@@ -106,6 +106,8 @@ FastAPI는 Temporal에 장시간 작업을 맡기고 상태를 조회한다. Tem
 
 ## 10. Worker 사이 입력·출력 및 의존 관계
 
+Provisioning Planning이 소비할 정보는 [Provision 입력 계약](../../specs/provisioning/input-contract.md)에 구체화한다. 상위 Workflow가 Analysis·Sandbox·Build 및 사용자 선택의 결과 참조를 연결하고 Planning Activity가 조회·검증·명세 조합을 수행하는 설계다. Sandbox는 검증 대상 코드·설정·요구사항 버전과 보고서를, Build는 사용한 소스·설정과 최종 이미지 Digest의 연결을 제공한다. 상세 wire schema는 각 담당 영역과 합의해야 하며, 이 문서 변경이 상위 Worker 구현을 변경하지 않는다.
+
 | 경계 | 전달 정보 | 받는 쪽의 책임 |
 | --- | --- | --- |
 | API → Analysis | 원본 AWS 접근 참조, 소스·`.env` 참조, 대상 환경 | 원본 분석·요구사항 도출 |
