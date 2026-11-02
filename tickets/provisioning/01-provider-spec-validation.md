@@ -1,7 +1,11 @@
 # Ticket 01 — 공통 입력 검증과 대상별 구성 예시
 
 ## 상태
-DRAFT
+IN_PROGRESS — 입력 계약 문서 정리 착수; 코드 구현·연동 검증은 미완료
+
+GitHub Issue: [#5](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/5)
+
+2026-11-03 사용자 요청으로 입력 정보 구성·기획 반영·Issue 생성에 착수했다. 이번 완료 범위는 문서 정리이며, 티켓 전체 수용 기준 완료와 구분한다.
 
 ## 목적
 앞 단계의 결과와 사용자 선택이 `ProvisioningSpec`으로 어떻게 조합되는지 정한 뒤, AWS·GCP·ON_PREM별 필수 입력과 변환 결과를 확인한다.
@@ -17,6 +21,7 @@ Blocked by: 없음
 - 제외: Terraform/Helm 실행과 자격 증명 원문 조회
 
 ## 수용 기준
+- [x] 선행 결과 수신·Spec 조합·승인 후 실행의 세 입력 경계와 정보 출처를 문서화한다.
 - [ ] AWS·GCP는 자격 증명 참조·Region·Node/네트워크 요구를, ON_PREM은 Agent·기존 K3s 정보를 검증한다.
 - [ ] Analysis·Sandbox·Build와 사용자 선택의 참조/버전을 조합해 Spec을 만들며, 필수 선행 산출물이 빠지거나 서로 맞지 않으면 출처가 드러나는 오류를 반환한다.
 - [ ] 지원하지 않는 Provider, CIDR 충돌, 이미지·Node 아키텍처 불일치를 항목별 오류로 반환한다.
@@ -35,7 +40,8 @@ Blocked by: 없음
 
 ## 설계 변경 기록
 - 초안 기준 확인 필요: 앞 단계 출력 모델·전달 방식, 필드명·기본값·Node 선정 정책이 확정되지 않으면 제안으로 유지하고 담당 영역과 합의한다.
-- 구현 중 변경: 아직 없음
+- 2026-11-03 (#5): [Provision 입력 계약](../../specs/provisioning/input-contract.md)을 추가했다. Sandbox/Build 출처 연결, Temporal/S3 역할, Node/PVC 분리, 환경별 동적 바인딩, 미정 정책을 명시하고 spec/plan/아키텍처에 연결했다. 제품 정책·HTTP 계약·ADR-001은 변경하지 않았다.
+- 코드 테스트 경계는 위 제안을 유지한다. 상위 팀 wire schema와 Digest 산정 범위를 합의하기 전 임의 필드를 확정 계약으로 구현하지 않는다.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
@@ -43,3 +49,10 @@ Blocked by: 없음
 - [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
 - [ ] 구현·계약 정합성 및 최종 리뷰
 - [ ] 미검증 항목과 결과 증거 기록
+
+## 이번 문서 작업 검증
+
+- `git diff --check`: 통과 (2026-11-03).
+- 변경 문서 7개의 Markdown 상대 파일 링크 검사 통과. 제품 정책/PROV 요구사항과 코드·이미지 추적, Node/PVC 및 승인 경계 정합성 검토 완료.
+- Python/HTTP/Temporal 코드 변경 없음. `make check`, `make openapi`, `make smoke-temporal`은 이번 문서 작업에서 실행하지 않는다.
+- 실제 Worker 연결·S3 조회·클라우드 배포·티켓의 동작 테스트는 미검증이다.
