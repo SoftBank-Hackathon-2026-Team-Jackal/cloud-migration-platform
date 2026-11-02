@@ -1,0 +1,17 @@
+{
+  "contract_version": "1",
+  "environment": "SANDBOX",
+  "provider": "ON_PREM",
+  "release_name": "sandbox-postgres",
+  "namespace": "sandbox-001",
+  "image": {
+    "uri": "registry.example.com/postgres@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "platforms": ["linux/amd64"]
+  },
+  "database": {
+    "version": "16", "name": "demo", "username": "app_user",
+    "secret_name": "sandbox-db-auth", "secret_key": "password"
+  },
+  "resources": {"cpu_millicores": 500, "memory_mib": 512},
+  "storage": {"class_name": "local-path", "size_gib": 20}
+}

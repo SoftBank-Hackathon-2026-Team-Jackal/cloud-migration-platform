@@ -4,6 +4,10 @@
 
 This workflow governs Codex work on Provisioning tickets only. Other teammates may use their own ticket process. Before selecting work, read [product policies](../product/policies.md), [architecture boundaries](../architecture/domain-boundaries.md), the [Provisioning spec](../../specs/provisioning/spec.md), [implementation plan](../../specs/provisioning/plan.md), [ticket index](../../specs/provisioning/tasks.md), the selected ticket, and relevant ADRs. The product policy sets the scope; the spec says what must work; the plan proposes how; the ticket defines the current slice. The [OpenAPI document](../contracts/openapi.yaml) describes only agreed/implemented external HTTP interfaces, not Worker contracts. The current API/Temporal code remains a scaffold.
 
+## Current working preference (2026-11-03)
+
+Work sequentially, one implementation ticket at a time. Include related policy/design/ticket documentation in the implementation Issue and PR; do not create documentation-only Issues/PRs by default. Parallel-work preparation is not an independent delivery goal. Existing historical parallel guidance is inactive unless the user explicitly requests parallel work again.
+
 ## Ticket selection and start
 
 1. Pick a `TODO` ticket whose `Blocked by` tickets are `DONE`. The 7th-stage drafts remain `DRAFT` until user review. Do not start implementing them merely because files exist.

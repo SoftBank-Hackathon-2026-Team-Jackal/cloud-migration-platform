@@ -11,7 +11,8 @@ Cloud Migration Platform moves an AWS EKS application to EKS, GKE, or K3s. FastA
 
 # Before implementation
 
-- Follow `docs/decisions/ADR-002.md` for the current P0 scope and `specs/provisioning/parallel-work.md` for parallel work. Tickets 02/05/06/07 require CP-01 merged first; separate chats must use separate worktrees/branches and respect shared-file ownership. Do not interpret EXISTING cloud-network parsing as P0 support.
+- Follow `docs/decisions/ADR-002.md` for P0 scope and `specs/provisioning/shared-contracts.md` for implemented shared interfaces. Work sequentially, one implementation ticket at a time. Do not create parallel chats/worktrees unless the user explicitly changes this preference. Do not interpret EXISTING cloud-network parsing as P0 support.
+- Include necessary documentation updates in the related implementation Issue/PR. Do not create documentation-only Issues or PRs by default; the user requested fewer administrative changes.
 
 - Check ticket status, blockers, scope, acceptance criteria, and proposed public test seam. Draft tickets require user review before implementation.
 - After review, create or reuse one GitHub Issue for the selected Provisioning ticket; record its `#number` in `specs/provisioning/tasks.md` before implementation. Never create duplicate Issues for the same ticket.

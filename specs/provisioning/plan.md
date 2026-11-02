@@ -8,7 +8,7 @@
 
 ## P0 후속 결정 (2026-11-03)
 
-[ADR-002](../../docs/decisions/ADR-002.md)가 아래 초기 제안의 해당 항목을 구체화한다. Preview/승인 유지, 핵심 산출물만 참조/Digest 고정, DB/App Chart 분리, AWS/GCP 기존 네트워크 재사용 제외, 중앙 S3 State+잠금, DB 승인 기록 유지·범용 Outbox 보류를 적용한다. 공통 코드의 선행 구현과 파일 담당은 [병렬 작업 규칙](parallel-work.md)에 정의한다. CP-01 완료 전 02/05/06/07의 동시 구현을 시작하지 않는다.
+[ADR-002](../../docs/decisions/ADR-002.md)가 아래 초기 제안의 해당 항목을 구체화한다. Preview/승인 유지, 핵심 산출물만 참조/Digest 고정, DB/App Chart 분리, AWS/GCP 기존 네트워크 재사용 제외, 중앙 S3 State+잠금, DB 승인 기록 유지·범용 Outbox 보류를 적용한다. 후속 사용자 지시로 한 티켓씩 순차 구현한다. 최소 공유 코드 CP-01의 실제 인터페이스는 [공유 계약](shared-contracts.md)을 따른다. 문서 수정은 구현 이슈/PR에 포함한다.
 
 ## 티켓 01 구현 현황
 

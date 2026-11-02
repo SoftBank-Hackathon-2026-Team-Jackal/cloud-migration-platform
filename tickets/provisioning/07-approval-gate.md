@@ -43,8 +43,8 @@ Preview ID/Revision을 승인할 때만 안전한 executor가 호출되는 흐�
 - [ ] 구현·계약 정합성 및 최종 리뷰
 - [ ] 미검증 항목과 결과 증거 기록
 
-## 병렬 작업 조건 (2026-11-03)
+## 순차 작업 조건 (2026-11-03)
 
-[ADR-002](../../docs/decisions/ADR-002.md)와 [병렬 작업 규칙](../../specs/provisioning/parallel-work.md)을 따른다. CP-01의 main 반영 뒤 동일 기준 커밋에서 별도 브랜치/worktree로 시작한다. 공통 계약을 개별 복제·수정하지 않고 자기 구현·테스트·티켓을 담당한다. 공통 SDD/index 갱신은 통합 담당자와 조정하며 완료/PR 전에 반영한다.
+[ADR-002](../../docs/decisions/ADR-002.md)와 [공유 계약](../../specs/provisioning/shared-contracts.md)을 따른다. 사용자 후속 지시에 따라 한 티켓씩 순차 구현하고 관련 문서·SDD/index 수정은 동일 구현 이슈/PR에 포함한다. 공통 계약을 복제하지 않고 기존 모델을 사용한다.
 
 필수 시나리오: DB 승인 기록 성공 후 Signal 실패, 같은 승인 재요청/재전달, 승인자 권한 없음, 오래된 Revision/Digest, 실행 전 재확인. 전달 실패를 접수/실행 완료로 숨기지 않는다.
