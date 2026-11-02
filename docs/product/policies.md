@@ -1,17 +1,74 @@
-# Product policies
+# Cloud Migration Platform — 제품 정책
 
-These policies reflect the project's agreed design snapshot. They describe intended behavior, not completed implementation. Changes require a deliberate decision and corresponding documentation updates.
+## 1. 목적과 적용 범위
 
-1. The baseline migration target is an application initially deployed and managed by this platform.
-2. Tenant is a logical ownership boundary. A tenant can have a separate K3s cluster per cloud; projects are isolated by Kubernetes Namespace within a cluster.
-3. Each project owns its PostgreSQL instance and persistent volume. Cleaning one project must preserve other projects and shared cluster resources.
-4. A sandbox uses test data and does not mutate the production database. Sandbox success alone does not prove a lossless production cutover.
-5. During HTTP canary, the original PostgreSQL remains the only write source, including for the new application instance.
-6. DB cutover controls new writes, waits for final synchronization and consistency checks, then promotes the target DB. A brief write pause may occur.
-7. After new writes occur on the target DB, traffic-only rollback to the old environment is unsafe. Retain the old environment until stabilization and recovery conditions are met.
+이 문서는 팀이 확정한 제품 범위, 사용자 승인 지점, 검증·인계 원칙의 기준이다. 아래 정책은 **제품이 따라야 할 동작**이며 구현 완료를 뜻하지 않는다. 도구 선택, 자원 크기, 세부 실행 절차처럼 확정되지 않은 내용은 정책으로 취급하지 않고 마지막 `확인 필요`에 기록한다. 전체 사용자 흐름은 [제품 개요](overview.md)를 참고한다.
 
-## Unresolved against the supplied proposal
+## 2. 확정 정책
 
-The supplied proposal also covers external AWS scanning, on-premises targets, Route 53 weighted routing, and WireGuard. Existing design documents instead use platform-managed applications, AWS → GCP as the baseline, and Cloudflare HTTP traffic switching. This scaffold keeps integration boundaries without choosing those conflicting implementations. Temporal is adopted for this repository's orchestration scaffold; production deployment details are still open.
+### P-01. 원본 환경 제한
 
-Source design snapshot: `product/policies.md`, `product/overview.md`, and `architecture/migration.md` in the SoftBank project reference set.
+원본 인프라는 **AWS EKS** 환경으로 제한한다. 임의의 VM이나 Docker Compose 기반 원본 환경을 현재 지원 범위에 포함하지 않는다. 원본에서 실제로 읽을 리소스와 필요한 접근 권한은 후속 Scanner 설계에서 정한다.
+
+### P-02. 이전 대상 환경
+
+지원 대상은 **AWS EKS, GCP GKE, 온프레미스 K3s**다. 세 환경의 네트워크·스토리지·인증·외부 접근 차이를 고려해 공통 리소스 요구사항을 대상별 구성으로 변환한다. 각 환경의 세부 인프라 사양은 후속 기술 설계에서 정의한다. Kubernetes 기반이라는 사실만으로 완전한 호환성을 보장하지 않는다.
+
+### P-03. 환경변수 입력과 비밀값
+
+사용자는 애플리케이션 `.env` 파일을 소스코드와 **별도로 업로드**한다. 플랫폼은 제공받은 환경변수를 분석해 대상 환경에 맞게 재매핑한다. 신규 DB 주소처럼 Provisioning 결과에 따라 달라지는 연결 정보는 실제 생성 결과를 기준으로 주입한다. 비밀번호와 API Key 같은 비밀값을 문서·로그에 노출하지 않는다.
+
+### P-04. Sandbox와 Production Provisioning의 책임 분리
+
+- **Sandbox:** 미리 준비된 Kubernetes 클러스터에서 검증 작업별 임시 실행 리소스를 구성하고, 변환된 코드·설정을 테스트한 뒤 리소스를 정리한다. 운영 대상 VPC나 클러스터를 이 단계에서 새로 생성하지 않는다.
+- **Production Provisioning:** 사용자 승인 후 실제 대상 인프라를 생성하고 애플리케이션을 배포한다.
+
+두 단계는 공통 Provider 변환 로직, Helm 차트, 설정 매핑 규칙과 검증 코드를 재사용할 수 있다. Sandbox 성공을 실제 대상 환경의 성공으로 간주하지 않는다.
+
+### P-05. 실제 Provisioning 전 사용자 승인
+
+실제 대상 리소스를 생성하기 전에 생성·변경될 리소스를 Preview로 보여주고 사용자 승인을 받는다. 승인된 계획과 실제 실행 내용이 일치하도록 만드는 세부 정책은 후속 설계에서 정의한다. 승인 전 실제 Provisioning을 시작하지 않는다.
+
+### P-06. P0 범위
+
+P0의 우선 대상은 다음과 같다.
+
+1. 원본 AWS EKS 환경 분석
+2. 코드·설정 변환
+3. Sandbox 검증
+4. 애플리케이션 이미지 생성
+5. 대상 Kubernetes 환경 Provisioning
+6. PostgreSQL 데이터 이전
+7. 배포 후 검증 및 트래픽 이전 연동
+
+**객체 스토리지 자동 생성과 데이터 이전은 P0 필수 구현에서 제외**한다. S3가 원본 데모 구성에 포함된다는 사실이 P0 자동 이전을 의미하지 않는다. P0 기능의 상세 성공 기준과 구현 우선순위는 후속 기능 명세에서 확정한다.
+
+### P-07. 발표 데모 제약
+
+발표 시연 시간은 **5분 이내**다. Sandbox에서 전체 운영 인프라를 먼저 생성·삭제한 다음 동일한 인프라를 다시 생성하는 방식을 기본 흐름으로 채택하지 않는다. 실제 클러스터 생성까지 포함한 전체 마이그레이션이 5분 안에 완료된다고 보장하지 않는다. 사전 준비할 자원과 시연 중 생성할 자원의 범위는 별도로 확정한다.
+
+### P-08. 마이그레이션 검증
+
+Sandbox 검증과 실제 대상 환경 검증을 구분한다. 실제 Provisioning 후에도 리소스 상태, 서비스 연결, 애플리케이션 헬스 체크를 확인한다. 가능한 경우 Sandbox에서 수행한 기능 테스트를 실제 배포 환경에서도 다시 실행한다. PostgreSQL 이전에는 데이터 정합성을 별도로 확인해야 하며, 논리 복제(CDC)가 모든 DB 객체와 변경을 자동으로 처리한다고 가정하지 않는다.
+
+### P-09. 운영권 인계
+
+마이그레이션 후 사용자가 대상 환경을 운영할 수 있도록 접근 정보와 필요한 산출물을 인계하는 것을 목표로 한다. 플랫폼을 사용자 애플리케이션의 영구 호스팅·운영 서비스로 설명하지 않는다. 온프레미스 중계 서버·터널의 장기 운영 주체는 아직 확정되지 않았다.
+
+## 3. P0 범위와 제외 범위
+
+P0는 P-06의 EKS 원본 분석부터 PostgreSQL 이전, 배포 후 검증과 트래픽 이전 연동까지를 우선한다. **객체 스토리지 자동 생성·데이터 이전은 제외**한다. 대상별 동일 수준의 데모 구현, 실제 트래픽 전환 방식, 단계별 성공 기준은 이 문서만으로 확정하지 않는다.
+
+## 4. 데모 운영 제약
+
+5분 이내 발표라는 시간 제약은 시연 구성을 설계할 때 고려한다. Sandbox의 역할은 변환 결과 검증이며 운영 인프라 전체를 반복 생성하는 단계가 아니다. 실제 대상 Provisioning과 배포 후 검증은 Sandbox 검증과 별도 책임으로 남긴다. 시연 시간 때문에 승인·검증이 완료된 것처럼 표현하거나 전체 이전 소요 시간을 보장하지 않는다.
+
+## 5. 확인 필요
+
+- 실제 EKS·GKE 클러스터를 시연 중 생성할지, 일부를 사전에 준비할지
+- Route 53·Envoy 중계 서버 기반 트래픽 전환안의 최종 채택 여부
+- 온프레미스 이전 후 중계 서버·WireGuard의 소유권과 장기 운영 주체
+- 객체 스토리지 기능을 P0 데모에서 어느 수준까지 보여줄지
+- 단계별 실패·재시도·롤백의 정확한 책임과 전환 후 복구 경계
+- 공급자별 인스턴스 규모, 네트워크와 권한 구성
+- 기존 아키텍처 문서의 **플랫폼 관리 앱·독립 K3s 클러스터·Cloudflare 전환** 방향과 이 문서의 **AWS EKS 원본·EKS/GKE/K3s 대상** 범위 간 충돌. 후속 기술 문서에서 어느 방향을 기준으로 삼을지 팀 확인이 필요하다.

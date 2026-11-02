@@ -1,7 +1,97 @@
-# Product overview
+# Cloud Migration Platform — 제품 개요
 
-The intended platform manages deployment, updates, and migration of stateful applications across clouds. The agreed baseline is an application first deployed and managed by this platform, with an AWS-to-GCP PostgreSQL migration demonstration. External arbitrary AWS application discovery and on-premises migration appear in a later proposal but are not confirmed as the baseline here.
+## 1. 제품 소개
 
-The desired migration flow is analysis → architecture planning and build → sandbox verification → approved target provisioning → data replication → HTTP canary → DB cutover → stabilization. This repository currently implements only a **local scaffold** of the orchestration sequence. It does not deploy, copy data, or shift traffic.
+Cloud Migration Platform은 **AWS EKS에서 실행 중인 Kubernetes 기반 백엔드 애플리케이션**을 분석하고, AI를 활용해 이전 대상에 맞는 코드와 설정을 준비한 뒤, 대상 인프라 구성부터 데이터·트래픽 이전과 운영권 인계까지 지원하는 플랫폼이다.
 
-The frontend is a separate repository and is excluded here. See `docs/product/policies.md` for current policy and `docs/architecture/overview.md` for the technical boundaries.
+단순한 재배포가 아니라 기존 인프라와 애플리케이션의 의존관계를 파악하고, 검증·승인·실제 이전을 하나의 사용자 흐름으로 연결하는 것이 목적이다. 이 문서는 제품이 제공하려는 동작을 설명하며, 현재 구현 완료 상태를 뜻하지 않는다. 확정된 제품 제약은 [정책](policies.md)을 따른다.
+
+## 2. 해결하려는 문제
+
+Kubernetes 애플리케이션을 다른 환경으로 옮길 때는 배포 파일만 복사해서 끝낼 수 없다. 기존 컴퓨팅·네트워크·스토리지·인증 구성, 환경변수, PostgreSQL 데이터와 외부 접근 경로를 함께 파악해야 한다. 또한 대상 환경의 차이를 반영한 설정 변환, 실행 검증, 사용자 승인, 데이터 동기화와 트래픽 전환이 이어져야 한다.
+
+플랫폼은 이 과정을 사용자가 검토할 수 있는 계획과 단계별 결과로 제시하고, 이전 후 대상 환경을 운영하는 데 필요한 산출물을 인계하는 것을 목표로 한다.
+
+## 3. 지원 환경 및 범위
+
+### 원본 환경
+
+원본 인프라는 **AWS EKS**로 제한한다. 데모 애플리케이션의 원본 구성은 서울 리전(`ap-northeast-2`)의 EKS 클러스터, 애플리케이션 Deployment·Pod, PostgreSQL 16 StatefulSet·Pod와 EBS 기반 PVC, Kubernetes Service·Ingress, 외부 접근용 AWS ALB, 환경변수·Secret, AWS S3 객체 스토리지를 포함한다. 실제 수집 가능한 정보와 필요한 접근 권한은 후속 Scanner 설계에서 구체화한다.
+
+임의의 VM이나 Docker Compose 기반 원본 환경은 현재 지원 범위에 포함하지 않는다.
+
+### 이전 대상
+
+| Provider | Kubernetes 실행 환경 |
+| --- | --- |
+| AWS | EKS |
+| GCP | GKE |
+| On-premises | K3s |
+
+세 대상은 모두 Kubernetes 기반이지만 네트워크, 스토리지, 인증, 외부 접근 방식이 다르다. 플랫폼은 공통 리소스 요구사항을 대상별 구성으로 변환한다. Kubernetes를 사용한다는 이유만으로 환경 간 완전한 호환성을 보장하지 않는다. 대상별 세부 인프라 사양은 후속 기술 설계에서 정한다.
+
+## 4. 사용자 입력
+
+사용자는 기존 AWS 인프라의 접근 정보, 애플리케이션 소스코드, 별도 `.env` 파일, 이전 대상 환경을 제공한다. 플랫폼은 인프라·Kubernetes 리소스·소스코드·환경변수를 분석해 대상에서 필요한 코드·설정 변경과 리소스 요구사항을 도출한다.
+
+제공받은 일반 환경변수는 대상 환경에 맞게 재매핑하고, 새 DB 주소처럼 대상 인프라 생성 후에 확정되는 연결 정보는 실제 생성 결과를 기준으로 주입한다. 비밀번호와 API Key 등 비밀값은 문서나 로그에 노출하지 않는다.
+
+## 5. 전체 마이그레이션 흐름
+
+```text
+사용자 입력
+  → 기존 인프라 및 소스코드 분석
+  → AI 기반 이전 계획 및 코드·설정 변환
+  → Sandbox 검증
+  → 검증된 애플리케이션 이미지 빌드·저장
+  → 공통 Provisioning 명세 생성
+  → 대상 환경별 리소스 구성 변환
+  → Provisioning Preview 및 사용자 승인
+  → 대상 인프라 Provisioning
+  → 데이터 이전
+  → 트래픽 전환
+  → 최종 검증 및 운영권 인계
+```
+
+실제 인프라 생성 전에는 사용자에게 생성될 리소스와 변경 사항을 보여주고 승인을 받는다. 각 단계의 구체적인 실행 수단과 실패·복구 절차는 후속 설계 대상이다.
+
+## 6. 주요 기능
+
+### 분석과 AI 변환
+
+원본 AWS 인프라와 Kubernetes 리소스, 소스코드, `.env`를 분석한다. AI는 분석 결과를 바탕으로 대상 환경에 필요한 이전 계획과 코드·설정 변경안을 만든다. 원본에서 무엇을 수집할 수 있는지와 변환 가능한 범위는 후속 기능 명세에서 확정한다.
+
+### Sandbox 검증
+
+미리 준비된 Kubernetes Sandbox 클러스터에서 검증 작업별 임시 리소스를 만들고 종료 후 정리한다. 애플리케이션 실행·헬스 체크, PostgreSQL 연결과 기본 읽기·쓰기, 환경변수·Secret·Service 주소 매핑, Kubernetes 리소스의 적용·연결 상태 및 필요한 기능 테스트를 확인한다.
+
+Sandbox는 코드·설정 변환 오류를 조기에 발견하는 공간이다. Sandbox 단계에서 운영 대상의 VPC나 클러스터를 새로 생성하지 않으며, 검증 성공이 실제 EKS·GKE·K3s에서의 정상 동작을 보장하지 않는다.
+
+### 대상 Provisioning과 실제 환경 검증
+
+검증된 애플리케이션과 공통 리소스 요구사항을 대상별 구성으로 변환한다. Preview와 사용자 승인 후 대상 인프라를 생성하고 애플리케이션을 배포한다. 배포 후에는 리소스 상태, 서비스 연결, 헬스 체크를 별도로 확인하고, 가능한 경우 Sandbox의 기능 테스트를 다시 실행한다.
+
+### 데이터와 트래픽 이전
+
+PostgreSQL 이전은 초기 복사와 이후 변경 사항 동기화를 위해 논리 복제(CDC)를 활용하는 방향이다. 데이터 정합성을 별도로 확인해야 하며, 논리 복제가 모든 데이터베이스 객체나 변경을 자동 처리한다고 가정하지 않는다.
+
+대상 준비와 동기화 상태를 확인한 뒤 트래픽을 점진적으로 이전한다. 기존 AWS 환경으로 돌아갈 수 있는 경로를 고려하되, 실제 전환 수단과 단계별 롤백 가능 범위는 아직 확정되지 않았다. Route 53·Envoy 중계 서버는 논의된 설계안이지 확정 정책이 아니다.
+
+## 7. P0와 발표 데모 제약
+
+P0 우선 대상은 원본 EKS 분석, 코드·설정 변환, Sandbox 검증, 애플리케이션 이미지 생성, 대상 Kubernetes 환경 Provisioning, PostgreSQL 데이터 이전, 배포 후 검증과 트래픽 이전 연동이다. **객체 스토리지 자동 생성과 데이터 이전은 P0 필수 범위에서 제외**한다. 기능별 성공 기준과 구현 우선순위는 후속 기능 명세에서 정한다.
+
+발표 시연 시간은 5분 이내다. 따라서 Sandbox에서 전체 운영 인프라를 생성·삭제한 후 똑같은 인프라를 다시 생성하는 방식은 기본 흐름으로 삼지 않는다. 이 제약이 실제 클러스터 생성을 포함한 전체 이전을 5분 안에 끝낸다는 보장은 아니다. 시연 전에 준비할 리소스와 현장에서 생성할 리소스의 범위를 별도로 결정해야 한다.
+
+## 8. 운영권 인계
+
+마이그레이션 후 대상 리소스의 접근 정보와 운영에 필요한 산출물을 사용자에게 인계하는 것이 목표다. 플랫폼이 이전 완료 후 사용자 애플리케이션을 영구적으로 호스팅하거나 운영하는 서비스라고 가정하지 않는다. 온프레미스 외부 접근에 필요한 중계 서버·터널의 장기 운영 주체는 추가 확인이 필요하다.
+
+## 9. 확인 필요
+
+- 발표 중 EKS·GKE 클러스터를 실제 생성할지, 일부를 사전 준비할지
+- Route 53·Envoy 기반 전환안의 최종 채택 여부와 단계별 실패·롤백 경계
+- 온프레미스 중계 서버·WireGuard의 소유권과 장기 운영 주체
+- P0에서 객체 스토리지 기능을 어느 수준까지 보여줄지
+- 클라우드별 인스턴스 규모와 네트워크 설정
+- 기존 아키텍처 문서의 **플랫폼 관리 앱·독립 K3s 클러스터·Cloudflare 전환** 방향과 이번 **외부 AWS EKS 원본·EKS/GKE/K3s 대상** 범위 사이의 충돌. 후속 아키텍처 문서 작성 전에 팀 확인이 필요하다.

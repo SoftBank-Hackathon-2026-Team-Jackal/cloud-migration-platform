@@ -24,4 +24,10 @@ def test_contract_rejects_unplanned_target() -> None:
 
 def test_checked_in_openapi_matches_api() -> None:
     path = Path(__file__).resolve().parents[1] / "docs/contracts/openapi.yaml"
-    assert yaml.safe_load(path.read_text(encoding="utf-8")) == app.openapi()
+    documented = yaml.safe_load(path.read_text(encoding="utf-8"))
+    generated = app.openapi()
+    assert documented["paths"] == generated["paths"]
+    assert documented["components"] == generated["components"]
+    assert {key: documented["info"][key] for key in generated["info"]} == generated["info"]
+    assert documented["x-sdd-agreed-capabilities"]
+    assert documented["x-sdd-unresolved-http-interface"]
