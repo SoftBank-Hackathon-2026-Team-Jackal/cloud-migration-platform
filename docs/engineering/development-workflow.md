@@ -8,8 +8,9 @@ This workflow governs Codex work on Provisioning tickets only. Other teammates m
 
 1. Pick a `TODO` ticket whose `Blocked by` tickets are `DONE`. The 7th-stage drafts remain `DRAFT` until user review. Do not start implementing them merely because files exist.
 2. Check its linked `PROV` IDs, expected observable outcome, excluded scope, target environment, and proposed test seam. Confirm the seam with the user before tests; describe what that seam catches and what it misses. Record the chosen seam in the ticket.
-3. Compare the ticket with current docs and code. If an assumption is undecided, isolate unaffected work and mark the dependent work `BLOCKED` with the needed decision. Do not use a fixture or scaffold behavior as proof of production support.
-4. Keep the branch and change set focused on the selected logical slice. Existing unrelated working-tree changes remain outside its commit.
+3. Create or reuse a GitHub Issue for this reviewed ticket **before implementation**. Search by ticket ID/title first to avoid duplicates; include the ticket link, `PROV` IDs, acceptance criteria, blockers, and test seam in the Issue. Record the Issue `#number` in `tasks.md`. If the ticket is revised, update the existing Issue rather than creating another. This Issue process applies to Provisioning work, not other teammates' areas.
+4. Compare the ticket with current docs and code. If an assumption is undecided, isolate unaffected work and mark the dependent work `BLOCKED` with the needed decision. Do not use a fixture or scaffold behavior as proof of production support.
+5. Keep the branch and change set focused on the selected Issue and logical slice. Existing unrelated working-tree changes remain outside its commit.
 
 ## Development cycle
 
@@ -29,7 +30,7 @@ Before `DONE`, check: ticket acceptance criteria; relevant tests; existing behav
 
 ## Git and PR
 
-Commit coherent changes on the task branch; small TDD commits are allowed. Keep unrelated files and secrets out of commits. A PR is for a **logically complete, reviewable** slice with relevant tests and documents aligned. Do not open one with unmet acceptance criteria, failed required checks, an unrecorded design change, or unresolved blocking dependency. A PR description should name ticket and `PROV` IDs, behavior delivered, commands/results, changed SDD documents, remaining unverified items, and material limitations. Push/PR actions require a task that authorizes external GitHub changes. This document itself does not impose an automatic GitHub gate; future CI, PR templates, and branch protection would be separate work.
+Commit coherent changes on the task branch; small TDD commits are allowed. Keep unrelated files and secrets out of commits. For work with a GitHub Issue, put its number in **every related commit message** (for example, `feat: validate ProvisioningSpec (#12)`) and in the PR title/body. Search for an existing PR before opening another for the same Issue. A PR is for a **logically complete, reviewable** slice with relevant tests and documents aligned. Do not open one with unmet acceptance criteria, failed required checks, an unrecorded design change, or unresolved blocking dependency. A PR description should name the Issue and ticket, `PROV` IDs, behavior delivered, commands/results, changed SDD documents, remaining unverified items, and material limitations. Use `Closes #12` only when merging that PR should close a fully satisfied Issue; otherwise use `Refs #12`. Push/PR actions require a task that authorizes external GitHub changes. If the user explicitly exempts a documentation-only change from Issue creation, record that exception in its PR and do not invent an Issue number for the commit. This document itself does not impose an automatic GitHub gate; future CI, PR templates, and branch protection would be separate work.
 
 ## Sources used for the workflow
 

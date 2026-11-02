@@ -40,6 +40,20 @@ tests/                       # 계약·렌더링·승인·복구·실환경 검�
 
 ## 3. Design and data flow — 계획과 실행의 경계
 
+### 앞 단계에서 `ProvisioningSpec`까지
+
+현재 확정된 것은 **정보의 출처와 논리적 순서**다. API는 원본 AWS 접근·소스·별도 `.env` 및 대상 선택의 참조를 받는다. Analysis는 원본 EKS·앱 요구사항과 변환된 코드·설정 참조를, Sandbox는 검증 결과와 통과한 코드 참조를, Build는 그 코드의 최종 이미지 URI·Digest와 아키텍처 정보를 낸다. Provisioning Planning이 이 결과와 사용자 선택을 조합해 공통 `ProvisioningSpec`을 만드는 책임을 갖는 것으로 **제안**한다. `cmp_worker.provisioning.planning`이 그 조합 로직을 담는 위치 제안이다. 원본 파일·`.env`·Credential 원문 대신 참조를 전달하고, 큰 산출물은 S3 참조로 다룬다.
+
+| 출처 | Planning이 소비할 정보 | 아직 정해지지 않은 계약 |
+| --- | --- | --- |
+| API·업무 DB | 대상 Provider/Profile, 원본·대상 접근 참조, 소스·`.env` 참조, 사용자 선택 | 생성 요청 필드·ID와 버전 |
+| Analysis | 공통 앱·DB·네트워크 요구, 변환 코드·설정 참조 | 분석 출력 모델·자동/사용자 입력 우선순위 |
+| Sandbox | 검증 상태, 통과한 코드·설정 참조 | 통과 기준·결과 버전 |
+| Build | 최종 이미지 URI·Digest·CPU 아키텍처 | 검증된 코드와 Digest를 묶는 증거 형식 |
+| Planning | 위 정보를 검증·조합한 Spec, 입력 산출물 참조·버전 | 구체적 Pydantic 필드, 누락/충돌 처리, Workflow 전달 방식 |
+
+따라서 아래 흐름은 구현 입력 계약이 완성됐다는 뜻이 아니다. **티켓 01은 Adapter 로직을 확장하기 전에** 이 선행 출력의 최소 계약과 Spec 조합 인터페이스를 확정·검증해야 한다. 상위 단계의 구체적 출력 모델과 Workflow/Activity 전달 방식은 담당 영역과 합의가 필요하며, 미정 상태에서 임의의 JSON 필드를 사실상 표준으로 만들지 않는다.
+
 ```text
 Analysis·Sandbox·Build 결과 + 사용자 대상 선택 + 업로드 .env 참조
   → ProvisioningSpec 구성·검증 → Provider Adapter
