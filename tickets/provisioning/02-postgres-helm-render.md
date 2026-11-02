@@ -1,7 +1,7 @@
 # Ticket 02 — PostgreSQL Chart 렌더링과 PVC 검사
 
 ## 상태
-DRAFT
+TODO — 범위 검토 완료; CP-01 및 아래 착수 조건 충족 후 구현
 
 ## 목적
 공통 요구에서 PostgreSQL 16 StatefulSet·Service·PVC를 검증 가능한 Manifest로 만든다.
@@ -10,7 +10,7 @@ DRAFT
 PROV-005, PROV-006, PROV-011
 
 ## 선행 작업
-Blocked by: 01
+Blocked by: 01, CP-01
 
 ## 작업 범위
 - 포함: 공통 Helm Chart/Values, DB 자원 요구, Secret 참조 자리와 StorageClass/PVC 렌더 검사를 구현한다.
@@ -33,7 +33,7 @@ Blocked by: 01
 - [요구사항](../../specs/provisioning/spec.md) · [구현 계획](../../specs/provisioning/plan.md) · [테스트 전략](../../docs/engineering/testing-strategy.md)
 
 ## 설계 변경 기록
-- 초안 기준 확인 필요: Chart 분리와 StorageClass 기본값은 팀 선택 전 임의 확정하지 않는다.
+- 초안 기준 확인 필요: DB/App 별도 Chart/Release로 결정. StorageClass·Secret 이름/키는 명시 입력이며 Provider 공통 기본값을 임의 지정하지 않는다.
 - 구현 중 변경: 아직 없음
 
 ## 완료 체크리스트
@@ -42,3 +42,9 @@ Blocked by: 01
 - [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
 - [ ] 구현·계약 정합성 및 최종 리뷰
 - [ ] 미검증 항목과 결과 증거 기록
+
+## 병렬 작업 조건 (2026-11-03)
+
+[ADR-002](../../docs/decisions/ADR-002.md)와 [병렬 작업 규칙](../../specs/provisioning/parallel-work.md)을 따른다. CP-01의 main 반영 뒤 동일 기준 커밋에서 별도 브랜치/worktree로 시작한다. 공통 계약을 개별 복제·수정하지 않고 자기 구현·테스트·티켓을 담당한다. 공통 SDD/index 갱신은 통합 담당자와 조정하며 완료/PR 전에 반영한다.
+
+담당: PostgreSQL Chart·Values 렌더·전용 테스트. Sandbox와 Production은 같은 DB Chart를 사용하고 서로 다른 Values를 전달한다.

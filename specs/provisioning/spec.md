@@ -20,7 +20,7 @@ Provisioning의 완료는 **대상 인프라와 워크로드가 다음 이전 �
 - **원본:** AWS EKS. 데모 원본은 Application Deployment·Pod, PostgreSQL 16 StatefulSet·Pod 및 EBS PVC, Service·Ingress·ALB, ConfigMap·Secret과 S3 의존성을 가진다. 원본의 모든 AWS 리소스를 대상에 그대로 복제하는 것은 요구하지 않는다.
 - **대상:** AWS EKS, GCP GKE, 온프레미스 K3s. AWS·GCP는 승인된 요구사항에 따라 클라우드 인프라를 구성하고 Kubernetes 리소스를 배포한다. 온프레미스는 사용자가 제공하는 K3s 실행 환경에 Agent를 통해 배포한다. macOS에서 K3s 실행에 필요한 Linux 환경의 도구·사전 준비 범위는 미정이다.
 - **P0 우선 리소스:** 대상 Kubernetes 실행 환경, 애플리케이션 Deployment, PostgreSQL 16 StatefulSet, Service, ConfigMap·Secret, DB용 PVC, 외부 접근 네트워크와 대상별 Ingress·Load Balancer, 기본 상태·앱 검증.
-- **P0 제외:** 객체 스토리지 자동 생성과 객체 데이터 이전. 원본 앱의 S3 기능을 데모에서 어떻게 처리할지는 확인이 필요하다.
+- **P0 제외:** AWS/GCP 기존 네트워크 재사용, 객체 스토리지 자동 생성과 객체 데이터 이전. AWS/GCP는 신규 네트워크 구성이며 ON_PREM 기존 K3s 사용은 유지한다. 원본 앱의 S3 기능을 데모에서 어떻게 처리할지는 확인이 필요하다.
 - **선행 산출물:** 분석·변환 결과, Sandbox 검증 결과, 검증된 코드에서 만든 이미지 URI·Digest, 대상 선택과 접근 참조, 계획에 필요한 공통 요구사항. 모든 입력을 사용자가 직접 작성하는 것은 아니다.
 - **외부 의존:** 공통 Provider 변환·렌더링·검증 기능, 대상별 인프라·Kubernetes 접근, 이미지 Registry, 계획·승인 기록, 산출물 저장소. 실제 자격 증명은 원문 대신 참조로 다룬다.
 
@@ -44,7 +44,7 @@ Planning은 Sandbox 검증 통과 후 최종 Build 결과까지 연결해 입력
 | Kubernetes 컴퓨팅 | Node 수·유형 또는 선정 요구, 디스크 | `1`, `t3.large` | AWS·GCP, 계획에 따라 |
 | PostgreSQL | 엔진·버전, DB 이름·사용자, CPU·메모리·용량, 인증 생성 정책 | `postgresql`, `16`, `20GiB` | 공통 |
 | 환경변수 | 별도 업로드된 `.env` 참조와 재매핑 요구 | `env-001`, `DB_HOST → database.host` | 공통 |
-| VPC·네트워크 | 신규 생성·기존 사용 선택, 식별자·CIDR | `CREATE`, `10.20.0.0/16` | AWS·GCP |
+| VPC·네트워크 | P0 신규 생성의 CIDR·Subnet 요구; 기존 사용 요청은 미지원 | `CREATE`, `10.20.0.0/16` | AWS·GCP |
 | Subnet | CIDR, 용도, 리전·AZ | `10.20.1.0/24`, `PUBLIC` | AWS·GCP별 |
 | Route·Gateway | 인터넷·아웃바운드·NAT·Endpoint 요구 | `NAT` | AWS·GCP별 |
 | 보안 규칙 | 출발지·목적지·프로토콜·포트 | `INTERNET → ALB:443` | 필요한 통신 경로 |
@@ -69,6 +69,7 @@ Provisioning은 구조화된 공통 `ProvisioningSpec`을 수신하고 실행 �
 - 필수 정보의 누락·형식 오류를 실제 리소스 생성 전에 식별하고 항목별 오류를 반환한다.
 - 선행 결과의 작업·버전·검증 대상과 Build 출처를 연결하고, Sandbox 미통과·Build 실패·검증 소스 불일치 시 계획 진행을 차단한다. 오류는 민감값 없이 입력 출처와 항목을 식별한다.
 - AWS·GCP·ON_PREM에 필요한 입력의 차이를 구분해 검증한다.
+- AWS/GCP의 `EXISTING` 네트워크 요청은 P0 미지원 오류로 반환하고 계획·실행으로 진행하지 않는다.
 
 #### PROV-002 — 대상별 리소스 요구사항 해석
 
@@ -343,10 +344,12 @@ Provisioning은 다음 단계에 필요한 접근 참조와 Endpoint를 제공�
 4. 실패·부분 성공·재시도 후 실제 리소스 상태와 결과를 추적할 수 있다.
 5. `ProvisioningResult`가 DB·앱 접근 정보를 후속 Worker에 제공하되 데이터·트래픽 이전 완료를 주장하지 않는다.
 
+P0 공통 결정과 병렬 착수 조건은 [ADR-002](../../docs/decisions/ADR-002.md), [병렬 작업 규칙](parallel-work.md)을 따른다. DB/App Chart 분리, 중앙 S3 State, 승인 DB 기록 유지 및 범용 Outbox 보류는 합의됐으며 구현 완료와 구분한다.
+
 ## 7. 확인 필요
 
 - 발표 중 EKS·GKE 클러스터를 실제 생성할지, 일부를 사전 구축할지
-- AWS·GCP Node 유형·규모, 영속 스토리지 사양과 기존 VPC·신규 VPC의 P0 지원 범위
+- AWS·GCP 신규 네트워크의 Node 유형·규모·영속 스토리지 사양. 기존 VPC 재사용은 P0 제외로 결정됐다.
 - 온프레미스 K3s 및 macOS용 Linux 환경의 사전 준비 범위
 - 외부 접근 도메인·TLS 인증서의 준비·발급 방식
 - 온프레미스 중계 서버의 장기 운영·인계와 WireGuard 연결 경계

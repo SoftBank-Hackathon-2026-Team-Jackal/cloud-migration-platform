@@ -1,7 +1,7 @@
 # Ticket 07 — Plan Revision 승인과 Temporal 실행 차단
 
 ## 상태
-DRAFT
+TODO — 범위 검토 완료; CP-01 및 아래 착수 조건 충족 후 구현
 
 ## 목적
 승인된 정확한 계획만 실행 경계까지 도달하게 한다.
@@ -10,7 +10,7 @@ DRAFT
 PROV-014, PROV-015, PROV-016, PROV-021
 
 ## 선행 작업
-Blocked by: 01
+Blocked by: 01, CP-01
 
 ## 작업 범위
 - 포함: 업무 DB 승인 기록, Plan/Revision/Digest 확인, Temporal 승인 대기·재개와 안전한 가짜 실행 경계를 구현한다.
@@ -33,7 +33,7 @@ Preview ID/Revision을 승인할 때만 안전한 executor가 호출되는 흐�
 - [요구사항](../../specs/provisioning/spec.md) · [구현 계획](../../specs/provisioning/plan.md) · [테스트 전략](../../docs/engineering/testing-strategy.md)
 
 ## 설계 변경 기록
-- 초안 기준 확인 필요: 제품 API 경로·필드·인증·HTTP 응답 보장, Signal/Update 선택은 확정 전 차단한다.
+- 초안 기준 확인 필요: Preview/승인은 유지한다. DB 승인 기록 + Temporal Signal을 사용하고 범용 Outbox는 보류한다. 승인 이벤트 ID 기반 중복 방지·실패 후 재전달·재조회를 구현한다. 제품 API URL·필드·인증/권한·응답 계약은 착수 전에 담당자와 확정한다.
 - 구현 중 변경: 아직 없음
 
 ## 완료 체크리스트
@@ -42,3 +42,9 @@ Preview ID/Revision을 승인할 때만 안전한 executor가 호출되는 흐�
 - [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
 - [ ] 구현·계약 정합성 및 최종 리뷰
 - [ ] 미검증 항목과 결과 증거 기록
+
+## 병렬 작업 조건 (2026-11-03)
+
+[ADR-002](../../docs/decisions/ADR-002.md)와 [병렬 작업 규칙](../../specs/provisioning/parallel-work.md)을 따른다. CP-01의 main 반영 뒤 동일 기준 커밋에서 별도 브랜치/worktree로 시작한다. 공통 계약을 개별 복제·수정하지 않고 자기 구현·테스트·티켓을 담당한다. 공통 SDD/index 갱신은 통합 담당자와 조정하며 완료/PR 전에 반영한다.
+
+필수 시나리오: DB 승인 기록 성공 후 Signal 실패, 같은 승인 재요청/재전달, 승인자 권한 없음, 오래된 Revision/Digest, 실행 전 재확인. 전달 실패를 접수/실행 완료로 숨기지 않는다.
