@@ -165,14 +165,18 @@ def test_other_providers_require_their_own_inputs(provider, field):
     assert any(issue.path.endswith(field) for issue in caught.value.issues)
 
 
-def test_existing_network_is_preserved_without_claiming_ownership():
+def test_legacy_existing_network_input_remains_parseable_but_cannot_be_planned():
+    from cmp_contracts.provisioning import PlanningRequest, ProvisioningInputError
+
     payload = request()
     network = payload["target_selection"]["target"]["network"]
     network["mode"] = "EXISTING"
     network["network_ref"] = {"id": "existing-vpc-001", "version": "1"}
-    result = prepare_plan(payload)
-    assert result.spec.target.network.mode == "EXISTING"
-    assert result.spec.target.network.network_ref.id == "existing-vpc-001"
+    parsed = PlanningRequest.model_validate(payload)
+    assert parsed.target_selection.target.network.network_ref.id == "existing-vpc-001"
+    with pytest.raises(ProvisioningInputError) as caught:
+        prepare_plan(payload)
+    assert "UNSUPPORTED_P0_NETWORK_MODE" in {issue.code for issue in caught.value.issues}
 
 
 def test_gcp_rejects_aws_topology():
@@ -228,3 +232,19 @@ def test_cleanup_failure_is_reported_as_pending_policy_without_inventing_a_deplo
     assert result.spec.inputs.sandbox_cleanup_status == "FAILED"
     assert [issue.code for issue in result.pending_decisions] == ["CLEANUP_POLICY_REQUIRED"]
     assert result.configuration.execution_performed is False
+
+
+@pytest.mark.parametrize("provider", ["aws", "gcp"])
+def test_p0_rejects_existing_cloud_networks(provider):
+    from cmp_contracts.provisioning import ProvisioningInputError
+
+    payload = json.loads((FIXTURES / f"{provider}.json").read_text())
+    network = payload["target_selection"]["target"]["network"]
+    network["mode"] = "EXISTING"
+    network["network_ref"] = {"id": "existing-network-001", "version": "1"}
+    with pytest.raises(ProvisioningInputError) as caught:
+        prepare_plan(payload)
+    assert any(
+        issue.code == "UNSUPPORTED_P0_NETWORK_MODE" and issue.path == "target.network.mode"
+        for issue in caught.value.issues
+    )

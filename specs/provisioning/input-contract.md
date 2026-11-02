@@ -47,7 +47,7 @@ Sandbox의 임시 DB 주소·비밀번호·Namespace·PVC를 운영 값으로 �
 | Kubernetes 컴퓨팅 | 클러스터 요구, Node 수·유형/선정 정책, Node 아키텍처·디스크 | AWS/GCP; ON_PREM은 기존 자원 충족 여부 점검 |
 | PostgreSQL | 버전 16, DB 이름·사용자, Pod 리소스, PVC 용량·스토리지 요구, 인증 생성 정책, 필요한 복제 준비 요구 | 공통; Node 루트 디스크와 PVC 분리; 데이터 복사·CDC 실행은 제외 |
 | 환경변수 | `.env` 버전 참조, 키 분류·재매핑 규칙, 동적 DB 바인딩, Secret 참조/생성 정책 | 공통; DB 비밀번호는 기존 값을 무조건 복사하지 않음 |
-| 네트워크 | 신규/기존 선택, 기존 자원 참조 또는 주소 요구, Subnet·아웃바운드·통신 정책 | AWS/GCP별 해석; GCP에 AWS의 IGW/VPC CIDR 모델 강제 금지 |
+| 네트워크 | P0 신규 네트워크의 주소·Subnet·아웃바운드·통신 요구 | AWS/GCP별 해석; 기존 네트워크 요청은 미지원, GCP에 AWS 모델 강제 금지 |
 | 외부 접근 | Ingress/LB 요구, 서비스·대상 포트, Health Check | 대상별; ON_PREM 터널 제품을 확정하지 않음 |
 | DNS/TLS | 도메인·인증서 참조 또는 발급 요구 | HTTPS 공개 시; 최종 DNS Cutover는 Traffic Migration |
 | 온프레미스 | Agent·기존 K3s 연결, Namespace, StorageClass·가용 용량 요구 | ON_PREM; 새 K3s 생성은 제외; `local-path`는 확정 기본값 아님 |
@@ -113,7 +113,7 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 - 검증 요구/Profile 식별, 변경 시 재검증 범위, Sandbox 정리 실패 시 진행 정책.
 - 최종 이미지 자체를 추가 실행 검증할지와 빌드 재현성/플랫폼별 검증 증거 수준.
 - 산출물 ID 조회 또는 S3 직접 참조의 표준, 불변성·보관·접근 권한 정책.
-- Node 선정 기본값, 기존 클러스터/네트워크 지원 범위, Registry·Secret·TLS 정책 및 Agent 완료 통지.
+- Node 선정 기본값, 신규 클러스터/네트워크 구성 범위(기존 네트워크는 P0 제외), Registry·Secret·TLS 정책 및 Agent 완료 통지.
 
 ## 9. 검증 범위
 
@@ -138,7 +138,7 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 - 검증 실패 또는 Build 실패는 진행 차단한다. 환경·대상 선택 버전이 달라지면 이 순수 함수는 유효성을 추정하지 않고 재검증이 필요한 입력 불일치로 반환한다. 더 세밀한 변경 영향 분석은 향후 정책이다.
 - Sandbox 정리 `FAILED/PENDING`은 출처 정보에 보존하고 `CLEANUP_POLICY_REQUIRED`를 `pending_decisions`에 반환한다. 이 모델은 승인 가능한 Preview를 만들지 않는다. 후속 승인/실행 구현에서 미해결 정책을 처리해야 한다.
 - AWS/GCP는 명시적 Node 수·인스턴스 유형·아키텍처·디스크, 위치·Credential 참조·네트워크를 받는다. 자동 Node 선정은 아직 미지원이며 조용한 기본값으로 대체하지 않는다. ON_PREM은 Agent·클러스터 참조·Namespace·StorageClass·아키텍처를 받는다.
-- `CREATE/EXISTING`을 구분하고 기존 네트워크는 참조를 요구한다. AWS 신규 VPC는 CIDR과 Subnet AZ를, GCP Subnet은 Region을 요구하며 AWS VPC CIDR/AZ 필드를 GCP에 허용하지 않는다.
+- 최초 01에서는 `CREATE/EXISTING`을 구분했으나, 후속 [ADR-002](../../docs/decisions/ADR-002.md)에 따라 P0 공개 Planning/Adapter는 `EXISTING`을 `UNSUPPORTED_P0_NETWORK_MODE`로 거절한다. 기존 형태는 모델에서 읽을 수 있어도 지원을 뜻하지 않는다. AWS 신규 VPC는 CIDR과 Subnet AZ를, GCP Subnet은 Region을 요구하며 AWS VPC CIDR/AZ 필드를 GCP에 허용하지 않는다.
 - CIDR은 canonical IPv4만 지원한다. Subnet 상호 중복·VPC 포함 관계와 전달된 점유 CIDR 충돌을 검사한다. `existing_cidrs`는 선택하여 재사용하는 Subnet을 제외한 외부/점유 범위다. 실제 클라우드 CIDR 조회·AZ 존재·인스턴스 카탈로그·가용 용량·접근 권한은 검증하지 않는다.
 - 최소 앱 입력은 CPU·메모리 요구, Replica, Port, Health Path다. DB는 PostgreSQL 16·이름/사용자·CPU/메모리·PVC 용량과 `GENERATE` 인증 정책을 받는다. 리소스 limit, 복제 설정, TLS/Secret 저장 방식은 후속 Chart/실행 티켓에서 확장한다.
 - 환경 매핑은 이번 버전에서 대상 DB의 host/port/name/username/secret_ref 바인딩만 구조화한다. 일반 `.env` 값은 환경 참조에 남기며 실제 조회·분류·주입은 티켓 03이다. P0 객체 스토리지 생성 필드는 미지원 오류로 반환한다.

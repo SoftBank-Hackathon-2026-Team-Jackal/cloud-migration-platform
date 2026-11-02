@@ -146,3 +146,7 @@ Provisioning Planning이 소비할 정보는 [Provision 입력 계약](../../spe
 - Workflow 분할·Task Queue·Worker 배포 단위, Activity 재시도·Heartbeat·멱등성 정책
 - 실제 배포 환경에서 기능 테스트 재실행 시 테스트 데이터·계정·정리 정책
 - P0에서 객체 스토리지 기능을 보여줄 수준. 자동 생성·데이터 이전은 P0 필수 범위에서 제외한다.
+
+## P0 병렬 구현 결정
+
+[ADR-002](../decisions/ADR-002.md)에 따라 Sandbox/Provisioning 공유 계약을 먼저 구현하고, 각 작업은 [파일 소유 범위](../../specs/provisioning/parallel-work.md)를 따른다. DB/App Chart는 분리하고 DB 승인 기록을 유지하며 범용 Outbox는 P0에서 보류한다. AWS/GCP 기존 네트워크 재사용은 제외하지만 ON_PREM의 기존 K3s 배포 책임은 유지한다.

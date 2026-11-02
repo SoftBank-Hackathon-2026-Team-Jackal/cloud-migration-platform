@@ -30,6 +30,12 @@ def validate_target(spec: ProvisioningSpec) -> list[ValidationIssue]:
     if target.provider == "ON_PREM":
         return issues
     network = target.network
+    if network.mode == "EXISTING":
+        reject(
+            "UNSUPPORTED_P0_NETWORK_MODE",
+            "network.mode",
+            "P0 supports new AWS/GCP networks only; existing network reuse is not supported.",
+        )
     if network.mode == "EXISTING" and network.network_ref is None:
         reject(
             "MISSING_NETWORK_REF",

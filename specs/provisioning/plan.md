@@ -6,6 +6,10 @@
 
 확정 전제는 AWS EKS 원본, AWS EKS·GCP GKE·온프레미스 K3s 대상, 세 대상 모두 Kubernetes의 PostgreSQL 16 StatefulSet/PVC, 별도 `.env` 업로드, Sandbox와 Production Worker 분리, Preview와 승인 후 실제 생성, P0에서 사용자 객체 스토리지 자동 생성·이전 제외다. S3는 플랫폼 산출물 저장소로 사용한다. 이전 EC2/Compute Engine + Docker Compose 경로는 이 설계의 대상이 아니다. Route 53·Envoy·WireGuard의 최종 방식은 아직 결정되지 않았고 트래픽 변경은 이 기능의 책임이 아니다.
 
+## P0 후속 결정 (2026-11-03)
+
+[ADR-002](../../docs/decisions/ADR-002.md)가 아래 초기 제안의 해당 항목을 구체화한다. Preview/승인 유지, 핵심 산출물만 참조/Digest 고정, DB/App Chart 분리, AWS/GCP 기존 네트워크 재사용 제외, 중앙 S3 State+잠금, DB 승인 기록 유지·범용 Outbox 보류를 적용한다. 공통 코드의 선행 구현과 파일 담당은 [병렬 작업 규칙](parallel-work.md)에 정의한다. CP-01 완료 전 02/05/06/07의 동시 구현을 시작하지 않는다.
+
 ## 티켓 01 구현 현황
 
 #5에서 내부 v1 계약과 순수 Planning/Provider 검증을 구현했다. 실제 위치는 `packages/contracts/src/cmp_contracts/provisioning.py`, `apps/worker/src/cmp_worker/provisioning.py`, `packages/providers/src/cmp_providers/provisioning.py`다. 작은 초기 범위라 기존 패키지의 단일 모듈로 두었고 아래 하위 패키지 분할은 후속 확장 제안으로 유지한다. 구현된 필드·미지원 범위·실행 증거는 [입력 계약 §10](input-contract.md)에 기록한다. 실제 상위 Worker의 wire 계약·S3 조회·Temporal 연결은 이번 구현에 포함되지 않는다.
@@ -91,13 +95,13 @@ Analysis·Sandbox·Build 결과 + 사용자 대상 선택 + 업로드 .env 참�
 | `NodeRequirement` | Node 수 범위, 유형 지정 또는 Adapter 선정 정책, Node 디스크·아키텍처 요구 |
 | `DatabaseSpec` | PostgreSQL 버전 16, DB 이름·사용자, `PodResources`, PVC 용량, 인증 생성 정책 |
 | `EnvironmentSpec` | `env_file_ref`, 변수 재매핑 규칙, 비밀값 식별 메타데이터. 원문 제외 |
-| `NetworkRequirements` | 신규/기존 네트워크 선택, CIDR 제약, subnet 목적, 아웃바운드·보안 통신 요구 |
+| `NetworkRequirements` | P0 신규 네트워크 요구(기존 사용은 미지원), CIDR 제약, subnet 목적, 아웃바운드·보안 통신 요구 |
 | `IngressRequirements` | 서비스/대상 포트, 외부 접근 방식, DNS·TLS 요구 또는 참조 |
 | `AwsTarget` / `GcpTarget` | `provider` 리터럴, credential ref, region, 클러스터·Node 요구, 네트워크 요구, 대상별 선택값 |
 | `OnPremTarget` | `provider='ON_PREM'`, Agent ID, 클러스터 참조, Namespace, StorageClass, 용량 요구 |
 | `ProvisioningSpec` | `PlanRef`, 판별 가능한 `target`, 앱·DB·환경·Ingress, 이전 연결 요구 |
 
-**권장:** Pydantic v2 `Field(discriminator='provider')`로 `AwsTarget | GcpTarget | OnPremTarget`을 구분한다. 이렇게 하면 클라우드 자격 증명·Region·Node 요구와 ON_PREM의 Agent·기존 K3s 요구가 타입 수준에서 달라진다. `model_validator(mode='after')`는 `CREATE`일 때 CIDR 필요, `USE_EXISTING`일 때 네트워크 참조 필요, TLS 요청 시 도메인·인증 정책 필요, 이미지 아키텍처와 Node 선정 정책의 호환성처럼 **교차 필드**에 사용한다. 단일 모델의 광범위한 Optional 필드와 Validator만으로 Provider별 필수값을 표현하는 방식은 오류가 늦고 계약이 불명확해 권장하지 않는다. Pydantic의 정적 검사 뒤에 Adapter의 대상별 지원성·권한·실제 CIDR 충돌·할당 가능성 검사를 별도로 둔다.
+**권장:** Pydantic v2 `Field(discriminator='provider')`로 `AwsTarget | GcpTarget | OnPremTarget`을 구분한다. 이렇게 하면 클라우드 자격 증명·Region·Node 요구와 ON_PREM의 Agent·기존 K3s 요구가 타입 수준에서 달라진다. `model_validator(mode='after')`는 `CREATE`일 때 CIDR 필요, `EXISTING` 요청은 P0 미지원 오류, TLS 요청 시 도메인·인증 정책 필요, 이미지 아키텍처와 Node 선정 정책의 호환성처럼 **교차 필드**에 사용한다. 단일 모델의 광범위한 Optional 필드와 Validator만으로 Provider별 필수값을 표현하는 방식은 오류가 늦고 계약이 불명확해 권장하지 않는다. Pydantic의 정적 검사 뒤에 Adapter의 대상별 지원성·권한·실제 CIDR 충돌·할당 가능성 검사를 별도로 둔다.
 
 Node 수·유형의 `EXPLICIT`/`POLICY_SELECTED` 같은 선정 모드를 제안한다. Explicit는 승인 입력을 그대로 사용하고, 선정 모드는 Profile·자원 요구·Provider 제한으로 후보를 계산한 뒤 **선정된 실제 Node 유형·수·비용 관련 변경을 Preview에 표시**한다. Pod CPU·메모리와 PostgreSQL PVC는 Node 디스크 크기와 서로 다른 값이다. 지원 아키텍처와 Node 아키텍처가 맞지 않으면 계획을 거절한다. 자동 선정 알고리즘과 자원 기본값은 미확정이다.
 
@@ -148,13 +152,13 @@ ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Ma
 
 **Plan/Apply 동일성 권장안:** Plan ID·Revision에 `ProvisioningSpec` 정규화 Digest, 이미지 Digest, Terraform 구성/모듈·Provider lockfile Digest, Helm Chart/Values **템플릿과 동적 바인딩 규칙**의 Digest, Template Version, 대상·계정·Backend State 식별자와 저장된 Terraform binary Plan Digest를 기록한다. DB Endpoint·생성 Secret 참조처럼 Apply 후에만 결정되는 값은 승인된 바인딩 위치에만 채우고, 최종 Values의 다른 부분이 Preview의 잠긴 구성과 같은지 검증한다. 사용자용 Preview는 이 잠긴 산출물에서 파생한 요약이다. 승인 기록은 동일 Plan ID·Revision·Preview Digest를 참조한다. Apply 직전에 승인·현재 Revision·파일 Digest·대상 계정·State 식별자를 재확인한다. 변경이나 State drift로 저장 Plan이 무효하면 **재계획·새 Revision·재승인**으로 돌아가고 조용히 새 Plan을 Apply하지 않는다. Preview에는 생성/변경 자원·Node/네트워크·보안·앱/DB/PVC·Terraform 변경 요약·Helm 예상 리소스·오류/경고를 보여주되 Plan 원문·Secret은 노출하지 않는다.
 
-**State 권장안:** Migration/대상 환경별 독립 Backend key를 두고 공유 인프라와 충돌하지 않게 소유 경계를 기록한다. 원격 Backend, 암호화·최소 권한·버전 관리, State locking을 권장한다. S3 Backend와 별도 잠금 방식 등 제품·버전별 세부 선택은 팀 결정 사항이다. 기존 네트워크를 사용하는 경우 외부 소유 자원을 State 소유 범위로 잘못 가져오지 않는다. 동일 State에 대한 동시 Apply를 잠금 및 업무 DB 실행 상태로 방지하고, 잠금 획득 실패는 대상 변경 없이 재조회/대기한다. Worker 장애 후에는 lock 상태·State·실제 클라우드 자원을 확인한 다음 재개한다. 로컬 Plan·State 임시 파일은 보호된 작업 공간에 두고 로그·Git에 남기지 않는다.
+**State 결정:** Migration/대상 환경별 독립 Backend key를 두고 공유 인프라와 충돌하지 않게 소유 경계를 기록한다. 원격 Backend, 암호화·최소 권한·버전 관리, State locking을 권장한다. 중앙 S3 Backend와 잠금을 채택한다. 구체 Terraform 버전·잠금 설정·버킷/권한은 공통 실행 설정으로 확정한다. P0에서는 기존 네트워크를 지원하지 않는다. 외부 소유 자원을 State로 가져오지 않는다. 동일 State에 대한 동시 Apply를 잠금 및 업무 DB 실행 상태로 방지하고, 잠금 획득 실패는 대상 변경 없이 재조회/대기한다. Worker 장애 후에는 lock 상태·State·실제 클라우드 자원을 확인한 다음 재개한다. 로컬 Plan·State 임시 파일은 보호된 작업 공간에 두고 로그·Git에 남기지 않는다.
 
-Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·변경된 자원을 기록한다. 자동 재시도 가능성을 판단하되 원인 불명·공유 자원·데이터가 있는 경우 사람의 조치 상태로 둔다. 무조건 `destroy`하지 않는다. Terraform Output은 Cluster/Network ID 등만 `ProvisioningResult`에 매핑하며 Secret Output은 일반 결과로 보내지 않는다. State Backend·잠금·자동 정리의 최종 정책은 미정이다.
+Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·변경된 자원을 기록한다. 자동 재시도 가능성을 판단하되 원인 불명·공유 자원·데이터가 있는 경우 사람의 조치 상태로 둔다. 무조건 `destroy`하지 않는다. Terraform Output은 Cluster/Network ID 등만 `ProvisioningResult`에 매핑하며 Secret Output은 일반 결과로 보내지 않는다. State는 중앙 S3와 잠금을 사용한다. 실제 설정과 부분 실패 후 자동 정리 정책은 미정이다.
 
 ## 9. Helm과 Kubernetes 배포 (`PROV-010`~`013`, `016`~`018`)
 
-`infra/helm/`에 App Deployment와 PostgreSQL StatefulSet·Service·PVC를 포함하는 공통 Chart 또는 역할별 Chart를 둔다. 분리 여부는 Release별 복구 경계로 결정한다. 공통 Values에는 이미지 Digest, Pod resources, replicas, ports, health, DB, 일반 설정과 Secret 참조를 넣고 Provider별 Values에는 StorageClass, Ingress/LB·Controller, 필요한 네트워크 설정을 둔다. Sandbox는 동일 Chart에 격리된 Namespace·테스트 Values를 적용한다. Chart는 환경별 Secret 원문을 Git에 넣지 않는다.
+`infra/helm/`에 DB와 App의 별도 Chart/Release를 둔다. DB Chart는 Sandbox/Production에서 공유하고 StorageClass 및 Secret 이름·키를 명시적으로 입력받는다. 공통 Values에는 이미지 Digest, Pod resources, replicas, ports, health, DB, 일반 설정과 Secret 참조를 넣고 Provider별 Values에는 StorageClass, Ingress/LB·Controller, 필요한 네트워크 설정을 둔다. Sandbox는 동일 Chart에 격리된 Namespace·테스트 Values를 적용한다. Chart는 환경별 Secret 원문을 Git에 넣지 않는다.
 
 실행 순서는 Namespace/StorageClass·Controller 준비 → DB 인증 Secret 준비 → PostgreSQL Helm 설치/업그레이드 → PVC Bound·Pod Ready·DB 접속 확인 → 대상 DB Service와 비밀 참조로 앱 Values 완성 → App Helm 설치/업그레이드 → Pod Ready·Service·Ingress/LB 주소 확인이다. 데이터 이전용 복제 역할·설정 적용 가능 여부도 확인하되 실제 복제는 Data Migration에 맡긴다. Registry Pull 인증·CPU 아키텍처를 배포 전에 검증한다. NetworkPolicy는 대상 지원성과 필수 경로를 검토한 뒤 렌더한다. Pod Ready나 PVC 객체 존재만으로 DB 접근·실제 Volume 사용 가능성을 선언하지 않는다.
 
@@ -174,7 +178,7 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 | Secret 준비·Helm 배포 | Kubernetes 부수효과·Release 복구 | Secret 참조·Release Revision·객체 상태 |
 | 실제 검증·결과 저장 | 외부 읽기·업무 기록/산출물 I/O | 검사 결과·저장된 Result 버전 |
 
-승인 요청은 FastAPI가 권한과 Plan ID·Revision을 확인해 업무 DB에 기록하고 Temporal에 전달한다. Signal을 쓰는 경우 Signal 수락과 Workflow 재개를 구분한다. Workflow는 승인 이벤트만 믿지 않고 실행 직전 Activity로 DB 승인 기록과 잠긴 Plan Digest를 재검증한다. 거절·수정·오래된 Revision은 Apply로 가지 않는다. DB 기록 성공·Signal 실패와 반대 순서/중복에 대비해 승인 이벤트 ID와 재전달·조회 조정을 권장한다. 정확한 API/Signal 계약은 후속 합의 대상이다.
+승인 요청은 FastAPI가 권한과 Plan ID·Revision을 확인해 업무 DB에 기록하고 Temporal에 전달한다. Signal을 쓰는 경우 Signal 수락과 Workflow 재개를 구분한다. Workflow는 승인 이벤트만 믿지 않고 실행 직전 Activity로 DB 승인 기록과 잠긴 Plan Digest를 재검증한다. 거절·수정·오래된 Revision은 Apply로 가지 않는다. DB 기록 성공·Signal 실패와 반대 순서/중복에 대비해 승인 이벤트 ID와 재전달·조회 조정을 권장한다. P0에서는 범용 Outbox를 도입하지 않고 승인 이벤트 ID 기반 재요청/재전달과 상태 재조회로 전달 실패를 드러내고 복구한다. DB 승인 기록은 유지한다. 정확한 API URL·인증 연동·응답 계약은 07 착수 전에 확정한다.
 
 장시간 Apply와 Agent 실행은 Heartbeat 또는 주기적 상태 조회를 두어 Worker 종료를 감지한다. 외부 프로세스가 계속 실행 중일 수 있으므로 Heartbeat timeout만 보고 같은 Apply/Agent 명령을 즉시 재발행하지 않는다. 실행 표식(`plan_id`, `revision`, `step`, 외부 작업 ID)과 State/Release/Agent 실제 상태를 먼저 조회한다. Activity Retry는 일시 오류에 한정하고 권한·검증·승인 불일치는 사용자/운영자 조치 상태로 보낸다. 취소 요청은 실행 중 외부 작업의 안전한 중단 가능성을 조회한 뒤 상태를 기록하며 인프라 자동 삭제로 해석하지 않는다. 이력에는 참조·상태·작은 오류만 남기고 Plan/Secret 원문을 싣지 않는다.
 
@@ -228,8 +232,8 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 | 미확정 사항 | 권장 검토 방향·결정 이유 |
 | --- | --- |
 | 시연 중 EKS/GKE 생성 또는 사전 구축 | 5분 발표 시간과 실제 생성 시간을 측정해 구분. 사전 구축도 승인·실행의 의미를 명확히 표시 |
-| Node 수·유형·네트워크·기존 VPC 범위 | 비용·Quota·CIDR·권한·기존 자원 소유권 기준으로 Profile 결정 |
-| Terraform Backend/Lock | 원격·암호화·잠금·State 격리는 권장, 제품/구성은 팀 선택 |
+| Node 수·유형·신규 네트워크 | 비용·Quota·CIDR·권한 기준으로 Profile 결정. 기존 네트워크는 P0 제외 |
+| Terraform Backend/Lock | 중앙 S3와 잠금 채택. 버전·권한·key·잠금 설정을 공통 실행 구성으로 확정 |
 | Secret 저장·회전, Registry Pull | 대상별 접근 권한과 ECR 접근성, K3s NAT 환경까지 검토 |
 | 도메인·TLS 발급 | 승인 Preview와 Ingress 외부 검증의 필수 여부 결정 |
 | Agent 완료 통지·작업 인증 | 폴링/콜백/비동기 완료, 재연결과 중복 작업 처리 결정 |
