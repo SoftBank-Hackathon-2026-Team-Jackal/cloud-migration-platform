@@ -1,23 +1,23 @@
 # Tasks: Provisioning
 
-이 파일은 7단계 Provisioning 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 모두 `DRAFT`이며 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
+이 파일은 7단계 Provisioning 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 모두 `DRAFT`이며 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
 
-| ID·티켓 | 상태 | Blocked by | 관련 요구사항 | 완료 |
-| --- | --- | --- | --- | --- |
-| [01 공통 입력 검증과 대상별 구성 예시](../../tickets/provisioning/01-provider-spec-validation.md) | DRAFT | 없음 | PROV-001, 002, 003 | ☐ |
-| [02 PostgreSQL Chart 렌더링과 PVC 검사](../../tickets/provisioning/02-postgres-helm-render.md) | DRAFT | 01 | PROV-005, 006, 011 | ☐ |
-| [03 앱 배포와 .env·Secret 바인딩 렌더링](../../tickets/provisioning/03-app-env-render.md) | DRAFT | 01, 02 | PROV-004, 005, 010, 012, 021 | ☐ |
-| [04 격리 K3s에서 Agent 배포 경로 검증](../../tickets/provisioning/04-k3s-agent-test-deploy.md) | DRAFT | 02, 03 | PROV-006, 009, 011, 013 | ☐ |
-| [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | DRAFT | 01 | PROV-002, 003, 007, 014, 021 | ☐ |
-| [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | DRAFT | 01 | PROV-002, 003, 008, 014, 021 | ☐ |
-| [07 Plan Revision 승인과 Temporal 실행 차단](../../tickets/provisioning/07-approval-gate.md) | DRAFT | 01 | PROV-014, 015, 016, 021 | ☐ |
-| [08 승인된 Plan으로 AWS EKS 기반 준비](../../tickets/provisioning/08-aws-infra-apply.md) | DRAFT | 05, 07 | PROV-007, 015, 016, 017 | ☐ |
-| [09 AWS EKS에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/09-aws-workloads.md) | DRAFT | 02, 03, 08 | PROV-010, 011, 012, 013, 018 | ☐ |
-| [10 승인된 Plan으로 GCP GKE 기반 준비](../../tickets/provisioning/10-gcp-infra-apply.md) | DRAFT | 06, 07 | PROV-008, 015, 016, 017 | ☐ |
-| [11 GCP GKE에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/11-gcp-workloads.md) | DRAFT | 02, 03, 10 | PROV-010, 011, 012, 013, 018 | ☐ |
-| [12 승인된 K3s Agent 운영 배포](../../tickets/provisioning/12-k3s-approved-rollout.md) | DRAFT | 04, 07 | PROV-009, 015, 016, 017, 018 | ☐ |
-| [13 실제 검증 결과와 Migration 인계](../../tickets/provisioning/13-result-handoff.md) | DRAFT | 12 | PROV-018, 019, 020, 021 | ☐ |
-| [14 실패 복구와 세 대상 통합 검증](../../tickets/provisioning/14-recovery-integration.md) | DRAFT | 08, 09, 10, 11, 12, 13 | PROV-015, 016, 017, 018, 019, 021 | ☐ |
+| ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
+| --- | --- | --- | --- | --- | --- |
+| [01 공통 입력 검증과 대상별 구성 예시](../../tickets/provisioning/01-provider-spec-validation.md) | DRAFT | 없음 | PROV-001, 002, 003 | 미생성 | ☐ |
+| [02 PostgreSQL Chart 렌더링과 PVC 검사](../../tickets/provisioning/02-postgres-helm-render.md) | DRAFT | 01 | PROV-005, 006, 011 | 미생성 | ☐ |
+| [03 앱 배포와 .env·Secret 바인딩 렌더링](../../tickets/provisioning/03-app-env-render.md) | DRAFT | 01, 02 | PROV-004, 005, 010, 012, 021 | 미생성 | ☐ |
+| [04 격리 K3s에서 Agent 배포 경로 검증](../../tickets/provisioning/04-k3s-agent-test-deploy.md) | DRAFT | 02, 03 | PROV-006, 009, 011, 013 | 미생성 | ☐ |
+| [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | DRAFT | 01 | PROV-002, 003, 007, 014, 021 | 미생성 | ☐ |
+| [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | DRAFT | 01 | PROV-002, 003, 008, 014, 021 | 미생성 | ☐ |
+| [07 Plan Revision 승인과 Temporal 실행 차단](../../tickets/provisioning/07-approval-gate.md) | DRAFT | 01 | PROV-014, 015, 016, 021 | 미생성 | ☐ |
+| [08 승인된 Plan으로 AWS EKS 기반 준비](../../tickets/provisioning/08-aws-infra-apply.md) | DRAFT | 05, 07 | PROV-007, 015, 016, 017 | 미생성 | ☐ |
+| [09 AWS EKS에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/09-aws-workloads.md) | DRAFT | 02, 03, 08 | PROV-010, 011, 012, 013, 018 | 미생성 | ☐ |
+| [10 승인된 Plan으로 GCP GKE 기반 준비](../../tickets/provisioning/10-gcp-infra-apply.md) | DRAFT | 06, 07 | PROV-008, 015, 016, 017 | 미생성 | ☐ |
+| [11 GCP GKE에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/11-gcp-workloads.md) | DRAFT | 02, 03, 10 | PROV-010, 011, 012, 013, 018 | 미생성 | ☐ |
+| [12 승인된 K3s Agent 운영 배포](../../tickets/provisioning/12-k3s-approved-rollout.md) | DRAFT | 04, 07 | PROV-009, 015, 016, 017, 018 | 미생성 | ☐ |
+| [13 실제 검증 결과와 Migration 인계](../../tickets/provisioning/13-result-handoff.md) | DRAFT | 12 | PROV-018, 019, 020, 021 | 미생성 | ☐ |
+| [14 실패 복구와 세 대상 통합 검증](../../tickets/provisioning/14-recovery-integration.md) | DRAFT | 08, 09, 10, 11, 12, 13 | PROV-015, 016, 017, 018, 019, 021 | 미생성 | ☐ |
 
 ## 선행 관계
 

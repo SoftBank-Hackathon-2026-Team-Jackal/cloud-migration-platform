@@ -12,6 +12,7 @@ Cloud Migration Platform moves an AWS EKS application to EKS, GKE, or K3s. FastA
 # Before implementation
 
 - Check ticket status, blockers, scope, acceptance criteria, and proposed public test seam. Draft tickets require user review before implementation.
+- After review, create or reuse one GitHub Issue for the selected Provisioning ticket; record its `#number` in `specs/provisioning/tasks.md` before implementation. Never create duplicate Issues for the same ticket.
 - If documents disagree or a product policy, API contract, or responsibility boundary must change, report the conflict and obtain a decision before affected implementation. Do not silently choose a policy.
 - Keep other teammates' features and tickets outside the Provisioning workflow.
 
@@ -26,7 +27,7 @@ Cloud Migration Platform moves an AWS EKS application to EKS, GKE, or K3s. FastA
 - When requirements, design, or decisions change, update the corresponding SDD document and ticket before marking DONE or opening a PR. Record “no documentation change” when behavior and contracts truly did not change.
 - A ticket is DONE only after its acceptance criteria, relevant tests, regression check, code/document alignment, and review pass. Record unmet checks as BLOCKED or pending decision.
 - Run `make check` after Python changes. For HTTP route changes, regenerate and review `make openapi`; for Temporal changes, run `make smoke-temporal` with local infrastructure when available. Add ticket-specific Terraform/Helm/cluster checks where relevant.
-- Commit only coherent changes. Push and create a PR only for a logically complete scope with tests and docs aligned, and only when the task authorizes remote actions.
+- Commit only coherent changes. For Issue-backed work, include `#number` in commit messages and PR title/body; use `Closes #number` only when the PR completes its acceptance criteria. Push and create a PR only for a logically complete scope with tests and docs aligned, and only when the task authorizes remote actions.
 
 # Detailed rules
 
