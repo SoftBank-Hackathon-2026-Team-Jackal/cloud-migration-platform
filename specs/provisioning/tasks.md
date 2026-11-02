@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | [01 공통 입력 검증과 대상별 구성 예시](../../tickets/provisioning/01-provider-spec-validation.md) | DONE | 없음 | PROV-001, 002, 003 | [#5](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/5) | ☑ |
 | [P0-01 정책 정렬·병렬 착수 조건](../../tickets/provisioning/p0-01-policy-alignment.md) | DONE | 01 | PROV-001, 014, 015, 021 | [#7](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/7) | ☑ |
-| [CP-01 최소 공유 계약](../../tickets/provisioning/cp-01-shared-contracts.md) | TODO | 01, P0-01 main 반영 | PROV-005, 006, 014, 015, 021 | 착수 전 생성 | ☐ |
+| [CP-01 최소 공유 계약](../../tickets/provisioning/cp-01-shared-contracts.md) | IN_PROGRESS | 01, P0-01 main 반영 | PROV-005, 006, 014, 015, 021 | [#9](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/9) | ☐ |
 | [02 PostgreSQL Chart 렌더링과 PVC 검사](../../tickets/provisioning/02-postgres-helm-render.md) | TODO | 01, CP-01 | PROV-005, 006, 011 | 미생성 | ☐ |
 | [03 앱 배포와 .env·Secret 바인딩 렌더링](../../tickets/provisioning/03-app-env-render.md) | DRAFT | 01, 02 | PROV-004, 005, 010, 012, 021 | 미생성 | ☐ |
 | [04 격리 K3s에서 Agent 배포 경로 검증](../../tickets/provisioning/04-k3s-agent-test-deploy.md) | DRAFT | 02, 03 | PROV-006, 009, 011, 013 | 미생성 | ☐ |
@@ -32,7 +32,7 @@
 08, 09, 10, 11, 12, 13 → 14
 ```
 
-화살표는 주요 경로를 요약한다. 정확한 모든 `Blocked by`는 위 표와 각 티켓에 있다. `02`·`05`·`06`·`07`은 `CP-01`이 main에 반영된 뒤 독립 진행할 수 있고, AWS/GCP의 배포 경로는 공통 Helm 기반과 해당 인프라 준비가 끝나면 독립 진행할 수 있다. `13`은 K3s 경로로 결과 계약을 먼저 검증한다. AWS/GCP 실제 경로와의 연결은 `14`에서 확인한다.
+화살표는 주요 경로를 요약한다. 정확한 모든 `Blocked by`는 위 표와 각 티켓에 있다. `02`·`05`·`06`·`07`은 `CP-01`이 main에 반영된 뒤 의존성상 독립이지만 현재는 순차로 진행하며, AWS/GCP의 배포 경로는 공통 Helm 기반과 해당 인프라 준비가 끝나면 독립 진행할 수 있다. `13`은 K3s 경로로 결과 계약을 먼저 검증한다. AWS/GCP 실제 경로와의 연결은 `14`에서 확인한다.
 
 ## 검토 및 결정 대기
 
@@ -41,6 +41,6 @@
 - AWS/GCP 기존 네트워크 재사용 P0 제외와 중앙 S3 State+잠금은 결정했다. Node·신규 네트워크 Profile, Backend 실제 설정, 검증 계정/권한, Registry/Secret/TLS, Agent 완료 통지, 실패 후 정리는 관련 티켓의 결정 전제다.
 - 티켓 이력은 유지한다. 요구사항이 바뀌면 영향받는 티켓과 SDD를 함께 갱신하고, 전체 티켓을 다시 생성하지 않는다.
 
-## 병렬 착수 현황
+## 현재 진행 방식
 
-정책 정렬만으로 병렬 구현 준비가 끝나지 않는다. CP-01 코드·fixture의 main 반영 전에는 새 채팅 4개를 시작하지 않는다. [착수 체크리스트와 파일 담당](parallel-work.md)을 따른다.
+사용자 지시에 따라 CP-01부터 한 티켓씩 순차 진행한다. 병렬 채팅을 만들거나 병렬 준비용 작업을 별도 수행하지 않는다. 문서는 관련 구현 이슈/PR에 함께 반영한다. 실제 공유 인터페이스는 [shared-contracts.md](shared-contracts.md)를 따른다.

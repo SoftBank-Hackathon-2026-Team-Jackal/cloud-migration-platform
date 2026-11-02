@@ -1,4 +1,6 @@
-# Provisioning 병렬 작업과 병합 규칙
+# Provisioning 병렬 작업과 병합 규칙 — 비활성 이력
+
+**2026-11-03 사용자 후속 지시로 현재는 한 티켓씩 순차 진행한다.** 아래 내용은 이전 검토 이력이며 새 채팅 생성·병렬 작업 준비를 요구하지 않는다. 현재 지침은 AGENTS.md와 development-workflow.md이며 공유 코드 인터페이스는 [shared-contracts.md](shared-contracts.md)에 있다.
 
 ## 현재 판단 (2026-11-03)
 

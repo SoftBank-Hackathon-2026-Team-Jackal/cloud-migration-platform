@@ -1,0 +1,73 @@
+{
+  "contract_version": "1",
+  "digest_format": "cmp-json-v1",
+  "migration_id": "migration-001",
+  "plan": {
+    "plan_id": "plan-001",
+    "revision": 1,
+    "template_version": "v1"
+  },
+  "scope": "FULL",
+  "target": {
+    "provider": "AWS",
+    "environment_id": "production-001",
+    "account_id": "account-001",
+    "region": "ap-northeast-2",
+    "state_ref": {
+      "id": "state-001",
+      "version": "1"
+    }
+  },
+  "image_uri": "registry.example.com/demo@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "artifacts": {
+    "spec": {
+      "id": "spec-001",
+      "version": "1",
+      "kind": "SPEC",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size_bytes": 100
+    },
+    "terraform_plan": {
+      "id": "terraform-plan-001",
+      "version": "1",
+      "kind": "TERRAFORM_PLAN",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size_bytes": 100
+    },
+    "database_chart": {
+      "id": "db-chart-001",
+      "version": "1",
+      "kind": "CHART",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "size_bytes": 100
+    },
+    "database_values": {
+      "id": "db-values-001",
+      "version": "1",
+      "kind": "VALUES",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "size_bytes": 100
+    },
+    "application_chart": {
+      "id": "app-chart-001",
+      "version": "1",
+      "kind": "CHART",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "size_bytes": 100
+    },
+    "application_values": {
+      "id": "app-values-001",
+      "version": "1",
+      "kind": "VALUES",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "size_bytes": 100
+    },
+    "bindings": {
+      "id": "bindings-001",
+      "version": "1",
+      "kind": "BINDINGS",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "size_bytes": 100
+    }
+  }
+}
