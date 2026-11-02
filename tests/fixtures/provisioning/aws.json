@@ -1,0 +1,48 @@
+{
+  "contract_version": "1",
+  "migration_id": "migration-001",
+  "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "v1"},
+  "environment_ref": {"id": "env-001", "version": "1"},
+  "target_selection": {
+    "ref": {"id": "target-001", "version": "1"},
+    "target": {
+      "provider": "AWS", "profile": "aws-eks-demo", "region": "ap-northeast-2",
+      "credential_ref": {"id": "credential-001", "version": "1"},
+      "nodes": {"count": 2, "instance_type": "t3.large", "architecture": "linux/amd64", "disk_gib": 60},
+      "network": {"mode": "CREATE", "vpc_cidr": "10.20.0.0/16", "subnets": [
+        {"cidr": "10.20.1.0/24", "zone": "ap-northeast-2a", "role": "PRIVATE"},
+        {"cidr": "10.20.2.0/24", "zone": "ap-northeast-2c", "role": "PRIVATE"}
+      ], "existing_cidrs": []}
+    }
+  },
+  "analysis": {
+    "migration_id": "migration-001",
+    "ref": {"id": "analysis-001", "version": "1"},
+    "source": {"id": "source-001", "version": "1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    "config": {"id": "config-001", "version": "1", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    "requirements_ref": {"id": "requirements-001", "version": "1"},
+    "requirements": {
+      "application": {"cpu_millicores": 500, "memory_mib": 512, "replicas": 1, "port": 8080, "health_path": "/health"},
+      "database": {"version": "16", "name": "demo", "username": "app_user", "cpu_millicores": 500, "memory_mib": 512, "storage_gib": 20, "auth_policy": "GENERATE"},
+      "bindings": {"DB_HOST": "database.host", "DB_PASSWORD": "database.secret_ref"}
+    }
+  },
+  "sandbox": {
+    "migration_id": "migration-001", "ref": {"id": "sandbox-001", "version": "1"},
+    "status": "PASSED", "cleanup_status": "CLEANED",
+    "analysis_ref": {"id": "analysis-001", "version": "1"},
+    "source": {"id": "source-001", "version": "1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    "config": {"id": "config-001", "version": "1", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    "requirements_ref": {"id": "requirements-001", "version": "1"},
+    "environment_ref": {"id": "env-001", "version": "1"},
+    "target_selection_ref": {"id": "target-001", "version": "1"},
+    "report_ref": {"id": "report-001", "version": "1"}
+  },
+  "build": {
+    "migration_id": "migration-001", "ref": {"id": "build-001", "version": "1"}, "status": "SUCCEEDED",
+    "sandbox_ref": {"id": "sandbox-001", "version": "1"},
+    "source": {"id": "source-001", "version": "1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    "config": {"id": "config-001", "version": "1", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    "image": {"uri": "registry.example.com/demo@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "platforms": ["linux/amd64"]}
+  }
+}

@@ -6,6 +6,10 @@
 
 확정 전제는 AWS EKS 원본, AWS EKS·GCP GKE·온프레미스 K3s 대상, 세 대상 모두 Kubernetes의 PostgreSQL 16 StatefulSet/PVC, 별도 `.env` 업로드, Sandbox와 Production Worker 분리, Preview와 승인 후 실제 생성, P0에서 사용자 객체 스토리지 자동 생성·이전 제외다. S3는 플랫폼 산출물 저장소로 사용한다. 이전 EC2/Compute Engine + Docker Compose 경로는 이 설계의 대상이 아니다. Route 53·Envoy·WireGuard의 최종 방식은 아직 결정되지 않았고 트래픽 변경은 이 기능의 책임이 아니다.
 
+## 티켓 01 구현 현황
+
+#5에서 내부 v1 계약과 순수 Planning/Provider 검증을 구현했다. 실제 위치는 `packages/contracts/src/cmp_contracts/provisioning.py`, `apps/worker/src/cmp_worker/provisioning.py`, `packages/providers/src/cmp_providers/provisioning.py`다. 작은 초기 범위라 기존 패키지의 단일 모듈로 두었고 아래 하위 패키지 분할은 후속 확장 제안으로 유지한다. 구현된 필드·미지원 범위·실행 증거는 [입력 계약 §10](input-contract.md)에 기록한다. 실제 상위 Worker의 wire 계약·S3 조회·Temporal 연결은 이번 구현에 포함되지 않는다.
+
 ## 2. Affected modules and contracts — 저장소에 맞춘 제안 구조
 
 현재 저장소는 `backend/`와 `infrastructure/`가 아니라 아래의 `apps/`, `packages/`, `infra/`를 사용한다. 다음은 **추가·확장 제안**이며 이번 단계에서 실제 파일을 생성하지 않는다. 새 Python 서브패키지를 추가할 때에는 현행 `pyproject.toml`의 수동 `setuptools.packages` 목록과 package-dir 설정도 갱신해야 한다.

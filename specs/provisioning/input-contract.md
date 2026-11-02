@@ -118,3 +118,39 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 ## 9. 검증 범위
 
 문서 변경은 제품 정책·PROV 요구사항·계획·책임 경계의 정합성과 상대 링크를 검토한다. 티켓 01의 코드 Test Seam은 선행 결과를 해석한 구조화 입력 → 공개 Planning 검증·조합 → 공개 Adapter 결과다. 이 검사는 실제 상위 Worker 성공·S3 권한·클라우드 배포를 증명하지 않는다. 코드 구현과 테스트 결과 없이 티켓 01을 DONE으로 표시하지 않는다.
+
+## 10. 티켓 01 내부 v1 구현 (2026-11-03, #5)
+
+사용자의 이슈 전체 구현 요청에 따라 위 설계에서 **로컬 조합·검증 경계**를 구현했다. 이는 다른 팀의 Activity 반환값을 강제로 바꾸는 wire 계약이 아니다. 외부 참조를 조회한 Activity가 아래 내부 모델로 정규화하여 호출한다. 아직 스캐폴드 Workflow에 연결하지 않았으며, 새 HTTP API도 추가하지 않았다.
+
+| 공개 경계 | 구현 및 보장 |
+| --- | --- |
+| `cmp_contracts.provisioning.PlanningRequest` | `contract_version="1"`; Plan 식별 정보, 작업 ID, 해석된 Analysis/Sandbox/Build, 환경 참조와 대상 선택. 엄격한 타입과 추가 필드 금지 |
+| `cmp_worker.provisioning.prepare_plan(dict)` | 누락/형식·선행 결과 상태·작업/버전/소스/설정 연결 검사 → `PlanningResult` |
+| `cmp_providers.provisioning.adapt(ProvisioningSpec)` | 대상 아키텍처·네트워크 정적 검사와 EKS/GKE/K3s 구성 요약 반환. 직접 호출 시에도 대상 검증 수행 |
+| `ProvisioningInputError.issues` | `code`, `path`, `message` 목록. 거부된 값·Pydantic 입력/context를 공개 오류에 포함하지 않음 |
+| `PlanningResult` | `spec`, `configuration`, `pending_decisions`. Preview나 배포 성공 결과가 아님 |
+
+내부 모델 세부 범위:
+
+- `VersionRef`는 `id`와 문자열 `version`, `ContentRef`는 추가로 소문자 64자리 `sha256`을 갖는다. 조회·소유권·Digest 실제 계산은 이 함수 밖의 Activity 책임이다. 코드/설정 참조는 동일 산출물 범위끼리 비교하며, 환경별 임시 값과 Secret 원문은 비교 대상이 아니다.
+- Analysis에는 코드·설정·요구사항 참조와 해석된 앱/DB 요구가 있다. Sandbox에는 Analysis·요구사항·환경·대상 선택 참조, 검증 코드/설정, 보고서 및 검증/정리 상태가 있다. Build에는 Sandbox 참조, 사용 코드/설정, 상태와 Digest 고정 이미지·플랫폼 목록이 있다.
+- 검증 실패 또는 Build 실패는 진행 차단한다. 환경·대상 선택 버전이 달라지면 이 순수 함수는 유효성을 추정하지 않고 재검증이 필요한 입력 불일치로 반환한다. 더 세밀한 변경 영향 분석은 향후 정책이다.
+- Sandbox 정리 `FAILED/PENDING`은 출처 정보에 보존하고 `CLEANUP_POLICY_REQUIRED`를 `pending_decisions`에 반환한다. 이 모델은 승인 가능한 Preview를 만들지 않는다. 후속 승인/실행 구현에서 미해결 정책을 처리해야 한다.
+- AWS/GCP는 명시적 Node 수·인스턴스 유형·아키텍처·디스크, 위치·Credential 참조·네트워크를 받는다. 자동 Node 선정은 아직 미지원이며 조용한 기본값으로 대체하지 않는다. ON_PREM은 Agent·클러스터 참조·Namespace·StorageClass·아키텍처를 받는다.
+- `CREATE/EXISTING`을 구분하고 기존 네트워크는 참조를 요구한다. AWS 신규 VPC는 CIDR과 Subnet AZ를, GCP Subnet은 Region을 요구하며 AWS VPC CIDR/AZ 필드를 GCP에 허용하지 않는다.
+- CIDR은 canonical IPv4만 지원한다. Subnet 상호 중복·VPC 포함 관계와 전달된 점유 CIDR 충돌을 검사한다. `existing_cidrs`는 선택하여 재사용하는 Subnet을 제외한 외부/점유 범위다. 실제 클라우드 CIDR 조회·AZ 존재·인스턴스 카탈로그·가용 용량·접근 권한은 검증하지 않는다.
+- 최소 앱 입력은 CPU·메모리 요구, Replica, Port, Health Path다. DB는 PostgreSQL 16·이름/사용자·CPU/메모리·PVC 용량과 `GENERATE` 인증 정책을 받는다. 리소스 limit, 복제 설정, TLS/Secret 저장 방식은 후속 Chart/실행 티켓에서 확장한다.
+- 환경 매핑은 이번 버전에서 대상 DB의 host/port/name/username/secret_ref 바인딩만 구조화한다. 일반 `.env` 값은 환경 참조에 남기며 실제 조회·분류·주입은 티켓 03이다. P0 객체 스토리지 생성 필드는 미지원 오류로 반환한다.
+- Provider 결과는 cluster/network/Ingress 종류, Node 사양, DB StatefulSet·PVC 용량, 앱 포트·이미지 요약이다. 완전한 Terraform 입력이나 Helm Values가 아니며 `execution_performed=false`를 명시한다. 승인 Plan 산출물·실행은 후속 티켓의 범위다.
+
+### 재현 예시와 검증 증거
+
+`tests/fixtures/provisioning/aws.json`, `gcp.json`, `on_prem.json`은 실제 비밀값·실자원 없이 같은 앱/DB 요구를 세 대상에 적용하는 독립 fixture다. 해당 경로는 저장소 루트 기준이다.
+
+```sh
+uv run pytest tests/test_provisioning.py -q
+make check
+```
+
+RED에서 공개 진입점 부재, 검증 소스 불일치 미차단, CIDR 중복·아키텍처 불일치 미차단을 확인한 뒤 구현하여 GREEN으로 전환했다. 정리 실패는 정책 미정 결과를 보존하도록 별도 RED/GREEN 검증했다. 코드 테스트 경계는 사용자의 이슈 전체 완료 요청에 따라 위 공개 Planning/Adapter 경계로 확정했다. HTTP/Temporal 실행 코드는 수정하지 않았으므로 OpenAPI 재생성·Temporal smoke는 이번 변경 대상이 아니다.
