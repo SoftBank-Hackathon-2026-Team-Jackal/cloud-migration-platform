@@ -12,4 +12,7 @@ jobs:
       - run: uv sync --extra dev --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - uses: azure/setup-helm@v4.3.0
+        with:
+          version: v3.17.3
       - run: uv run pytest

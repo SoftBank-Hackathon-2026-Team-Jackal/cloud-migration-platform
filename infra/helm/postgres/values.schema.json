@@ -1,0 +1,214 @@
+{
+  "$defs": {
+    "DatabaseSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "16",
+          "title": "Version",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "username": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Username",
+          "type": "string"
+        },
+        "secret_name": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Secret Name",
+          "type": "string"
+        },
+        "secret_key": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9._-]+$",
+          "title": "Secret Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "name",
+        "username",
+        "secret_name",
+        "secret_key"
+      ],
+      "title": "DatabaseSettings",
+      "type": "object"
+    },
+    "Image": {
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "pattern": "^[^\\s@]+@sha256:[a-f0-9]{64}$",
+          "title": "Uri",
+          "type": "string"
+        },
+        "platforms": {
+          "items": {
+            "enum": [
+              "linux/amd64",
+              "linux/arm64"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Platforms",
+          "type": "array"
+        },
+        "registry_auth_ref": {
+          "type": "null",
+          "default": null,
+          "description": "Registry credential resolution is not implemented in ticket 02."
+        }
+      },
+      "required": [
+        "uri",
+        "platforms"
+      ],
+      "title": "Image",
+      "type": "object"
+    },
+    "PersistentStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "class_name": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Class Name",
+          "type": "string"
+        },
+        "size_gib": {
+          "exclusiveMinimum": 0,
+          "title": "Size Gib",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "class_name",
+        "size_gib"
+      ],
+      "title": "PersistentStorage",
+      "type": "object"
+    },
+    "PodResources": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_millicores": {
+          "exclusiveMinimum": 0,
+          "title": "Cpu Millicores",
+          "type": "integer"
+        },
+        "memory_mib": {
+          "exclusiveMinimum": 0,
+          "title": "Memory Mib",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpu_millicores",
+        "memory_mib"
+      ],
+      "title": "PodResources",
+      "type": "object"
+    },
+    "VersionRef": {
+      "additionalProperties": false,
+      "description": "Opaque, immutable record version. Never a credential or signed URL.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "VersionRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "const": "1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "environment": {
+      "enum": [
+        "SANDBOX",
+        "PRODUCTION"
+      ],
+      "title": "Environment",
+      "type": "string"
+    },
+    "provider": {
+      "enum": [
+        "AWS",
+        "GCP",
+        "ON_PREM"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "release_name": {
+      "maxLength": 53,
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "title": "Release Name",
+      "type": "string"
+    },
+    "namespace": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "title": "Namespace",
+      "type": "string"
+    },
+    "image": {
+      "$ref": "#/$defs/Image"
+    },
+    "database": {
+      "$ref": "#/$defs/DatabaseSettings"
+    },
+    "resources": {
+      "$ref": "#/$defs/PodResources"
+    },
+    "storage": {
+      "$ref": "#/$defs/PersistentStorage"
+    }
+  },
+  "required": [
+    "contract_version",
+    "environment",
+    "provider",
+    "release_name",
+    "namespace",
+    "image",
+    "database",
+    "resources",
+    "storage"
+  ],
+  "title": "PostgresChartValues",
+  "type": "object"
+}

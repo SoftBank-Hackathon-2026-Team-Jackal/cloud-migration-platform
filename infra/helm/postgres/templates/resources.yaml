@@ -1,0 +1,101 @@
+{{- if or (ne .Release.Name .Values.release_name) (ne .Release.Namespace .Values.namespace) -}}
+{{- fail "Release name and namespace must match the approved Values" -}}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storage.class_name | quote }}
+  resources:
+    requests:
+      storage: {{ printf "%vGi" .Values.storage.size_gib | quote }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  serviceName: {{ .Release.Name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                    {{- range .Values.image.platforms }}
+                      - {{ trimPrefix "linux/" . | quote }}
+                    {{- end }}
+                  - key: kubernetes.io/os
+                    operator: In
+                    values: [linux]
+      containers:
+        - name: postgres
+          image: {{ .Values.image.uri | quote }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.database.name | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.database.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secret_name | quote }}
+                  key: {{ .Values.database.secret_key | quote }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: {{ printf "%vm" .Values.resources.cpu_millicores | quote }}
+              memory: {{ printf "%vMi" .Values.resources.memory_mib | quote }}
+            limits:
+              cpu: {{ printf "%vm" .Values.resources.cpu_millicores | quote }}
+              memory: {{ printf "%vMi" .Values.resources.memory_mib | quote }}
+          readinessProbe:
+            exec:
+              command: [sh, -ec, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}

@@ -48,7 +48,7 @@ Preview는 manifest Digest와 허용된 자원 변경 요약(종류·행위·이
 
 `PostgresChartValues`는 SANDBOX/PRODUCTION 및 AWS/GCP/ON_PREM에서 같은 구조다. 클라우드 Credential을 받지 않는다. PostgreSQL 16의 이름·사용자, Secret 이름/키, Pod CPU millicores·메모리 MiB, PVC GiB·StorageClass를 명시한다. Node 디스크와 PVC를 혼동하지 않는다. 이미지 URI는 Digest에 고정한다. Registry 인증이 필요한 경우에만 참조를 제공한다.
 
-이름은 초기 구현에서 보수적인 Kubernetes label 형태, Secret key는 영숫자·점·밑줄·하이픈으로 제한한다. 이미지가 실제 PostgreSQL 16인지, Secret/PVC가 존재하는지는 렌더/실환경 검증에서 확인한다. DB Chart의 Helm 템플릿 자체는 02에서 구현한다.
+이름은 초기 구현에서 보수적인 Kubernetes label 형태, Secret key는 영숫자·점·밑줄·하이픈으로 제한한다. 이미지가 실제 PostgreSQL 16인지, Secret/PVC가 존재하는지는 렌더/실환경 검증에서 확인한다. DB Chart의 Helm 템플릿은 02에서 `infra/helm/postgres`에 구현했다. 사용법·렌더 제한은 [Helm 안내](../../infra/helm/README.md)를 따른다. 현재 Chart는 해결되지 않은 `registry_auth_ref`를 거절하며, 실제 Secret/StorageClass 존재·이미지 실행 검증은 후속 배포 경계다.
 
 동적 바인딩은 `database.host ← DATABASE_HOST`, `database.secret_name ← DATABASE_SECRET_NAME`만 지원한다. 이는 런타임 DB 연결을 쓰는 Values 템플릿의 자리이며 DB Chart에 host 필드를 추가한다는 뜻은 아니다. 대상 자리가 미리 존재하고 null이어야 한다. 비밀번호 원문 대신 생성된 Kubernetes Secret **이름**을 전달한다. 제공한 source key가 빠지거나 남으면, 경로가 중복되거나 source/target이 어긋나면 실패한다. 원본 템플릿은 변경하지 않는다.
 
