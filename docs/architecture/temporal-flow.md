@@ -56,7 +56,7 @@ flowchart TD
     L -. 전환 오류 .-> Z
 ```
 
-이는 **상위 책임 순서**다. 특정 상자가 하나의 Activity 또는 Child Workflow와 1:1로 대응한다는 뜻이 아니다. 빌드는 Sandbox 워크로드 밖에서 수행하며, 수정 시 새 빌드·검증을 반복하고 통과 후 재빌드하지 않는다. 통과 Digest를 Production에 그대로 전달한다. 현재 스캐폴드/내부 v1 계약은 이 새 루프를 아직 구현하지 않았으며 [B-01](../../tickets/provisioning/b-01-image-build.md)에서 전환한다.
+이는 **상위 책임 순서**다. 특정 상자가 하나의 Activity 또는 Child Workflow와 1:1로 대응한다는 뜻이 아니다. 빌드는 Sandbox 워크로드 밖에서 수행하며, 수정 시 새 빌드·검증을 반복하고 통과 후 재빌드하지 않는다. 통과 Digest를 Production에 그대로 전달한다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 S3→ECR 공통 빌드 모듈이며 현재 스캐폴드/내부 v1 계약의 순서 전환은 후속 통합 작업이다.
 
 Production Provisioning 직후의 **Ready**는 인프라·워크로드의 준비 상태이며 데이터 이전 완료 상태가 아니다. 대상 PostgreSQL의 스키마·데이터가 아직 준비되지 않은 시점에는 가능한 준비 검사와 데이터 이전 후의 전체 기능 검증을 구분한다. 필요한 검증이 끝나기 전에 트래픽 전환으로 진행하지 않는다.
 
@@ -154,7 +154,7 @@ Temporal Query 또는 업무 DB의 상태 Projection을 조회 원천으로 검�
 
 ## 13. 단계 사이 데이터 계약
 
-Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning/input-contract.md)을 따른다. Workflow는 결과 참조·작은 메타데이터를 다음 Activity에 전달하고, Planning Activity가 산출물 조회·권한·Digest와 Sandbox/Build 출처 일치를 검증한다. S3·업무 DB 조회는 Workflow 내부에서 수행하지 않는다. 초기 Planning 입력과 승인 후 실행 입력을 구분하며, 최초 요청에 아직 생성되지 않은 Preview/승인 기록을 요구하지 않는다. Sandbox가 실행·검증한 이미지 Digest와 Planning/실행 이미지가 같아야 한다. 구체 필드·버전 전환은 B-01에서 구현한다.
+Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning/input-contract.md)을 따른다. Workflow는 결과 참조·작은 메타데이터를 다음 Activity에 전달하고, Planning Activity가 산출물 조회·권한·Digest와 Sandbox/Build 출처 일치를 검증한다. S3·업무 DB 조회는 Workflow 내부에서 수행하지 않는다. 초기 Planning 입력과 승인 후 실행 입력을 구분하며, 최초 요청에 아직 생성되지 않은 Preview/승인 기록을 요구하지 않는다. Sandbox가 실행·검증한 이미지 Digest와 Planning/실행 이미지가 같아야 한다. 구체 필드·버전 전환은 후속 통합 작업에서 구현한다.
 
 | 단계 | 주요 입력 | 주요 출력 |
 | --- | --- | --- |
@@ -189,7 +189,7 @@ Sandbox 성공과 Production 준비·검증은 구분한다. Production Provisio
 | Task Queue 이름·개수와 Worker 배포 단위 | 실행 자원 격리, 부하·권한 경계, 장애 영향 범위 |
 | Activity별 Timeout·Retry·Heartbeat | 외부 작업 시간, 재시도 안전성, 장애 감지·재연결 방식 |
 | 승인 Signal 외 Update 사용 | API 응답 보장, 승인 기록과 Workflow 처리 시점의 일관성 |
-| 빌드/검증 이미지 계약 | 같은 Digest 재사용은 ADR-003으로 결정. B-01에서 내부 v1 전환·플랫폼별 증거 구현 |
+| 빌드/검증 이미지 계약 | 같은 Digest 재사용은 ADR-003으로 결정. B-01은 공통 빌더, 내부 v1 전환·플랫폼별 증거는 후속 통합 작업 |
 | Agent 비동기 완료 통지 | NAT·연결 단절·중복 전달·작업 상관관계 |
 | CDC 장기 실행 상태 추적 | 복제 지연·재시작·상태 조회와 무기한 Activity 방지 |
 | 데이터·트래픽 전환의 추가 승인 | 위험 단계와 승인 주체, 사용자 대기 시간 |

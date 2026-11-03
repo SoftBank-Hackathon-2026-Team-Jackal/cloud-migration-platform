@@ -239,7 +239,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 | Agent 완료 통지·작업 인증 | 폴링/콜백/비동기 완료, 재연결과 중복 작업 처리 결정 |
 | Temporal 분할·Task Queue·Timeout/Retry | 실제 외부 작업 시간과 재시도 안전성 측정 후 결정 |
 | Apply 실패·취소 후 자동 정리 | 공유 자원·PVC 데이터 보존과 비용 사이 정책 결정 |
-| Sandbox 검증 이미지 | 동일 Digest 재사용은 ADR-003으로 결정. B-01에서 계약 버전 전환·플랫폼별 검증 증거 구현 |
+| Sandbox 검증 이미지 | 동일 Digest 재사용은 ADR-003으로 결정. B-01은 공통 빌더, 계약 버전 전환·플랫폼별 검증 증거는 후속 통합 작업 |
 | Production 기능 테스트 | 테스트 계정·데이터 변경·정리 범위 결정 |
 | K3s 사전 준비·macOS Linux 환경 | Agent가 확인할 최소 클러스터/StorageClass 계약 결정 |
 | 온프레미스 중계·WireGuard, Route 53·Envoy | 최종 채택 및 장기 운영 주체는 Migration 영역과 함께 결정 |
@@ -261,4 +261,4 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 
 ### 빌드·Sandbox 순서 변경 (ADR-003, B-01)
 
-앞선 단계의 `Sandbox → 최종 Build` 설명은 [ADR-003](../../docs/decisions/ADR-003.md)으로 대체한다. 계획 입력은 Sandbox가 실제 실행한 Build 참조·이미지 Digest·플랫폼/설정 범위와 Build 출처를 요구하며 통과 후 재빌드하지 않는다. 현재 내부 v1 모델·테스트는 이전 순서이므로 [B-01](../../tickets/provisioning/b-01-image-build.md)에서 전환한다.
+앞선 단계의 `Sandbox → 최종 Build` 설명은 [ADR-003](../../docs/decisions/ADR-003.md)으로 대체한다. 계획 입력은 Sandbox가 실제 실행한 Build 참조·이미지 Digest·플랫폼/설정 범위와 Build 출처를 요구하며 통과 후 재빌드하지 않는다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 S3→ECR 공통 빌더를 제공하며 현재 내부 v1 모델·테스트의 순서 전환은 후속 통합 작업이다.

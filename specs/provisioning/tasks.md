@@ -10,7 +10,7 @@
 | [02 PostgreSQL Chart 렌더링과 PVC 검사](../../tickets/provisioning/02-postgres-helm-render.md) | DONE | 01, CP-01 | PROV-005, 006, 011 | [#11](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/11) | ☑ |
 | [03 앱 배포와 .env·Secret 바인딩 렌더링](../../tickets/provisioning/03-app-env-render.md) | DONE | 01, 02 | PROV-004, 005, 010, 012, 021 | [#13](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/13) | ☑ |
 | [04 격리 K3s에서 Agent 배포 경로 검증](../../tickets/provisioning/04-k3s-agent-test-deploy.md) | DONE | 02, 03 | PROV-006, 009, 011, 013 | [#15](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/15) | ☑ |
-| [B-01 공통 이미지 빌드와 통과 Digest 재사용](../../tickets/provisioning/b-01-image-build.md) | TODO | ADR-003, 01 내부 v1 전환 | PROV-001, 004, 010, 015, 021 | [#17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/17) | ☐ |
+| [B-01 S3 소스 공통 빌드와 ECR Digest 반환](../../tickets/provisioning/b-01-image-build.md) | DONE | ADR-003 | PROV-001, 004, 010, 021 | [#17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/17) | ☑ |
 | [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | TODO | 01, CP-01 | PROV-002, 003, 007, 014, 021 | 미생성 | ☐ |
 | [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | TODO | 01, CP-01 | PROV-002, 003, 008, 014, 021 | 미생성 | ☐ |
 | [07 Plan Revision 승인과 Temporal 실행 차단](../../tickets/provisioning/07-approval-gate.md) | TODO | 01, CP-01 | PROV-014, 015, 016, 021 | 미생성 | ☐ |
@@ -49,4 +49,4 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 
 ## 이미지 흐름 변경 (ADR-003, Issue #17)
 
-이전 내부 v1 Planning은 Build가 Sandbox를 참조하는 순서로 구현돼 있다. 새 제품 정책은 Build 선행·Sandbox 실행 Digest 검증·동일 Digest 배포다. [B-01](../../tickets/provisioning/b-01-image-build.md)에서 코드/fixture를 전환하기 전까지 현재 01의 DONE은 **당시 범위의 완료**이고 새 이미지 동일성 정책의 구현 증거가 아니다. 04의 격리 Agent 배포 테스트도 수정 루프/Build 모듈의 완료 증거가 아니다. 변경은 PR #16 문서에 포함하고 별도 문서 PR을 만들지 않는다.
+이전 내부 v1 Planning은 Build가 Sandbox를 참조하는 순서로 구현돼 있다. 새 제품 정책은 Build 선행·Sandbox 실행 Digest 검증·동일 Digest 배포다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 공통 빌드 모듈로 범위를 좁혔다. 후속 통합 작업에서 코드/fixture를 전환하기 전까지 현재 01의 DONE은 **당시 범위의 완료**이고 새 이미지 동일성 정책의 구현 증거가 아니다. 04의 격리 Agent 배포 테스트도 수정 루프/Build 모듈의 완료 증거가 아니다.
