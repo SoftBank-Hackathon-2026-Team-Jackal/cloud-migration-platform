@@ -24,6 +24,7 @@ Blocked by: 01, CP-01
 ## 테스트 전략
 - 제안 Test Seam: API 승인 요청과 Temporal Workflow 상태/가짜 executor. 실제 인프라 변경은 확인하지 못한다.
 - 실행: Temporal 테스트 환경의 승인 대기·중복·stale Revision·거절·재전달 시나리오; HTTP 변경 시 `make openapi`.
+- 실제 AWS/GCP 승인 경계는 `LOCAL_STATE_VALIDATION_ONLY` Preview를 거절한다. 대상 계정/프로젝트 및 중앙 S3 State·잠금이 확인된 최종 저장 Plan과 그 Preview/Digest가 일치해야 승인 기록을 만들 수 있다. 가짜 executor 테스트 통과만으로 운영 승인 가능 상태를 선언하지 않는다.
 
 ## 완료 시 확인할 동작
 Preview ID/Revision을 승인할 때만 안전한 executor가 호출되는 흐름을 볼 수 있다.

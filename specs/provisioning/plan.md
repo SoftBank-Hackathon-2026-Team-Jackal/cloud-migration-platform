@@ -154,7 +154,7 @@ ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Ma
 
 ## 8. Terraform Plan·Apply·State (`PROV-014`~`017`, `021`)
 
-05의 AWS 경로는 `infra/terraform/aws`의 고정 템플릿과 `cmp_providers.aws_preview`의 명시적 신규 VPC·Subnet·EKS·Node 입력을 사용한다. S3 Backend는 기존 버킷의 환경별 key, 암호화, Terraform lockfile 잠금으로 초기화하며 Plan 시 AWS 계정을 재확인한다. 저장 binary Plan·Spec의 바이트 Digest, 템플릿·Provider lockfile Digest, Plan ID·Revision·대상/State 식별을 기록한다. 사용자 Preview는 `terraform show -json`의 자원 종류·행위만 허용 목록으로 읽고 검증된 입력 사양을 표시한다. 이 Preview는 `INFRASTRUCTURE` 범위이며 ALB/앱/DB 배포 완료나 전체 승인 가능 상태를 뜻하지 않는다. 실제 격리 계정 Plan 검증과 영속 산출물 저장 연동은 미검증이다.
+05의 AWS 경로는 `infra/terraform/aws`의 고정 템플릿과 `cmp_providers.aws_preview`의 명시적 신규 VPC·Subnet·EKS·Node 입력을 사용한다. 운영 Plan의 S3 Backend는 기존 버킷의 환경별 key, 암호화, Terraform lockfile 잠금으로 초기화하며 Plan 시 AWS 계정을 재확인한다. 저장 binary Plan·Spec의 바이트 Digest, 템플릿·Provider lockfile Digest, Plan ID·Revision·대상/State 식별을 기록한다. Preview는 `terraform show -json`의 자원 종류·행위만 허용 목록으로 읽고 검증된 입력 사양을 표시한다. 05의 로컬 State 검증 Plan은 `LOCAL_STATE_VALIDATION_ONLY` 미해결 결정을 남겨 승인할 수 없으며, 실제 승인 전에 S3-backed 최종 Plan·Preview를 새로 생성해야 한다. 이 Preview는 `INFRASTRUCTURE` 범위이며 ALB/앱/DB 배포 완료나 전체 승인 가능 상태를 뜻하지 않는다. 영속 산출물 저장 연동은 후속 범위다.
 
 클라우드 경로는 **구성 생성 → init → validate → 저장 Plan → Preview → 승인 → 저장된 Plan Apply → Output/실제 상태 조회** 순서다. Terraform이 관리하는 것은 네트워크·클러스터 등 인프라이고 Helm은 Kubernetes 워크로드를 관리한다. Chart/Values도 승인 계획에 묶어 두 실행 계층의 구성이 같이 고정되게 한다.
 

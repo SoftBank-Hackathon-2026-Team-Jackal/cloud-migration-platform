@@ -33,6 +33,8 @@ Local contract/render/Workflow tests use fixtures and temporary files with no re
 
 On this workstation, AWS checks use `cmp-aws-prod` and gcloud CLI checks use `cmp-gcp-prod` as directed by the user. Inspect the account/project identity before use. The gcloud configuration does not supply Terraform/SDK ADC by itself; verify ADC independently. A production-named profile is an authentication route, not permission to Apply or destroy. This v2 Planning contract task performs no cloud calls.
 
+For 05/06 Plan-only development verification, a verified named account/project and protected temporary local State may be used without Apply. This verifies Provider Plan and redacted Preview generation but produces an approval-blocked validation artifact. Before a real cloud approval, verify the intended target account/project, central S3 State/lock and a newly generated final saved Plan/Preview. Never treat the local validation Plan as an Apply artifact.
+
 ## Commands and evidence
 
 Use `make check` for Python lint/tests, `make smoke-temporal` for the existing local scaffold when available, `helm lint`/`helm template` for Chart tickets, and target-specific Terraform static checks when modules exist. For an implemented API route, regenerate and inspect `make openapi`. Ticket evidence includes commands, test environment, results, artifacts or masked excerpts, and any unverified target behavior. A failing required test blocks `DONE`; a test that could not run remains explicitly unverified rather than assumed successful. Current scaffold smoke tests do not establish real Provisioning support.

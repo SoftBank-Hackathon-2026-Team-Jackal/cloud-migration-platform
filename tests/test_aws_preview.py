@@ -78,7 +78,7 @@ def _fake_tools(tmp_path: Path, monkeypatch, *, account="123456789012", fail_pla
     encoded = json.dumps(plan_json)
     terraform.write_text(
         "#!/bin/sh\n"
-        'printf \'%s\\n\' "$1" >> "$TOOL_CALLS"\n'
+        'printf \'%s\\n\' "$*" >> "$TOOL_CALLS"\n'
         + (
             'if [ "$1" = plan ]; then echo TOP_SECRET_NEVER_SHOW >&2; exit 1; fi\n'
             if fail_plan
@@ -119,6 +119,7 @@ def test_saved_plan_and_redacted_preview_agree(tmp_path, monkeypatch):
     assert "TOP_SECRET_NEVER_SHOW" not in (stored / "manifest.json").read_text()
     evidence = json.loads((stored / "evidence.json").read_text())
     assert evidence["manifest_digest"] == preview.manifest_digest
+    assert evidence["backend_mode"] == "S3"
     assert len(evidence["template_digest"]) == 64
     assert len(evidence["provider_lock_digest"]) == 64
     assert "apply" not in calls.read_text()
@@ -127,6 +128,35 @@ def test_saved_plan_and_redacted_preview_agree(tmp_path, monkeypatch):
         plan_aws_infrastructure(
             request(),
             output_dir=tmp_path / "plans",
+            terraform_bin=str(terraform),
+            aws_profile="fixture",
+        )
+
+
+def test_local_validation_plan_cannot_be_approved(tmp_path, monkeypatch):
+    terraform, calls = _fake_tools(tmp_path, monkeypatch)
+    payload = request().model_dump()
+    payload["state_bucket"] = None
+    local_request = AwsPlanInput.model_validate(payload)
+    manifest, preview = plan_aws_infrastructure(
+        local_request,
+        output_dir=tmp_path / "plans",
+        terraform_bin=str(terraform),
+        aws_profile="fixture",
+        backend_mode="LOCAL_VALIDATION",
+    )
+    evidence = json.loads((tmp_path / "plans/plan-001-r1/evidence.json").read_text())
+    assert evidence["backend_mode"] == "LOCAL_VALIDATION"
+    assert evidence["template_digest"] != evidence["effective_template_digest"]
+    assert [issue.code for issue in preview.pending_decisions] == ["LOCAL_STATE_VALIDATION_ONLY"]
+    assert {issue.code for issue in approval_issues(manifest, preview)} == {"PENDING_DECISION"}
+    assert "-backend=false" in calls.read_text()
+    assert "-backend-config" not in calls.read_text()
+    assert "apply" not in calls.read_text()
+    with pytest.raises(ProvisioningInputError, match="MISSING_STATE_BUCKET"):
+        plan_aws_infrastructure(
+            local_request,
+            output_dir=tmp_path / "other",
             terraform_bin=str(terraform),
             aws_profile="fixture",
         )

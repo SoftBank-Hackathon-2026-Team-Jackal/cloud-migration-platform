@@ -15,6 +15,11 @@ def main() -> int:
     parser.add_argument("output", type=Path, help="Protected local Plan artifact directory")
     parser.add_argument("--aws-profile", required=True, help="Explicit named AWS CLI profile")
     parser.add_argument("--terraform-bin", default="terraform")
+    parser.add_argument(
+        "--local-validation",
+        action="store_true",
+        help="Use temporary local State; Preview is explicitly ineligible for approval",
+    )
     args = parser.parse_args()
     try:
         request = AwsPlanInput.model_validate_json(args.input.read_bytes())
@@ -23,6 +28,7 @@ def main() -> int:
             output_dir=args.output,
             aws_profile=args.aws_profile,
             terraform_bin=args.terraform_bin,
+            backend_mode="LOCAL_VALIDATION" if args.local_validation else "S3",
         )
     except ValidationError:
         parser.exit(2, "Invalid AWS Plan input schema.\n")

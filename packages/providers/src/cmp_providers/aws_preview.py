@@ -49,6 +49,7 @@ _ACTIONS = {
     "read": "READ",
     "no-op": "NO_CHANGE",
 }
+BackendMode = Literal["S3", "LOCAL_VALIDATION"]
 
 
 class AwsSubnet(Contract):
@@ -67,7 +68,7 @@ class AwsPlanInput(Contract):
     region: Annotated[str, Field(pattern=r"^[a-z]{2}(?:-[a-z]+)+-[0-9]$")]
     credential_ref: VersionRef
     state_ref: VersionRef
-    state_bucket: Text
+    state_bucket: Text | None = None
     state_key: Text
     cluster_name: Annotated[str, Field(pattern=_NAME)]
     kubernetes_version: Annotated[str, Field(pattern=r"^1\.[0-9]{2}$")]
@@ -109,7 +110,7 @@ def validate_aws_input(request: AwsPlanInput) -> None:
         )
     if request.state_key != f"cmp/{request.environment_id}/terraform.tfstate":
         _reject("INVALID_STATE_KEY", "state_key", "State key must be stable per environment.")
-    if (
+    if request.state_bucket is not None and (
         not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", request.state_bucket)
         or ".." in request.state_bucket
     ):
@@ -265,9 +266,20 @@ def plan_aws_infrastructure(
     terraform_bin: str = "terraform",
     aws_profile: str,
     template_dir: Path | None = None,
+    backend_mode: BackendMode = "S3",
 ) -> tuple[PlanManifest, Preview]:
-    """Run a saved, locked Plan against existing S3 state; never invoke Apply."""
+    """Run a saved Plan; local validation is never an approvable production Plan."""
     variables = terraform_variables(request)
+    if backend_mode not in {"S3", "LOCAL_VALIDATION"}:
+        _reject("UNSUPPORTED_BACKEND", "backend_mode", "Unknown Plan backend mode.")
+    if backend_mode == "S3" and request.state_bucket is None:
+        _reject("MISSING_STATE_BUCKET", "state_bucket", "S3 Plan requires an existing bucket.")
+    if backend_mode == "LOCAL_VALIDATION" and request.state_bucket is not None:
+        _reject(
+            "UNEXPECTED_STATE_BUCKET",
+            "state_bucket",
+            "Local validation cannot name a State bucket.",
+        )
     if not aws_profile or aws_profile == "default":
         _reject("MISSING_PROFILE", "aws_profile", "An explicit named AWS profile is required.")
     root = template_dir or Path(__file__).resolve().parents[4] / "infra/terraform/aws"
@@ -283,6 +295,16 @@ def plan_aws_infrastructure(
         for source in root.glob("*.tf"):
             shutil.copy2(source, work / source.name)
             template_digests[source.name] = sha256_bytes(source.read_bytes())
+        if backend_mode == "LOCAL_VALIDATION":
+            versions_file = work / "versions.tf"
+            contents = versions_file.read_text()
+            backend_block = '  backend "s3" {}\n'
+            if contents.count(backend_block) != 1:
+                _reject("UNREVIEWED_TEMPLATE", "terraform", "Expected one S3 backend block.")
+            versions_file.write_text(contents.replace(backend_block, ""))
+        effective_template_digests = {
+            path.name: sha256_bytes(path.read_bytes()) for path in work.glob("*.tf")
+        }
         lock = root / ".terraform.lock.hcl"
         if not lock.exists():
             _reject(
@@ -311,21 +333,20 @@ def plan_aws_infrastructure(
             _reject("ACCOUNT_CHECK_FAILED", "account_id", "AWS account identity is unavailable.")
         if account != request.account_id:
             _reject("ACCOUNT_MISMATCH", "account_id", "AWS profile is for another account.")
-        _run(
-            [
-                terraform_bin,
-                "init",
-                "-input=false",
-                "-lockfile=readonly",
-                f"-backend-config=bucket={request.state_bucket}",
-                f"-backend-config=key={request.state_key}",
-                f"-backend-config=region={request.region}",
-                "-backend-config=encrypt=true",
-                "-backend-config=use_lockfile=true",
-            ],
-            work,
-            env,
-        )
+        init_args = [terraform_bin, "init", "-input=false", "-lockfile=readonly"]
+        if backend_mode == "S3":
+            init_args.extend(
+                [
+                    f"-backend-config=bucket={request.state_bucket}",
+                    f"-backend-config=key={request.state_key}",
+                    f"-backend-config=region={request.region}",
+                    "-backend-config=encrypt=true",
+                    "-backend-config=use_lockfile=true",
+                ]
+            )
+        else:
+            init_args.append("-backend=false")
+        _run(init_args, work, env)
         _run([terraform_bin, "validate", "-no-color"], work, env)
         plan_file = work / "saved.tfplan"
         _run(
@@ -365,6 +386,14 @@ def plan_aws_infrastructure(
             },
         )
         preview = preview_from_plan(plan_json, request, manifest_digest(manifest))
+        if backend_mode == "LOCAL_VALIDATION":
+            preview.pending_decisions.append(
+                ValidationIssue(
+                    code="LOCAL_STATE_VALIDATION_ONLY",
+                    path="terraform_plan",
+                    message="Generate a new S3-backed Plan before production approval.",
+                )
+            )
         target.mkdir(mode=0o700)
         (target / "spec.json").write_bytes(spec_bytes)
         (target / "saved.tfplan").write_bytes(plan_bytes)
@@ -377,7 +406,11 @@ def plan_aws_infrastructure(
             "revision": request.plan.revision,
             "template_version": request.plan.template_version,
             "template_digest": sha256_bytes(canonical_json_bytes(template_digests)),
+            "effective_template_digest": sha256_bytes(
+                canonical_json_bytes(effective_template_digests)
+            ),
             "provider_lock_digest": sha256_bytes(lock.read_bytes()),
+            "backend_mode": backend_mode,
             "state_ref": request.state_ref.model_dump(mode="json"),
             "state_bucket": request.state_bucket,
             "state_key": request.state_key,
