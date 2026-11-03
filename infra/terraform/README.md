@@ -1,3 +1,3 @@
 # Terraform templates
 
-AWS/GCP의 검증된 모듈과 환경별 변수는 기능 명세가 확정될 때 이곳에 추가한다. 현재 Terraform 리소스는 없다. State는 Git에 저장하지 말고, 팀 사용 전에 원격 저장·잠금·자격 증명 방식을 결정한다.
+AWS EKS와 GCP GKE 인프라 Plan 템플릿은 각각 [aws/README.md](aws/README.md), [gcp/README.md](gcp/README.md)를 따른다. 중앙 S3 State와 lockfile은 실제 운영 계획에 사용하며, 검증 전용 로컬 State Plan은 승인 불가다. Terraform Plan/State/변수 JSON은 Git에 저장하지 않는다.
