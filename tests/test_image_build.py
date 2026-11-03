@@ -7,7 +7,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
-from cmp_worker.image_build import BuildRequest, _extract, build_and_push
+from cmp_worker.image_build import BuildContext, ImageBuilder, _extract
 from pydantic import ValidationError
 
 ECR = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/demo"
@@ -26,17 +26,22 @@ def archive(tmp_path: Path, files: dict[str, bytes]) -> Path:
     return target
 
 
-def request(path: Path) -> BuildRequest:
-    return BuildRequest.model_validate(
-        {
-            "migration_id": "migration-1",
-            "attempt_id": "attempt-1",
-            "source": {"uri": f"s3://source-bucket/sources/{path.name}", "version_id": "source-v1"},
-            "ecr_repository": ECR,
-            "platform": "linux/arm64",
-            "log_destination": {"uri": "s3://log-bucket/builds/migration-1/attempt-1.json"},
-        }
+def builder() -> ImageBuilder:
+    return ImageBuilder(
+        BuildContext.model_validate(
+            {
+                "migration_id": "migration-1",
+                "attempt_id": "attempt-1",
+                "ecr_repository": ECR,
+                "platform": "linux/arm64",
+                "log_bucket": "log-bucket",
+            }
+        )
     )
+
+
+def source_uri(path: Path) -> str:
+    return f"s3://source-bucket/sources/{path.name}"
 
 
 def mock_aws_docker(monkeypatch, path: Path, *, existing=False):
@@ -52,7 +57,7 @@ def mock_aws_docker(monkeypatch, path: Path, *, existing=False):
                 stdout=json.dumps({"ContentLength": path.stat().st_size}),
             )
         if command[:3] == ["aws", "s3api", "get-object"]:
-            assert command[command.index("--version-id") + 1] == "source-v1"
+            assert "--version-id" not in command
             shutil.copyfile(path, command[-1])
             return subprocess.CompletedProcess(command, 0, stdout="{}")
         if command[:3] == ["aws", "ecr", "describe-repositories"]:
@@ -112,20 +117,24 @@ def test_s3_to_ecr_returns_digest_and_versioned_log(tmp_path, monkeypatch):
         },
     )
     calls, logs = mock_aws_docker(monkeypatch, path)
-    result = build_and_push(request(path))
+    result = builder().build(source_uri(path))
     assert result.status == "SUCCEEDED"
     assert result.digest == DIGEST
     assert result.image_uri == f"{ECR}@{DIGEST}"
+    assert result.source.uri == source_uri(path)
+    assert result.source.version_id is None
+    assert result.log.uri == "s3://log-bucket/builds/migration-1/attempt-1.json"
     assert result.log.version_id == "log-v1"
     assert logs[0]["source_sha256"] == path.name.removesuffix(".tar.gz")
     assert [c[:3] for c in calls].count(["docker", "buildx", "build"]) == 1
     assert not any("temporary-password" in " ".join(c) for c in calls)
+    assert not any("--version-id" in c for c in calls)
 
 
 def test_retry_reuses_existing_digest_without_rebuild(tmp_path, monkeypatch):
     path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n"})
     calls, _ = mock_aws_docker(monkeypatch, path, existing=True)
-    result = build_and_push(request(path))
+    result = builder().build(source_uri(path))
     assert result.status == "SUCCEEDED"
     assert result.image_uri == f"{ECR}@{DIGEST}"
     assert not any(c[0] == "docker" for c in calls)
@@ -135,7 +144,7 @@ def test_changed_archive_bytes_are_rejected_before_ecr_lookup(tmp_path, monkeypa
     path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n"})
     path.write_bytes(b"tampered")
     calls, logs = mock_aws_docker(monkeypatch, path)
-    result = build_and_push(request(path))
+    result = builder().build(source_uri(path))
     assert result.status == "FAILED"
     assert result.error_code == "SOURCE_DIGEST_MISMATCH"
     assert result.image_uri is None
@@ -171,16 +180,13 @@ def test_archive_rejects_symlink(tmp_path):
         _extract(path, tmp_path / "context")
 
 
-def test_input_requires_ecr_and_hash_named_archive(tmp_path):
-    path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n"})
-    bad = request(path).model_dump()
+def test_input_requires_ecr_and_hash_named_archive():
+    bad = builder().context.model_dump()
     bad["ecr_repository"] = "localhost:5000/demo"
     with pytest.raises(ValidationError):
-        BuildRequest.model_validate(bad)
-    bad["ecr_repository"] = ECR
-    bad["source"]["uri"] = "s3://bucket/latest.tar.gz"
+        BuildContext.model_validate(bad)
     with pytest.raises(ValidationError):
-        BuildRequest.model_validate(bad)
+        builder().build("s3://bucket/latest.tar.gz")
 
 
 def test_mutable_ecr_repository_is_rejected(tmp_path, monkeypatch):
@@ -204,7 +210,7 @@ def test_mutable_ecr_repository_is_rejected(tmp_path, monkeypatch):
         return original(command, **kwargs)
 
     monkeypatch.setattr("cmp_worker.image_build.subprocess.run", mutable)
-    result = build_and_push(request(path))
+    result = builder().build(source_uri(path))
     assert result.status == "FAILED"
     assert result.error_code == "ECR_REPOSITORY_NOT_IMMUTABLE"
     assert result.log.version_id == "log-v1"
