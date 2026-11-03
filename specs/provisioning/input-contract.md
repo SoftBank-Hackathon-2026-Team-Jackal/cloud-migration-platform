@@ -1,5 +1,7 @@
 # Provision 수행을 위해 전달받아야 하는 정보
 
+> 이 문서의 §10은 기존 **v1** 구현 기록이다. 2026-11-04 확정한 `resources[]`·Build 선행·Sandbox 동일 이미지 검증의 새 로컬 계약과 현재 미구현 경계는 [입력 계약 v2](input-contract-v2.md)를 따른다.
+
 ## 1. 상태와 적용 범위
 
 - 작업: [Issue #5](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/5), [티켓 01](../../tickets/provisioning/01-provider-spec-validation.md).
@@ -16,7 +18,7 @@
 | Planning → 공통 Provider 모듈 | 검증된 `ProvisioningSpec` | 순수 Provider 변환·렌더링·검증. 저장소 조회·클라우드 변경 없음 |
 | 승인 대기 이후 → 실행 Activity | Plan ID·Revision, 잠긴 산출물과 승인 기록 참조 | 승인·대상·Digest 재확인 후 Terraform/Helm/Agent 실행 |
 
-Sandbox가 전체 Spec을 작성한다고 가정하지 않는다. 전체 빌드 실행에는 작업 ID·시도 ID·소스 URI·대상 플랫폼이 필요하다. Sandbox/변환 루프가 공통 Build 모듈에 넘기는 **소스 산출물 정보**는 SHA-256 이름의 S3 아카이브 URI 하나이며 Dockerfile·컨텍스트는 루트에 둔다. 작업/시도 ID와 플랫폼은 상위 실행 맥락, ECR·로그 설정은 Builder 환경에서 주입한다. B-01은 이 공통 호출 인터페이스를 제공하고 실제 Worker 연결은 후속 통합 범위다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
+Sandbox가 전체 Spec을 작성한다고 가정하지 않는다. 전체 빌드 실행에는 작업 ID·리소스 ID·시도 ID·소스 URI·대상 플랫폼이 필요하다. 공통 Build 모듈의 기본 소스 인자는 SHA-256 이름의 S3 아카이브 URI이며 S3 객체 버전이 있으면 선택적으로 고정한다. Dockerfile·컨텍스트는 루트에 둔다. 작업/리소스/시도 ID와 플랫폼은 상위 실행 맥락, ECR·로그 설정은 Builder 환경에서 주입한다. B-01은 이 공통 호출 인터페이스를 제공하고 실제 Worker 연결은 후속 통합 범위다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
 
 ## 3. Planning이 선행 단계에서 받는 정보
 
@@ -121,7 +123,7 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 
 ## 10. 티켓 01 내부 v1 구현 (2026-11-03, #5)
 
-**구현 전환 대기:** 아래는 이전 순서의 현재 코드 설명이다. `BuildResult.sandbox_ref`를 요구하고 SandboxResult에는 검증 이미지 Digest가 없다. 따라서 현재 `prepare_plan`의 성공은 P-10 동일 이미지 검증 정책의 충족 증거가 아니다. B-01(#17)은 공통 빌드 모듈로 범위를 좁혔으며 새 버전 Planning 계약·검증은 후속 통합 작업에서 전환한다. 구 v1 입력을 새 검증 증거로 자동 인정하지 않는다.
+**v1 유지:** 아래는 이전 순서의 코드 설명이다. `BuildResult.sandbox_ref`를 요구하고 SandboxResult에는 검증 이미지 Digest가 없다. 따라서 `prepare_plan`의 성공은 P-10 동일 이미지 검증 정책의 충족 증거가 아니다. 새 `prepare_plan_v2`의 로컬 검증 범위와 후속 Activity/Workflow 연결은 [입력 계약 v2](input-contract-v2.md)에서 구분한다. 구 v1 입력을 새 검증 증거로 자동 인정하지 않는다.
 
 사용자의 이슈 전체 구현 요청에 따라 위 설계에서 **로컬 조합·검증 경계**를 구현했다. 이는 다른 팀의 Activity 반환값을 강제로 바꾸는 wire 계약이 아니다. 외부 참조를 조회한 Activity가 아래 내부 모델로 정규화하여 호출한다. 아직 스캐폴드 Workflow에 연결하지 않았으며, 새 HTTP API도 추가하지 않았다.
 

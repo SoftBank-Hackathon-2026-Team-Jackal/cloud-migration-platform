@@ -44,7 +44,8 @@ flowchart TD
     G -->|수정 요청·거절| X[계획 재작성 또는 종료: 정책 미정]
     H --> I[대상 인프라·앱·DB 준비 상태 확인]
     I --> J[Data Migration: 초기 복사·CDC·정합성]
-    J --> K{전환 조건 확인}
+    J --> T[데이터 이전 후 테스트 묶음·정합성 확인]
+    T --> K{전환 조건 확인}
     K -->|충족| L[Traffic Migration: 점진적 전환]
     K -->|미충족| Y[전환 차단·원인 확인]
     L --> M[최종 검증·운영권 인계]
@@ -53,6 +54,7 @@ flowchart TD
     D -. 실패·취소 .-> Z
     H -. 부분 성공·취소 .-> Z
     J -. 정합성 오류 .-> Z
+    T -. 테스트 실패 .-> Z
     L -. 전환 오류 .-> Z
 ```
 
@@ -146,7 +148,7 @@ Temporal은 Workflow 이력을 보존하고 Worker 재시작 후 처리를 이�
 Frontend는 전체 작업 상태, 현재 단계, 최근 완료 단계, 진행 중인 작업, 승인 대기 여부, 실패 원인, 주요 산출물 참조와 최종 완료·실패·취소 여부를 볼 수 있어야 한다. 아래는 **개념적인 상태 예시**이며 최종 Enum이 아니다.
 
 ```text
-CREATED → ANALYZING → SANDBOX_VERIFYING → BUILDING → PLANNING
+CREATED → ANALYZING → BUILDING → SANDBOX_VERIFYING → PLANNING
   → WAITING_APPROVAL → PROVISIONING → DATA_MIGRATING
   → TRAFFIC_MIGRATING → VERIFYING → COMPLETED
                  ↘ 실패·취소·승인 거절 등 예외 상태 필요
@@ -179,7 +181,7 @@ Temporal 측에서는 요청·Agent 작업 ID의 상관관계, 완료·실패 �
 
 ## 15. 실제 배포 후 검증
 
-Sandbox 성공과 Production 준비·검증은 구분한다. Production Provisioning 뒤에는 대상 EKS·GKE·K3s 클러스터와 Pod 상태, 앱 준비 상태, PostgreSQL 접근성, Service·Secret·환경변수 매핑, PVC·StorageClass, 실제 Ingress·Load Balancer 접근을 확인한다. 가능한 경우 Sandbox 기능 테스트를 실제 대상에서도 재실행하되 사용자 데이터·테스트 계정·정리 정책을 먼저 고려한다.
+Sandbox 성공과 Production 준비·검증은 구분한다. Production Provisioning 직후에는 대상 EKS·GKE·K3s 클러스터와 Pod 상태, 앱 준비 상태, PostgreSQL 기본 접근성, Service·Secret·환경변수 매핑, PVC·StorageClass, 실제 Ingress·Load Balancer 접근을 확인한다. Sandbox 테스트 묶음은 데이터 이전·정합성 확인 후 트래픽 전환 전에 대상 환경에서 실행하되 사용자 데이터·테스트 계정·정리 정책을 먼저 고려한다.
 
 데이터 이전 전에는 대상 DB 스키마·데이터가 아직 준비되지 않았을 수 있다. 따라서 **인프라·서비스 준비 검사**와 **데이터 이전 후 전체 기능·정합성 검증**의 시점을 나눈다. 최종 트래픽 전환에 필요한 검증이 끝나지 않았다면 다음 단계로 진행하지 않는다.
 
