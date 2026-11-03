@@ -1,4 +1,4 @@
-"""AWS infrastructure-only Terraform Plan and allowlisted Preview boundary."""
+"""AWS 인프라 Terraform Plan과 허용 목록 기반 Preview 생성 경계."""
 
 import json
 import os
@@ -28,19 +28,19 @@ from cmp_providers.plans import manifest_digest
 _NAME = r"^[a-z][a-z0-9-]{0,38}[a-z0-9]$"
 _RESOURCE_TYPES = {
     "aws_vpc": ("NETWORK", "VPC"),
-    "aws_subnet": ("NETWORK", "Subnet"),
-    "aws_internet_gateway": ("NETWORK", "Internet gateway"),
-    "aws_route_table": ("NETWORK", "Route table"),
-    "aws_route": ("NETWORK", "Route"),
-    "aws_route_table_association": ("NETWORK", "Route association"),
-    "aws_eip": ("NETWORK", "NAT elastic IP"),
-    "aws_nat_gateway": ("NETWORK", "NAT gateway"),
-    "aws_security_group": ("NETWORK", "Cluster security group"),
-    "aws_vpc_security_group_egress_rule": ("NETWORK", "Cluster egress rule"),
-    "aws_iam_role": ("CLUSTER", "EKS IAM role"),
-    "aws_iam_role_policy_attachment": ("CLUSTER", "EKS IAM policy attachment"),
-    "aws_eks_cluster": ("CLUSTER", "EKS cluster"),
-    "aws_eks_node_group": ("NODE", "Managed node group"),
+    "aws_subnet": ("NETWORK", "서브넷"),
+    "aws_internet_gateway": ("NETWORK", "인터넷 게이트웨이"),
+    "aws_route_table": ("NETWORK", "라우팅 테이블"),
+    "aws_route": ("NETWORK", "라우트"),
+    "aws_route_table_association": ("NETWORK", "라우팅 테이블 연결"),
+    "aws_eip": ("NETWORK", "NAT 탄력적 IP"),
+    "aws_nat_gateway": ("NETWORK", "NAT 게이트웨이"),
+    "aws_security_group": ("NETWORK", "클러스터 보안 그룹"),
+    "aws_vpc_security_group_egress_rule": ("NETWORK", "클러스터 아웃바운드 규칙"),
+    "aws_iam_role": ("CLUSTER", "EKS IAM 역할"),
+    "aws_iam_role_policy_attachment": ("CLUSTER", "EKS IAM 정책 연결"),
+    "aws_eks_cluster": ("CLUSTER", "EKS 클러스터"),
+    "aws_eks_node_group": ("NODE", "관리형 노드 그룹"),
 }
 _ACTIONS = {
     "create": "CREATE",
@@ -59,7 +59,7 @@ class AwsSubnet(Contract):
 
 
 class AwsPlanInput(Contract):
-    """Explicit infrastructure input; no credential, workload or Secret bytes."""
+    """Credential·워크로드·Secret 원문을 받지 않는 명시적 인프라 입력."""
 
     migration_id: Text
     plan: PlanRef
@@ -88,10 +88,10 @@ def _network(value: str, path: str) -> IPv4Network:
     try:
         result = ip_network(value, strict=True)
         if not isinstance(result, IPv4Network):
-            raise ValueError("IPv6 is unsupported")  # noqa: TRY004
+            raise ValueError("IPv6는 지원하지 않습니다")  # noqa: TRY004
         return result
     except ValueError:
-        _reject("INVALID_CIDR", path, "Expected a canonical IPv4 CIDR.")
+        _reject("INVALID_CIDR", path, "정규화된 IPv4 CIDR가 필요합니다.")
 
 
 def validate_aws_input(request: AwsPlanInput) -> None:
@@ -100,55 +100,59 @@ def validate_aws_input(request: AwsPlanInput) -> None:
         ("environment_id", request.environment_id),
     ):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value):
-            _reject("INVALID_IDENTIFIER", path, "Expected a safe opaque identifier.")
+            _reject("INVALID_IDENTIFIER", path, "안전한 불투명 식별자가 필요합니다.")
     vpc = _network(request.vpc_cidr, "vpc_cidr")
     if not 16 <= vpc.prefixlen <= 24:
-        _reject("INVALID_TOPOLOGY", "vpc_cidr", "VPC CIDR must be between /16 and /24.")
+        _reject("INVALID_TOPOLOGY", "vpc_cidr", "VPC CIDR는 /16에서 /24 사이여야 합니다.")
     if request.plan.template_version != "aws-eks-v1":
         _reject(
-            "UNSUPPORTED_TEMPLATE", "plan.template_version", "Unsupported AWS template version."
+            "UNSUPPORTED_TEMPLATE", "plan.template_version", "지원하지 않는 AWS 템플릿 버전입니다."
         )
     if request.state_key != f"cmp/{request.environment_id}/terraform.tfstate":
-        _reject("INVALID_STATE_KEY", "state_key", "State key must be stable per environment.")
+        _reject("INVALID_STATE_KEY", "state_key", "State key는 환경별로 고정되어야 합니다.")
     if request.state_bucket is not None and (
         not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", request.state_bucket)
         or ".." in request.state_bucket
     ):
-        _reject("INVALID_STATE_BUCKET", "state_bucket", "Expected an existing S3 bucket name.")
+        _reject("INVALID_STATE_BUCKET", "state_bucket", "기존 S3 버킷 이름이 필요합니다.")
     zones: dict[str, set[str]] = {}
     networks = []
     for index, subnet in enumerate(request.subnets):
         path = f"subnets.{index}"
         cidr = _network(subnet.cidr, f"{path}.cidr")
         if cidr.prefixlen > 27 or not cidr.subnet_of(vpc):
-            _reject("INVALID_TOPOLOGY", path, "Subnet must be within VPC and at least /27.")
+            _reject(
+                "INVALID_TOPOLOGY", path, "서브넷은 VPC 안에 있어야 하며 /27 이상이어야 합니다."
+            )
         if (
             not subnet.zone.startswith(request.region)
             or len(subnet.zone) != len(request.region) + 1
         ):
-            _reject("INVALID_TOPOLOGY", f"{path}.zone", "Subnet AZ must match the region.")
+            _reject("INVALID_TOPOLOGY", f"{path}.zone", "서브넷 AZ가 대상 리전과 일치해야 합니다.")
         if any(cidr.overlaps(other) for other in networks):
-            _reject("CIDR_OVERLAP", f"{path}.cidr", "Subnets overlap.")
+            _reject("CIDR_OVERLAP", f"{path}.cidr", "서브넷 CIDR가 겹칩니다.")
         networks.append(cidr)
         zones.setdefault(subnet.zone, set()).add(subnet.role)
     if len(zones) < 2 or any(roles != {"PUBLIC", "PRIVATE"} for roles in zones.values()):
-        _reject("INVALID_TOPOLOGY", "subnets", "At least two AZs need public and private subnets.")
+        _reject("INVALID_TOPOLOGY", "subnets", "최소 2개 AZ에 공개·비공개 서브넷이 필요합니다.")
     for index, cidr in enumerate(request.api_access_cidrs):
         network = _network(cidr, f"api_access_cidrs.{index}")
         if network.prefixlen == 0:
             _reject(
-                "PUBLIC_API_EXPOSURE", f"api_access_cidrs.{index}", "Restrict API access CIDRs."
+                "PUBLIC_API_EXPOSURE",
+                f"api_access_cidrs.{index}",
+                "API 접근 CIDR를 제한해야 합니다.",
             )
 
 
 def terraform_variables(request: AwsPlanInput) -> dict:
-    """Map reviewed input to the fixed Terraform root; no credential material."""
+    """검토한 입력을 고정 Terraform 구성의 변수로 변환한다."""
     validate_aws_input(request)
     groups = {"PUBLIC": {}, "PRIVATE": {}}
     for subnet in request.subnets:
         groups[subnet.role][subnet.zone] = {"cidr": subnet.cidr, "zone": subnet.zone}
     if sum(len(group) for group in groups.values()) != len(request.subnets):
-        _reject("INVALID_TOPOLOGY", "subnets", "Only one subnet per role and AZ is supported.")
+        _reject("INVALID_TOPOLOGY", "subnets", "역할·AZ별 서브넷 하나만 지원합니다.")
     return {
         "region": request.region,
         "account_id": request.account_id,
@@ -165,43 +169,44 @@ def terraform_variables(request: AwsPlanInput) -> dict:
 
 
 def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Preview:
-    """Derive actions from Terraform while discarding every after/before/sensitive value."""
+    """Terraform 변경 행위만 읽고 실제 값과 민감값은 버린다."""
     counts: dict[tuple[str, str, str], int] = {}
     for change in plan_json.get("resource_changes", []):
         if change.get("mode") == "data":
             continue
         kind = change.get("type")
         if change.get("mode") != "managed" or kind not in _RESOURCE_TYPES:
-            _reject("UNREVIEWED_PLAN", "terraform_plan", "Plan contains an unexpected resource.")
+            _reject("UNREVIEWED_PLAN", "terraform_plan", "Plan에 예상하지 못한 자원이 있습니다.")
         for action in change.get("change", {}).get("actions", []):
             if action not in _ACTIONS:
-                _reject("UNREVIEWED_PLAN", "terraform_plan", "Plan contains an unknown action.")
+                _reject("UNREVIEWED_PLAN", "terraform_plan", "Plan에 알 수 없는 행위가 있습니다.")
             if action in {"update", "delete"}:
                 _reject(
                     "DESTRUCTIVE_PLAN",
                     "terraform_plan",
-                    "New-network Plan cannot change or remove existing resources.",
+                    "신규 네트워크 Plan은 기존 자원을 변경하거나 삭제할 수 없습니다.",
                 )
             resource_type, name = _RESOURCE_TYPES[kind]
             key = resource_type, _ACTIONS[action], name
             counts[key] = counts.get(key, 0) + 1
     required = {
         ("NETWORK", "CREATE", "VPC"),
-        ("CLUSTER", "CREATE", "EKS cluster"),
-        ("NODE", "CREATE", "Managed node group"),
+        ("CLUSTER", "CREATE", "EKS 클러스터"),
+        ("NODE", "CREATE", "관리형 노드 그룹"),
     }
     if not required.issubset(counts):
-        _reject("INCOMPLETE_NEW_PLAN", "terraform_plan", "New VPC, EKS and nodes must be created.")
+        _reject("INCOMPLETE_NEW_PLAN", "terraform_plan", "신규 VPC·EKS·Node 계획이 필요합니다.")
     subnet_summary = "; ".join(
-        f"{subnet.role.lower()} {subnet.zone} {subnet.cidr}" for subnet in request.subnets
+        f"{'공개' if subnet.role == 'PUBLIC' else '비공개'} {subnet.zone} {subnet.cidr}"
+        for subnet in request.subnets
     )
     display = {
         "VPC": request.vpc_cidr,
-        "Subnet": subnet_summary,
-        "Route": "public 0.0.0.0/0 via IGW; private 0.0.0.0/0 via single NAT",
-        "Cluster security group": "No explicit ingress; outbound 0.0.0.0/0",
-        "EKS cluster": f"Kubernetes {request.kubernetes_version}; public API {', '.join(request.api_access_cidrs)}; private API enabled",
-        "Managed node group": f"{request.node_instance_type}; {request.node_count} nodes; {request.node_disk_gib} GiB each; private subnets",
+        "서브넷": subnet_summary,
+        "라우트": "공개 0.0.0.0/0 → IGW; 비공개 0.0.0.0/0 → 단일 NAT",
+        "클러스터 보안 그룹": "명시적 인바운드 없음; 아웃바운드 0.0.0.0/0",
+        "EKS 클러스터": f"Kubernetes {request.kubernetes_version}; 공개 API {', '.join(request.api_access_cidrs)}; 사설 API 활성화",
+        "관리형 노드 그룹": f"{request.node_instance_type}; 노드 {request.node_count}개; 각 {request.node_disk_gib} GiB; 비공개 서브넷",
     }
     changes = [
         ResourceChange(
@@ -213,28 +218,28 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
         ResourceChange(
             resource_type="NETWORK",
             action="CREATE",
-            name="One NAT gateway for private subnet egress",
+            name="비공개 서브넷 아웃바운드용 NAT 게이트웨이 1개",
             quantity=1,
         ),
         ResourceChange(
-            resource_type="CLUSTER", action="CREATE", name="Private EKS API endpoint enabled"
+            resource_type="CLUSTER", action="CREATE", name="EKS 사설 API Endpoint 활성화"
         ),
         ResourceChange(
             resource_type="INGRESS",
             action="NO_CHANGE",
-            name="Public ALB subnet tags prepared; ALB not deployed",
+            name="공개 ALB용 서브넷 태그 준비; ALB 미배포",
         ),
     ]
     warnings = [
         ValidationIssue(
             code="ALB_NOT_DEPLOYED",
             path="external_access",
-            message="ALB controller, Ingress, TLS and public service remain outside this Plan.",
+            message="ALB Controller·Ingress·TLS·공개 서비스는 이 Plan의 범위 밖입니다.",
         ),
         ValidationIssue(
             code="SINGLE_NAT_AZ",
             path="network",
-            message="One NAT gateway provides private subnet egress and is an AZ dependency.",
+            message="단일 NAT 게이트웨이에 비공개 서브넷 아웃바운드가 의존합니다.",
         ),
     ]
     return Preview(
@@ -252,10 +257,10 @@ def _run(args: list[str], cwd: Path, env: dict[str, str]) -> bytes:
             args, cwd=cwd, env=env, capture_output=True, check=False, timeout=600
         )
     except (OSError, subprocess.TimeoutExpired):
-        _reject("TOOL_UNAVAILABLE", "terraform", "Terraform or AWS CLI could not complete.")
+        _reject("TOOL_UNAVAILABLE", "terraform", "Terraform 또는 AWS CLI를 완료하지 못했습니다.")
     if result.returncode:
-        # Terraform stdout/stderr can contain credentials and sensitive state values.
-        _reject("PLAN_COMMAND_FAILED", "terraform", f"Terraform command failed at {args[1]}.")
+        # Terraform 출력에는 자격 증명이나 민감한 State 값이 있을 수 있다.
+        _reject("PLAN_COMMAND_FAILED", "terraform", f"Terraform 명령 {args[1]}이 실패했습니다.")
     return result.stdout
 
 
@@ -268,26 +273,26 @@ def plan_aws_infrastructure(
     template_dir: Path | None = None,
     backend_mode: BackendMode = "S3",
 ) -> tuple[PlanManifest, Preview]:
-    """Run a saved Plan; local validation is never an approvable production Plan."""
+    """저장 Plan을 실행한다. 로컬 검증 Plan은 운영 승인이 불가능하다."""
     variables = terraform_variables(request)
     if backend_mode not in {"S3", "LOCAL_VALIDATION"}:
-        _reject("UNSUPPORTED_BACKEND", "backend_mode", "Unknown Plan backend mode.")
+        _reject("UNSUPPORTED_BACKEND", "backend_mode", "알 수 없는 Plan Backend 모드입니다.")
     if backend_mode == "S3" and request.state_bucket is None:
-        _reject("MISSING_STATE_BUCKET", "state_bucket", "S3 Plan requires an existing bucket.")
+        _reject("MISSING_STATE_BUCKET", "state_bucket", "S3 Plan에는 기존 버킷이 필요합니다.")
     if backend_mode == "LOCAL_VALIDATION" and request.state_bucket is not None:
         _reject(
             "UNEXPECTED_STATE_BUCKET",
             "state_bucket",
-            "Local validation cannot name a State bucket.",
+            "로컬 검증에서는 State 버킷을 지정할 수 없습니다.",
         )
     if not aws_profile or aws_profile == "default":
-        _reject("MISSING_PROFILE", "aws_profile", "An explicit named AWS profile is required.")
+        _reject("MISSING_PROFILE", "aws_profile", "이름이 지정된 AWS 프로필이 필요합니다.")
     root = template_dir or Path(__file__).resolve().parents[4] / "infra/terraform/aws"
     output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(output_dir, 0o700)
     target = output_dir / f"{request.plan.plan_id}-r{request.plan.revision}"
     if target.exists():
-        _reject("IMMUTABLE_PLAN_EXISTS", "output_dir", "Plan revision already exists.")
+        _reject("IMMUTABLE_PLAN_EXISTS", "output_dir", "해당 Plan Revision이 이미 존재합니다.")
     work = Path(mkdtemp(prefix="aws-plan-", dir=output_dir))
     os.chmod(work, 0o700)
     try:
@@ -300,16 +305,14 @@ def plan_aws_infrastructure(
             contents = versions_file.read_text()
             backend_block = '  backend "s3" {}\n'
             if contents.count(backend_block) != 1:
-                _reject("UNREVIEWED_TEMPLATE", "terraform", "Expected one S3 backend block.")
+                _reject("UNREVIEWED_TEMPLATE", "terraform", "S3 Backend 블록 하나가 필요합니다.")
             versions_file.write_text(contents.replace(backend_block, ""))
         effective_template_digests = {
             path.name: sha256_bytes(path.read_bytes()) for path in work.glob("*.tf")
         }
         lock = root / ".terraform.lock.hcl"
         if not lock.exists():
-            _reject(
-                "MISSING_PROVIDER_LOCK", "terraform", "A reviewed provider lockfile is required."
-            )
+            _reject("MISSING_PROVIDER_LOCK", "terraform", "검토된 Provider lockfile이 필요합니다.")
         shutil.copy2(lock, work / lock.name)
         var_file = work / "input.auto.tfvars.json"
         var_file.write_bytes(canonical_json_bytes(variables))
@@ -330,9 +333,9 @@ def plan_aws_infrastructure(
         try:
             account = json.loads(identity)["Account"]
         except (ValueError, KeyError, TypeError):
-            _reject("ACCOUNT_CHECK_FAILED", "account_id", "AWS account identity is unavailable.")
+            _reject("ACCOUNT_CHECK_FAILED", "account_id", "AWS 계정 식별을 확인할 수 없습니다.")
         if account != request.account_id:
-            _reject("ACCOUNT_MISMATCH", "account_id", "AWS profile is for another account.")
+            _reject("ACCOUNT_MISMATCH", "account_id", "AWS 프로필이 다른 계정을 가리킵니다.")
         init_args = [terraform_bin, "init", "-input=false", "-lockfile=readonly"]
         if backend_mode == "S3":
             init_args.extend(
@@ -391,7 +394,7 @@ def plan_aws_infrastructure(
                 ValidationIssue(
                     code="LOCAL_STATE_VALIDATION_ONLY",
                     path="terraform_plan",
-                    message="Generate a new S3-backed Plan before production approval.",
+                    message="운영 승인 전에 S3 State를 사용하는 새 Plan을 생성해야 합니다.",
                 )
             )
         target.mkdir(mode=0o700)

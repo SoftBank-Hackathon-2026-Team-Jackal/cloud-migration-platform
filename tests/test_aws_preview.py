@@ -1,4 +1,4 @@
-"""Public AWS saved Plan boundary with local tool substitutes and no cloud calls."""
+"""로컬 대체 도구로 AWS 저장 Plan 경계를 검증한다."""
 
 import json
 import os
@@ -113,7 +113,7 @@ def test_saved_plan_and_redacted_preview_agree(tmp_path, monkeypatch):
     assert {change.resource_type for change in preview.changes} == {"NETWORK", "CLUSTER", "NODE"}
     shown = " ".join(change.size or "" for change in preview.changes)
     assert "10.20.1.0/24" in shown and "t3.large" in shown
-    assert "203.0.113.10/32" in shown and "single NAT" in shown
+    assert "203.0.113.10/32" in shown and "단일 NAT" in shown
     assert {warning.code for warning in preview.warnings} == {"ALB_NOT_DEPLOYED", "SINGLE_NAT_AZ"}
     assert "TOP_SECRET_NEVER_SHOW" not in (stored / "preview.json").read_text()
     assert "TOP_SECRET_NEVER_SHOW" not in (stored / "manifest.json").read_text()
@@ -223,8 +223,8 @@ def test_sanitized_provider_plan_fixture_covers_full_aws_topology():
     preview = preview_from_plan(payload, request(), "a" * 64)
     counts = {change.name: change.quantity for change in preview.changes}
     assert counts["VPC"] == 1
-    assert counts["Subnet"] == 4
-    assert counts["Route"] == 2
-    assert counts["EKS cluster"] == 1
-    assert counts["Managed node group"] == 1
+    assert counts["서브넷"] == 4
+    assert counts["라우트"] == 2
+    assert counts["EKS 클러스터"] == 1
+    assert counts["관리형 노드 그룹"] == 1
     assert "DO_NOT_LEAK_CANARY" not in preview.model_dump_json()

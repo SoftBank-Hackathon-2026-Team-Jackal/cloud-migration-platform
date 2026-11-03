@@ -1,4 +1,4 @@
-"""Create an infrastructure-only AWS EKS saved Plan and redacted Preview."""
+"""AWS EKS 인프라 저장 Plan과 민감정보 제거 Preview를 생성한다."""
 
 import argparse
 import json
@@ -11,14 +11,14 @@ from pydantic import ValidationError
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, help="Reviewed AWS infrastructure input JSON")
-    parser.add_argument("output", type=Path, help="Protected local Plan artifact directory")
-    parser.add_argument("--aws-profile", required=True, help="Explicit named AWS CLI profile")
+    parser.add_argument("input", type=Path, help="검토된 AWS 인프라 입력 JSON")
+    parser.add_argument("output", type=Path, help="접근이 제한된 로컬 Plan 산출물 디렉터리")
+    parser.add_argument("--aws-profile", required=True, help="이름이 지정된 AWS CLI 프로필")
     parser.add_argument("--terraform-bin", default="terraform")
     parser.add_argument(
         "--local-validation",
         action="store_true",
-        help="Use temporary local State; Preview is explicitly ineligible for approval",
+        help="임시 로컬 State로 검증하며 Preview를 승인 불가로 표시",
     )
     args = parser.parse_args()
     try:
@@ -31,10 +31,10 @@ def main() -> int:
             backend_mode="LOCAL_VALIDATION" if args.local_validation else "S3",
         )
     except ValidationError:
-        parser.exit(2, "Invalid AWS Plan input schema.\n")
+        parser.exit(2, "AWS Plan 입력 형식이 올바르지 않습니다.\n")
     except ProvisioningInputError as error:
-        parser.exit(2, f"AWS Plan rejected: {error}\n")
-    # Preview contains only allowlisted fields; never print Terraform JSON or the binary Plan.
+        parser.exit(2, f"AWS Plan 거절: {error}\n")
+    # Preview에는 허용된 필드만 담는다. Terraform JSON과 바이너리 Plan은 출력하지 않는다.
     print(
         json.dumps(
             {

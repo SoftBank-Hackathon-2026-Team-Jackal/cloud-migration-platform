@@ -33,7 +33,7 @@ Local contract/render/Workflow tests use fixtures and temporary files with no re
 
 On this workstation, AWS checks use `cmp-aws-prod` and gcloud CLI checks use `cmp-gcp-prod` as directed by the user. Inspect the account/project identity before use. The gcloud configuration does not supply Terraform/SDK ADC by itself; verify ADC independently. A production-named profile is an authentication route, not permission to Apply or destroy. This v2 Planning contract task performs no cloud calls.
 
-For 05/06 Plan-only development verification, a verified named account/project and protected temporary local State may be used without Apply. This verifies Provider Plan and redacted Preview generation but produces an approval-blocked validation artifact. Before a real cloud approval, verify the intended target account/project, central S3 State/lock and a newly generated final saved Plan/Preview. Never treat the local validation Plan as an Apply artifact.
+05/06의 Plan 전용 개발 검증에는 계정/프로젝트를 확인한 명시적 프로필과 접근을 제한한 임시 로컬 State를 사용할 수 있다. Apply 없이 실제 Provider Plan·민감정보 제거 Preview 생성을 확인하되, 이 산출물은 승인 불가로 표시한다. 실제 클라우드 승인 전에는 대상 계정/프로젝트, 중앙 S3 State·잠금, 새로 생성한 최종 저장 Plan·Preview를 확인한다. 로컬 검증 Plan을 Apply 산출물로 취급하지 않는다.
 
 ## Commands and evidence
 
