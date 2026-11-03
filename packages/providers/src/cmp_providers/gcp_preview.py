@@ -178,7 +178,8 @@ def preview_from_plan(plan_json: dict, request: GcpPlanInput, digest: str) -> Pr
         ),
         "GKE node pool": (
             f"{request.node_machine_type}; {request.node_count} nodes; "
-            f"{request.node_disk_gib} GiB each; dedicated existing service account"
+            f"{request.node_disk_gib} GiB each; configured node service account "
+            "(existence unverified)"
         ),
     }
     changes = [
@@ -262,7 +263,7 @@ def plan_gcp_infrastructure(
     request: GcpPlanInput,
     *,
     output_dir: Path,
-    mode: Literal["S3", "LOCAL_TEST"] = "S3",
+    mode: Literal["S3", "LOCAL_TEST", "LOCAL_PROJECT"] = "S3",
     gcloud_configuration: str | None = None,
     expected_adc_email: str | None = None,
     aws_profile: str | None = None,
@@ -278,14 +279,15 @@ def plan_gcp_infrastructure(
                 "project_id",
                 "Local test mode requires a fixed fake project.",
             )
-    elif mode == "S3":
+    elif mode in ("S3", "LOCAL_PROJECT"):
         for path, value in (
             ("gcloud_configuration", gcloud_configuration),
             ("expected_adc_email", expected_adc_email),
-            ("aws_profile", aws_profile),
         ):
             if not value or value == "default":
                 _reject("MISSING_IDENTITY", path, "Explicit named identity is required.")
+        if mode == "S3" and (not aws_profile or aws_profile == "default"):
+            _reject("MISSING_IDENTITY", "aws_profile", "Explicit named State identity is required.")
     else:
         _reject("UNSUPPORTED_PLAN_MODE", "mode", "Unknown Plan mode.")
     root = template_dir or Path(__file__).resolve().parents[4] / "infra/terraform/gcp"
@@ -304,7 +306,7 @@ def plan_gcp_infrastructure(
         for source in root.glob("*.tf"):
             shutil.copy2(source, work / source.name)
             template_digests[source.name] = sha256_bytes(source.read_bytes())
-        if mode == "LOCAL_TEST":
+        if mode != "S3":
             versions = work / "versions.tf"
             content = versions.read_text()
             if content.count('backend "s3" {}') != 1:
@@ -343,8 +345,12 @@ def plan_gcp_infrastructure(
             ):
                 env.pop(name, None)
             env["CLOUDSDK_ACTIVE_CONFIG_NAME"] = gcloud_configuration
-            env["AWS_PROFILE"] = aws_profile
-            env["AWS_DEFAULT_PROFILE"] = aws_profile
+            if mode == "S3":
+                env["AWS_PROFILE"] = aws_profile
+                env["AWS_DEFAULT_PROFILE"] = aws_profile
+            else:
+                env.pop("AWS_PROFILE", None)
+                env.pop("AWS_DEFAULT_PROFILE", None)
             project = (
                 _run(
                     [
@@ -367,45 +373,57 @@ def plan_gcp_infrastructure(
                     "project_id",
                     "gcloud configuration selects another project.",
                 )
-            account = _run(
-                ["aws", "sts", "get-caller-identity", "--profile", aws_profile, "--output", "json"],
-                work,
-                env,
-            )
-            try:
-                state_account = json.loads(account)["Account"]
-            except (ValueError, KeyError, TypeError):
-                _reject(
-                    "STATE_ACCOUNT_CHECK_FAILED",
-                    "state_account_id",
-                    "AWS State identity is unavailable.",
+            if mode == "S3":
+                account = _run(
+                    [
+                        "aws",
+                        "sts",
+                        "get-caller-identity",
+                        "--profile",
+                        aws_profile,
+                        "--output",
+                        "json",
+                    ],
+                    work,
+                    env,
                 )
-            if state_account != request.state_account_id:
-                _reject(
-                    "STATE_ACCOUNT_MISMATCH",
-                    "state_account_id",
-                    "S3 profile selects another account.",
-                )
+                try:
+                    state_account = json.loads(account)["Account"]
+                except (ValueError, KeyError, TypeError):
+                    _reject(
+                        "STATE_ACCOUNT_CHECK_FAILED",
+                        "state_account_id",
+                        "AWS State identity is unavailable.",
+                    )
+                if state_account != request.state_account_id:
+                    _reject(
+                        "STATE_ACCOUNT_MISMATCH",
+                        "state_account_id",
+                        "S3 profile selects another account.",
+                    )
             _verify_adc(expected_adc_email, work, env)
-            _run(
-                [
-                    terraform_bin,
-                    "init",
-                    "-input=false",
-                    "-lockfile=readonly",
-                    f"-backend-config=bucket={request.state_bucket}",
-                    f"-backend-config=key={request.state_key}",
-                    f"-backend-config=region={request.state_region}",
-                    f"-backend-config=profile={aws_profile}",
-                    "-backend-config=encrypt=true",
-                    "-backend-config=use_lockfile=true",
-                ],
-                work,
-                env,
-            )
+            if mode == "LOCAL_PROJECT":
+                _run([terraform_bin, "init", "-input=false", "-lockfile=readonly"], work, env)
+            else:
+                _run(
+                    [
+                        terraform_bin,
+                        "init",
+                        "-input=false",
+                        "-lockfile=readonly",
+                        f"-backend-config=bucket={request.state_bucket}",
+                        f"-backend-config=key={request.state_key}",
+                        f"-backend-config=region={request.state_region}",
+                        f"-backend-config=profile={aws_profile}",
+                        "-backend-config=encrypt=true",
+                        "-backend-config=use_lockfile=true",
+                    ],
+                    work,
+                    env,
+                )
         _run([terraform_bin, "validate", "-no-color"], work, env)
         plan_file = work / "saved.tfplan"
-        plan_options = ["-refresh=false"] if mode == "LOCAL_TEST" else []
+        plan_options = ["-refresh=false"] if mode != "S3" else []
         _run(
             [
                 terraform_bin,
@@ -451,14 +469,14 @@ def plan_gcp_infrastructure(
             },
         )
         preview = preview_from_plan(plan_json, request, manifest_digest(manifest))
-        if mode == "LOCAL_TEST":
+        if mode != "S3":
             preview = preview.model_copy(
                 update={
                     "errors": [
                         ValidationIssue(
                             code="LOCAL_STATE_UNAPPROVABLE",
                             path="terraform_plan",
-                            message="Local test Plan has no cloud or central State verification.",
+                            message="Local State Plan lacks central S3 State verification.",
                         )
                     ]
                 }

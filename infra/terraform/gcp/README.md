@@ -36,14 +36,21 @@ uv run python scripts/plan_gcp_gke.py \
 
 `LOCAL_TEST` requires the fake project `cmp-plan-local`, replaces the copied
 backend block with local State, injects an invalid token, and plans without
-refresh. It does not call gcloud or AWS. The binary Plan, Spec, Manifest,
-Preview and evidence are written under a protected Plan ID/revision directory.
-The Preview has `LOCAL_STATE_UNAPPROVABLE` in `errors`; the shared approval
-check rejects it. Never use this binary Plan for Apply or operational approval.
+refresh. It does not call gcloud or AWS. To exercise the actual project and
+ADC identity before a central State bucket exists, use `LOCAL_PROJECT` with
+the reviewed project input, `--gcloud-configuration cmp-gcp-prod` and
+`--expected-adc-email <ADC principal>`. This mode checks project and ADC,
+then creates a local, no-refresh Plan without S3 access or Apply.
+
+Both local modes write binary Plan, Spec, Manifest, Preview and evidence under
+a protected Plan ID/revision directory. Their Preview has
+`LOCAL_STATE_UNAPPROVABLE` in `errors`; the shared approval check rejects
+them. Never use a local binary Plan for Apply or operational approval.
 The original template and provider lock digests are recorded in
 `evidence.json`; the local backend override is identified by `plan_mode`.
 These artifacts remain outside Git because saved Plans can contain sensitive
-data.
+data. A local project Plan does not prove GKE API enablement, service-account
+existence/IAM, quota, central State access or actual cluster creation.
 
 ## S3-backed Plan preconditions
 

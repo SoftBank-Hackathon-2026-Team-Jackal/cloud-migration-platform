@@ -259,7 +259,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 
 GCP 전용 명시 입력은 VPC 전체 CIDR이나 AWS AZ 목록을 받지 않는다. 신규 GCP VPC Network, 단일 리전 서브넷의 primary·Pod·Service CIDR, 별도 GKE control-plane /28, 접근 허용 CIDR, private node용 Cloud Router/NAT, 내부 firewall, 리전 GKE Standard cluster·분리된 Node Pool로 변환한다. Pod·Service·control-plane CIDR은 서로 겹치지 않는 RFC1918 범위로 검증한다. Node 서비스 계정은 동일 프로젝트에 이미 존재해야 하며 그 권한은 실제 환경에서 별도 확인한다. 앱·DB·Ingress·TLS·스토리지·ECR Pull은 이 인프라 Plan에 포함되지 않는다.
 
-Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다. 운영 Plan은 중앙 S3 State의 환경별 고정 key와 `use_lockfile=true`로 만들며, GCP Provider의 ADC와 S3 Backend의 AWS profile을 각각 검증한다. 검증용 `LOCAL_TEST`는 가상 프로젝트 `cmp-plan-local`, 임시 로컬 State, 무효 토큰과 `-refresh=false`로 실제 저장 Plan→Preview 변환을 실행한다. Preview 오류 `LOCAL_STATE_UNAPPROVABLE`로 승인 불가를 명시하고 이 Plan을 Apply에 재사용하지 않는다. 실제 프로젝트/중앙 S3 State 기반 검증은 운영 승인 전에 별도 수행한다. [템플릿과 실행 예시](../../infra/terraform/gcp/README.md)를 따른다.
+Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다. 운영 Plan은 중앙 S3 State의 환경별 고정 key와 `use_lockfile=true`로 만들며, GCP Provider의 ADC와 S3 Backend의 AWS profile을 각각 검증한다. 검증용 `LOCAL_TEST`는 가상 프로젝트 `cmp-plan-local`, 임시 로컬 State, 무효 토큰과 `-refresh=false`로 실제 저장 Plan→Preview 변환을 실행한다. `LOCAL_PROJECT`는 지정 프로젝트와 ADC 주체를 대조한 뒤 보호된 로컬 State에서 같은 변환을 검증한다. 두 모드 모두 Preview 오류 `LOCAL_STATE_UNAPPROVABLE`로 승인 불가를 명시하고 Plan을 Apply에 재사용하지 않는다. 실제 GKE API·노드 서비스 계정/권한·중앙 S3 State 기반 최종 Plan 검증은 운영 승인 전에 별도 수행한다. [템플릿과 실행 예시](../../infra/terraform/gcp/README.md)를 따른다.
 
 ### Ticket 02 구현 결과
 

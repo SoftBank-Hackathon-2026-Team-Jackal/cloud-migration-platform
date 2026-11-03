@@ -200,6 +200,28 @@ def test_local_saved_plan_is_explicitly_unapprovable(tmp_path, monkeypatch):
         )
 
 
+def test_local_project_checks_adc_then_marks_plan_unapprovable(tmp_path, monkeypatch):
+    template, terraform, calls = fake_tools(tmp_path, monkeypatch)
+    manifest, preview = plan_gcp_infrastructure(
+        request(),
+        output_dir=tmp_path / "plans",
+        mode="LOCAL_PROJECT",
+        gcloud_configuration="cmp-gcp-prod",
+        expected_adc_email="planner@example.com",
+        terraform_bin=str(terraform),
+        template_dir=template,
+    )
+    assert manifest.target.account_id == "sbh26-test"
+    assert [issue.code for issue in preview.errors] == ["LOCAL_STATE_UNAPPROVABLE"]
+    assert [issue.code for issue in approval_issues(manifest, preview)] == ["VALIDATION_FAILED"]
+    assert (
+        json.loads((tmp_path / "plans/plan-001-r1/evidence.json").read_text())["plan_mode"]
+        == "LOCAL_PROJECT"
+    )
+    assert "-refresh=false" in calls.read_text()
+    assert "backend-config" not in calls.read_text()
+
+
 def test_invalid_gcp_topology_rejected_before_cloud(tmp_path):
     payload = request().model_dump()
     payload["pods_cidr"] = "10.30.0.0/21"

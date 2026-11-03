@@ -13,7 +13,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="Reviewed GCP infrastructure input JSON")
     parser.add_argument("output", type=Path, help="Protected local Plan artifact directory")
-    parser.add_argument("--mode", choices=["S3", "LOCAL_TEST"], default="S3")
+    parser.add_argument("--mode", choices=["S3", "LOCAL_TEST", "LOCAL_PROJECT"], default="S3")
     parser.add_argument("--gcloud-configuration")
     parser.add_argument("--expected-adc-email")
     parser.add_argument("--aws-profile", help="Named AWS profile for central S3 State")
