@@ -16,7 +16,7 @@
 | Planning → 공통 Provider 모듈 | 검증된 `ProvisioningSpec` | 순수 Provider 변환·렌더링·검증. 저장소 조회·클라우드 변경 없음 |
 | 승인 대기 이후 → 실행 Activity | Plan ID·Revision, 잠긴 산출물과 승인 기록 참조 | 승인·대상·Digest 재확인 후 Terraform/Helm/Agent 실행 |
 
-Sandbox가 전체 Spec을 작성한다고 가정하지 않는다. Sandbox/변환 루프가 공통 Build 모듈을 호출하는 인터페이스는 B-01에서 제공하고 실제 Worker 연결은 Sandbox 담당자가 맡는다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
+Sandbox가 전체 Spec을 작성한다고 가정하지 않는다. 전체 빌드 실행에는 작업 ID·시도 ID·소스 URI·대상 플랫폼이 필요하다. Sandbox/변환 루프가 공통 Build 모듈에 넘기는 **소스 산출물 정보**는 SHA-256 이름의 S3 아카이브 URI 하나이며 Dockerfile·컨텍스트는 루트에 둔다. 작업/시도 ID와 플랫폼은 상위 실행 맥락, ECR·로그 설정은 Builder 환경에서 주입한다. B-01은 이 공통 호출 인터페이스를 제공하고 실제 Worker 연결은 후속 통합 범위다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
 
 ## 3. Planning이 선행 단계에서 받는 정보
 

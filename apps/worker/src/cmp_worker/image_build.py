@@ -22,6 +22,7 @@ _ECR = re.compile(
 )
 _ARCHIVE = re.compile(r"^(?P<sha>[a-f0-9]{64})\.tar\.gz$")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$")
+_BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _BLOCKED_PARTS = {".env", ".git", ".aws", ".kube", ".docker", ".ssh"}
 _BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
@@ -53,7 +54,30 @@ class S3Ref(BaseModel):
         return urlsplit(self.uri).path.lstrip("/")
 
 
-class BuildRequest(BaseModel):
+class BuildContext(BaseModel):
+    """Execution metadata supplied by orchestration and worker configuration."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+    migration_id: str
+    attempt_id: str
+    ecr_repository: str
+    platform: str
+    log_bucket: str
+
+    @model_validator(mode="after")
+    def valid_context(self) -> "BuildContext":
+        if not _NAME.fullmatch(self.attempt_id) or not _NAME.fullmatch(self.migration_id):
+            raise ValueError("invalid migration or attempt ID")
+        if not _ECR.fullmatch(self.ecr_repository):
+            raise ValueError("invalid ECR repository URI")
+        if self.platform not in {"linux/amd64", "linux/arm64"}:
+            raise ValueError("unsupported platform")
+        if not _BUCKET.fullmatch(self.log_bucket):
+            raise ValueError("invalid log bucket")
+        return self
+
+
+class _BuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     migration_id: str = Field(min_length=1)
     attempt_id: str
@@ -63,7 +87,7 @@ class BuildRequest(BaseModel):
     log_destination: S3Ref
 
     @model_validator(mode="after")
-    def valid_request(self) -> "BuildRequest":
+    def valid_request(self) -> "_BuildRequest":
         if not _NAME.fullmatch(self.attempt_id) or not _NAME.fullmatch(self.migration_id):
             raise ValueError("invalid migration or attempt ID")
         if not _ECR.fullmatch(self.ecr_repository):
@@ -192,7 +216,7 @@ def _extract(archive: Path, context: Path) -> None:
         raise BuildFailure("DOCKERFILE_MISSING")
 
 
-def _ecr_digest(request: BuildRequest, tag: str) -> str | None:
+def _ecr_digest(request: _BuildRequest, tag: str) -> str | None:
     match = _ECR.fullmatch(request.ecr_repository)
     command = [
         "aws",
@@ -224,7 +248,7 @@ def _ecr_digest(request: BuildRequest, tag: str) -> str | None:
     return digest
 
 
-def _require_immutable_ecr(request: BuildRequest) -> None:
+def _require_immutable_ecr(request: _BuildRequest) -> None:
     match = _ECR.fullmatch(request.ecr_repository)
     result = _run(
         [
@@ -249,7 +273,7 @@ def _require_immutable_ecr(request: BuildRequest) -> None:
         raise BuildFailure("ECR_REPOSITORY_NOT_IMMUTABLE")
 
 
-def _login(request: BuildRequest, docker_config: Path) -> dict[str, str]:
+def _login(request: _BuildRequest, docker_config: Path) -> dict[str, str]:
     match = _ECR.fullmatch(request.ecr_repository)
     env = os.environ.copy()
     env["DOCKER_CONFIG"] = str(docker_config)
@@ -277,7 +301,7 @@ def _login(request: BuildRequest, docker_config: Path) -> dict[str, str]:
     return env
 
 
-def _publish(request: BuildRequest, context: Path, docker_config: Path, tag: str) -> str:
+def _publish(request: _BuildRequest, context: Path, docker_config: Path, tag: str) -> str:
     env = _login(request, docker_config)
     metadata = context.parent / "build-metadata.json"
     _run(
@@ -312,7 +336,7 @@ def _publish(request: BuildRequest, context: Path, docker_config: Path, tag: str
     return digest
 
 
-def _upload_log(request: BuildRequest, record: dict, workspace: Path) -> S3Ref:
+def _upload_log(request: _BuildRequest, record: dict, workspace: Path) -> S3Ref:
     path = workspace / "build-log.json"
     path.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")))
     result = _run(
@@ -337,7 +361,7 @@ def _upload_log(request: BuildRequest, record: dict, workspace: Path) -> S3Ref:
     return S3Ref(uri=request.log_destination.uri, version_id=version_id)
 
 
-def build_and_push(request: BuildRequest) -> BuildOutcome:
+def _build_and_push(request: _BuildRequest) -> BuildOutcome:
     """Return a safe result; no raw AWS/Docker output is exposed."""
     sha = _ARCHIVE.fullmatch(PurePosixPath(request.source.key).name).group("sha")
     identity = f"{request.migration_id}\0{request.attempt_id}\0{request.platform}\0{sha}"
@@ -389,3 +413,26 @@ def build_and_push(request: BuildRequest) -> BuildOutcome:
         log=log,
         error_code=error_code,
     )
+
+
+class ImageBuilder:
+    """Prepared per attempt; the Sandbox loop supplies only an S3 source URI."""
+
+    def __init__(self, context: BuildContext) -> None:
+        self.context = context
+
+    def build(self, source_uri: str) -> BuildOutcome:
+        request = _BuildRequest(
+            migration_id=self.context.migration_id,
+            attempt_id=self.context.attempt_id,
+            source=S3Ref(uri=source_uri),
+            ecr_repository=self.context.ecr_repository,
+            platform=self.context.platform,
+            log_destination=S3Ref(
+                uri=(
+                    f"s3://{self.context.log_bucket}/builds/"
+                    f"{self.context.migration_id}/{self.context.attempt_id}.json"
+                )
+            ),
+        )
+        return _build_and_push(request)

@@ -1,6 +1,6 @@
 # Tasks: Provisioning
 
-이 파일은 7단계 Provisioning 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 입력 계약·로컬 검증·대상별 구성 예시와 회귀 검증을 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증·전체 186개 테스트를 완료했으며 main 반영은 구현 PR 병합으로 확인한다. B-01(#17)과 05/06/07은 `TODO`이며 한 티켓씩 순차 진행한다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
+이 파일은 7단계 Provisioning 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 입력 계약·로컬 검증·대상별 구성 예시와 회귀 검증을 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증을 완료했다. B-01(#17)의 공통 빌드 모듈은 PR #18로 main에 반영됐고 Workflow/Worker 연결은 후속 통합 범위다. 05/06/07은 `TODO`이며 한 티켓씩 순차 진행한다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
 
 | ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
