@@ -31,6 +31,7 @@ aws cloudformation deploy \
   --stack-name "$stack" \
   --template-file infra/demo/cloudformation.yaml \
   --capabilities CAPABILITY_IAM \
+  --no-fail-on-empty-changeset \
   --parameter-overrides \
     AmiId="$ami" SubnetId="$subnet" VpcId="$vpc" \
     StateBucketName="cmp-demo-${account}-apne2-state" \

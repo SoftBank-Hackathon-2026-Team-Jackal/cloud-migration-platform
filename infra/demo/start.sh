@@ -3,6 +3,7 @@ set -euo pipefail
 
 release_dir="${1:?release directory required}"
 cd "$release_dir"
+install -d -m 700 /opt/cmp/data/plans
 
 for attempt in {1..60}; do
   if docker compose version >/dev/null 2>&1; then

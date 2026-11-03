@@ -79,4 +79,6 @@ services:
         condition: service_started
     environment:
       TEMPORAL_ADDRESS: temporal:7233
+    volumes:
+      - /opt/cmp/data/plans:/opt/cmp/plans
     command: ["python", "-m", "cmp_worker.workers.run_all"]
