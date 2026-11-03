@@ -1,0 +1,403 @@
+{
+  "$defs": {
+    "Application": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_millicores": {
+          "exclusiveMinimum": 0,
+          "title": "Cpu Millicores",
+          "type": "integer"
+        },
+        "memory_mib": {
+          "exclusiveMinimum": 0,
+          "title": "Memory Mib",
+          "type": "integer"
+        },
+        "replicas": {
+          "exclusiveMinimum": 0,
+          "title": "Replicas",
+          "type": "integer"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "health_path": {
+          "pattern": "^/\\S*$",
+          "title": "Health Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cpu_millicores",
+        "memory_mib",
+        "replicas",
+        "port",
+        "health_path"
+      ],
+      "title": "Application",
+      "type": "object"
+    },
+    "ConfigBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "CONFIG_MAP",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9._-]+$",
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "key"
+      ],
+      "title": "ConfigBinding",
+      "type": "object"
+    },
+    "ContentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Version",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "sha256"
+      ],
+      "title": "ContentRef",
+      "type": "object"
+    },
+    "DatabaseBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "DATABASE",
+          "title": "Kind",
+          "type": "string"
+        },
+        "field": {
+          "enum": [
+            "host",
+            "port",
+            "name",
+            "username",
+            "secret_ref"
+          ],
+          "title": "Field",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "field"
+      ],
+      "title": "DatabaseBinding",
+      "type": "object"
+    },
+    "DatabaseConnection": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Host"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "username": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Username",
+          "type": "string"
+        },
+        "secret_name": {
+          "anyOf": [
+            {
+              "maxLength": 63,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Secret Name"
+        },
+        "secret_key": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9._-]+$",
+          "title": "Secret Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "port",
+        "name",
+        "username",
+        "secret_name",
+        "secret_key"
+      ],
+      "title": "DatabaseConnection",
+      "type": "object"
+    },
+    "EnvironmentBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "discriminator": {
+            "mapping": {
+              "CONFIG_MAP": "#/$defs/ConfigBinding",
+              "DATABASE": "#/$defs/DatabaseBinding",
+              "USER_SECRET": "#/$defs/SecretBinding"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ConfigBinding"
+            },
+            {
+              "$ref": "#/$defs/SecretBinding"
+            },
+            {
+              "$ref": "#/$defs/DatabaseBinding"
+            }
+          ],
+          "title": "Source"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "EnvironmentBinding",
+      "type": "object"
+    },
+    "Image": {
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "pattern": "^[^\\s@]+@sha256:[a-f0-9]{64}$",
+          "title": "Uri",
+          "type": "string"
+        },
+        "platforms": {
+          "items": {
+            "enum": [
+              "linux/amd64",
+              "linux/arm64"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Platforms",
+          "type": "array"
+        },
+        "registry_auth_ref": {
+          "type": "null",
+          "default": null
+        }
+      },
+      "required": [
+        "uri",
+        "platforms"
+      ],
+      "title": "Image",
+      "type": "object"
+    },
+    "SecretBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "USER_SECRET",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9._-]+$",
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "key"
+      ],
+      "title": "SecretBinding",
+      "type": "object"
+    },
+    "VersionRef": {
+      "additionalProperties": false,
+      "description": "Opaque, immutable record version. Never a credential or signed URL.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "VersionRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "const": "1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "environment": {
+      "enum": [
+        "SANDBOX",
+        "PRODUCTION"
+      ],
+      "title": "Environment",
+      "type": "string"
+    },
+    "provider": {
+      "enum": [
+        "AWS",
+        "GCP",
+        "ON_PREM"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "release_name": {
+      "maxLength": 53,
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "title": "Release Name",
+      "type": "string"
+    },
+    "namespace": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "title": "Namespace",
+      "type": "string"
+    },
+    "config_ref": {
+      "$ref": "#/$defs/ContentRef"
+    },
+    "image": {
+      "$ref": "#/$defs/Image"
+    },
+    "application": {
+      "$ref": "#/$defs/Application"
+    },
+    "database": {
+      "$ref": "#/$defs/DatabaseConnection"
+    },
+    "required_env": {
+      "items": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+        "type": "string"
+      },
+      "title": "Required Env",
+      "type": "array"
+    },
+    "env": {
+      "items": {
+        "$ref": "#/$defs/EnvironmentBinding"
+      },
+      "title": "Env",
+      "type": "array"
+    }
+  },
+  "required": [
+    "contract_version",
+    "environment",
+    "provider",
+    "release_name",
+    "namespace",
+    "config_ref",
+    "image",
+    "application",
+    "database",
+    "required_env",
+    "env"
+  ],
+  "title": "ApplicationValues",
+  "type": "object"
+}

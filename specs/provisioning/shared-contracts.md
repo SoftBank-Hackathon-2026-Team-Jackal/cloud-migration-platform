@@ -74,3 +74,7 @@ identity = approval_target(manifest, preview)
 ```
 
 `uv run pytest tests/test_artifacts.py tests/test_chart_contracts.py tests/test_plan_contracts.py tests/test_bindings.py`로 공개 경계 테스트를 재현한다. 후속 기능이 완성되기 전에는 fixture 통과를 실제 저장 Plan·Helm 렌더·승인 실행의 성공으로 표시하지 않는다.
+
+## 앱 렌더 소비자 (03)
+
+`cmp_contracts.application`과 `cmp_providers.application`이 기존 DynamicBinding을 소비한다. `cmp_providers.app_renderer.render_application`은 검증된 참조 전용 Values로 실제 Helm Manifest bytes를 만든다. [상세 계약](application-rendering.md)을 따른다. 승인/저장/실배포 기능을 대신하지 않는다.
