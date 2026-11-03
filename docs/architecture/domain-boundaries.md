@@ -150,3 +150,7 @@ Provisioning Planning이 소비할 정보는 [Provision 입력 계약](../../spe
 ## P0 병렬 구현 결정
 
 [ADR-002](../decisions/ADR-002.md)에 따라 Sandbox/Provisioning 공유 계약을 먼저 구현하고, 각 작업은 [파일 소유 범위](../../specs/provisioning/parallel-work.md)를 따른다. DB/App Chart는 분리하고 DB 승인 기록을 유지하며 범용 Outbox는 P0에서 보류한다. AWS/GCP 기존 네트워크 재사용은 제외하지만 ON_PREM의 기존 K3s 배포 책임은 유지한다.
+
+### 격리 Agent 구현 경계 (#15)
+
+04의 검증 Agent는 로컬 SQLite spool 폴링과 명시적 kubeconfig로 실제 격리 K3s를 호출한다. 현재 FastAPI/Temporal 스캐폴드 또는 운영 원격 Agent 전송 경로와 연결하지 않는다. [구현·검증 범위](../../specs/provisioning/k3s-agent.md)를 따른다.

@@ -254,3 +254,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 ### Ticket 03 구현 결과
 
 앱 전용 `infra/helm/application`과 내부 ApplicationValues/환경변수 메타데이터 계약을 구현했다. 일반 설정·사용자 Secret은 ConfigMap/Secret 이름·키 참조, DB 연결은 명시적인 DATABASE 매핑으로 구분한다. 기존 DynamicBinding과 bind/verify 함수를 재사용해 승인된 host/secret_name 슬롯만 채운다. 공개 렌더 함수는 Helm 오류 원문을 숨기며 실제 배포/참조 조회는 수행하지 않는다. [계약·예제·책임 경계](application-rendering.md)를 따른다.
+
+### Ticket 04 구현 결과
+
+[k3s-agent.md](k3s-agent.md)의 로컬 폴링 Agent와 별도 k3d 환경에서 DB·앱 실제 배포, PVC/Ready/Service·SQL, 중복/재연결 및 정리를 검증했다. UID·작업 라벨로 테스트 대상에 묶고 Digest 고정 Helm 렌더 산출물을 적용한다. 운영 원격 Agent 프로토콜·인증·Helm Release 관리·Production 승인 연결은 후속 범위다. 학습용 minikube는 대상에서 제외한다.

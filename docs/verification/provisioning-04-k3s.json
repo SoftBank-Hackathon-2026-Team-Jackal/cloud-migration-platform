@@ -1,0 +1,36 @@
+{
+  "context": "k3d-cmp-prov-15",
+  "namespace": "cmp-test-smoke-0a510327",
+  "job_id": "smoke-0a510327",
+  "preflight": {
+    "connected": true,
+    "cluster_uid": "94d35d0a-5457-4a59-98ce-7c8777fb5c48",
+    "namespace_uid": "fb8bf1e6-246b-4fd6-b8c9-f115ed972ead",
+    "storage_class": "local-path",
+    "provisioner": "rancher.io/local-path"
+  },
+  "deployment": {
+    "status": "SUCCEEDED",
+    "result": {
+      "pvc": "Bound",
+      "database_ready": true,
+      "application_ready": true,
+      "service_database_check": true,
+      "namespace": "cmp-test-smoke-0a510327"
+    }
+  },
+  "duplicate_and_process_reconnect": "PASSED",
+  "lost_completion_ack_recovered_without_redeploy": true,
+  "live_recheck": {
+    "pvc": "Bound",
+    "database_ready": true,
+    "application_ready": true,
+    "service_database_check": true,
+    "namespace": "cmp-test-smoke-0a510327"
+  },
+  "namespace_deleted": true,
+  "default_kubeconfig_unchanged": true,
+  "test_cluster_and_registry_deleted": true,
+  "default_context_after_cleanup": "minikube",
+  "existing_minikube_container_running": true
+}
