@@ -246,3 +246,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 | S3 의존 앱의 P0 검증 | 사용자 객체 스토리지 자동 생성·이전 없이 시연할 기능 범위 결정 |
 
 현행 로컬 Temporal/API 스캐폴드는 AWS→GCP 예시 흐름이고, 실제 EKS/GKE/K3s Provisioning을 구현하지 않는다. 이전 플랫폼 관리 앱·독립 K3s·Cloudflare 방향의 문서와 현행 정책 간 차이는 [제품 정책의 확인 필요](../../docs/product/policies.md)에 이미 기록돼 있다. 이 설계는 4단계 `spec.md`의 범위를 유지하며, 그 충돌을 임의로 해결하거나 기존 코드를 수정하지 않는다.
+
+### Ticket 02 구현 결과
+
+공통 PostgreSQL 16 Chart는 `infra/helm/postgres`에 구현했다. 공유 PostgresChartValues와 동일 구조의 schema를 사용하며 세 Provider와 Sandbox/Production 조합의 실제 Helm 렌더를 검사한다. 단일 StatefulSet·headless Service·보존 PVC를 생성하고 requests/limits와 PVC 용량을 분리한다. [입력·재현·미검증 범위](../../infra/helm/README.md)를 따른다. 원격 Artifact 저장과 배포/실제 PVC·DB 검증은 아직 수행하지 않는다.

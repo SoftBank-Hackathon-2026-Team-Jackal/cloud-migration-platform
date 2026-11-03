@@ -1,0 +1,6 @@
+apiVersion: v2
+name: postgres
+version: 0.1.0
+appVersion: '16'
+description: Shared PostgreSQL chart for Sandbox and Production
+type: application
