@@ -1,5 +1,7 @@
 # Sandbox/온프레미스 공통 배포 입력·렌더 결과 계약
 
+> 아래의 `SharedDeploymentRequest`/`Result` 예시는 **구현된 v1 단일 앱·DB 계약**이다. 최신 다중 리소스 입·출력 목표는 이 문서의 **v2 설계 입력·반환** 절을 따른다. v2 공통 렌더러는 아직 구현되지 않았다.
+
 ## 상태와 책임
 
 2026-11-03 사용자와 합의한 **공통 렌더 계약**이다. 04A(#20)의 `SharedDeploymentRequest`/`SharedDeploymentResult`와 `cmp_providers.shared_deployment.render_shared_deployment`가 기존 `PostgresChartValues`, `ApplicationValues`, DB 바인딩 및 두 Helm Chart를 조합한다. 이 문서는 실제 배포가 끝났다는 뜻이 아니다.
@@ -103,6 +105,47 @@ result = render_shared_deployment(
     application_chart_dir=Path("infra/helm/application"),
 )
 ```
+
+## v2 설계 입력·반환 (미구현)
+
+사용자가 확정한 공통 렌더러 v2는 Sandbox Worker와 Provisioning Worker가 **대상 환경에 맞는 구체값을 결정한 뒤** 호출한다. Planning의 `RequirementsV2.resources[]`는 분석 요구이며 다음 입력의 Release 이름, 이미지, StorageClass, Secret 참조까지 확정한 상태가 아니다. Worker는 `.env`와 `mapping_ref`의 제외·대체 규칙을 해석하고 Secret을 준비해 최종 변수별 바인딩만 전달한다. 원문 비밀값은 렌더러에 넣지 않는다.
+
+```yaml
+contract_version: "2"
+environment: SANDBOX           # 운영 배포는 PRODUCTION
+provider: ON_PREM              # 검증하는 대상 Provider
+namespace: cmp-test-001        # 호출 Worker가 결정
+resources:
+  - id: postgres-main
+    kind: POSTGRESQL
+    release_name: cmp-test-001-db
+    image: {uri: "docker.io/library/postgres@sha256:<Digest>", platforms: [linux/amd64]}
+    version: "16"               # Analysis 요구와 이미지 호환 확인
+    extensions: []              # P0 미지원 확장은 거절
+    database:
+      name: appdb
+      username: appuser
+      password_secret_ref: {name: cmp-test-001-db-auth, key: password}
+    resources: {cpu_millicores: 250, memory_mib: 512}
+    storage: {class_name: local-path, size_gib: 5}
+  - id: api-main
+    kind: APPLICATION
+    release_name: cmp-test-001-app
+    image: {uri: "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/demo@sha256:<검증 Digest>", platforms: [linux/amd64]}
+    replicas: 1
+    resources: {cpu_millicores: 250, memory_mib: 256}
+    port: 8080
+    health_path: /health
+    env_bindings:
+      DB_HOST: {resource_id: postgres-main, output: host}
+      DB_PORT: {resource_id: postgres-main, output: port}
+      DB_PASSWORD: {resource_id: postgres-main, output: password_secret_ref}
+      API_KEY: {secret_ref: {name: cmp-test-001-app-env, key: API_KEY}}
+```
+
+성공 반환은 `environment`, `namespace`, ID·종류를 유지한 `resources[]`, `validation`으로 구성한다. 각 DB 원소는 `release_name`, `helm_values`, `manifest_yaml`, `outputs={host,port,name,username,password_secret_ref}`를, 각 앱 원소는 `release_name`, `helm_values`, `manifest_yaml`, `resolved_env_bindings`를 반환한다. 예를 들면 `DB_HOST`는 생성된 DB Service 주소, `DB_PASSWORD`와 `API_KEY`는 `{secret_name,secret_key}`가 된다. `validation={passed:true,errors:[]}`는 **렌더 검증**일 뿐 실제 Apply·Pod Ready·DB 접속 성공이 아니다. 실패는 안전한 필드 경로·오류 코드로 반환한다.
+
+구현 시 `APPLICATION`·`POSTGRESQL`만 렌더하고 나머지 종류는 명시적으로 거절한다. PostgreSQL 이미지의 버전/확장은 Analysis 요구와 대조하며 대상 Profile은 요구를 덮어쓰지 못한다. `network_intent`는 Sandbox와 운영 Worker가 각 환경의 정책으로 해석하고, Sandbox 전용 원본 클라우드 차단 규칙은 별도로 적용한다. 현재 v1의 `release_names.app/db`, `app`, `db`, `env_bindings` 최상위 필드를 v2 입력으로 그대로 전달할 수 없다.
 
 ## Agent 등록과 소유
 

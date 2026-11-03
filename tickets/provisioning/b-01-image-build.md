@@ -16,6 +16,8 @@ DONE — [Issue #17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/clou
 - 출력: 성공/실패, 리소스 ID·소스 URI/선택적 버전·SHA-256·시도/플랫폼 출처, 성공 시 ECR manifest Digest와 `repository@sha256:...` 전체 참조, 로그 S3 참조와 가능한 VersionId, 실패 시 안전한 오류 코드.
 - Builder의 IAM 권한으로 S3 읽기/로그 쓰기와 ECR 조회·push를 수행한다. ECR 저장소는 미리 만들고 태그 불변(immutable)으로 설정한다. 인증 값은 함수 인자나 Temporal 이력에 싣지 않는다. 로그는 원시 Docker 출력 대신 상태·Digest·안전한 오류 코드의 구조화 기록이다.
 
+현재 `BuildOutcome.model_dump()`의 정확한 반환 필드는 `migration_id`, `resource_id`, `attempt_id`, `status`, `source_ref={uri,version_id,sha256}`, `platform`, `image_uri`, `image_digest`, `log={uri,version_id}` 또는 null, `error_code`다. 실패 시 `image_uri`·`image_digest`는 null이다. Python 기존 호출의 `source`·`source_sha256`·`digest` 읽기 속성은 호환을 위해 남지만 직렬화 출력에는 없다. 로그 경로는 리소스별 충돌을 막기 위해 아래 예시처럼 `<resource_id>`를 포함한다.
+
 ## 수용 기준
 
 - [x] URI 하나로 S3 원본 아카이브를 내려받고 파일명 SHA-256과 실제 바이트를 비교한다. 별도 해시·컨텍스트 경로·VersionId 입력은 요구하지 않는다.

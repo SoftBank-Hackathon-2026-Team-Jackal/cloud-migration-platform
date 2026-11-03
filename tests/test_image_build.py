@@ -133,6 +133,14 @@ def test_s3_to_ecr_returns_digest_and_versioned_log(tmp_path, monkeypatch):
     assert result.image_uri == f"{ECR}@{DIGEST}"
     assert result.source.uri == source_uri(path)
     assert result.source.version_id is None
+    wire = result.model_dump()
+    assert wire["source_ref"] == {
+        "uri": source_uri(path),
+        "version_id": None,
+        "sha256": path.name.removesuffix(".tar.gz"),
+    }
+    assert wire["image_digest"] == DIGEST
+    assert "source" not in wire and "digest" not in wire
     assert result.log.uri == "s3://log-bucket/builds/migration-1/api-main/attempt-1.json"
     assert result.log.version_id == "log-v1"
     assert logs[0]["source_sha256"] == path.name.removesuffix(".tar.gz")
@@ -199,6 +207,7 @@ def test_changed_archive_bytes_are_rejected_before_ecr_lookup(tmp_path, monkeypa
     assert result.status == "FAILED"
     assert result.error_code == "SOURCE_DIGEST_MISMATCH"
     assert result.image_uri is None
+    assert result.model_dump()["image_digest"] is None
     assert not any(c[:3] == ["aws", "ecr", "describe-images"] for c in calls)
     assert logs[0]["status"] == "FAILED"
 

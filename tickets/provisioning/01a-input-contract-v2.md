@@ -27,3 +27,4 @@ DONE — [Issue #1](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud
 - 2026-11-04: `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` — Ruff lint/format 통과, pytest **238 passed**(기존 Starlette 경고 1건). v1 회귀를 포함한다.
 - `tests/test_provisioning_v2.py`에서 정상 단일/다중 앱, 세 대상 종류, 원문·참조·Digest·플랫폼·상태·설정·정리 불일치, 임의 키의 오류 노출 방지를 확인했다. `tests/test_image_build.py`에서 리소스별 태그/로그 분리와 선택적 S3 Version ID 전달을 확인했다.
 - 실제 S3 객체·ECR/GCP 권한·업무 DB 소유권 조회, 다중 리소스 렌더, Temporal 인계와 클라우드 배포는 이 순수 경계 밖이며 검증하지 않았다. 로컬 클라우드 작업용 프로필 이름만 기록했고 계정 접근은 시도하지 않았다.
+- 입·출력 계약 재대조: `input-contract-v2.md`에 Planning envelope·요구사항 산출물·반환 필드를 명시하고, `onprem-shared-deployment.md`에 공통 렌더러 v2의 목표 입력·반환을 **미구현 설계**로 분리했다. Build 직렬화 결과를 `source_ref`·`image_digest`로 정렬하고 기존 Python 속성 호환을 유지했다. 이후 `make check` 238개 재통과.

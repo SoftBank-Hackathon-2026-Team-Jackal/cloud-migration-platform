@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated
 from urllib.parse import urlsplit
 
+from cmp_contracts.provisioning_v2 import S3ArchiveRef
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _ECR = re.compile(
@@ -118,13 +119,25 @@ class BuildOutcome(BaseModel):
     resource_id: str
     attempt_id: str
     status: str
-    source: S3Ref
-    source_sha256: str
+    source_ref: S3ArchiveRef
     platform: str
-    digest: str | None = None
+    image_digest: str | None = None
     image_uri: str | None = None
     log: S3Ref | None = None
     error_code: str | None = None
+
+    @property
+    def source(self) -> S3Ref:
+        """Compatibility view for callers of the initial common builder."""
+        return S3Ref(uri=self.source_ref.uri, version_id=self.source_ref.version_id)
+
+    @property
+    def source_sha256(self) -> str:
+        return self.source_ref.sha256
+
+    @property
+    def digest(self) -> str | None:
+        return self.image_digest
 
 
 class BuildFailure(Exception):
@@ -420,10 +433,13 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
         resource_id=request.resource_id,
         attempt_id=request.attempt_id,
         status="FAILED" if error_code else "SUCCEEDED",
-        source=request.source,
-        source_sha256=sha,
+        source_ref=S3ArchiveRef(
+            uri=request.source.uri,
+            version_id=request.source.version_id,
+            sha256=sha,
+        ),
         platform=request.platform,
-        digest=digest if not error_code else None,
+        image_digest=digest if not error_code else None,
         image_uri=f"{request.ecr_repository}@{digest}" if digest and not error_code else None,
         log=log,
         error_code=error_code,

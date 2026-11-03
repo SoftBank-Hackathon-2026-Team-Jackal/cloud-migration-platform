@@ -15,6 +15,54 @@ result = prepare_plan_v2(envelope, requirements_bytes=requirements_bytes)
 # result.spec은 Plan 입력이다. 아직 Plan ID·Revision·Preview나 배포 성공이 아니다.
 ```
 
+## 정확한 Planning 입·출력 배치
+
+`PlanningRequestV2`의 입력은 아래 필드로 고정한다. `<...>`는 실제 값이 아닌 설명용 표기다. 호출 Activity가 참조의 권한·불변 버전을 확인하고, `requirements_ref`가 가리키는 정확한 JSON 바이트를 별도 `requirements_bytes` 인자로 전달한다.
+
+```yaml
+contract_version: "2"
+migration_id: migration-001
+analysis:
+  result_ref: {id: analysis-001, version: "1"}
+  requirements_ref: {id: requirements-001, version: "1", sha256: "<SHA-256>"}
+  source_refs:
+    api-main: {uri: "s3://source-bucket/<SHA-256>.tar.gz", version_id: null, sha256: "<SHA-256>"}
+  # config_artifact_ref: {id: config-001, version: "1", sha256: "<SHA-256>"}
+builds:
+  - resource_id: api-main
+    result_ref: {id: build-001, version: "1"}
+    status: SUCCEEDED
+    source_ref: {uri: "s3://source-bucket/<SHA-256>.tar.gz", version_id: null, sha256: "<SHA-256>"}
+    image_uri: "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/demo@sha256:<Digest>"
+    image_digest: "sha256:<Digest>"
+    platforms: [linux/amd64]
+sandbox:
+  result_ref: {id: sandbox-001, version: "1"}
+  status: PASSED
+  validated_workloads:
+    - {resource_id: api-main, build_ref: {id: build-001, version: "1"}, image_digest: "sha256:<Digest>", platform: linux/amd64, source_sha256: "<SHA-256>"}
+  requirements_ref: {id: requirements-001, version: "1", sha256: "<SHA-256>"}
+  report_ref: {id: report-001, version: "1", sha256: "<SHA-256>"}
+  test_suite_ref: {uri: "s3://test-bucket/<SHA-256>.tar.gz", version_id: null, sha256: "<SHA-256>"}
+  cleanup_status: CLEANED
+  # config_artifact_ref: {id: config-001, version: "1", sha256: "<SHA-256>"}
+target_selection:
+  ref: {id: target-001, version: "1"}
+  provider: ON_PREM
+  location: null
+  access_ref: {id: cluster-001, version: "1"}
+  capabilities_ref: {id: capabilities-001, version: "1"}
+  # profile: optional-default
+environment:
+  env_file_ref: {id: env-001, version: "1", sha256: "<SHA-256>"}
+  mapping_ref: {id: mapping-001, version: "1", sha256: "<SHA-256>"}
+policy: {template_version: helm-v2}
+```
+
+`requirements_bytes`의 JSON은 `contract_version="2"`, `resources[]`, `network_intent[]`다. `resources[]`의 각 `APPLICATION`은 `id`, `kind`, `replicas`, `cpu_millicores`, `memory_mib`, `port`, `health_path`, `env_bindings`를, 각 `POSTGRESQL`은 `id`, `kind`, `version`, `extensions`, `database={name,username}`, `cpu_millicores`, `memory_mib`, `storage_gib`를 가진다. `env_bindings` 값은 `{resource_id,output}`이며, `network_intent[]`는 `{source_resource_id,destination_resource_id | external_host,port,protocol}`이다. 이 바이트의 SHA가 `analysis.requirements_ref.sha256`과 같아야 한다.
+
+정확한 반환은 `PlanningResultV2={spec,pending_decisions}`다. `spec`의 최상위 필드는 `contract_version`, `migration_id`, `analysis_result_ref`, `requirements_ref`, `requirements`, `source_refs`, 선택적 `config_artifact_ref`, `sandbox_result_ref`, `sandbox_report_ref`, `sandbox_cleanup_status`, `test_suite_ref`, `images[]`, `target_selection`, `environment`, `policy`다. `images[]`의 각 원소는 `{resource_id,build_ref,source_ref,image_uri,image_digest,platform}`이다. `pending_decisions[]`는 `{code,path,message}`다. **Plan ID·Revision·Preview는 반환하지 않는다.**
+
 ## Analysis 요구사항과 리소스 연결
 
 `requirements_ref={id,version,sha256}`가 가리키는 JSON은 `contract_version="2"`, `resources[]`, `network_intent[]`로 구성한다. 리소스마다 고유 `id`와 `kind`가 있다. P0는 `APPLICATION`, `POSTGRESQL`만 수용하고 다른 종류는 오류다. 최소 한 앱과 한 DB가 필요하다. 앱은 CPU millicores·메모리 MiB·복제 수·포트·헬스 경로를, PostgreSQL은 버전 16·DB 이름/사용자·CPU·메모리·PVC GiB와 `extensions`를 기록한다. 현재 확장 설치·검증은 없으므로 `extensions`가 비어 있지 않으면 계획 입력을 거절한다. DB 이미지는 이 요구를 만족하는 Digest를 후속 대상 구성에서 선택·검증하며 Profile이 요구 버전을 덮어쓰지 않는다.
@@ -40,8 +88,12 @@ Sandbox `cleanup_status`가 `CLEANED`가 아니면 결과에 `CLEANUP_POLICY_REQ
 
 공통 빌더의 `BuildContext`는 `migration_id`, `resource_id`, `attempt_id`, 플랫폼, ECR 저장소와 로그 버킷을 받는다. 호출 시 소스 URI와 **있다면** S3 Version ID를 전달한다. 같은 시도에서 서로 다른 앱은 다른 ECR 태그와 로그 경로를 사용하고, 결과에는 앱 ID·소스 버전·Digest·로그 참조를 포함한다. URI의 해시 이름을 기준으로 아카이브 내용을 검증한다. 빌드 시도/이미지 결과가 실제로 어떤 Migration 기록에 속하는지는 상위 Activity가 소유권 조회로 확인해야 한다.
 
+빌더의 직렬화 결과는 `BuildOutcome={migration_id,resource_id,attempt_id,status,source_ref,platform,image_uri,image_digest,log,error_code}`다. `source_ref={uri,version_id,sha256}`이며 로그는 `{uri,version_id}`다. Planning의 `builds[]`는 이 결과를 그대로 받는 형태가 아니다. 상위 Activity가 빌드 결과를 불변 기록으로 저장해 `result_ref`를 발급하고 단일 `platform`을 `platforms[]`로 정규화하며, 해당 결과의 소유 작업·시도를 확인해 전달한다. 이 저장·정규화 Activity는 아직 구현되지 않았다.
+
 ## 대상·환경과 Plan 시점
 
 `target_selection`에는 선택 기록 참조, Provider(`AWS`/`GCP`/`ON_PREM`), Cloud 위치 또는 ON_PREM의 null, 접근 참조, capabilities 참조가 필수다. 이름 붙은 `profile`은 선택적 기본값일 뿐 요구사항을 덮어쓰지 않는다. capabilities의 아키텍처·StorageClass·이미지 접근 여부와 실제 Provider 권한은 후속 대상 구성 Activity가 조회·검증한다. `environment`의 `.env` 파일·mapping 참조를 Worker가 처리해 **최종 변수별 바인딩**을 만들고 Secret을 준비한다. 이 순수 경계에는 원문 `.env`·Secret·Credential을 넣지 않는다.
 
 `prepare_plan_v2`는 검증된 요구·출처·대상·환경 참조와 앱별 고정 이미지를 `ProvisioningSpecV2`로 반환한다. **입력에 Plan ID·Revision을 요구하지 않는다.** 후속 Planning 저장 경계가 Plan ID/Revision과 불변 산출물·Preview를 발급하고, 승인 후 실행은 그 정확한 산출물을 재검증한다. v2 Spec은 기존 단일 앱/DB `cmp_providers.provisioning.adapt`나 `render_shared_deployment`에 바로 넣지 않는다. 다중 리소스 렌더·대상별 변환과 Temporal 결과 전달은 다음 구현 작업이다.
+
+공통 렌더러의 변경된 `resources[]` 입력·반환 설계는 [공통 배포 계약 v2 절](onprem-shared-deployment.md#v2-설계-입력반환-미구현)에 기록한다. 현재는 v1 단일 앱·DB 렌더러만 실행 가능하다.
