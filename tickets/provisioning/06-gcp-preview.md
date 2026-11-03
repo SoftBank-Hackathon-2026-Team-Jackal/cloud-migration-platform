@@ -24,6 +24,7 @@ Blocked by: 01, CP-01
 ## 테스트 전략
 - 제안 Test Seam: GCP 저장 Plan 메타데이터와 사용자 Preview. 실제 GKE 준비 상태는 확인하지 못한다.
 - 실행: `terraform fmt -check`, `terraform init -backend=false`, `terraform validate`; 격리 프로젝트 Plan은 별도 실행.
+- 2026-11-04 기준: 실제 GCP Provider의 저장 Plan·민감정보 제거 Preview를 보호된 로컬 State에서 검증할 수 있다. 이 검증 Plan은 승인 불가로 표시한다. 운영 승인은 중앙 S3 State와 잠금을 사용한 새 최종 Plan·Preview 및 대상 프로젝트/ADC 권한 확인이 선행되어야 한다. Mock fixture만으로 DONE 처리하지 않는다.
 
 ## 완료 시 확인할 동작
 GCP 대상 Preview와 내부 Plan 참조를 대조할 수 있다.

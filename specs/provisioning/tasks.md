@@ -1,6 +1,6 @@
 # Tasks: Provisioning
 
-이 파일은 Provisioning 구현 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 내부 v1 입력 계약·로컬 검증·대상별 구성 예시를 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증을 완료했다. 04A는 PR #21로 main에 반영됐다. B-01(#17)의 공통 빌드 모듈은 PR #18로 main에 반영됐고 Workflow/Worker 연결은 후속 통합 범위다. 01A(#1)는 최신 v2 입력/Planning 검증과 로컬 검사를 완료했다. 04B(#23)는 v2 다중 리소스 공통 Chart 렌더를 완료했다. 05/06/07은 `TODO`이며 사용자 지시에 따라 독립 티켓은 병렬 채팅에서 진행할 수 있다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
+이 파일은 Provisioning 구현 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 내부 v1 입력 계약·로컬 검증·대상별 구성 예시를 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증을 완료했다. 04A는 PR #21로 main에 반영됐다. B-01(#17)의 공통 빌드 모듈은 PR #18로 main에 반영됐고 Workflow/Worker 연결은 후속 통합 범위다. 01A(#1)는 최신 v2 입력/Planning 검증과 로컬 검사를 완료했다. 04B(#23)는 v2 다중 리소스 공통 Chart 렌더를 완료했다. 05는 실제 AWS Provider 저장 Plan·민감정보 제거 Preview를 로컬 검증 경로에서 완료했고 운영 승인은 별도 선행 조건이다. 06/07은 `TODO`이며 사용자 지시에 따라 독립 티켓은 병렬 채팅에서 진행할 수 있다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
 
 | ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
@@ -14,7 +14,7 @@
 | [04A 온프레미스 Agent 등록과 공통 K3s 배포 계약](../../tickets/provisioning/04a-onprem-agent-enrollment.md) | DONE | 02, 03, 04 | PROV-005, 006, 009 | [#20](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/20) | ☑ |
 | [04B Sandbox·Provisioning 공통 렌더링 v2](../../tickets/provisioning/04b-shared-render-v2.md) | DONE | 01A, 04A | PROV-004, 005, 006, 010, 011, 012, 021 | [#23](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/23) | ☑ |
 | [B-01 S3 소스 공통 빌드와 ECR Digest 반환](../../tickets/provisioning/b-01-image-build.md) | DONE | ADR-003 | PROV-001, 004, 010, 021 | [#17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/17) | ☑ |
-| [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | TODO | 01A, CP-01 | PROV-002, 003, 007, 014, 021 | 미생성 | ☐ |
+| [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | DONE | 01A, CP-01 | PROV-002, 003, 007, 014, 021 | [#2](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/2) | ☑ |
 | [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | TODO | 01A, CP-01 | PROV-002, 003, 008, 014, 021 | 미생성 | ☐ |
 | [07 Plan Revision 승인과 Temporal 실행 차단](../../tickets/provisioning/07-approval-gate.md) | TODO | 01A, CP-01 | PROV-014, 015, 016, 021 | 미생성 | ☐ |
 | [08 승인된 Plan으로 AWS EKS 기반 준비](../../tickets/provisioning/08-aws-infra-apply.md) | DRAFT | 05, 07 | PROV-007, 015, 016, 017 | 미생성 | ☐ |

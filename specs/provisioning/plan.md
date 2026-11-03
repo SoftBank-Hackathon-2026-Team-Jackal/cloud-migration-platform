@@ -154,6 +154,8 @@ ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Ma
 
 ## 8. Terraform Plan·Apply·State (`PROV-014`~`017`, `021`)
 
+05의 AWS 경로는 `infra/terraform/aws`의 고정 템플릿과 `cmp_providers.aws_preview`의 명시적 신규 VPC·Subnet·EKS·Node 입력을 사용한다. 운영 Plan의 S3 Backend는 기존 버킷의 환경별 key, 암호화, Terraform lockfile 잠금으로 초기화하며 Plan 시 AWS 계정을 재확인한다. 저장 binary Plan·Spec의 바이트 Digest, 템플릿·Provider lockfile Digest, Plan ID·Revision·대상/State 식별을 기록한다. Preview는 `terraform show -json`의 자원 종류·행위만 허용 목록으로 읽고 검증된 입력 사양을 표시한다. 05의 로컬 State 검증 Plan은 `LOCAL_STATE_VALIDATION_ONLY` 미해결 결정을 남겨 승인할 수 없으며, 실제 승인 전에 S3-backed 최종 Plan·Preview를 새로 생성해야 한다. 이 Preview는 `INFRASTRUCTURE` 범위이며 ALB/앱/DB 배포 완료나 전체 승인 가능 상태를 뜻하지 않는다. 영속 산출물 저장 연동은 후속 범위다.
+
 클라우드 경로는 **구성 생성 → init → validate → 저장 Plan → Preview → 승인 → 저장된 Plan Apply → Output/실제 상태 조회** 순서다. Terraform이 관리하는 것은 네트워크·클러스터 등 인프라이고 Helm은 Kubernetes 워크로드를 관리한다. Chart/Values도 승인 계획에 묶어 두 실행 계층의 구성이 같이 고정되게 한다.
 
 **Plan/Apply 동일성 권장안:** Plan ID·Revision에 `ProvisioningSpec` 정규화 Digest, 이미지 Digest, Terraform 구성/모듈·Provider lockfile Digest, Helm Chart/Values **템플릿과 동적 바인딩 규칙**의 Digest, Template Version, 대상·계정·Backend State 식별자와 저장된 Terraform binary Plan Digest를 기록한다. DB Endpoint·생성 Secret 참조처럼 Apply 후에만 결정되는 값은 승인된 바인딩 위치에만 채우고, 최종 Values의 다른 부분이 Preview의 잠긴 구성과 같은지 검증한다. 사용자용 Preview는 이 잠긴 산출물에서 파생한 요약이다. 승인 기록은 동일 Plan ID·Revision·Preview Digest를 참조한다. Apply 직전에 승인·현재 Revision·파일 Digest·대상 계정·State 식별자를 재확인한다. 변경이나 State drift로 저장 Plan이 무효하면 **재계획·새 Revision·재승인**으로 돌아가고 조용히 새 Plan을 Apply하지 않는다. Preview에는 생성/변경 자원·Node/네트워크·보안·앱/DB/PVC·Terraform 변경 요약·Helm 예상 리소스·오류/경고를 보여주되 Plan 원문·Secret은 노출하지 않는다.
