@@ -10,7 +10,7 @@ DRAFT — 사용자 검토 전
 AV-001~AV-021, spec §7
 
 ## 선행 작업
-Blocked by: 06, 15, 데모 앱 준비
+Blocked by: 06, 15, 데모 앱 준비(D-07)
 
 ## 작업 범위
 - 포함: 데모 앱 실제 분석, 실제 빌드, 미리 띄운 Sandbox 기반에서 검증, 소요 시간 측정, 시연 순서
@@ -29,8 +29,8 @@ Blocked by: 06, 15, 데모 앱 준비
 데모 앱을 넣으면 검증된 Digest와 분석 결과가 Planning으로 넘어간다.
 
 ## 결정 대기
-- 데모 앱 확정(소울님)
-- Sandbox 기반 클러스터 준비 주체·시점
+- 데모 앱 확정(D-07)
+- Sandbox 기반 클러스터 준비(D-08)
 
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
@@ -38,7 +38,7 @@ Blocked by: 06, 15, 데모 앱 준비
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 구현 중 변경: 아직 없음
+- 2026-11-04: 의도 누락 시나리오를 통합 조건에 포함.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

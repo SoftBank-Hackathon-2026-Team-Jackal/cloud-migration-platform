@@ -1,33 +1,53 @@
 # Implementation plan: 분석·매핑·Sandbox 검증
 
-[spec.md](spec.md)의 `AV-001`~`AV-021`을 Python 3.11, Pydantic v2, Temporal, Helm으로 구현하기 위한 **설계 제안**이다. 함수명·필드명·Activity 분할은 구현하며 확정한다. Provisioning과 맞물리는 계약은 [Provision 입력 계약](../provisioning/input-contract.md), [공유 계약](../provisioning/shared-contracts.md), [앱 렌더링](../provisioning/application-rendering.md), [B-01](../../tickets/provisioning/b-01-image-build.md)을 따른다.
+[spec.md](spec.md)의 `AV-001`~`AV-021`을 Python 3.11, Pydantic v2, Temporal, Helm으로 구현하기 위한 **설계 제안**이다. 함수명·필드명·Activity 분할은 구현하며 확정한다. Provisioning과 맞물리는 계약은 민서님 계약 협의안 v2(2026-11-04), [Provision 입력 계약](../provisioning/input-contract.md), [공유 계약](../provisioning/shared-contracts.md), [앱 렌더링](../provisioning/application-rendering.md), [B-01](../../tickets/provisioning/b-01-image-build.md)을 따른다.
+
+## 0. 계약 협의 결과 요약 (2026-11-03~04, 민서)
+
+| 항목 | 결정 | 상태 |
+| --- | --- | --- |
+| 공통 모듈 역할 | 렌더 전용. 구체 환경 값은 호출부가 정함. 차트는 Sandbox·Production 공유 | 합의 |
+| 모듈 입력 구조 | `resources[]`(id·kind) + ID 참조 연결. 첫 단계는 `APPLICATION`·`POSTGRESQL`만 | 민서 제안, 수용 |
+| 대상 정보 | 필수 Profile 대신 capabilities(아키텍처·StorageClass·이미지 접근). Profile은 선택 기본값 | 민서 제안, 수용 |
+| `.env` | 워커가 `.env`와 예외 목록을 처리해 변수별 `env_bindings`·Secret 생성. 렌더러에는 Secret 이름·키 또는 리소스 출력 참조만 | 수용 |
+| `config_ref` | 별도 수정 설정 파일 산출물이 있을 때만 | 수용 |
+| `source_ref` | 리소스별 S3 URI·SHA-256 | 수용 |
+| `network_intent` | 분석이 기록, 각 워커가 환경 정책으로 변환. Sandbox 전용 규칙은 별도 | 수용 |
+| 배포 후 테스트 | 배포 직후 준비 검사만, 테스트 묶음은 데이터 이전 후 | 수용 |
+| `test_suite_ref` | S3 SHA-256, `run_suite` 제공 | 승철 제안 |
+| DB 이미지 | 원본 이미지 우선(분석 확정), 대체 선택 주체 미정 | **결정 대기 D-11** |
+| Build 호출 방식·시간 상한·`source_version_id` | 미정 | **결정 대기 D-12** |
 
 ## 1. Affected modules and contracts
 
 ```text
 packages/contracts/src/cmp_contracts/
-  analysis.py          # 새로: AnalysisRequest, UsageProfile, NetworkIntent, Evidence,
-                       #       MappingRow, PrecheckReport, EnvClassification, AnalysisResult
+  analysis.py          # 새로: AnalysisRequest, Evidence, MappingRow, UsageProfile, PrecheckReport,
+                       #       NetworkIntent, ResourceRequirement(APPLICATION/POSTGRESQL),
+                       #       Requirements, EnvExceptions, AnalysisReport
   verification.py      # 새로: SourceArchive, BuildAttempt, SandboxAttempt, Verdict,
-                       #       SandboxVerification (Planning SandboxResult v2로 투영)
+                       #       ValidatedWorkload, SandboxVerification (Planning 입력 v2로 투영)
 packages/agents/src/cmp_agents/      # 새로: 에이전트 본체 (Temporal 의존 없음)
   llm.py  mapper.py  tester.py  fixer.py  masking.py
 packages/scanners/src/cmp_scanners/  # 새로: 결정적 스캐너 (Temporal 의존 없음)
   source.py  code_python.py  manifests.py  aws_infra.py  network.py  profile.py  precheck.py
+packages/testsuite/src/cmp_testsuite/ # 새로: 테스트 묶음 형식과 run_suite (Production 재사용)
 catalog/               # 카탈로그 YAML (사용 방식 어휘·탐지 규칙·등급 기준·표준 테스트)
 skills/                # Skill 지침·보조 스크립트 (k8s-workload, db-postgres, network, config-env)
 apps/worker/src/cmp_worker/
   activities/analysis.py      # 스캔·매핑 Activity (얇게 감싸기)
-  activities/sandbox.py       # 새로: 묶음·빌드 호출·적용·테스트·판정·수정·정리 Activity
-  sandbox/                    # 새로: Helm 적용·갱신·정리, 테스트 실행기, 출구 기록 수집
+  activities/sandbox.py       # 새로: 묶음·빌드 호출·구성·적용·테스트·판정·수정·정리 Activity
+  sandbox/                    # 새로: 구체 값 결정, Secret·NetworkPolicy 생성, Helm 적용·정리, 출구 기록
   workflows/sandbox.py        # 새로: SandboxVerificationWorkflow (자식)
   workers/analysis.py, workers/sandbox.py
 tests/analysis/, tests/sandbox/, tests/fixtures/analysis/
 ```
 
+- 분석 결과 모델 이름은 `AnalysisReport`로 한다. Provisioning v1의 `cmp_contracts.provisioning.AnalysisResult`(Planning 입력용)와 혼동하지 않기 위해서다. Planning에 넘길 때 v2 입력 형태로 투영한다.
+- Enum 값은 대문자로 통일한다(`DIRECT`, `PROCEED`, `SANDBOX_VERIFIED`, `PASSED`, `CLEANED`).
 - 새 Python 패키지는 `pyproject.toml`의 `packages`·`package-dir`에 등록한다.
-- 기존 `cmp_contracts.provisioning.SandboxResult`·`BuildResult`(v1, 이전 순서)는 **수정하지 않는다**. v2 전환은 민서와 합의한 뒤 공동 작업으로 한다(§9).
-- Queue: 기존 `analysis`를 쓰고, Sandbox는 새 `sandbox` Queue를 제안한다(`queues.py`에 추가). Build 모듈 호출 Activity도 `sandbox` Worker에서 실행하되 builder 권한(Docker·ECR push)은 그 Worker 프로세스에만 둔다. Worker를 나누지 않기로 하면 Queue 추가는 생략한다.
+- 기존 `cmp_contracts.provisioning` v1 모델은 **수정하지 않는다**. v2 전환은 민서와 합의한 뒤 공동 작업으로 한다(§9).
+- Queue: 기존 `analysis`를 쓰고, Sandbox는 새 `sandbox` Queue를 제안한다. `queues.py`·`run.py`·`run_all.py`·Workflow는 공유 파일이라 **Q-01 작은 PR로 먼저** 올린다(D-05).
 
 ## 2. Design and data flow
 
@@ -38,53 +58,94 @@ MigrationWorkflow (migration)
  │                  ├─ scan_manifests ──┤ 병렬 (asyncio.gather)
  │                  ├─ scan_aws_infra ──┤
  │                  └─ scan_network ────┘
- │   build_profile → precheck → map_usage(LLM) → check_evidence
+ │   build_requirements → precheck → map_usage(LLM) → check_evidence
  │   (필수 기능 차단이면 여기서 중단·보고)
  ├─ SandboxVerificationWorkflow (자식, migration queue → sandbox activities)
  │   generate_tests(LLM, 별도 세션) → validate_tests → 고정(lock)
  │   package_source → request_build → BuildAttempt
+ │   prepare_sandbox (Namespace·Release·StorageClass·Secret·env_bindings·NetworkPolicy)
  │   반복 attempt = 1..3:
  │     render_sandbox → apply_sandbox → readiness_check
  │     reset_test_data → run_tests → judge
  │     통과 → break
  │     실패 → classify_failure
- │        SPEC   → fix_mapping(LLM) → (다음 시도: 재render, 같은 Digest)
+ │        SPEC(통신 의도 누락 포함) → fix_mapping(LLM) → (다음 시도: 재render, 같은 Digest)
  │        CODE/BUILD → fix_code(LLM) → package_source → request_build → (새 Digest)
  │        RENDER → 중단, Provisioning 담당 보고
  │   3회 초과 → 사람 검토 Signal 대기
+ │   통과 → publish_final_report (최종 AnalysisReport·요구사항 버전 발행)
  │   finally: teardown_sandbox
- └─ AnalysisResult + SandboxVerification → Planning 입력 조립(민서)
+ └─ AnalysisReport + Requirements + SandboxVerification 참조 → Planning 입력 조립(민서)
 ```
 
 - 자식 Workflow로 분리하는 이유: 독립 취소·정리(finally teardown), 시도별 이력 구분, 사람 검토 대기. temporal-flow.md §7의 분리 근거(별도 취소·정리)에 해당한다.
-- Workflow에는 참조와 작은 메타데이터만 둔다. 스캔 원본·렌더 결과·테스트 보고서는 S3에 `<sha256>` 이름으로 저장하고 `ContentRef`로 넘긴다.
+- Workflow에는 참조와 작은 메타데이터만 둔다. 스캔 원본·렌더 결과·테스트 보고서·테스트 묶음은 S3에 `<sha256>` 이름으로 저장하고 참조로 넘긴다.
+- Planning은 앞 단계를 다시 실행하지 않는다. 최상위 Workflow가 결과 참조를 모아 한 번에 넘기고, Planning이 저장소에서 내용을 읽어 대조한다.
 
 ### 2.1 소스 확보 (AV-002)
 
 1. 개발 중: 토큰 클론. 이후: GitHub App(해당 저장소 읽기, 짧은 수명 토큰).
 2. 운영 커밋: EKS의 실행 이미지 → ECR 이미지 설정의 OCI 라벨에서 커밋. 실패 시 사용자 지정 커밋 + `commit_verified=false`.
 3. 작업 공간: Worker의 격리 디렉터리 `<workdir>/<migration_id>/<commit>`. 원본(빌드용)과 마스킹본(LLM용)을 분리 보관한다.
+4. `.env`는 분석 단계에서 이름만 파싱한다. 값은 Sandbox 워커가 Secret을 만들 때만 읽는다(§2.6).
 
 ### 2.2 스캔 (AV-003~AV-006)
 
 | 스캐너 | 방식 | 결과 |
 | --- | --- | --- |
-| `code_python` | 표준 `ast`: `boto3.client/resource(...)` 호출과 메서드, `os.environ`/`getenv`, `psycopg`/`sqlalchemy` import·URL | 호출 지점 목록(파일·줄) |
-| `manifests` | YAML 파싱, Helm 차트는 `helm template` 후 | 리소스별 클라우드 의존(어노테이션·StorageClass·SA) |
+| `code_python` | 표준 `ast`: `boto3.client/resource(...)` 호출과 메서드, `os.environ`/`getenv`, `psycopg`/`sqlalchemy` import·URL, `requests`/`httpx` 외부 호스트, 마이그레이션의 `CREATE EXTENSION` | 호출 지점 목록(파일·줄) |
+| `manifests` | YAML 파싱, Helm 차트는 `helm template` 후 | 리소스별 클라우드 의존, 원본 DB 이미지 Digest |
 | `aws_infra` | boto3 읽기 전용(EKS, EC2 VPC/Subnet/RouteTable/SG, ELBv2, IAM role policy, CloudTrail LookupEvents) | 리소스 설정 |
-| `network` | SG·Ingress → `NetworkIntent{flows, egress, exposure, source_cidrs}` | 네트워크 의도 |
-| `profile` | 위 결과 병합 + Dockerfile 파싱(`COPY`/`ADD` 경로 존재 확인) | `UsageProfile` |
-| `precheck` | 원본 DB 읽기 전용 쿼리(가능할 때) 또는 마이그레이션 파일 정적 분석 | `PrecheckReport` |
+| `network` | SG·Ingress·코드 외부 호출 → `NetworkIntent` | 통신 의도 |
+| `profile` | 위 결과 병합 + Dockerfile 파싱(`COPY`/`ADD` 경로 존재 확인) → `UsageProfile`, `Requirements` | 요구사항 |
+| `precheck` | 코드·매니페스트에서 보이는 단서(세션 기능, 확장, 헬스체크, 노출 주소) | `PrecheckReport` |
 
 교차 해석: 코드 + CloudTrail 일치 = 확실히 사용, 코드에만 = 드문 경로, 권한에만 = 미사용 권한(거버넌스 항목). CloudTrail은 S3 데이터 이벤트를 기본 기록하지 않는다는 한계를 결과에 표시한다.
 
 자격 증명은 `get_session(credential_ref)` 인터페이스 뒤에 둔다. 개발 중에는 SSO 프로필, 이후 환경 연결(민서)이 발급한 참조로 교체한다. 개발용 역할에도 스캔용 정책(읽기 전용, 비밀 값 조회 금지)을 그대로 붙이고 그 정책을 권한 목록으로 전달한다.
 
+`network_intent` 형식(환경 중립, 리소스 ID 기준):
+
+```yaml
+network_intent:
+  exposure:   [{ protocol: HTTPS, port: 443, target: api-main, target_port: 8080 }]
+  flows:      [{ from: api-main, to: postgres-main, port: 5432 }]
+  egress:     [{ host: api.example.com, port: 443, purpose: "외부 API", source_service: KEEP }]
+  source_cidrs: [10.0.0.0/16]   # 정보용
+```
+
+요구사항 형식(공통 모듈 v2 입력과 같은 id·kind):
+
+```yaml
+resources:
+  - id: postgres-main
+    kind: POSTGRESQL
+    version: "16"
+    extensions: []
+    extensions_created_by_app: true      # 마이그레이션이 CREATE EXTENSION을 하는지
+    image: { uri: "<원본 이미지>@sha256:...", status: CONFIRMED }  # 또는 NEEDS_REPLACEMENT
+    database: { name: appdb, username: appuser }
+    resources: { cpu_millicores: 250, memory_mib: 512 }
+    storage: { size_gib: 5 }
+  - id: api-main
+    kind: APPLICATION
+    replicas: 1
+    resources: { cpu_millicores: 250, memory_mib: 256 }
+    port: 8080
+    health_path: /health
+    env_links:
+      DB_HOST: { resource_id: postgres-main, output: host }
+      DB_PASSWORD: { resource_id: postgres-main, output: password_secret_ref }
+```
+
+DB 이미지 확정 규칙: 원본 이미지의 manifest가 capabilities 아키텍처를 지원하면 `CONFIRMED`, 아니면(또는 RDS라 이미지가 없으면) `NEEDS_REPLACEMENT`로 두고 대체 선택을 요청한다(D-11).
+
 ### 2.3 매핑 (AV-007, AV-008)
 
 - 카탈로그 항목: `capability`, `usage_vocabulary`, `detect_rules`, `grade_rules`, `known_differences`, `standard_tests`.
 - Mapper 입력: 마스킹된 증거 요약 + 해당 Skill 지침 + 카탈로그 후보. 출력: `MappingRow[]`(JSON 스키마 강제).
-- 처리 표(기계적): 직접 대응·API 다름 → 진행. 부분 대응 → 필수면 대체 방법 증명 시 진행 아니면 차단, 선택이면 승인. 대응 없음 → 필수면 차단, 선택이면 승인.
+- 처리 표(기계적): `DIRECT`·`API_DIFF` → `PROCEED`. `PARTIAL` → 필수면 대체 방법 증명 시 진행 아니면 `BLOCK`, 선택이면 `APPROVAL`. `NONE` → 필수면 `BLOCK`, 선택이면 `APPROVAL`.
+- 각 의존 서비스에 `MIGRATE` / `KEEP`(원본 유지)을 남긴다. 첫 사이클의 S3는 `KEEP`.
 - `check_evidence`: 근거의 파일·줄 존재, 매니페스트 경로, 리소스 ID 조회. 실패한 행은 `UNVERIFIED`로 둔다.
 
 ### 2.4 소스 묶음 (AV-009)
@@ -114,13 +175,15 @@ context = BuildContext.model_validate({
     "migration_id": migration_id,
     "attempt_id": f"{run_id}-b{n}",        # 코드 변경마다 새 n, 같은 빌드 재시도는 같은 n
     "ecr_repository": settings.ecr_repository,
-    "platform": target_platform,          # 대상 선택에서 결정
+    "platform": capabilities.architecture, # 대상 capabilities에서 결정
     "log_bucket": settings.build_log_bucket,
 })
-outcome = ImageBuilder(context).build(source_uri)   # Activity 안에서만 호출
+outcome = ImageBuilder(context).build(source_uri)   # 현재 B-01 방식(함수). D-12에 따라 Activity 호출로 바뀔 수 있음
 ```
 
-- **재사용은 호출 측에서**: `(source_sha256, platform) → BuildOutcome`을 실행 기록에 남기고, 같은 키면 Build 모듈을 부르지 않는다. B-01은 같은 `attempt_id` 재시도만 재사용하고 `reused` 필드는 없다.
+- **호출 방식(D-12):** B-01은 루프가 함수를 직접 호출하는 설계라, 그대로면 Sandbox 워커에 Docker·ECR push 권한이 필요하다. `build` Queue의 `prepare_image` 스캐폴드를 실제 빌드 Activity로 바꾸는 방안을 민서님께 질문했다. 결정 전에는 `request_build` 뒤에 감춰 어느 쪽이든 바꿀 수 있게 한다.
+- **시간 상한:** 외부 명령마다 600초가 기본이고 전체 상한은 없다. Activity timeout은 D-12 답변으로 정한다.
+- **재사용은 호출 측에서:** `(source_sha256, platform) → BuildOutcome`을 실행 기록에 남기고, 같은 키면 Build 모듈을 부르지 않는다.
 - 실패 코드 분류(B-01 구현 기준):
 
 | 코드 | 분류 | 처리 |
@@ -130,21 +193,24 @@ outcome = ImageBuilder(context).build(source_uri)   # Activity 안에서만 호�
 | `SOURCE_METADATA_INVALID`, `SOURCE_DIGEST_MISMATCH`, `INVALID_ARCHIVE`, `UNSAFE_ARCHIVE`, `ARCHIVE_TOO_LARGE` | 묶음 문제 | 묶음 규칙 확인·재패키징. Fixer 대상 아님 |
 | `ECR_*`, `BUILD_DIGEST_*`, `LOG_UPLOAD_*` | 인프라 | Activity 재시도 후 사람 검토 |
 
-- **결정 필요**: Fixer가 빌드 실패를 고치려면 실패 단계와 정제된 출력 일부가 필요하다. 현재 B-01 로그는 상태·코드만 남긴다. `BUILD_FAILED`/`PUSH_FAILED` 분리와 정제된 마지막 N줄 제공을 민서에게 요청한다. 그 전까지 코드 수정 시연은 런타임 실패(테스트 실패) 사례로 한다.
+- Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부)는 급하지 않은 요청(D-04). 그 전까지 코드 수정 시연은 런타임 실패(테스트 실패) 사례로 한다.
 
-### 2.6 Sandbox 렌더·적용·갱신 (AV-011)
+### 2.6 Sandbox 구성·적용·갱신 (AV-011, AV-016)
 
-현재 쓸 수 있는 공통 기능과 빈 곳:
+호출부(Sandbox 워커)가 정하는 값:
 
-| 필요 | 현재 | 첫 사이클 처리 |
-| --- | --- | --- |
-| DB 렌더 | `PostgresChartValues` + `infra/helm/postgres` | 그대로 사용, `environment=SANDBOX` |
-| 앱 렌더 | `prepare_application` → `resolve_application` → `render_application` + `infra/helm/application` | 그대로 사용, DB host·secret_name 동적 바인딩 |
-| Namespace·Release·Secret 이름 규칙 | 없음(입력으로 받음) | 임시 규칙 `cmp-sbx-<run>`, `<ns>-db`, `<ns>-app`. 통합 함수 제공 시 교체 |
-| DB Secret | Chart가 만들지 않음(기존 Secret 참조) | Sandbox Worker가 가짜 비밀번호 Secret 생성(값은 Worker 안에서만) |
-| 내부 Ingress, NetworkPolicy | 렌더 안 함 | **결정 필요**. 첫 사이클은 Ingress·NetworkPolicy 검증 제외로 시작하고 민서 Chart 추가를 기다림 |
-| 인프라 준비 검사 | 없음 | 임시 구현(Pod Ready, `pg_isready`+SQL, 헬스 GET). 공통 함수 제공 시 교체 |
-| 템플릿 버전 | Chart `version` | 렌더에 쓴 Chart 이름·버전과 Values SHA-256을 시도 기록에 남김 |
+| 값 | 규칙 |
+| --- | --- |
+| Namespace | `cmp-sbx-<run_id>` |
+| Release 이름 | `<namespace>-<resource_id>` |
+| StorageClass | capabilities의 사용 가능 목록에서 기본값(없으면 첫 항목) |
+| DB 비밀번호 Secret | `<namespace>-<db id>-auth`, 무작위 생성. 재시도·갱신 때 다시 만들지 않음 |
+| 앱 env Secret | `<namespace>-<app id>-env`. `.env`에서 예외 목록의 제외 변수와 DB 연결 변수를 뺀 나머지, 대체 변수는 대체값으로 |
+| `env_bindings` | DB 변수는 `{resource_id, output}`, 나머지는 `{secret_ref: {name, key}}` |
+| DB 이미지 | 요구사항의 확정 이미지(`CONFIRMED`). `NEEDS_REPLACEMENT`면 D-11 결과를 기다림 |
+| NetworkPolicy | §2.7 |
+
+공통 모듈 v2(`resources[]`)를 `environment: SANDBOX`로 호출하고, 반환된 Helm Values로 `helm upgrade --install --wait`을 실행한다. 렌더 모듈 구현 전에는 기존 부품(`PostgresChartValues` + `infra/helm/postgres`, `prepare/resolve/render_application` + `infra/helm/application`)으로 같은 결과를 만든다.
 
 갱신 규칙:
 
@@ -152,30 +218,41 @@ outcome = ImageBuilder(context).build(source_uri)   # Activity 안에서만 호�
 | --- | --- |
 | 이미지 Digest만 | 앱 Release만 `helm upgrade` (롤링) |
 | 앱 설정·바인딩 | 앱 Values 재렌더 → `helm upgrade` |
+| env Secret 내용만 | Secret 갱신 + 앱 Pod 재시작 보장(차트의 내용 해시 어노테이션이 없으면 `kubectl rollout restart`) |
 | DB 설정(바꿀 수 있는 값) | DB Release `helm upgrade` |
 | 바꿀 수 없는 필드, DB 메이저 버전, 손상 | 해당 Release 삭제 + PVC 삭제 → 재설치 |
 | 테스트 데이터 | 매 시도 `DROP DATABASE`·재생성 또는 합성 데이터 재주입 |
 
+- 준비 검사: Pod Ready, `SELECT version()`으로 요구 버전 확인, SQL 접속, 앱 헬스. 공통 준비 검사 함수가 생기면 교체한다.
 - DB Chart의 PVC는 `helm.sh/resource-policy: keep`이라 `helm uninstall`로 지워지지 않는다. 정리는 Namespace 삭제로 한다.
 - 모든 리소스에 `cmp.run-id`, `cmp.expires-at` 라벨. 주기 정리 작업이 만료된 Namespace를 지운다.
-- 개발 환경: 04번처럼 별도 k3d 클러스터(`cmp-sandbox`)를 쓴다. minikube는 쓰지 않는다.
+- 내부 Ingress는 현재 차트에 없어 첫 사이클에서는 Service로 직접 호출한다. Ingress 경로 검증은 차트 지원 후로 미룬다.
+- 개발 환경: 별도 k3d 클러스터(`cmp-sandbox`). minikube는 쓰지 않는다.
 
-### 2.7 테스트 (AV-012, AV-013)
+### 2.7 통신 규칙·테스트 (AV-012, AV-013)
 
-- 테스트 정의: YAML 시나리오(`request` → `expect`) + 필요 시 Python 검사. 실행기는 `base_url`·인증 참조만 주입받아 Sandbox와 Production에서 같은 정의를 돌린다.
+NetworkPolicy(Sandbox 워커 생성):
+- Namespace 기본 차단(ingress·egress).
+- `flows` 허용(리소스 라벨 기준), DNS(kube-dns) 허용.
+- 외부 egress는 출구 프록시로만 허용. 프록시 허용 목록 = intent `egress` + 매핑에서 `KEEP`인 서비스 주소.
+- `MIGRATE` 서비스의 원본 주소(원본 DB, 원본 ALB 등)와 목록 밖 호스트는 차단·기록 → 판정 실패 → `SPEC`(의도 누락)으로 분류.
+
+테스트:
+- 테스트 정의: YAML 시나리오(`request` → `expect`) + 필요 시 Python 검사. 각 테스트에 `READ_ONLY` / `WRITES_DATA`, 외부 부수효과 여부를 표시한다. 외부 부수효과가 있는 테스트는 기본 제외.
+- 묶음: 정의 + 메타데이터를 tar.gz로 묶어 `s3://<버킷>/<migration_id>/tests/<sha256>.tar.gz`. 이 SHA-256이 `test_suite_ref`이자 고정 해시다.
+- `run_suite(suite_ref, base_url, auth_ref, include=READ_ONLY|ALL)`: 실행 전에 해시를 확인하고 결과를 구조화해 반환한다. Production에서는 민서님 쪽이 이 함수를 호출한다.
 - 표준 테스트(첫 사이클): 헬스체크, 앱 API로 DB 쓰기 → 읽기 → 내용 일치, 재시작 후 데이터 유지(PVC).
 - AI 테스트 검증(`validate_tests`):
   1. 원본 쪽 테스트 자원에서 통과(프로덕션 원본에서 실행 금지).
   2. 상태 코드가 아닌 결과 값 assertion이 있는지 정적 검사.
   3. 대상 의존성(DB Service, 외부 호스트)을 NetworkPolicy·프록시로 끊고 실행 → 실패해야 함.
-  4. 통과한 테스트 묶음을 `sha256`으로 고정. 이후 Fixer 입력에는 읽기 전용으로만 제공하고, 실행 시 해시를 다시 확인한다.
-- 출구 기록: Sandbox Namespace의 기본 egress를 출구 프록시로만 허용(NetworkPolicy가 들어온 뒤). 프록시 접근 로그에서 목록 밖 호스트를 수집한다.
-- 실행 커버리지: Python 앱이면 `coverage run`으로 감싼 테스트 이미지 변형이 필요해 **첫 사이클 제외**, 호출 지점별 테스트 매핑으로 대체 표시.
+  4. 통과한 묶음을 SHA-256으로 고정. 이후 Fixer 입력에는 읽기 전용으로만 제공하고, 실행 시 해시를 다시 확인한다.
+- 실행 커버리지: Python 앱이면 `coverage run`으로 감싼 테스트 이미지 변형이 필요해 **첫 사이클 제외**, 호출 지점별 테스트 대응 표시로 대체.
 
 ### 2.8 판정과 실패 분류 (AV-014, AV-015)
 
-- `judge`는 결정적 함수: 필수 테스트 결과, 앱 로그의 미지원 호출 패턴, 출구 기록, 매핑 대조 → `Verdict{passed, reasons[]}`.
-- `classify_failure` 순서: (1) 렌더 결과가 요구사항과 필드 단위로 다르면 `RENDER` (2) 빌드 실패면 `BUILD` (3) 테스트 실패 + 스택트레이스가 앱 코드면 `CODE` (4) 나머지 `SPEC`. 판단이 애매하면 Fixer가 원인 후보를 제안하고, 판정은 다음 시도의 결과로 확인한다.
+- `judge`는 결정적 함수: 필수 테스트 결과, 앱 로그의 미지원 호출 패턴, 프록시 차단 기록, 매핑 대조 → `Verdict{passed, reasons[]}`.
+- `classify_failure` 순서: (1) 렌더 결과가 요구사항과 필드 단위로 다르면 `RENDER` (2) 빌드 실패면 `BUILD` (3) 프록시 차단이 있으면 `SPEC`(의도 누락) (4) 테스트 실패 + 스택트레이스가 앱 코드면 `CODE` (5) 나머지 `SPEC`. 애매하면 Fixer가 원인 후보를 제안하고 다음 시도의 결과로 확인한다.
 
 ### 2.9 에이전트 (Mapper·Tester·Fixer)
 
@@ -183,7 +260,7 @@ outcome = ImageBuilder(context).build(source_uri)   # Activity 안에서만 호�
 | --- | --- | --- | --- |
 | Mapper | A | 증거 조회, 카탈로그·Skill 읽기 | 비밀 값, 원본 쓰기 |
 | Tester | B(분리) | 사용 프로필·API 목록 읽기 | Fixer 수정 내용 보기 |
-| Fixer | A | 작업 공간 diff 제안, 로그·보고서 읽기, 요구사항 패치 제안 | 테스트 수정, Production 자격 증명 |
+| Fixer | A | 작업 공간 diff 제안, 로그·보고서 읽기, 요구사항·intent 패치 제안 | 테스트 수정, Production 자격 증명 |
 
 - 에이전트끼리 대화하지 않는다. Workflow가 결과물만 넘긴다.
 - 모든 출력은 Pydantic 스키마로 검증한다. 판단 과정(본 증거, 시도한 수정)은 보고서에 남겨 승인 화면에 제공한다.
@@ -206,31 +283,48 @@ class MappingRow(Contract):
     usage: str
     grade: Literal["DIRECT", "API_DIFF", "PARTIAL", "NONE"]
     required: bool
+    disposition: Literal["MIGRATE", "KEEP"]
     loses: list[str]
     treatment: Literal["PROCEED", "APPROVAL", "BLOCK"]
     status: Literal["UNVERIFIED", "EVIDENCE_CHECKED", "SANDBOX_VERIFIED"]
     evidence: list[Evidence]
 
-class SandboxVerification(Contract):          # Planning SandboxResult v2로 투영
+class EnvExceptions(Contract):          # mapping_ref가 가리키는 내용
+    excluded: list[str]                 # 원본 환경에 묶여 빼는 변수
+    replaced: dict[str, str]            # 대체 값이 비밀이 아닌 변수만
+    missing: list[str]                  # 코드가 읽지만 .env에 없는 변수
+
+class AnalysisReport(Contract):         # Provisioning v1 AnalysisResult와 별개
+    migration_id: str
+    ref: VersionRef                     # Sandbox 통과 시점 버전
+    base_commit: str
+    commit_verified: bool
+    usage_profile: UsageProfile
+    mapping: list[MappingRow]
+    precheck: PrecheckReport
+    unmapped_items: list[str]
+    unverified_risks: list[str]
+
+class ValidatedWorkload(Contract):
+    resource_id: str
+    build_ref: VersionRef
+    image_digest: str
+    platform: str
+    source_sha256: str
+
+class SandboxVerification(Contract):    # Planning 입력 v2의 sandbox 블록으로 투영
     migration_id: str
     ref: VersionRef
     status: Literal["PASSED", "FAILED", "NEEDS_REVIEW", "STOPPED_RENDER"]
-    build_ref: VersionRef                    # 검증한 BuildAttempt
-    image_uri: str                           # repo@sha256:...
-    image_digest: str
-    platform: str
-    source: ContentRef                       # 소스 묶음 sha256
-    config_ref: VersionRef
-    requirements_ref: VersionRef
-    target_selection_ref: VersionRef
-    template_version: str
+    validated_workloads: list[ValidatedWorkload]
+    requirements_ref: ContentRef
     report_ref: ContentRef
-    test_suite_ref: ContentRef
+    test_suite_ref: S3ContentRef        # uri, version_id(null 허용), sha256
     attempts: list[SandboxAttemptSummary]
     cleanup_status: Literal["CLEANED", "FAILED", "PENDING"]
 ```
 
-Planning 입력과의 대응은 민서에게 보낸 계약안(Planning 입력의 `sandbox.*`, `build.*`)과 같은 이름을 쓴다. 대조 규칙: `build.image_digest = sandbox.image_digest`, 소스 참조 일치(analysis·build·sandbox), `policy.template_version = sandbox.template_version`, `sandbox.status = PASSED`.
+Planning v2 입력과의 대응: `analysis.result_ref` ← `AnalysisReport.ref`, `analysis.requirements_ref` ← 요구사항 참조, `analysis.source_refs` ← 리소스별 최종 소스 아카이브, `sandbox.*` ← `SandboxVerification`, `environment.mapping_ref` ← `EnvExceptions` 참조. 대조 방식은 Planning(민서)이 정한다.
 
 ## 4. Activity 경계와 실행 설정
 
@@ -238,15 +332,17 @@ Planning 입력과의 대응은 민서에게 보낸 계약안(Planning 입력의
 | --- | --- | --- | --- | --- |
 | `fetch_source` | analysis | 2분 | 3(네트워크만) | 같은 커밋 재사용 |
 | `scan_*` | analysis | 3분 | 3(스로틀링만) | Heartbeat. 권한 거부는 비재시도 오류 |
-| `build_profile`, `precheck`, `check_evidence` | analysis | 1분 | 2 | 결정적 |
+| `build_requirements`, `precheck`, `check_evidence` | analysis | 1분 | 2 | 결정적 |
 | `map_usage`, `generate_tests`, `fix_*` | analysis / sandbox | 2분 | 2 | 스키마 검증 실패도 재시도 |
 | `validate_tests` | sandbox | 5분 | 1 | 원본 테스트 자원 필요 |
 | `package_source` | sandbox | 2분 | 2 | 같은 해시면 업로드 생략 |
-| `request_build` | sandbox | 15분 | 1(+분류 규칙) | Heartbeat. 실패는 결과값으로 반환 |
+| `request_build` | sandbox (D-12) | D-12 | 1(+분류 규칙) | Heartbeat. 실패는 결과값으로 반환 |
+| `prepare_sandbox` | sandbox | 2분 | 2 | Secret·NetworkPolicy 생성, 기존 Secret 있으면 재사용 |
 | `render_sandbox`, `apply_sandbox` | sandbox | 5분 | 2 | `helm upgrade --install --wait` |
 | `readiness_check`, `reset_test_data` | sandbox | 2분 | 2 | |
 | `run_tests` | sandbox | 3분 | 1 | 테스트 실패는 결과값 |
 | `judge`, `classify_failure` | sandbox | 30초 | 2 | 결정적 |
+| `publish_final_report` | sandbox | 1분 | 3 | 불변 저장, 같은 내용이면 같은 참조 |
 | `teardown_sandbox` | sandbox | 3분 | 5 | 취소·실패에도 실행, TTL 이중 정리 |
 
 수치는 측정 후 조정한다. 비재시도 오류는 `ApplicationError(non_retryable=True)`로 구분한다.
@@ -260,10 +356,11 @@ Planning 입력과의 대응은 민서에게 보낸 계약안(Planning 입력의
 | LLM 출력 스키마 오류 | 2회 재시도 후 사람 검토 |
 | 근거 확인 실패 | 해당 행 `UNVERIFIED`, 진행은 처리 규칙에 따름 |
 | 필수 기능 대응 없음 | 분석 단계에서 차단, Sandbox로 가지 않음 |
+| DB 이미지 `NEEDS_REPLACEMENT` | D-11 결과 전까지 Sandbox 진입 대기 |
 | 빌드 실패 | §2.5 분류 |
 | Helm 적용 실패 | Release 상태 조회 → 같은 Values로 재시도, 바꿀 수 없는 필드면 재생성 분기 |
 | 준비 검사 실패 | 테스트 없이 실패 판정, 원인 분류로 |
-| 테스트 실패 | 결과값, 수정 루프 |
+| 테스트 실패·출구 차단 | 결과값, 수정 루프 |
 | 렌더 결과 불일치 | 루프 중단, Provisioning 담당 보고 |
 | 3회 초과 | 사람 검토 Signal 대기(타이머 상한), 정리 실행 |
 | Worker 장애·취소 | `finally` 정리 + TTL 라벨 정리 작업 |
@@ -273,19 +370,20 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 ## 6. 보안
 
 - 마스킹(`cmp_agents.masking`): 고엔트로피 문자열, 알려진 키 패턴(AKIA…, `-----BEGIN`), `.env` 값 위치. 마스킹본만 LLM에 보낸다.
-- `.env`는 이름만 파싱해 보관하고 값은 읽은 즉시 버린다. Sandbox에는 가짜 값을 넣는다.
-- Sandbox Worker 권한: Sandbox 클러스터의 지정 Namespace 패턴만, Build 호출용 S3 쓰기·Builder 실행. Production 자격 증명 없음.
+- `.env` 값은 `prepare_sandbox`에서 Secret을 만들 때만 읽는다. Activity 인자·결과·로그에 싣지 않고, 참조(`env_file_ref`)만 넘긴다.
+- 외부 부수효과가 있는 테스트는 기본 제외한다(실제 `.env` 키로 메일·결제가 일어나지 않게).
+- Sandbox Worker 권한: Sandbox 클러스터의 지정 Namespace 패턴만, 소스·테스트 묶음 S3 쓰기, (D-12에 따라) Builder 실행. Production 자격 증명 없음.
 - 로그에는 참조·해시·오류 코드만 남긴다. Helm·Docker 원시 출력은 공개 오류에 복사하지 않는다(민서 03과 같은 원칙).
 
 ## 7. Verification
 
 | 대상 | 방법 | 증명하지 못하는 것 |
 | --- | --- | --- |
-| 계약 | Pydantic 모델 테스트, fixture JSON 왕복, Planning 입력 대조 함수 | 상대 Worker의 실제 출력 |
+| 계약 | Pydantic 모델 테스트, fixture JSON 왕복, Planning v2 투영 검사 | 상대 Worker의 실제 출력 |
 | 스캐너 | 데모 앱 축소 fixture(코드·매니페스트) 결과 스냅샷, AWS는 `botocore.stub` | 실제 계정의 권한·지연 |
 | 매핑 | 가짜 LLM 응답으로 스키마·처리 표·근거 확인 검사 | 실제 모델의 판단 품질 |
-| 소스 묶음 | 같은 입력 두 번 → 같은 해시, 제외 규칙, B-01 `_safe_extract` 통과 | 실제 S3 권한 |
-| Sandbox | 로컬 k3d + 실제 Helm 3.17.3, 포트 오류 주입 → 수정 → 통과 | GKE/EKS Sandbox 차이 |
+| 소스 묶음 | 같은 입력 두 번 → 같은 해시, 제외 규칙, B-01 아카이브 검사 통과 | 실제 S3 권한 |
+| Sandbox | 로컬 k3d + 실제 Helm, 포트 오류·intent 누락 주입 → 수정 → 통과 | GKE/EKS Sandbox 차이 |
 | Workflow | Temporal 테스트 환경(time skipping)으로 루프·3회 초과·취소 정리, `make smoke-temporal` | 실제 외부 시간 |
 
 `make check`는 Python 변경마다, HTTP 변경 시 `make openapi`.
@@ -303,24 +401,31 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 | AV-007, AV-008 | §2.3, §2.9, §2.10 | 08, 17 |
 | AV-009 | §2.4 | 09 |
 | AV-010 | §2.5 | 10 |
-| AV-011 | §2.6 | 11 |
-| AV-012, AV-013 | §2.7 | 12, 13 |
-| AV-014, AV-015 | §2.8 | 13, 14 |
-| AV-016 | §2.6, §5 | 11 |
-| AV-017 | §3 | 01, 07 |
+| AV-011 | §2.6 | 11, 11B |
+| AV-012 | §2.7 | 12 |
+| AV-013 | §2.7 | 13 |
+| AV-014, AV-015 | §2.8 | 02B, 13, 14 |
+| AV-016 | §2.6, §5 | 02B, 11 |
+| AV-017 | §3 | 01, 07, 14 |
 | AV-018 | §3 | 15 |
 | AV-019 | §2.1 | 14 |
 | AV-020 | §6 | 전 티켓 |
-| AV-021 | §4, §5 | 02, 전 티켓 |
+| AV-021 | §4, §5 | Q-01, 02, 02B, 전 티켓 |
 
-## 9. 구현 전 결정이 필요한 사항
+## 9. 결정 대기
 
-| 항목 | 권장 방향 | 담당 |
-| --- | --- | --- |
-| Planning `SandboxResult`/`BuildResult` v2 | §3 필드로 v2 추가, v1 유지. 민서 통합 작업과 같은 PR 또는 연속 PR | 민서·승철 |
-| 통합 Sandbox 렌더 함수, Ingress·NetworkPolicy 렌더 | 앱 Chart에 내부 Ingress·NetworkPolicy 옵션 추가 요청 | 민서 |
-| Build 실패 상세 | `BUILD_FAILED`/`PUSH_FAILED` 분리 + 정제된 출력 일부 | 민서 |
-| `sandbox` Queue 추가 | builder 권한 격리를 위해 추가 | 승철(민서 공유) |
-| LLM 공급자·모델·전송 범위 | ADR-004로 기록 | 승철·팀 |
-| 소스 묶음 버킷·정리 규칙 | 플랫폼 소유 버킷, 실행 종료 후 N일 | 민서·승철 |
-| 데모 앱 언어·DB 형태 | 스캐너 범위 결정 | 소울 |
+| ID | 항목 | 현재 방향 | 담당 |
+| --- | --- | --- | --- |
+| D-01 | LLM 공급자·모델·전송 범위 | ADR-004로 기록. 근거 주변 코드 조각만 전송 | 승철·팀 |
+| D-02 | Planning 입력 v2 확정, `*_ref` 저장 위치 | 민서 협의안 v2 기준으로 구현, 확정 대기 | 민서·승철 |
+| D-04 | Build 실패 상세 | 급하지 않음 | 민서 |
+| D-05 | `sandbox` Queue 추가 | Q-01 작은 PR로 먼저 | 승철(민서 공유) |
+| D-06 | 소스·테스트 묶음 버킷 소유·정리 규칙 | 플랫폼 소유 버킷, 실행 종료 후 N일 | 민서·승철 |
+| D-07 | 데모 앱 언어·DB 형태·위치 | 스캐너 범위 결정 | 소울 |
+| D-08 | Sandbox 기반 클러스터 준비 주체·시점 | | 민서·승철 |
+| D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | | 승철·소울 |
+| D-10 | Production 테스트 묶음 실행 시점·데이터 정리 | 데이터 이전 후·트래픽 전환 전(민서 협의안) | 민서·소울·상헌 |
+| D-11 | 원본 DB 이미지를 못 쓸 때 대체 Digest 선택 주체 | 원본 이미지 우선은 분석이 확정 | 민서 |
+| D-12 | Build 호출 방식(함수 vs Activity)·전체 시간 상한·`resource_id`·`source_version_id` | Activity 등록 제안 | 민서 |
+| D-13 | DB 내부 상태 사전 점검 담당(기본 키·시퀀스·복제 설정) | Data Migration 쪽 제안 | 소울 |
+| D-14 | 확장을 앱이 만들지 않을 때 `CREATE EXTENSION` 실행 주체 | 데모 앱 확인 후 | 민서 |

@@ -14,13 +14,13 @@ Blocked by: 01
 
 ## 작업 범위
 - 포함: 토큰 기반 클론(GitHub App은 후속), 실행 이미지 OCI 라벨에서 커밋 찾기(인터페이스 + stub), 작업 공간 재사용, 마스킹 함수, `.env` 이름만 파싱
-- 제외: GitHub App 연동, Draft PR(14)
+- 제외: GitHub App 연동, Draft PR(14), `.env` 값 처리(11의 Secret 생성)
 
 ## 수용 기준
 - [ ] 커밋을 못 찾으면 사용자 지정 커밋을 쓰고 `commit_verified=false`를 남긴다.
 - [ ] 같은 커밋 재요청은 다시 클론하지 않는다.
 - [ ] 마스킹본에 알려진 키 패턴·고엔트로피 문자열·`.env` 값이 남지 않는다.
-- [ ] `.env` 파싱 결과에 값이 없고 이름만 있다.
+- [ ] 분석 단계의 `.env` 파싱 결과에 값이 없고 이름만 있다.
 - [ ] 작업 공간 경로가 Migration·커밋별로 분리되고 서비스 프로세스 디렉터리 밖이다.
 
 ## 테스트 전략
@@ -36,7 +36,7 @@ fixture 저장소를 넣으면 커밋 고정된 원본·마스킹본과 `.env` �
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 구현 중 변경: 아직 없음
+- 2026-11-04: `.env` 값은 Sandbox 워커만 Secret 생성 때 읽는다는 결정 반영(이 티켓은 이름만).
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

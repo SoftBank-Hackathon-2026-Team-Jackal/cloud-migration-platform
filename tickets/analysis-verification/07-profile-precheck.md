@@ -1,10 +1,10 @@
-# Ticket 07 — 사용 프로필·사전 점검·분석 결과 조립
+# Ticket 07 — 요구사항·사용 프로필·사전 점검 조립
 
 ## 상태
 DRAFT — 사용자 검토 전
 
 ## 목적
-스캔 결과를 사용 프로필로 합치고 Dockerfile·빌드 컨텍스트와 DB 사전 점검을 더해 `AnalysisResult` 초안을 만든다.
+스캔 결과를 `resources[]` 요구사항과 사용 프로필로 합치고, DB 이미지 확정·환경변수 예외 목록·코드 수준 사전 점검을 만든다.
 
 ## 관련 요구사항
 AV-006, AV-017
@@ -13,24 +13,27 @@ AV-006, AV-017
 Blocked by: 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시)
 
 ## 작업 범위
-- 포함: 결과 병합, 교차 해석(코드·CloudTrail·권한), Dockerfile 파싱과 `COPY`·`ADD` 경로 확인, 사전 점검 쿼리(기본 키 없는 테이블·확장·시퀀스·`wal_level`·세션 기능), 환경변수 분류(일반·동적 바인딩·비밀 이름)
-- 제외: 매핑 판단(08)
+- 포함: 결과 병합, 교차 해석(코드·CloudTrail·권한), `resources[]`·`{resource_id, output}` 연결 생성, DB 이미지 확정(capabilities 아키텍처로 원본 이미지 실행 가능 여부 판단 → `CONFIRMED`/`NEEDS_REPLACEMENT`), `EnvExceptions`(제외·대체·누락), Dockerfile·빌드 컨텍스트 점검, 코드 수준 사전 점검
+- 제외: 매핑 판단(08), DB 내부 상태 점검(D-13)
 
 ## 수용 기준
+- [ ] 요구사항에 `APPLICATION`·`POSTGRESQL` 리소스와 DB 연결 참조가 나오고 01 계약 검증을 통과한다.
+- [ ] 원본 DB 이미지가 capabilities 아키텍처를 지원하면 `CONFIRMED`, 아니면 `NEEDS_REPLACEMENT`가 된다.
+- [ ] 원본 환경에 묶인 변수(`AWS_REGION` 등)가 `excluded`로, 누락 변수가 `missing`으로 나온다.
 - [ ] Dockerfile 유무·위치와 누락된 `COPY` 경로가 기록된다.
-- [ ] 로컬 PostgreSQL fixture에서 기본 키 없는 테이블·확장·시퀀스가 감지된다.
-- [ ] `DB_HOST`·`DB_PORT` 등이 동적 바인딩으로, `DB_PASSWORD`가 비밀(이름·분류)로 분류된다.
-- [ ] 결과가 01 계약 검증을 통과한다.
+- [ ] 세션 단위 기능·확장 사용·헬스체크 경로·노출된 클라우드 주소가 사전 점검에 나온다.
 
 ## 테스트 전략
-- 제안 Test Seam: `build_profile(...)`·`precheck(...)` 결과. 잡는 것: 병합·분류 규칙. 못 잡는 것: 실제 원본 DB 접근 권한.
-- 실행: fixture + 로컬 Postgres(`infra/local/compose.yaml`), `uv run pytest tests/analysis/test_profile.py`
+- 제안 Test Seam: `build_requirements(...)`·`precheck(...)` 결과. 잡는 것: 병합·연결·분류 규칙. 못 잡는 것: 실제 원본 DB 상태.
+- 실행: fixture, `uv run pytest tests/analysis/test_requirements.py`
 
 ## 완료 시 확인할 동작
-스캔 fixture로 완성된 `AnalysisResult`(매핑 제외)가 나온다.
+스캔 fixture로 완성된 요구사항·`AnalysisReport`(매핑 제외)·예외 목록이 나온다.
 
 ## 결정 대기
-- 원본 PostgreSQL이 RDS인지 Pod인지(소울님)
+- 원본 PostgreSQL이 RDS인지 Pod인지(D-07)
+- 대체 DB 이미지 선택 주체(D-11)
+- DB 내부 상태 점검 담당(D-13)
 
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
@@ -38,7 +41,7 @@ Blocked by: 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 구현 중 변경: 아직 없음
+- 2026-11-04: 리소스 목록 요구사항, DB 이미지 확정 규칙, 예외 목록 반영. DB 내부 상태 점검은 D-13으로 분리.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

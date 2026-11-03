@@ -13,7 +13,7 @@ AV-009, AV-020
 Blocked by: 03
 
 ## 작업 범위
-- 포함: `package_source`: 파일 목록(`.dockerignore`, `.git`·`.env`·인증 파일 제외, 일반 파일만), Dockerfile 루트 배치, 재현 가능한 tar.gz, 같은 키 존재 시 업로드 생략
+- 포함: `package_source`: 파일 목록(`.dockerignore`, `.git`·`.env`·인증 파일 제외, 일반 파일만), Dockerfile 루트 배치, 재현 가능한 tar.gz, 같은 키 존재 시 업로드 생략, 리소스 ID별 `source_refs`
 - 제외: Dockerfile 생성(14의 Fixer)
 
 ## 수용 기준
@@ -28,10 +28,10 @@ Blocked by: 03
 - 실행: fixture 작업 공간 + 가짜 S3 클라이언트, `uv run pytest tests/sandbox/test_archive.py`
 
 ## 완료 시 확인할 동작
-fixture 작업 공간에서 `s3://.../<sha256>.tar.gz` URI가 나온다.
+fixture 작업 공간에서 리소스 ID별 `s3://.../<sha256>.tar.gz`와 SHA-256이 나온다.
 
 ## 결정 대기
-- 소스 묶음 버킷 이름·소유·정리 규칙(민서님)
+- 소스 묶음 버킷 이름·소유·정리 규칙(D-06)
 
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
@@ -39,7 +39,7 @@ fixture 작업 공간에서 `s3://.../<sha256>.tar.gz` URI가 나온다.
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 구현 중 변경: 아직 없음
+- 2026-11-04: 리소스 ID별 source_refs 형식 반영.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
