@@ -6,7 +6,7 @@
 - 2026-11-03 사용자 요청에 따라 기존 정책과 논의한 입력 흐름을 구체화한 **계약 설계안**이다. 실제 Worker/API 구현이나 다른 팀의 wire schema 합의 완료를 뜻하지 않는다.
 - 제품 정책과 [spec.md](spec.md)가 우선한다. 이 문서는 입력 정보의 출처·시점·검증을 다루고 [plan.md](plan.md)는 실행 설계를 다룬다.
 - 논리적 순서: Analysis/코드 수정 → Build → 해당 Digest로 Sandbox 검증(실패·재수정 시 새 Build) → 통과 Digest로 Planning·Preview → 특정 계획 승인 → Production Provisioning.
-- 통과 후 재빌드하지 않는다. Sandbox 실행·검증 Digest와 Production 배포 Digest를 일치시킨다. [ADR-003](../../docs/decisions/ADR-003.md) 기준이며 기존 내부 v1 구현과의 차이는 §10과 B-01에 기록한다.
+- 통과 후 재빌드하지 않는다. Sandbox 실행·검증 Digest와 Production 배포 Digest를 일치시킨다. [ADR-003](../../docs/decisions/ADR-003.md) 기준이며 기존 내부 v1 구현과의 차이는 §10에 기록한다. B-01은 S3→ECR 공통 빌더이고 계약 전환은 후속 통합 작업이다.
 
 ## 2. 세 가지 입력 경계
 
@@ -16,7 +16,7 @@
 | Planning → 공통 Provider 모듈 | 검증된 `ProvisioningSpec` | 순수 Provider 변환·렌더링·검증. 저장소 조회·클라우드 변경 없음 |
 | 승인 대기 이후 → 실행 Activity | Plan ID·Revision, 잠긴 산출물과 승인 기록 참조 | 승인·대상·Digest 재확인 후 Terraform/Helm/Agent 실행 |
 
-Sandbox가 전체 Spec을 작성한다고 가정하지 않는다. Sandbox/변환 루프가 공통 Build 모듈을 Activity 경계에서 호출하는 구체 인터페이스는 B-01에서 맞춘다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
+Sandbox가 전체 Spec을 작성한다고 가정하지 않는다. Sandbox/변환 루프가 공통 Build 모듈을 호출하는 인터페이스는 B-01에서 제공하고 실제 Worker 연결은 Sandbox 담당자가 맡는다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
 
 ## 3. Planning이 선행 단계에서 받는 정보
 
@@ -111,7 +111,7 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 
 - Analysis/Sandbox/Build 담당자의 실제 출력 필드, 상태 Enum, 계약 버전, 소스 패키징 및 Digest 산정 범위.
 - 검증 요구/Profile 식별, 변경 시 재검증 범위, Sandbox 정리 실패 시 진행 정책.
-- 동일 이미지 Digest 실행 검증은 필수다. 멀티 플랫폼 manifest의 개별 플랫폼 검증 증거와 Registry 보존/접근 정책은 B-01 착수 시 구체화한다.
+- 동일 이미지 Digest 실행 검증은 필수다. 플랫폼별 Sandbox 검증 증거와 ECR 보존/대상 Pull 권한은 후속 Sandbox·Provisioning 통합 작업에서 구체화한다.
 - 산출물 ID 조회 또는 S3 직접 참조의 표준, 불변성·보관·접근 권한 정책.
 - Node 선정 기본값, 신규 클러스터/네트워크 구성 범위(기존 네트워크는 P0 제외), Registry·Secret·TLS 정책 및 Agent 완료 통지.
 
@@ -121,7 +121,7 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 
 ## 10. 티켓 01 내부 v1 구현 (2026-11-03, #5)
 
-**구현 전환 대기:** 아래는 이전 순서의 현재 코드 설명이다. `BuildResult.sandbox_ref`를 요구하고 SandboxResult에는 검증 이미지 Digest가 없다. 따라서 현재 `prepare_plan`의 성공은 P-10 동일 이미지 검증 정책의 충족 증거가 아니다. B-01(#17)에서 새 버전 계약·검증으로 전환하고 구 v1 입력을 자동으로 검증 완료 처리하지 않는다. 이번 PR #16의 후속 문서 변경은 런타임 모델/테스트를 변경하지 않는다.
+**구현 전환 대기:** 아래는 이전 순서의 현재 코드 설명이다. `BuildResult.sandbox_ref`를 요구하고 SandboxResult에는 검증 이미지 Digest가 없다. 따라서 현재 `prepare_plan`의 성공은 P-10 동일 이미지 검증 정책의 충족 증거가 아니다. B-01(#17)은 공통 빌드 모듈로 범위를 좁혔으며 새 버전 Planning 계약·검증은 후속 통합 작업에서 전환한다. 구 v1 입력을 새 검증 증거로 자동 인정하지 않는다.
 
 사용자의 이슈 전체 구현 요청에 따라 위 설계에서 **로컬 조합·검증 경계**를 구현했다. 이는 다른 팀의 Activity 반환값을 강제로 바꾸는 wire 계약이 아니다. 외부 참조를 조회한 Activity가 아래 내부 모델로 정규화하여 호출한다. 아직 스캐폴드 Workflow에 연결하지 않았으며, 새 HTTP API도 추가하지 않았다.
 
