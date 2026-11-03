@@ -47,6 +47,7 @@ def source_uri(path: Path) -> str:
 def mock_aws_docker(monkeypatch, path: Path, *, existing=False):
     calls = []
     log_content = []
+    published_tags = set()
 
     def run(command, **kwargs):
         calls.append(command)
@@ -73,7 +74,8 @@ def mock_aws_docker(monkeypatch, path: Path, *, existing=False):
                 ),
             )
         if command[:3] == ["aws", "ecr", "describe-images"]:
-            if existing or any(item[:3] == ["docker", "buildx", "build"] for item in calls):
+            tag = command[command.index("--image-ids") + 1]
+            if existing or tag in published_tags:
                 return subprocess.CompletedProcess(
                     command,
                     0,
@@ -98,6 +100,7 @@ def mock_aws_docker(monkeypatch, path: Path, *, existing=False):
             Path(command[command.index("--metadata-file") + 1]).write_text(
                 json.dumps({"containerimage.digest": DIGEST})
             )
+            published_tags.add("imageTag=" + command[command.index("--tag") + 1].rsplit(":", 1)[1])
             return subprocess.CompletedProcess(command, 0, stdout=DIGEST)
         if command[:3] == ["aws", "s3api", "put-object"]:
             log_content.append(json.loads(Path(command[command.index("--body") + 1]).read_text()))
@@ -138,6 +141,21 @@ def test_retry_reuses_existing_digest_without_rebuild(tmp_path, monkeypatch):
     assert result.status == "SUCCEEDED"
     assert result.image_uri == f"{ECR}@{DIGEST}"
     assert not any(c[0] == "docker" for c in calls)
+
+
+def test_new_attempt_uses_a_new_image_tag(tmp_path, monkeypatch):
+    path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n", "app.py": b"print('ok')"})
+    calls, _ = mock_aws_docker(monkeypatch, path)
+    first = builder()
+    second = ImageBuilder(first.context.model_copy(update={"attempt_id": "attempt-2"}))
+    first.build(source_uri(path))
+    second.build(source_uri(path))
+    build_commands = [c for c in calls if c[:3] == ["docker", "buildx", "build"]]
+    assert len(build_commands) == 2
+    assert (
+        build_commands[0][build_commands[0].index("--tag") + 1]
+        != (build_commands[1][build_commands[1].index("--tag") + 1])
+    )
 
 
 def test_changed_archive_bytes_are_rejected_before_ecr_lookup(tmp_path, monkeypatch):

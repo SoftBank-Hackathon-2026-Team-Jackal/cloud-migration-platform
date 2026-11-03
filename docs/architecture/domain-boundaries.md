@@ -40,7 +40,7 @@ Sandbox는 변환 오류를 사전에 찾는 곳이다. **Sandbox 성공은 실�
 | 책임 제외 | 실제 대상 인프라 생성, 데이터 이전, 트래픽 전환 |
 | 의존 모듈 | 이미지 빌드 실행 수단, Registry(데모 ECR), 산출물 저장소 |
 
-최종 배포 이미지는 **Sandbox가 실행·검증한 동일 Digest**다. 민서가 공통 빌드 모듈(S3 아카이브 URI → build/push → Digest 반환)을 맡고 Sandbox/변환 담당자가 수정·빌드 호출·검증 루프를 조정한다. 호출 측이 보내는 값은 SHA-256 이름의 S3 URI 하나이며, 작업/시도 ID·플랫폼·ECR/로그 설정은 빌더 준비 맥락에서 공급한다. Dockerfile 자동 생성·코드 수정·범용 언어 탐지는 빌드 모듈 범위 밖이다. 호출은 Activity 등 외부 I/O 경계에서 수행하며 Sandbox 워크로드에 builder 권한을 부여하지 않는다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 공통 모듈까지 구현됐고 실제 Workflow/Worker 연결은 남아 있다. 데모 기본 이미지 Registry는 ECR이지만 배포 대상의 이미지 접근 방식은 별도 설계가 필요하다.
+최종 배포 이미지는 **Sandbox가 실행·검증한 동일 Digest**다. 민서가 공통 빌드 모듈(S3 아카이브 URI → build/push → Digest 반환)을 맡고 Sandbox/변환 담당자가 수정·빌드 호출·검증 루프를 조정한다. 전체 빌드 실행에는 작업 ID·시도 ID·S3 URI·플랫폼이 필요하다. Sandbox 담당자가 별도로 제공할 소스 산출물 정보는 SHA-256 이름의 S3 URI 하나이며, ID·플랫폼·ECR/로그 설정은 빌더 준비 맥락에서 공급한다. Dockerfile 자동 생성·코드 수정·범용 언어 탐지는 빌드 모듈 범위 밖이다. 호출은 Activity 등 외부 I/O 경계에서 수행하며 Sandbox 워크로드에 builder 권한을 부여하지 않는다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 공통 모듈까지 구현됐고 실제 Workflow/Worker 연결은 남아 있다. 데모 기본 이미지 Registry는 ECR이지만 배포 대상의 이미지 접근 방식은 별도 설계가 필요하다.
 
 ## 5. Provisioning Worker
 

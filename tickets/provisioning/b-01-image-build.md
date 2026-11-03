@@ -10,8 +10,9 @@ DONE — [Issue #17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/clou
 
 ## 입력·출력
 
-- Sandbox/변환 담당자의 호출 입력: SHA-256 이름의 `s3://.../<sha256>.tar.gz` **URI 하나**. 파일명에서 해시를 읽어 실제 바이트와 비교하고 Dockerfile·빌드 컨텍스트는 아카이브 루트에 둔다. 별도 해시·상대 경로·VersionId를 이 호출에 요구하지 않는다.
-- 빌더 준비 맥락: 작업/시도 ID와 대상 `linux/amd64` 또는 `linux/arm64`는 상위 실행 맥락에서, ECR 저장소와 로그 S3 버킷은 Builder 실행 설정에서 제공한다. 이들은 승철 담당자가 아카이브와 함께 전달할 필드가 아니다.
+- 전체 빌드 실행의 논리적 입력은 `migration_id`, `attempt_id`, `source_uri`, 대상 플랫폼이다. 작업/시도 ID와 플랫폼은 상위 실행 맥락에서 공급한다. `attempt_id`는 코드 수정 뒤 새 빌드와 동일 시도 재시도를 구분한다.
+- Sandbox/변환 담당자가 별도로 제공할 **소스 산출물 정보는 URI 하나**다: SHA-256 이름의 `s3://.../<sha256>.tar.gz`. 파일명에서 해시를 읽어 실제 바이트와 비교하고 Dockerfile·빌드 컨텍스트는 아카이브 루트에 둔다. 별도 해시·상대 경로·VersionId를 요구하지 않는다.
+- ECR 저장소와 로그 S3 버킷은 Builder 실행 설정에서 제공한다. 이들은 소스 산출물 필드가 아니다.
 - 출력: 성공/실패, 소스 SHA-256·시도/플랫폼 출처, 성공 시 ECR manifest Digest와 `repository@sha256:...` 전체 참조, 로그 S3 참조와 가능한 VersionId, 실패 시 안전한 오류 코드.
 - Builder의 IAM 권한으로 S3 읽기/로그 쓰기와 ECR 조회·push를 수행한다. ECR 저장소는 미리 만들고 태그 불변(immutable)으로 설정한다. 인증 값은 함수 인자나 Temporal 이력에 싣지 않는다. 로그는 원시 Docker 출력 대신 상태·Digest·안전한 오류 코드의 구조화 기록이다.
 
@@ -35,7 +36,7 @@ Dockerfile 생성, 코드 수정·소스 업로드, Sandbox 실행·검증, 최�
 
 ## 호출 예시
 
-Builder가 실행 맥락으로 `ImageBuilder`를 준비한 뒤, Sandbox 담당자의 수정 루프는 `builder.build(source_uri)`만 호출한다. 공통 모듈은 Temporal Activity가 아니다. 실제 Workflow/Worker 연결은 후속 통합 작업이다.
+Builder가 작업/시도 ID·플랫폼·ECR/로그 설정으로 `ImageBuilder`를 준비한 뒤, 수정 루프는 `builder.build(source_uri)`를 호출한다. 따라서 Python 메서드의 인자는 URI 하나이지만 **빌드 실행 전체에는 ID와 플랫폼이 필요하다**. 공통 모듈은 Temporal Activity가 아니다. 실제 Workflow/Worker 연결은 후속 통합 작업이다.
 
 ```python
 from cmp_worker.image_build import BuildContext, ImageBuilder
@@ -63,4 +64,4 @@ result = builder.build("s3://source-bucket/migration-001/<sha256>.tar.gz")
 - 전용 로컬 Registry(`127.0.0.1:5502`, 검사 후 컨테이너 제거)에서 Docker Buildx `linux/arm64` build/push 후 manifest HEAD와 Buildx 메타데이터 Digest 일치: `sha256:c7a7e2bb642f149fd401ae4667ea154a6393cd4461e6e92761baa8c5587b275f`.
 - `tests/test_image_build.py`: S3/ECR CLI 계약을 격리해 정상·재시도·입력 변조·위험 아카이브·mutable ECR 거부를 검증했다.
 - 실제 S3 버킷/ECR 저장소와 IAM 테스트 권한은 제공되지 않아 AWS 서비스 통합 호출, 대상 클러스터 Pull/Ready는 미검증이다. ECR 저장소는 `IMMUTABLE` 태그 설정이 필요하다. Docker 원시 출력은 로그에 저장하지 않고 안전한 상태·오류 기록만 남긴다.
-- 병합 후 입력 경계 정정: `ImageBuilder(context).build(source_uri)`로 Sandbox 담당자가 넘기는 값은 URI 하나가 됐다. 작업/시도 ID·아키텍처·ECR/로그 설정은 빌더 준비 맥락으로 분리했다. `make check` 재실행에서 pytest 196개와 Ruff 검사가 통과했다.
+- 병합 후 입력 경계 정정: `ImageBuilder(context).build(source_uri)`로 소스 산출물 필드는 URI 하나가 됐다. 작업/시도 ID·아키텍처·ECR/로그 설정은 빌더 준비 맥락으로 분리했다. 새 `attempt_id`가 별도 이미지 태그를 사용하고 동일 시도는 재사용하는지 검증했다. 이 수정의 `make check`는 pytest 197개와 Ruff 검사를 통과했다.
