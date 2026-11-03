@@ -10,6 +10,7 @@
 | [02 PostgreSQL Chart 렌더링과 PVC 검사](../../tickets/provisioning/02-postgres-helm-render.md) | DONE | 01, CP-01 | PROV-005, 006, 011 | [#11](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/11) | ☑ |
 | [03 앱 배포와 .env·Secret 바인딩 렌더링](../../tickets/provisioning/03-app-env-render.md) | DONE | 01, 02 | PROV-004, 005, 010, 012, 021 | [#13](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/13) | ☑ |
 | [04 격리 K3s에서 Agent 배포 경로 검증](../../tickets/provisioning/04-k3s-agent-test-deploy.md) | DONE | 02, 03 | PROV-006, 009, 011, 013 | [#15](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/15) | ☑ |
+| [04A 온프레미스 Agent 등록과 공통 K3s 배포 계약](../../tickets/provisioning/04a-onprem-agent-enrollment.md) | DONE | 02, 03, 04 | PROV-005, 006, 009 | [#20](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/20) | ☑ |
 | [B-01 S3 소스 공통 빌드와 ECR Digest 반환](../../tickets/provisioning/b-01-image-build.md) | DONE | ADR-003 | PROV-001, 004, 010, 021 | [#17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/17) | ☑ |
 | [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | TODO | 01, CP-01 | PROV-002, 003, 007, 014, 021 | 미생성 | ☐ |
 | [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | TODO | 01, CP-01 | PROV-002, 003, 008, 014, 021 | 미생성 | ☐ |
@@ -18,7 +19,7 @@
 | [09 AWS EKS에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/09-aws-workloads.md) | DRAFT | 02, 03, 08 | PROV-010, 011, 012, 013, 018 | 미생성 | ☐ |
 | [10 승인된 Plan으로 GCP GKE 기반 준비](../../tickets/provisioning/10-gcp-infra-apply.md) | DRAFT | 06, 07 | PROV-008, 015, 016, 017 | 미생성 | ☐ |
 | [11 GCP GKE에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/11-gcp-workloads.md) | DRAFT | 02, 03, 10 | PROV-010, 011, 012, 013, 018 | 미생성 | ☐ |
-| [12 승인된 K3s Agent 운영 배포](../../tickets/provisioning/12-k3s-approved-rollout.md) | DRAFT | 04, 07 | PROV-009, 015, 016, 017, 018 | 미생성 | ☐ |
+| [12 승인된 K3s Agent 운영 배포](../../tickets/provisioning/12-k3s-approved-rollout.md) | DRAFT | 04A, 07 | PROV-009, 015, 016, 017, 018 | 미생성 | ☐ |
 | [13 실제 검증 결과와 Migration 인계](../../tickets/provisioning/13-result-handoff.md) | DRAFT | 12 | PROV-018, 019, 020, 021 | 미생성 | ☐ |
 | [14 실패 복구와 세 대상 통합 검증](../../tickets/provisioning/14-recovery-integration.md) | DRAFT | 08, 09, 10, 11, 12, 13 | PROV-015, 016, 017, 018, 019, 021 | 미생성 | ☐ |
 
@@ -26,7 +27,7 @@
 
 ```text
 01 → P0-01 → CP-01
-                ├→ 02 → 03 → 04 → 12 → 13
+                ├→ 02 → 03 → 04 → 04A → 12 → 13
                 ├→ 05 → 08 → 09
                 ├→ 06 → 10 → 11
                 └→ 07 → 08 / 10 / 12

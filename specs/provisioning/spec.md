@@ -107,6 +107,8 @@ AWS·GCP 자격 증명은 원문이 아닌 참조로 전달받아 필요한 접�
 
 Sandbox와 Production은 Provider별 설정 변환, Kubernetes Manifest·Helm Values 렌더링, 환경변수·Secret 매핑과 공통 검증 규칙을 재사용할 수 있어야 한다.
 
+Sandbox와 온프레미스 K3s 운영 배포의 공통 입력·렌더 결과는 [공통 배포 계약](onprem-shared-deployment.md)을 따른다. 같은 DB/App Chart를 사용하되 각 Worker의 클러스터 접속·적용·검증·정리 책임은 합치지 않는다.
+
 **수용 기준**
 
 - Sandbox Worker가 Production Provisioning 전체를 실행하지 않고 공통 기능을 사용할 수 있다.
@@ -152,9 +154,12 @@ Sandbox의 임시 리소스는 Sandbox Worker가, 실제 대상 인프라와 운
 
 사용자가 제공한 K3s 실행 환경에 Agent를 통해 앱·PostgreSQL을 배포해야 한다.
 
+P0에서는 공개 회원가입 없이 최소 소유자 기록에 Agent를 연결한다. Agent 등록·인증은 [공통 배포 계약](onprem-shared-deployment.md)의 소유 경계를 따르며, 실제 운영 Apply는 승인된 Plan에만 허용한다.
+
 **수용 기준**
 
 - Agent 연결·클러스터 접근·대상 자원 충족 여부를 확인하고 연결 불가 시 실패 또는 대기 상태와 원인을 반환한다.
+- 다른 소유자·Agent로 등록하거나 작업을 가져갈 수 없어야 하며 등록 토큰 재사용·만료는 거부한다.
 - Namespace를 준비하고 앱·PostgreSQL 배포 상태를 확인한다.
 - PVC와 StorageClass 사용 가능성 및 PostgreSQL 영속 상태를 확인한다.
 - Data Migration과 Traffic Migration이 사용할 대상 접근 참조를 제공한다.

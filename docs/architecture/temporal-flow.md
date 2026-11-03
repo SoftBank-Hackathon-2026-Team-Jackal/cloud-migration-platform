@@ -83,6 +83,8 @@ Production Provisioning은 공통 요구사항을 대상별 구성으로 변환�
 
 두 Worker는 `packages/providers/`의 공통 변환·Manifest/Helm 렌더링·환경변수/Secret 매핑·리소스 검증 로직과 기능 테스트를 재사용할 수 있다. 공통 라이브러리의 재사용은 Sandbox가 Production Provisioning Workflow 전체를 호출한다는 뜻이 아니다. 실제 실행 환경과 자원의 생명주기는 각 Worker가 맡는다. 실제 환경에서 기능 테스트를 재실행할 때에는 사용자 데이터 변경·테스트 계정·정리 정책을 별도 고려한다.
 
+Sandbox/온프레미스 K3s의 공유 렌더 입력·출력은 [공통 배포 계약](../../specs/provisioning/onprem-shared-deployment.md)을 따른다. 렌더 결과에는 적용 성공·Ready 판정이 없고, Sandbox Worker의 테스트/정리와 Production Worker의 승인 후 배포/검증은 별도 Activity 결과로 기록한다. 온프레미스 Agent 등록은 최소 소유자와 묶인 API·업무 DB 경계이며 Workflow 이력에 등록 토큰이나 인증 원문을 넣지 않는다.
+
 ## 7. Workflow 분할과 Child Workflow 판단
 
 | 선택지 | 장점 | 비용·주의 |

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
     database_url: str = "postgresql+psycopg://platform:platform@localhost:5433/platform"
+    agent_enrollment_admin_key: str | None = None
 
 
 settings = Settings()

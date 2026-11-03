@@ -46,6 +46,8 @@ tests/                       # 계약·렌더링·승인·복구·실환경 검�
 
 `cmp_contracts`는 Worker·API·후속 Migration이 공유할 직렬화 계약만 보유한다. `cmp_providers`는 순수 변환·렌더링·검증을 담당하며 클라우드 자격 증명, Terraform Apply, Kubernetes 변경, Agent 호출, Temporal 상태를 갖지 않는다. 실제 I/O, 자원 생명주기, Secret 조회, 산출물 저장은 Worker 서비스에 둔다. Sandbox 팀은 `cmp_providers`와 공통 검증 코드를 독립적으로 import하고 임시 Namespace 관리는 자체 Worker에서 수행한다. 기능 테스트 역시 실행기와 검사 정의를 분리해 두 환경에서 대상 주소·인증만 바꾸어 재사용한다.
 
+04A(#20)는 [Sandbox/온프레미스 공통 배포 계약](onprem-shared-deployment.md)을 기존 DB/App Chart 모델과 바인딩 함수 위에 구현한다. 온프레미스 Agent 등록은 최소 소유자 기록·일회용 등록 토큰·Agent별 인증/작업 조회로 한정한다. 공개 회원가입은 만들지 않는다. 운영 Apply/Ready와 승인 연결은 07·12의 선행 조건을 따른다.
+
 ## 3. Design and data flow — 계획과 실행의 경계
 
 ### 앞 단계에서 `ProvisioningSpec`까지

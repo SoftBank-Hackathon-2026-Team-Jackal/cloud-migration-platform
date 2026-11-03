@@ -3,20 +3,13 @@ openapi: 3.1.0
 info:
   title: Cloud Migration Platform
   version: 0.1.0
-  description: 'FastAPI external HTTP contract. The paths below describe only the
-    current
-
-    local Temporal-learning scaffold, not the completed migration product.
-
-    In particular, its AWS-to-GCP request, approval without Plan ID/Revision,
-
-    and status fields are not the production contract. Agreed capabilities and
-
-    unresolved interface choices are recorded in x-sdd-* sections. This file
-
-    does not define Temporal Client calls, Workflow/Activity Python contracts,
-
-    Provider module APIs, ProvisioningResult internals, or on-prem Agent traffic.'
+  description: FastAPI external HTTP contract. Migration paths remain a local Temporal-learning
+    scaffold; their approval without Plan ID/Revision is not the production contract.
+    Agent enrollment and outbound polling paths are implemented for the 04A registration
+    boundary, without approved Production Apply. Agreed capabilities and unresolved
+    choices are recorded in x-sdd-*. This file does not define Temporal Client calls,
+    Workflow/Activity Python contracts, Provider module APIs, or ProvisioningResult
+    internals.
 paths:
   /migrations:
     post:
@@ -153,6 +146,179 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agent-enrollments:
+    post:
+      tags:
+      - on-premises agents
+      summary: Issue Enrollment
+      operationId: issue_enrollment_agent_enrollments_post
+      parameters:
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollmentRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollmentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/register:
+    post:
+      tags:
+      - on-premises agents
+      summary: Register Agent
+      operationId: register_agent_agents_register_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/jobs/claim:
+    post:
+      tags:
+      - on-premises agents
+      summary: Next Job
+      operationId: next_job_agents__agent_id__jobs_claim_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/jobs/{job_id}/result:
+    post:
+      tags:
+      - on-premises agents
+      summary: Submit Result
+      operationId: submit_result_agents__agent_id__jobs__job_id__result_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobReport'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportAck'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}:
+    get:
+      tags:
+      - on-premises agents
+      summary: Agent Status
+      operationId: agent_status_agents__agent_id__get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentStatus'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -169,6 +335,98 @@ paths:
                 title: Response Health Health Get
 components:
   schemas:
+    AgentStatus:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        owner_id:
+          type: string
+          title: Owner Id
+        cluster_uid:
+          type: string
+          title: Cluster Uid
+      additionalProperties: false
+      type: object
+      required:
+      - agent_id
+      - owner_id
+      - cluster_uid
+      title: AgentStatus
+    ClaimResponse:
+      properties:
+        job:
+          anyOf:
+          - $ref: '#/components/schemas/ClaimedJob'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - job
+      title: ClaimResponse
+    ClaimedJob:
+      properties:
+        job_id:
+          type: string
+          title: Job Id
+        payload:
+          $ref: '#/components/schemas/QueuedWork'
+        status:
+          type: string
+          const: RUNNING
+          title: Status
+      additionalProperties: false
+      type: object
+      required:
+      - job_id
+      - payload
+      - status
+      title: ClaimedJob
+    EnrollmentRequest:
+      properties:
+        owner_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Owner Id
+        agent_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+        ttl_seconds:
+          type: integer
+          maximum: 3600.0
+          minimum: 1.0
+          title: Ttl Seconds
+          default: 600
+      additionalProperties: false
+      type: object
+      required:
+      - owner_id
+      - agent_id
+      - cluster_uid
+      title: EnrollmentRequest
+    EnrollmentResponse:
+      properties:
+        enrollment_token:
+          type: string
+          title: Enrollment Token
+        expires_in_seconds:
+          type: integer
+          title: Expires In Seconds
+      additionalProperties: false
+      type: object
+      required:
+      - enrollment_token
+      - expires_in_seconds
+      title: EnrollmentResponse
     HTTPValidationError:
       properties:
         detail:
@@ -178,6 +436,25 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    JobReport:
+      properties:
+        status:
+          type: string
+          enum:
+          - SUCCEEDED
+          - FAILED
+          - UNKNOWN
+          title: Status
+        code:
+          type: string
+          pattern: ^[A-Z0-9_]{1,64}$
+          title: Code
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      - code
+      title: JobReport
     MigrationCreated:
       properties:
         workflow_id:
@@ -242,6 +519,72 @@ components:
       - approval_pending
       - cancel_requested
       title: MigrationStatus
+    QueuedWork:
+      properties:
+        kind:
+          type: string
+          const: SANDBOX_TEST
+          title: Kind
+        work_ref:
+          $ref: '#/components/schemas/VersionRef'
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - work_ref
+      title: QueuedWork
+    RegistrationRequest:
+      properties:
+        enrollment_token:
+          type: string
+          title: Enrollment Token
+        agent_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+      additionalProperties: false
+      type: object
+      required:
+      - enrollment_token
+      - agent_id
+      - cluster_uid
+      title: RegistrationRequest
+    RegistrationResponse:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        credential:
+          type: string
+          title: Credential
+      additionalProperties: false
+      type: object
+      required:
+      - agent_id
+      - credential
+      title: RegistrationResponse
+    ReportAck:
+      properties:
+        job_id:
+          type: string
+          title: Job Id
+        accepted:
+          type: boolean
+          const: true
+          title: Accepted
+      additionalProperties: false
+      type: object
+      required:
+      - job_id
+      - accepted
+      title: ReportAck
     ValidationError:
       properties:
         loc:
@@ -268,9 +611,30 @@ components:
       - msg
       - type
       title: ValidationError
+    VersionRef:
+      properties:
+        id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Id
+        version:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Version
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - version
+      title: VersionRef
+      description: Opaque, immutable record version. Never a credential or signed
+        URL.
 x-sdd-contract-status:
-  scope: Frontend to FastAPI REST and SSE
-  implementation: Current paths and component schemas are a local scaffold only.
+  scope: Frontend and on-premises Agent to FastAPI REST and SSE
+  implementation: Migration paths remain a scaffold; Agent enrollment and polling
+    paths are implemented without Production Apply.
   source-of-truth:
   - docs/product/policies.md
   - docs/architecture/domain-boundaries.md
@@ -286,9 +650,14 @@ x-sdd-contract-status:
     business-records: PostgreSQL stores users, migrations, plans, and approvals.
     workflow-history: Temporal stores execution history and task state.
     artifacts: S3 stores uploaded files and large artifacts by reference.
-  secret-boundary: Do not return credential, .env, or Secret plaintext in ordinary
-    responses or logs.
+  secret-boundary: Agent enrollment and registration return one-time tokens or credentials
+    only in those dedicated responses. Do not log or return credential, .env, or Secret
+    plaintext in ordinary responses.
 x-sdd-agreed-capabilities:
+- capability: on-prem-agent-enrollment
+  purpose: An operator with the configured enrollment key issues a short-lived, one-use
+    token for an owner and K3s Agent. The Agent registers outbound and receives its
+    credential once; authenticated polling only returns work assigned to that Agent.
 - capability: source-upload
   purpose: Accept application source for analysis and provide a later usable reference.
 - capability: environment-upload
@@ -316,8 +685,8 @@ x-sdd-agreed-capabilities:
   purpose: Stream stage, approval, validation, error, and completion updates via FastAPI
     SSE without stopping the Workflow when a client disconnects.
 x-sdd-unresolved-http-interface:
-- URL paths and HTTP methods for all product capabilities, including whether scaffold
-  paths will be retained.
+- URL paths and HTTP methods for migration product capabilities, including whether
+  scaffold migration paths will be retained. Agent registration paths are implemented.
 - Authentication and authorization model for uploads, migration ownership, preview,
   approval, and cancellation.
 - Request and response field names, validation constraints, and external status enumeration.

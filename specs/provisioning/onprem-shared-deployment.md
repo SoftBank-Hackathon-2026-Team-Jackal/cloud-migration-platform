@@ -1,0 +1,113 @@
+# Sandbox/온프레미스 공통 배포 입력·렌더 결과 계약
+
+## 상태와 책임
+
+2026-11-03 사용자와 합의한 **공통 렌더 계약**이다. 04A(#20)의 `SharedDeploymentRequest`/`SharedDeploymentResult`와 `cmp_providers.shared_deployment.render_shared_deployment`가 기존 `PostgresChartValues`, `ApplicationValues`, DB 바인딩 및 두 Helm Chart를 조합한다. 이 문서는 실제 배포가 끝났다는 뜻이 아니다.
+
+Sandbox Worker는 미리 준비된 별도 클러스터의 임시 Namespace에 적용·검증·정리한다. Provisioning Worker는 승인된 운영 계획에 한해서 사용자 제공 K3s의 배포를 요청하고 결과를 확인한다. 공통 모듈은 입력 검증, 이름·연결값 계산과 DB/App Values·Manifest 렌더링을 수행한다. 클러스터 접속, Secret 생성·조회, Kubernetes 적용, 테스트, Ready 판정, 정리는 Worker/Agent 책임이다. Sandbox는 Production Provisioning Workflow 전체를 호출하지 않는다.
+
+## 공통 입력
+
+| 필드 | 역할 |
+| --- | --- |
+| `environment`, `provider` | `SANDBOX` 또는 `PRODUCTION`, 대상 `AWS`/`GCP`/`ON_PREM`. 온프레미스 운영은 `PRODUCTION` + `ON_PREM`이다. |
+| `namespace`, `release_names.app/db`, `storage_class` | 배포할 Namespace, 별도 앱/DB Release, DB PVC의 StorageClass. Cluster 접속 정보는 포함하지 않는다. |
+| `app` | Digest 고정 이미지·지원 플랫폼, 복제 수, CPU millicores·메모리 MiB, 컨테이너 Port, Health Path, 설정 산출물 참조. |
+| `db` | PostgreSQL 16 Digest 고정 이미지·지원 플랫폼, DB 이름/사용자, 비밀번호 Secret 이름·키, CPU·메모리, PVC GiB. 비밀번호 원문은 포함하지 않는다. |
+| `env_bindings` | 앱의 필수 환경변수 이름과 `CONFIG_MAP`/`USER_SECRET`/`DATABASE` 출처. 일반 설정·Secret은 이름/키만, DB 변수는 host/port/name/username/secret_ref 필드로 연결한다. |
+
+예시(`sha256`·설정 참조는 설명용):
+
+```yaml
+contract_version: "1"
+environment: SANDBOX
+provider: ON_PREM
+namespace: cmp-test-001
+release_names: {app: cmp-test-001-app, db: cmp-test-001-db}
+storage_class: local-path
+app:
+  image:
+    uri: "registry.example.com/demo-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    platforms: [linux/arm64]
+  config_ref: {id: config-001, version: "1", sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+  replicas: 1
+  cpu_millicores: 250
+  memory_mib: 256
+  port: 8080
+  health_path: /health
+db:
+  image:
+    uri: "docker.io/library/postgres@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    platforms: [linux/arm64]
+  version: "16"
+  name: appdb
+  username: appuser
+  password_secret_name: cmp-test-001-db-auth
+  password_secret_key: password
+  cpu_millicores: 250
+  memory_mib: 512
+  pvc_size_gib: 5
+env_bindings:
+  APP_MODE: {kind: CONFIG_MAP, name: app-config, key: mode}
+  API_KEY: {kind: USER_SECRET, name: uploaded-secrets, key: api-key}
+  DB_HOST: database.host
+  DB_PORT: database.port
+  DB_NAME: database.name
+  DB_USER: database.username
+  DB_PASSWORD: database.secret_ref
+```
+
+입력은 현재 두 Chart 모델의 공통 필드를 조합한다. `config_ref`와 이미지 `platforms`는 현재 앱 Chart 계약에서 필수라 예시에 명시했다. `env_bindings`는 변수 이름을 키로 사용하고 DB 값은 `database.host` 등 필드 이름, 일반·사용자 Secret은 `kind`/`name`/`key` 참조를 받는다. 실제 Secret·ConfigMap 존재 및 이미지 Pull 권한은 이 모듈이 보증하지 않는다. SANDBOX에 운영 Credential을 요구하지 않는다.
+
+## 공통 반환
+
+| 필드 | 의미 |
+| --- | --- |
+| DB/App Helm Values 및 렌더 Manifest | 호출자가 저장·Digest 검증 후 Worker/Agent에 전달할 정확한 배포 내용. DB/App Chart·Release를 분리한다. |
+| 내부 DB Service `host`, `port` | Release·Namespace에서 계산한 연결 대상. 실제 DNS/DB 접근 성공의 증거는 아니다. |
+| 앱 환경변수 매핑 | `DB_HOST` 등은 계산한 DB 정보로, DB 비밀번호는 Secret 이름/키 참조로 연결한다. 원문 값은 포함하지 않는다. |
+| 검증 결과 | 성공 시 유효한 렌더 결과, 실패 시 필드/코드가 있는 오류. `READY`나 배포 완료 상태는 반환하지 않는다. |
+
+```yaml
+environment: SANDBOX
+namespace: cmp-test-001
+database:
+  release_name: cmp-test-001-db
+  helm_values: "<최종 DB Values>"
+  manifest_yaml: "<StatefulSet·Service·PVC YAML>"
+  service: {host: cmp-test-001-db.cmp-test-001.svc, port: 5432}
+application:
+  release_name: cmp-test-001-app
+  helm_values: "<DB 주소가 채워진 앱 Values>"
+  manifest_yaml: "<Deployment·Service YAML>"
+bindings:
+  DB_HOST: cmp-test-001-db.cmp-test-001.svc
+  DB_PORT: "5432"
+  DB_NAME: appdb
+  DB_USER: appuser
+  DB_PASSWORD: {secret_name: cmp-test-001-db-auth, secret_key: password}
+validation: {passed: true, errors: []}
+```
+
+큰 Manifest는 모듈 내부에서 정확한 바이트로 생성한다. S3 참조 발급·저장, 승인 Artifact/Digest와의 대조, 클러스터 배포 및 실제 Ready/DB/앱 검증은 호출자가 맡는다. Sandbox Worker 테스트 결과와 Production Worker의 `ProvisioningResult`는 이 렌더 결과와 별도로 기록한다.
+
+공개 함수 호출은 다음과 같다. 입력은 위 YAML을 파싱한 `dict`이며 반환 모델 안에 DB/App Values와 Manifest YAML 문자열이 들어 있다. 실패 시 `ProvisioningInputError.issues`에 비밀값 없는 오류 코드가 들어간다. Helm CLI 호출은 외부 I/O이므로 Temporal Workflow 내부가 아닌 Activity/Worker 서비스에서 실행한다.
+
+```python
+from pathlib import Path
+from cmp_providers.shared_deployment import render_shared_deployment
+
+result = render_shared_deployment(
+    payload,
+    database_chart_dir=Path("infra/helm/postgres"),
+    application_chart_dir=Path("infra/helm/application"),
+)
+```
+
+## Agent 등록과 소유
+
+P0는 공개 회원가입 대신 플랫폼의 최소 소유자 식별자에 Agent를 연결한다. 등록 권한은 소유자에 묶인 일회용·만료 토큰으로 위임하며, 등록된 Agent는 아웃바운드 연결로 자신에게 할당된 작업만 조회·보고한다. 등록 토큰과 Agent 인증 원문을 업무 DB·Temporal History·로그에 남기지 않는다. 운영 배포 작업은 특정 승인 Plan ID·Revision·Digest와 Agent·클러스터에 고정되어야 하며 07·12에서 실행 연결을 한다.
+
+Agent가 접속하는 대상 K3s는 사용자 측에 있고 Sandbox 클러스터는 플랫폼이 미리 준비한 별도 자원이다. 공통 모듈이 플랫폼 서버 내부에 앱/DB를 띄우는 것은 아니다.
+
+04A에서는 플랫폼 운영자 키를 가진 호출만 `POST /agent-enrollments`로 토큰을 발급한다. Agent는 `POST /agents/register`로 토큰을 한 번 사용해 인증 값을 받고, `POST /agents/{agent_id}/jobs/claim`과 결과 보고 API로 자기 작업만 다룬다. DB에는 토큰·인증 값의 SHA-256 Digest만 저장한다. 현재 전송 가능한 작업 본문은 `SANDBOX_TEST`의 버전 참조이며 승인된 운영 Apply 작업은 12에서 추가한다. 원격 Agent CLI의 `poll-once`는 참조 조회만 하고 K3s Apply를 실행하지 않는다.
