@@ -1,0 +1,13 @@
+variable "project_id" { type = string }
+variable "region" { type = string }
+variable "name" { type = string }
+variable "subnet_cidr" { type = string }
+variable "pods_cidr" { type = string }
+variable "services_cidr" { type = string }
+variable "master_cidr" { type = string }
+variable "api_access_cidrs" { type = list(string) }
+variable "release_channel" { type = string }
+variable "node_machine_type" { type = string }
+variable "node_count" { type = number }
+variable "node_disk_gib" { type = number }
+variable "node_service_account_email" { type = string }

@@ -1,0 +1,36 @@
+{
+  "migration_id": "migration-local",
+  "plan": {
+    "plan_id": "plan-local",
+    "revision": 1,
+    "template_version": "gcp-gke-v1"
+  },
+  "environment_id": "demo-local",
+  "project_id": "cmp-plan-local",
+  "region": "asia-northeast3",
+  "credential_ref": {
+    "id": "local-test-only",
+    "version": "1"
+  },
+  "state_ref": {
+    "id": "local-state-only",
+    "version": "1"
+  },
+  "state_bucket": "unused-local-state-bucket",
+  "state_key": "cmp/gcp/demo-local/terraform.tfstate",
+  "state_region": "ap-northeast-2",
+  "state_account_id": "000000000000",
+  "cluster_name": "cmp-local",
+  "subnet_cidr": "10.30.0.0/20",
+  "pods_cidr": "10.32.0.0/14",
+  "services_cidr": "10.36.0.0/20",
+  "master_cidr": "172.16.0.0/28",
+  "api_access_cidrs": [
+    "203.0.113.10/32"
+  ],
+  "release_channel": "REGULAR",
+  "node_machine_type": "e2-standard-2",
+  "node_count": 2,
+  "node_disk_gib": 60,
+  "node_service_account_email": "cmp-node@cmp-plan-local.iam.gserviceaccount.com"
+}
