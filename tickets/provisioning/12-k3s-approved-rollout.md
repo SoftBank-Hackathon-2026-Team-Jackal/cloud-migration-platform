@@ -10,10 +10,11 @@ DRAFT
 PROV-009, PROV-015, PROV-016, PROV-017, PROV-018
 
 ## 선행 작업
-Blocked by: 04, 07
+Blocked by: 04A, 07
 
 ## 작업 범위
 - 포함: Agent ID·작업 ID·Plan Digest 검사, Namespace·StorageClass·Helm 상태 재조회, 운영 배포 검증을 구현한다.
+- 04A의 소유자·Agent 등록과 [공통 렌더 입력/출력](../../specs/provisioning/onprem-shared-deployment.md)을 사용한다. 원격 등록·차트 변환을 복제하지 않는다.
 - 제외: 온프레미스 외부 중계·Envoy·WireGuard 생명주기
 
 ## 수용 기준

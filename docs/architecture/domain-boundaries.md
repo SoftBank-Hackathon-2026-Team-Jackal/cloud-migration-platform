@@ -54,6 +54,8 @@ Sandbox는 변환 오류를 사전에 찾는 곳이다. **Sandbox 성공은 실�
 
 대상은 AWS EKS, GCP GKE, 온프레미스 K3s다. Preview와 승인된 계획의 일치 방식을 후속 설계에서 정해야 하며, **승인 전 실제 인프라를 생성하지 않는다.** Provisioning은 Data Migration에 DB 접근 참조를, Traffic Migration에 신규 서비스 접근 정보와 준비 상태를 제공한다. 실제 배포 후의 상태·헬스·기능 검증은 Sandbox 검증과 별개의 결과다.
 
+온프레미스 Agent는 최소 소유자 기록과 묶어 등록한다. Agent 등록 토큰은 일회용·만료이며 인증된 Agent만 자신의 작업을 조회·보고한다. 공개 회원가입은 P0 범위 밖이다. 등록·인증은 플랫폼 API/업무 DB 경계, 대상 K3s 적용은 Agent 경계, 승인된 실행 판단은 Provisioning/Temporal 경계다. [공통 배포 계약](../../specs/provisioning/onprem-shared-deployment.md)을 따른다.
+
 ## 6. Data Migration Worker
 
 | 항목 | 내용 |
@@ -88,7 +90,7 @@ PostgreSQL 논리 복제가 모든 DB 객체나 변경을 자동 처리한다고
 | 책임 제외 | 특정 Worker의 실행 상태 관리, Terraform Apply, 클라우드 자원 생성, Sandbox 테스트·정리 |
 | 의존 모듈 | 경계별 계약, 검증된 템플릿·Helm 차트, 대상별 설정 규칙 |
 
-Sandbox와 Production Provisioning은 같은 Python 모듈을 직접 재사용할 수 있다. Deployment·StatefulSet 요구사항, ConfigMap·Secret 매핑, 공통 Helm 렌더링, Service·Pod 검사와 리소스 검증은 공통화 후보로 둔다. **EKS·GKE·K3s 클러스터 구성, IAM, 네트워크, Load Balancer, CSI·StorageClass와 Provider 인증**은 대상별 구현이 필요하다. 공통 모듈의 최종 패키지 구조·함수 시그니처는 미정이다.
+Sandbox와 Production Provisioning은 같은 Python 모듈을 직접 재사용할 수 있다. Deployment·StatefulSet 요구사항, ConfigMap·Secret 매핑, 공통 Helm 렌더링, Service·Pod 검사와 리소스 검증은 공통화 후보로 둔다. **EKS·GKE·K3s 클러스터 구성, IAM, 네트워크, Load Balancer, CSI·StorageClass와 Provider 인증**은 대상별 구현이 필요하다. Sandbox/온프레미스 K3s에서 공유하는 앱·DB 렌더링의 논리 입출력은 [공통 배포 계약](../../specs/provisioning/onprem-shared-deployment.md)에 확정했다. Python 함수 시그니처와 나머지 Provider 패키지 분할은 04A 구현에서 정한다.
 
 기능 테스트 코드도 가능한 경우 Sandbox와 실제 배포 후 검증에 재사용한다. 테스트 대상 주소·인증·연결 정보는 실행 환경에 맞게 주입한다. 운영 환경에서 테스트가 데이터에 영향을 주는지, 테스트 계정과 정리 규칙이 무엇인지는 별도로 정해야 한다.
 

@@ -78,3 +78,7 @@ identity = approval_target(manifest, preview)
 ## 앱 렌더 소비자 (03)
 
 `cmp_contracts.application`과 `cmp_providers.application`이 기존 DynamicBinding을 소비한다. `cmp_providers.app_renderer.render_application`은 검증된 참조 전용 Values로 실제 Helm Manifest bytes를 만든다. [상세 계약](application-rendering.md)을 따른다. 승인/저장/실배포 기능을 대신하지 않는다.
+
+## Sandbox/온프레미스 조합 소비자 (04A)
+
+기존 `PostgresChartValues`, `ApplicationValues`, DB 바인딩과 두 Helm Chart를 조합하는 [공통 배포 입력·렌더 결과 계약](onprem-shared-deployment.md)을 04A에서 구현한다. SANDBOX/PRODUCTION은 같은 입력 형태를 쓰고 Namespace·StorageClass·Secret 참조 등 환경별 값을 다르게 전달한다. 순수 렌더 결과는 K3s 적용 성공·Ready 또는 Sandbox 기능 검증을 뜻하지 않는다.
