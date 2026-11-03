@@ -14,7 +14,9 @@
 
 #5에서 내부 v1 계약과 순수 Planning/Provider 검증을 구현했다. 실제 위치는 `packages/contracts/src/cmp_contracts/provisioning.py`, `apps/worker/src/cmp_worker/provisioning.py`, `packages/providers/src/cmp_providers/provisioning.py`다. 작은 초기 범위라 기존 패키지의 단일 모듈로 두었고 아래 하위 패키지 분할은 후속 확장 제안으로 유지한다. 구현된 필드·미지원 범위·실행 증거는 [입력 계약 §10](input-contract.md)에 기록한다. 실제 상위 Worker의 wire 계약·S3 조회·Temporal 연결은 이번 구현에 포함되지 않는다.
 
-후속 #1은 [입력 계약 v2](input-contract-v2.md)를 별도 공개 경계로 구현한다. Analysis의 리소스 목록, APPLICATION별 Build→Sandbox 출처·Digest·플랫폼, 대상·환경 참조를 검증하여 **Plan 발급 전의 Spec**을 반환한다. 단일 앱/DB Provider Adapter·공통 Helm 렌더러와 v2 다중 리소스 Spec의 연결, 실제 참조 조회와 최상위 Temporal 연결은 후속 구현이다.
+후속 #1은 [입력 계약 v2](input-contract-v2.md)를 별도 공개 경계로 구현한다. Analysis의 리소스 목록, APPLICATION별 Build→Sandbox 출처·Digest·플랫폼, 대상·환경 참조를 검증하여 **Plan 발급 전의 Spec**을 반환한다. #23은 v2 다중 리소스 공통 Helm 렌더러를 별도 공개 경계로 구현한다. Planning Spec에서 대상별 구체 렌더 입력으로 변환하는 Worker, 실제 참조 조회와 최상위 Temporal 연결은 후속 구현이다.
+
+#23은 [공통 배포 계약 v2](onprem-shared-deployment.md#v2-공통-렌더-입력반환)의 여러 APPLICATION·POSTGRESQL을 ID로 연결해 별도 Helm Values·Manifest로 렌더한다. 호출 Worker가 v2 Planning 요구와 대상별 이미지·Namespace·StorageClass·Secret 참조를 대조하고 최종 입력을 공급해야 한다. 이 렌더 결과를 Plan 저장이나 클러스터 적용 성공으로 간주하지 않는다.
 
 ## 2. Affected modules and contracts — 저장소에 맞춘 제안 구조
 

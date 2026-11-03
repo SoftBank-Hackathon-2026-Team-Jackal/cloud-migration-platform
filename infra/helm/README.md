@@ -27,3 +27,5 @@ uv run pytest tests/test_postgres_helm.py
 ## Application Chart
 
 `application/`은 앱 Deployment·ClusterIP Service를 렌더한다. [입력·바인딩·공개 렌더 함수](../../specs/provisioning/application-rendering.md)를 따른다. `tests/fixtures/contracts/app-values.json`은 DB 동적 슬롯이 null인 계획 템플릿이므로 DB 연결 결과를 바인딩한 뒤 렌더한다. 원문 환경변수는 받지 않고 ConfigMap/Secret 이름·키 참조를 사용한다. 실제 ConfigMap/Secret 생성과 클러스터 배포는 별도 실행 경계다.
+
+같은 App Chart는 [공통 렌더 계약 v2](../../specs/provisioning/onprem-shared-deployment.md#v2-공통-렌더-입력반환)의 `ApplicationValuesV2`도 받는다. v2에서는 리소스 ID별 DB 출력이 이미 해결된 문자열 또는 Secret 이름·키 참조가 `env`에 들어가며, 여러 DB를 쓰는 앱도 변수별로 구분된다. Chart JSON Schema는 v1/v2를 분기해 검증한다. 렌더는 실제 Secret 존재, 이미지 Pull, Pod Ready를 보증하지 않는다.

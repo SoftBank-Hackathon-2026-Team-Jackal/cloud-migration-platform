@@ -1,6 +1,6 @@
 # Sandbox/온프레미스 공통 배포 입력·렌더 결과 계약
 
-> 아래의 `SharedDeploymentRequest`/`Result` 예시는 **구현된 v1 단일 앱·DB 계약**이다. 최신 다중 리소스 입·출력 목표는 이 문서의 **v2 설계 입력·반환** 절을 따른다. v2 공통 렌더러는 아직 구현되지 않았다.
+> 아래의 `SharedDeploymentRequest`/`Result` 예시는 **구현된 v1 단일 앱·DB 계약**이다. 다중 리소스 v2는 이 문서의 **v2 공통 렌더 입력·반환** 절과 `render_shared_deployment_v2`를 따른다. 두 호출은 별도이며 v1 입력을 자동 승격하지 않는다.
 
 ## 상태와 책임
 
@@ -106,9 +106,9 @@ result = render_shared_deployment(
 )
 ```
 
-## v2 설계 입력·반환 (미구현)
+## v2 공통 렌더 입력·반환
 
-사용자가 확정한 공통 렌더러 v2는 Sandbox Worker와 Provisioning Worker가 **대상 환경에 맞는 구체값을 결정한 뒤** 호출한다. Planning의 `RequirementsV2.resources[]`는 분석 요구이며 다음 입력의 Release 이름, 이미지, StorageClass, Secret 참조까지 확정한 상태가 아니다. Worker는 `.env`와 `mapping_ref`의 제외·대체 규칙을 해석하고 Secret을 준비해 최종 변수별 바인딩만 전달한다. 원문 비밀값은 렌더러에 넣지 않는다.
+`cmp_providers.shared_deployment_v2.render_shared_deployment_v2`는 Sandbox Worker와 Provisioning Worker가 **대상 환경에 맞는 구체값을 결정한 뒤** 호출하는 공통 렌더 경계다. Planning의 `RequirementsV2.resources[]`는 분석 요구이며 다음 입력의 Release 이름, 이미지, StorageClass, Secret 참조까지 확정한 상태가 아니다. Worker는 `.env`와 `mapping_ref`의 제외·대체 규칙을 해석하고 Secret을 준비해 최종 변수별 바인딩만 전달한다. 원문 비밀값은 렌더러에 넣지 않는다. 입력·반환 모델은 `cmp_contracts.shared_deployment_v2`에 정의했다.
 
 ```yaml
 contract_version: "2"
@@ -143,9 +143,22 @@ resources:
       API_KEY: {secret_ref: {name: cmp-test-001-app-env, key: API_KEY}}
 ```
 
-성공 반환은 `environment`, `namespace`, ID·종류를 유지한 `resources[]`, `validation`으로 구성한다. 각 DB 원소는 `release_name`, `helm_values`, `manifest_yaml`, `outputs={host,port,name,username,password_secret_ref}`를, 각 앱 원소는 `release_name`, `helm_values`, `manifest_yaml`, `resolved_env_bindings`를 반환한다. 예를 들면 `DB_HOST`는 생성된 DB Service 주소, `DB_PASSWORD`와 `API_KEY`는 `{secret_name,secret_key}`가 된다. `validation={passed:true,errors:[]}`는 **렌더 검증**일 뿐 실제 Apply·Pod Ready·DB 접속 성공이 아니다. 실패는 안전한 필드 경로·오류 코드로 반환한다.
+성공 반환은 `environment`, `provider`, `namespace`, ID·종류를 유지한 `resources[]`, `validation`으로 구성한다. 각 DB 원소는 `release_name`, `helm_values`, `manifest_yaml`, `outputs={host,port,name,username,password_secret_ref}`를, 각 앱 원소는 `release_name`, `helm_values`, `manifest_yaml`, `resolved_env_bindings`를 반환한다. 예를 들면 `DB_HOST`는 DB Service 주소, `DB_PASSWORD`와 `API_KEY`는 `{secret_name,secret_key}`가 된다. `validation={passed:true,errors:[]}`는 **렌더 검증**일 뿐 실제 Apply·Pod Ready·DB 접속 성공이 아니다. 실패는 안전한 필드 경로·오류 코드로 반환한다.
 
-구현 시 `APPLICATION`·`POSTGRESQL`만 렌더하고 나머지 종류는 명시적으로 거절한다. PostgreSQL 이미지의 버전/확장은 Analysis 요구와 대조하며 대상 Profile은 요구를 덮어쓰지 못한다. `network_intent`는 Sandbox와 운영 Worker가 각 환경의 정책으로 해석하고, Sandbox 전용 원본 클라우드 차단 규칙은 별도로 적용한다. 현재 v1의 `release_names.app/db`, `app`, `db`, `env_bindings` 최상위 필드를 v2 입력으로 그대로 전달할 수 없다.
+현재 `APPLICATION`·`POSTGRESQL`만 렌더하고 나머지 종류 및 PostgreSQL 확장은 거절한다. 여러 앱·DB를 지원하며 앱 환경변수마다 해당 DB의 ID·출력 또는 이미 준비한 Secret 이름·키를 요구한다. DB 버전 필드는 16으로 제한하지만 **이미지 Digest 자체의 실제 PostgreSQL 버전·확장·대상 Pull 가능성은 조회하지 않는다.** Worker가 Planning 요구와 이미지 출처, 대상 capabilities·실제 Secret/StorageClass를 대조해야 한다. Profile은 요구를 덮어쓰지 못한다. `network_intent`는 Sandbox와 운영 Worker가 각 환경의 정책으로 해석하고 Sandbox 전용 원본 클라우드 차단 규칙은 별도로 적용한다. v1의 `release_names.app/db`, `app`, `db`, `env_bindings` 최상위 필드를 v2 입력으로 그대로 전달할 수 없다.
+
+DB Values는 기존 `PostgresChartValues` v1을 리소스마다 재사용하고, 앱은 같은 Chart의 `ApplicationValuesV2` 분기를 사용한다. 별도 수정 설정 산출물이 있을 때만 앱의 `config_ref`를 넣는다. 앱 Values의 환경변수는 리소스 출력에서 확정한 문자열 또는 Secret 이름·키 참조이며 raw `.env` 값은 허용하지 않는다. Chart는 외부 Helm CLI로 **template**만 실행한다. Manifest·Values의 저장/Digest·승인 산출물 대조, 클러스터 적용·검사·정리, 실제 네트워크 정책은 호출 Worker가 맡는다.
+
+```python
+from pathlib import Path
+from cmp_providers.shared_deployment_v2 import render_shared_deployment_v2
+
+result = render_shared_deployment_v2(
+    payload,
+    database_chart_dir=Path("infra/helm/postgres"),
+    application_chart_dir=Path("infra/helm/application"),
+)
+```
 
 ## Agent 등록과 소유
 

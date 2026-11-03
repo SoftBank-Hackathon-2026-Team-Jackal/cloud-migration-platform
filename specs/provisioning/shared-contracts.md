@@ -82,3 +82,7 @@ identity = approval_target(manifest, preview)
 ## Sandbox/온프레미스 조합 소비자 (04A)
 
 기존 `PostgresChartValues`, `ApplicationValues`, DB 바인딩과 두 Helm Chart를 조합하는 [공통 배포 입력·렌더 결과 계약](onprem-shared-deployment.md)을 04A에서 구현한다. SANDBOX/PRODUCTION은 같은 입력 형태를 쓰고 Namespace·StorageClass·Secret 참조 등 환경별 값을 다르게 전달한다. 순수 렌더 결과는 K3s 적용 성공·Ready 또는 Sandbox 기능 검증을 뜻하지 않는다.
+
+## ID 기반 다중 리소스 소비자 (04B)
+
+`cmp_contracts.shared_deployment_v2.SharedDeploymentRequestV2`와 `cmp_providers.shared_deployment_v2.render_shared_deployment_v2`는 여러 DB/App 입력을 고유 ID로 렌더한다. DB별 기존 `PostgresChartValues`와 앱별 `ApplicationValuesV2`를 같은 Chart에 공급해 Values·Manifest·DB 출력·해결된 환경변수 참조를 반환한다. 입력에서 Secret 원문과 미지원 종류/확장을 거절한다. Worker는 환경별 리소스 값·Secret·대상 capabilities를 준비하고 Chart 산출물을 저장·승인 내용과 대조한 뒤 실제 적용한다. v1 조합 호출은 그대로 유지한다.
