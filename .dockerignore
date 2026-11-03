@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.terraform
+**/*.tfstate*
+**/*.tfplan
+**/input.auto.tfvars.json
+tests
+docs
+specs
+tickets

@@ -1,0 +1,82 @@
+name: cmp-demo
+
+services:
+  platform-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: ${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD}
+      POSTGRES_DB: platform
+    volumes:
+      - /opt/cmp/data/platform-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      retries: 12
+
+  temporal-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:?set TEMPORAL_DB_PASSWORD}
+    volumes:
+      - /opt/cmp/data/temporal-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      retries: 12
+
+  temporal:
+    image: temporalio/auto-setup:1.29.1
+    restart: unless-stopped
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:?set TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: temporal-db
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/demo/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      platform-db:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+psycopg://platform:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD}@platform-db:5432/platform
+      TEMPORAL_ADDRESS: temporal:7233
+      AGENT_ENROLLMENT_ADMIN_KEY: ${AGENT_ENROLLMENT_ADMIN_KEY:?set AGENT_ENROLLMENT_ADMIN_KEY}
+    command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/demo/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    command: ["python", "-m", "cmp_worker.workers.run_all"]
