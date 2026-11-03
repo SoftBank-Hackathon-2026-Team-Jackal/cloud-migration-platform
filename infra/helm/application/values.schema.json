@@ -317,87 +317,264 @@
       ],
       "title": "VersionRef",
       "type": "object"
+    },
+    "LiteralEnvSourceV2": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "LITERAL",
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "LiteralEnvSourceV2",
+      "type": "object"
+    },
+    "ResolvedEnvV2": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "discriminator": {
+            "mapping": {
+              "LITERAL": "#/$defs/LiteralEnvSourceV2",
+              "SECRET": "#/$defs/SecretEnvSourceV2"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralEnvSourceV2"
+            },
+            {
+              "$ref": "#/$defs/SecretEnvSourceV2"
+            }
+          ],
+          "title": "Source"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "ResolvedEnvV2",
+      "type": "object"
+    },
+    "SecretEnvSourceV2": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "SECRET",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 253,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9._-]+$",
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "key"
+      ],
+      "title": "SecretEnvSourceV2",
+      "type": "object"
     }
   },
-  "additionalProperties": false,
-  "properties": {
-    "contract_version": {
-      "const": "1",
-      "title": "Contract Version",
-      "type": "string"
-    },
-    "environment": {
-      "enum": [
-        "SANDBOX",
-        "PRODUCTION"
-      ],
-      "title": "Environment",
-      "type": "string"
-    },
-    "provider": {
-      "enum": [
-        "AWS",
-        "GCP",
-        "ON_PREM"
-      ],
-      "title": "Provider",
-      "type": "string"
-    },
-    "release_name": {
-      "maxLength": 53,
-      "minLength": 1,
-      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-      "title": "Release Name",
-      "type": "string"
-    },
-    "namespace": {
-      "maxLength": 63,
-      "minLength": 1,
-      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-      "title": "Namespace",
-      "type": "string"
-    },
-    "config_ref": {
-      "$ref": "#/$defs/ContentRef"
-    },
-    "image": {
-      "$ref": "#/$defs/Image"
-    },
-    "application": {
-      "$ref": "#/$defs/Application"
-    },
-    "database": {
-      "$ref": "#/$defs/DatabaseConnection"
-    },
-    "required_env": {
-      "items": {
-        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
-        "type": "string"
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "1",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "SANDBOX",
+            "PRODUCTION"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "AWS",
+            "GCP",
+            "ON_PREM"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "release_name": {
+          "maxLength": 53,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Release Name",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Namespace",
+          "type": "string"
+        },
+        "config_ref": {
+          "$ref": "#/$defs/ContentRef"
+        },
+        "image": {
+          "$ref": "#/$defs/Image"
+        },
+        "application": {
+          "$ref": "#/$defs/Application"
+        },
+        "database": {
+          "$ref": "#/$defs/DatabaseConnection"
+        },
+        "required_env": {
+          "items": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Required Env",
+          "type": "array"
+        },
+        "env": {
+          "items": {
+            "$ref": "#/$defs/EnvironmentBinding"
+          },
+          "title": "Env",
+          "type": "array"
+        }
       },
-      "title": "Required Env",
-      "type": "array"
+      "required": [
+        "contract_version",
+        "environment",
+        "provider",
+        "release_name",
+        "namespace",
+        "config_ref",
+        "image",
+        "application",
+        "database",
+        "required_env",
+        "env"
+      ],
+      "title": "ApplicationValues",
+      "type": "object"
     },
-    "env": {
-      "items": {
-        "$ref": "#/$defs/EnvironmentBinding"
+    {
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "2",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "SANDBOX",
+            "PRODUCTION"
+          ],
+          "title": "Environment",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "AWS",
+            "GCP",
+            "ON_PREM"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "release_name": {
+          "maxLength": 53,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Release Name",
+          "type": "string"
+        },
+        "namespace": {
+          "maxLength": 63,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+          "title": "Namespace",
+          "type": "string"
+        },
+        "image": {
+          "$ref": "#/$defs/Image"
+        },
+        "config_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "application": {
+          "$ref": "#/$defs/Application"
+        },
+        "required_env": {
+          "items": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Required Env",
+          "type": "array"
+        },
+        "env": {
+          "items": {
+            "$ref": "#/$defs/ResolvedEnvV2"
+          },
+          "title": "Env",
+          "type": "array"
+        }
       },
-      "title": "Env",
-      "type": "array"
+      "required": [
+        "contract_version",
+        "environment",
+        "provider",
+        "release_name",
+        "namespace",
+        "image",
+        "application",
+        "required_env",
+        "env"
+      ],
+      "title": "ApplicationValuesV2",
+      "type": "object"
     }
-  },
-  "required": [
-    "contract_version",
-    "environment",
-    "provider",
-    "release_name",
-    "namespace",
-    "config_ref",
-    "image",
-    "application",
-    "database",
-    "required_env",
-    "env"
-  ],
-  "title": "ApplicationValues",
-  "type": "object"
+  ]
 }

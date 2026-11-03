@@ -94,6 +94,6 @@ Sandbox `cleanup_status`가 `CLEANED`가 아니면 결과에 `CLEANUP_POLICY_REQ
 
 `target_selection`에는 선택 기록 참조, Provider(`AWS`/`GCP`/`ON_PREM`), Cloud 위치 또는 ON_PREM의 null, 접근 참조, capabilities 참조가 필수다. 이름 붙은 `profile`은 선택적 기본값일 뿐 요구사항을 덮어쓰지 않는다. capabilities의 아키텍처·StorageClass·이미지 접근 여부와 실제 Provider 권한은 후속 대상 구성 Activity가 조회·검증한다. `environment`의 `.env` 파일·mapping 참조를 Worker가 처리해 **최종 변수별 바인딩**을 만들고 Secret을 준비한다. 이 순수 경계에는 원문 `.env`·Secret·Credential을 넣지 않는다.
 
-`prepare_plan_v2`는 검증된 요구·출처·대상·환경 참조와 앱별 고정 이미지를 `ProvisioningSpecV2`로 반환한다. **입력에 Plan ID·Revision을 요구하지 않는다.** 후속 Planning 저장 경계가 Plan ID/Revision과 불변 산출물·Preview를 발급하고, 승인 후 실행은 그 정확한 산출물을 재검증한다. v2 Spec은 기존 단일 앱/DB `cmp_providers.provisioning.adapt`나 `render_shared_deployment`에 바로 넣지 않는다. 다중 리소스 렌더·대상별 변환과 Temporal 결과 전달은 다음 구현 작업이다.
+`prepare_plan_v2`는 검증된 요구·출처·대상·환경 참조와 앱별 고정 이미지를 `ProvisioningSpecV2`로 반환한다. **입력에 Plan ID·Revision을 요구하지 않는다.** 후속 Planning 저장 경계가 Plan ID/Revision과 불변 산출물·Preview를 발급하고, 승인 후 실행은 그 정확한 산출물을 재검증한다. v2 Spec은 기존 단일 앱/DB `cmp_providers.provisioning.adapt`나 `render_shared_deployment`에 바로 넣지 않는다. #23의 공통 렌더러 v2는 Worker가 대상별 값·Secret 참조를 확정한 입력을 소비하며, Spec을 이 입력으로 변환하는 Worker와 Temporal 결과 전달은 후속 작업이다.
 
-공통 렌더러의 변경된 `resources[]` 입력·반환 설계는 [공통 배포 계약 v2 절](onprem-shared-deployment.md#v2-설계-입력반환-미구현)에 기록한다. 현재는 v1 단일 앱·DB 렌더러만 실행 가능하다.
+공통 렌더러의 `resources[]` 입력·반환과 구현된 범위는 [공통 배포 계약 v2 절](onprem-shared-deployment.md#v2-공통-렌더-입력반환)에 기록한다. 렌더러가 반환한 Manifest는 아직 실제 배포나 Plan 저장의 증거가 아니다.

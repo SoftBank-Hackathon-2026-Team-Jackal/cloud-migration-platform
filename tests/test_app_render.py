@@ -211,10 +211,23 @@ def test_direct_helm_rejects_invalid_values(tmp_path, payload, resolved, mutatio
 
 
 def test_schema_stays_aligned():
-    expected = ApplicationValues.model_json_schema()
-    expected["$defs"]["Image"]["properties"]["registry_auth_ref"] = {
+    from cmp_contracts.shared_deployment_v2 import ApplicationValuesV2
+
+    v1 = ApplicationValues.model_json_schema()
+    v2 = ApplicationValuesV2.model_json_schema()
+    v1["$defs"]["Image"]["properties"]["registry_auth_ref"] = {
         "type": "null",
         "default": None,
+    }
+    v2["$defs"]["Image"]["properties"]["registry_auth_ref"] = {
+        "type": "null",
+        "default": None,
+    }
+    for name in v1["$defs"].keys() & v2["$defs"].keys():
+        assert v1["$defs"][name] == v2["$defs"][name]
+    expected = {
+        "$defs": {**v1.pop("$defs"), **v2.pop("$defs")},
+        "oneOf": [v1, v2],
     }
     assert json.loads((CHART / "values.schema.json").read_text()) == expected
 

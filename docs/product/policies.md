@@ -71,7 +71,7 @@ P0 온프레미스 경로는 공개 회원가입 기능 없이 최소 소유자 
 
 Sandbox와 온프레미스 운영 배포는 [공통 배포 입력·렌더 결과 계약](../../specs/provisioning/onprem-shared-deployment.md) 및 기존 DB/App Chart를 재사용한다. 공통 모듈은 배포 산출물을 반환하고 실제 적용·테스트·정리는 각 Worker가 맡는다. Sandbox 앱·DB는 사전 준비된 별도 클러스터에, 온프레미스 앱·DB는 사용자 K3s에 구성한다.
 
-상위 요구사항은 [입력 계약 v2](../../specs/provisioning/input-contract-v2.md)의 ID·종류를 가진 리소스 목록과 ID 참조 연결로 표현한다. 초기 지원 종류는 APPLICATION과 POSTGRESQL이다. 기존 단일 앱/DB 공통 렌더 계약은 아직 v1이며 v2 다중 리소스 렌더링의 완료 증거가 아니다.
+상위 요구사항은 [입력 계약 v2](../../specs/provisioning/input-contract-v2.md)의 ID·종류를 가진 리소스 목록과 ID 참조 연결로 표현한다. 초기 지원 종류는 APPLICATION과 POSTGRESQL이다. [공통 렌더 계약 v2](../../specs/provisioning/onprem-shared-deployment.md#v2-공통-렌더-입력반환)는 Worker가 대상 값을 확정한 여러 앱·DB를 ID로 연결해 Chart 산출물을 만든다. 기존 단일 앱/DB v1 렌더 계약은 호환용으로 유지한다. 두 렌더 결과 모두 실제 Apply·Ready의 증거는 아니다.
 
 ## 3. P0 범위와 제외 범위
 

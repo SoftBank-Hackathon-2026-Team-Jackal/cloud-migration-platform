@@ -6,7 +6,7 @@
   {{- if hasKey $seen .name -}}{{- fail "Duplicate environment binding" -}}{{- end -}}
   {{- $_ := set $seen .name true -}}
   {{- if not (has .name $.Values.required_env) -}}{{- fail "Unexpected environment binding" -}}{{- end -}}
-  {{- if eq .source.kind "DATABASE" -}}
+  {{- if and (eq $.Values.contract_version "1") (eq .source.kind "DATABASE") -}}
     {{- if and (eq .source.field "host") (empty $.Values.database.host) -}}{{- fail "Database host is unresolved" -}}{{- end -}}
     {{- if and (eq .source.field "secret_ref") (empty $.Values.database.secret_name) -}}{{- fail "Database Secret is unresolved" -}}{{- end -}}
   {{- end -}}
@@ -81,7 +81,18 @@ spec:
           env:{{ if empty .Values.env }} []{{ end }}
           {{- range .Values.env }}
             - name: {{ .name | quote }}
-              {{- if eq .source.kind "CONFIG_MAP" }}
+              {{- if eq $.Values.contract_version "2" }}
+                {{- if eq .source.kind "LITERAL" }}
+              value: {{ .source.value | quote }}
+                {{- else if eq .source.kind "SECRET" }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .source.name | quote }}
+                  key: {{ .source.key | quote }}
+                {{- else }}
+                  {{- fail "Unsupported v2 environment binding" }}
+                {{- end }}
+              {{- else if eq .source.kind "CONFIG_MAP" }}
               valueFrom:
                 configMapKeyRef:
                   name: {{ .source.name | quote }}
