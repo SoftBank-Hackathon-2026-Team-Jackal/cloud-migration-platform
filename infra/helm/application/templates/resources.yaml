@@ -1,0 +1,102 @@
+{{- if or (ne .Release.Name .Values.release_name) (ne .Release.Namespace .Values.namespace) -}}
+{{- fail "Release name and namespace must match Values" -}}
+{{- end -}}
+{{- $seen := dict -}}
+{{- range .Values.env -}}
+  {{- if hasKey $seen .name -}}{{- fail "Duplicate environment binding" -}}{{- end -}}
+  {{- $_ := set $seen .name true -}}
+  {{- if not (has .name $.Values.required_env) -}}{{- fail "Unexpected environment binding" -}}{{- end -}}
+  {{- if eq .source.kind "DATABASE" -}}
+    {{- if and (eq .source.field "host") (empty $.Values.database.host) -}}{{- fail "Database host is unresolved" -}}{{- end -}}
+    {{- if and (eq .source.field "secret_ref") (empty $.Values.database.secret_name) -}}{{- fail "Database Secret is unresolved" -}}{{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if or (ne (len $seen) (len .Values.required_env)) (ne (len (uniq .Values.required_env)) (len .Values.required_env)) -}}
+{{- fail "Missing or duplicate environment metadata" -}}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: application
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.application.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.application.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: application
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: application
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                    {{- range .Values.image.platforms }}
+                      - {{ trimPrefix "linux/" . | quote }}
+                    {{- end }}
+                  - key: kubernetes.io/os
+                    operator: In
+                    values: [linux]
+      containers:
+        - name: application
+          image: {{ .Values.image.uri | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.application.port }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.application.health_path | quote }}
+              port: http
+          resources:
+            requests:
+              cpu: {{ printf "%vm" .Values.application.cpu_millicores | quote }}
+              memory: {{ printf "%vMi" .Values.application.memory_mib | quote }}
+            limits:
+              cpu: {{ printf "%vm" .Values.application.cpu_millicores | quote }}
+              memory: {{ printf "%vMi" .Values.application.memory_mib | quote }}
+          env:{{ if empty .Values.env }} []{{ end }}
+          {{- range .Values.env }}
+            - name: {{ .name | quote }}
+              {{- if eq .source.kind "CONFIG_MAP" }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .source.name | quote }}
+                  key: {{ .source.key | quote }}
+              {{- else if eq .source.kind "USER_SECRET" }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .source.name | quote }}
+                  key: {{ .source.key | quote }}
+              {{- else if eq .source.field "secret_ref" }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.database.secret_name | quote }}
+                  key: {{ $.Values.database.secret_key | quote }}
+              {{- else }}
+              value: {{ index $.Values.database .source.field | toString | quote }}
+              {{- end }}
+          {{- end }}

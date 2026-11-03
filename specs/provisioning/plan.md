@@ -250,3 +250,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 ### Ticket 02 구현 결과
 
 공통 PostgreSQL 16 Chart는 `infra/helm/postgres`에 구현했다. 공유 PostgresChartValues와 동일 구조의 schema를 사용하며 세 Provider와 Sandbox/Production 조합의 실제 Helm 렌더를 검사한다. 단일 StatefulSet·headless Service·보존 PVC를 생성하고 requests/limits와 PVC 용량을 분리한다. [입력·재현·미검증 범위](../../infra/helm/README.md)를 따른다. 원격 Artifact 저장과 배포/실제 PVC·DB 검증은 아직 수행하지 않는다.
+
+### Ticket 03 구현 결과
+
+앱 전용 `infra/helm/application`과 내부 ApplicationValues/환경변수 메타데이터 계약을 구현했다. 일반 설정·사용자 Secret은 ConfigMap/Secret 이름·키 참조, DB 연결은 명시적인 DATABASE 매핑으로 구분한다. 기존 DynamicBinding과 bind/verify 함수를 재사용해 승인된 host/secret_name 슬롯만 채운다. 공개 렌더 함수는 Helm 오류 원문을 숨기며 실제 배포/참조 조회는 수행하지 않는다. [계약·예제·책임 경계](application-rendering.md)를 따른다.

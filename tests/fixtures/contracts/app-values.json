@@ -1,0 +1,95 @@
+{
+  "contract_version": "1",
+  "environment": "SANDBOX",
+  "provider": "ON_PREM",
+  "release_name": "demo-app",
+  "namespace": "sandbox-001",
+  "config_ref": {
+    "id": "uploaded-env",
+    "version": "1",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "image": {
+    "uri": "registry.example.com/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "platforms": [
+      "linux/amd64"
+    ]
+  },
+  "application": {
+    "cpu_millicores": 500,
+    "memory_mib": 512,
+    "replicas": 2,
+    "port": 8080,
+    "health_path": "/health"
+  },
+  "database": {
+    "host": null,
+    "port": 5432,
+    "name": "demo",
+    "username": "app_user",
+    "secret_name": null,
+    "secret_key": "password"
+  },
+  "required_env": [
+    "APP_MODE",
+    "API_KEY",
+    "DB_HOST",
+    "DB_PORT",
+    "DB_NAME",
+    "DB_USER",
+    "DB_PASSWORD"
+  ],
+  "env": [
+    {
+      "name": "APP_MODE",
+      "source": {
+        "kind": "CONFIG_MAP",
+        "name": "app-config",
+        "key": "mode"
+      }
+    },
+    {
+      "name": "API_KEY",
+      "source": {
+        "kind": "USER_SECRET",
+        "name": "uploaded-secrets",
+        "key": "api-key"
+      }
+    },
+    {
+      "name": "DB_HOST",
+      "source": {
+        "kind": "DATABASE",
+        "field": "host"
+      }
+    },
+    {
+      "name": "DB_PORT",
+      "source": {
+        "kind": "DATABASE",
+        "field": "port"
+      }
+    },
+    {
+      "name": "DB_NAME",
+      "source": {
+        "kind": "DATABASE",
+        "field": "name"
+      }
+    },
+    {
+      "name": "DB_USER",
+      "source": {
+        "kind": "DATABASE",
+        "field": "username"
+      }
+    },
+    {
+      "name": "DB_PASSWORD",
+      "source": {
+        "kind": "DATABASE",
+        "field": "secret_ref"
+      }
+    }
+  ]
+}

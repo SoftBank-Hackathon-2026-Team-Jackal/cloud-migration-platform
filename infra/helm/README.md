@@ -1,6 +1,6 @@
 # Helm charts
 
-`postgres/`는 Sandbox/Production 및 AWS/GCP/ON_PREM에서 공유하는 PostgreSQL 16 DB 전용 Chart다. App Chart/Release는 별도로 구현한다.
+`postgres/`는 Sandbox/Production 및 AWS/GCP/ON_PREM에서 공유하는 PostgreSQL 16 DB 전용 Chart다. App Chart는 별도 `application/` 디렉터리와 Release를 사용한다.
 
 ## 렌더 검증
 
@@ -23,3 +23,7 @@ uv run pytest tests/test_postgres_helm.py
 - PVC에 `helm.sh/resource-policy: keep`을 설정해 Helm 삭제 대상에서 보존한다. 자동 삭제/rollback/재설치는 구현하지 않는다. 보존 PVC의 재사용·확장·StorageClass 변경은 실제 상태와 데이터 소유권을 검증한 후 별도로 결정해야 한다.
 
 현재 결과는 로컬 Manifest다. S3 저장·`RenderedChart` 참조 발급, Helm 설치, 실제 PVC Bound/마운트, DB 접속, 데이터 복사/CDC는 구현 범위 밖이다. 이후 저장 경계는 이 Chart/Values/Manifest의 정확한 바이트로 공통 ArtifactRef를 발급해야 한다.
+
+## Application Chart
+
+`application/`은 앱 Deployment·ClusterIP Service를 렌더한다. [입력·바인딩·공개 렌더 함수](../../specs/provisioning/application-rendering.md)를 따른다. `tests/fixtures/contracts/app-values.json`은 DB 동적 슬롯이 null인 계획 템플릿이므로 DB 연결 결과를 바인딩한 뒤 렌더한다. 원문 환경변수는 받지 않고 ConfigMap/Secret 이름·키 참조를 사용한다. 실제 ConfigMap/Secret 생성과 클러스터 배포는 별도 실행 경계다.
