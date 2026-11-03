@@ -1,0 +1,244 @@
+{
+  "resource_changes": [
+    {
+      "mode": "managed",
+      "type": "aws_eip",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "credential": "DO_NOT_LEAK_CANARY"
+        },
+        "after_sensitive": {
+          "credential": true
+        }
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_eks_cluster",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_eks_node_group",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_iam_role_policy_attachment",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_iam_role_policy_attachment",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_iam_role_policy_attachment",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_iam_role_policy_attachment",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_internet_gateway",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route_table",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route_table",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route_table_association",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route_table_association",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route_table_association",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_route_table_association",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_security_group",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_subnet",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_subnet",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_subnet",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_subnet",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_vpc",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    },
+    {
+      "mode": "managed",
+      "type": "aws_vpc_security_group_egress_rule",
+      "change": {
+        "actions": [
+          "create"
+        ]
+      }
+    }
+  ]
+}

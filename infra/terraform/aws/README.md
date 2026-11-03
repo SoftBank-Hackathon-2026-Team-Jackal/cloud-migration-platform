@@ -16,6 +16,8 @@ The runner rechecks the AWS account before Terraform. It writes `spec.json`, `sa
 
 The Preview uses Terraform's action/type list but ignores every `before`, `after`, `*_sensitive` and output value. It only displays fixed resource labels and validated network/Node/API access inputs. Unknown resource types or unexpected actions reject the Plan. `INFRASTRUCTURE` scope cannot stand for application or database deployment. ALB deployment and the single-NAT limitation are explicit warnings.
 
+`tests/fixtures/terraform/aws-create-plan.json` is a sanitized action-only shape from a real AWS Provider Plan, with a fake canary to verify redaction. It contains no actual Plan bytes, State or Provider output values. Ticket 06 needs its own GCP resource-action fixture; the shared Plan/Preview contract fixtures do not replace Provider-specific Plan checks.
+
 Static checks (no AWS resource changes):
 
 ```sh

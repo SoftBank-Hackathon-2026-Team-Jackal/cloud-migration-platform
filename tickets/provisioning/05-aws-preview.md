@@ -47,9 +47,9 @@ AWS 대상 Preview와 내부 Plan 참조를 대조할 수 있다.
 ## 2026-11-04 검증 기록
 
 - Issue [#2](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/2)를 재사용한다. 이슈의 다른 대상 인프라 범위는 이 PR로 닫지 않는다.
-- `terraform fmt -check`, `terraform init -backend=false`, `terraform validate` 통과. 로컬 대체 도구로 저장 Plan/Spec Digest, Account mismatch 차단, 민감값 제거 Preview, 불변 Revision 및 Apply 미실행을 검사했다. `make check`: 242 passed.
-- `cmp-aws-prod` STS 계정 ID는 `714066696240`으로 확인했다. 이 프로필로 실제 Terraform Plan/Apply는 실행하지 않았다.
-- 격리 AWS 계정·기존 S3 State 버킷/권한·Node/네트워크 운영 프로필이 제공되지 않아 실제 저장 Plan과 Provider 권한/쿼터 검증은 **미검증**이다. `ProvisioningSpecV2`에는 아직 구체 AWS Network/Node 필드가 없으므로 이번 AWS 전용 입력은 상위 Activity가 검증된 대상 정책에서 구성해야 하며 자동 변환은 미연결이다. 따라서 첫 번째 수용 기준의 실환경 부분과 최종 DONE 판정은 보류한다. ALB Controller/Ingress·CSI와 앱/DB는 후속 티켓 범위다.
+- `terraform fmt -check`, `terraform init -backend=false`, `terraform validate` 통과. 로컬 대체 도구로 저장 Plan/Spec Digest, Account mismatch 차단, 민감값 제거 Preview, 불변 Revision 및 Apply 미실행을 검사했다. 최신 main 기준 `make check`: 259 passed.
+- `cmp-aws-prod` STS 계정 ID `714066696240` 확인 후, 보호된 임시 디렉터리에서 S3 Backend 블록만 제거한 검증용 복사본으로 AWS Provider 6.71.0·Terraform 1.17.0의 실제 저장 Plan을 실행했다. EKS 1.36·`t3.large`가 대상 리전/선택 AZ에서 제공됨을 읽기 전용으로 확인했다. Plan SHA-256은 `67ff6e899ebb8329a4bc92dfee2f2a66e08ba9498f9c2e79305713d897e03d0d`; 신규 VPC 1, Subnet 4, Route 2, EKS 1, Node Group 1을 포함하며 허용 목록 Preview 변환이 통과했다. 저장 Plan 원문·State·실제 Secret은 커밋하지 않았다. Terraform Apply와 AWS 대상 자원 생성은 실행하지 않았다.
+- 이 계정에 S3 버킷이 없어 중앙 S3 State/잠금 경로의 실환경 검증은 **미검증**이다. 위 Plan은 격리 계정이 아닌 production-named 프로필의 로컬 State 검증이며, 사용자가 검토 중인 05/06 완료 기준 결정 전에는 격리 계정 검증을 대체하지 않는다. `ProvisioningSpecV2`에는 아직 구체 AWS Network/Node 필드가 없으므로 이번 AWS 전용 입력은 상위 Activity가 검증된 대상 정책에서 구성해야 하며 자동 변환은 미연결이다. ALB Controller/Ingress·CSI와 앱/DB는 후속 티켓 범위다.
 
 ## 순차 작업 조건 (2026-11-03)
 

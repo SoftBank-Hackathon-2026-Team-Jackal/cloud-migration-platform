@@ -15,6 +15,8 @@ from cmp_providers.aws_preview import (
 )
 from cmp_providers.plans import approval_issues, manifest_digest
 
+AWS_PLAN_ACTIONS = Path(__file__).parent / "fixtures/terraform/aws-create-plan.json"
+
 
 def request() -> AwsPlanInput:
     return AwsPlanInput.model_validate(
@@ -184,3 +186,15 @@ def test_new_network_preview_rejects_unreviewed_or_destructive_plan():
         }
         with pytest.raises(ProvisioningInputError, match=code):
             preview_from_plan(payload, request(), "a" * 64)
+
+
+def test_sanitized_provider_plan_fixture_covers_full_aws_topology():
+    payload = json.loads(AWS_PLAN_ACTIONS.read_text())
+    preview = preview_from_plan(payload, request(), "a" * 64)
+    counts = {change.name: change.quantity for change in preview.changes}
+    assert counts["VPC"] == 1
+    assert counts["Subnet"] == 4
+    assert counts["Route"] == 2
+    assert counts["EKS cluster"] == 1
+    assert counts["Managed node group"] == 1
+    assert "DO_NOT_LEAK_CANARY" not in preview.model_dump_json()
