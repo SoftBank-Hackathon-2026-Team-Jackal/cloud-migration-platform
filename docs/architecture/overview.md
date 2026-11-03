@@ -92,8 +92,8 @@ Redis, Celery, Kafka 같은 별도 작업 큐는 현재 확정 스택에 포함�
 | 1 | 사용자 입력 | API가 AWS 접근 정보 참조, 소스, 별도 `.env`, 대상 환경을 접수 |
 | 2 | Infrastructure / Application Analysis | 원본 AWS·EKS와 Kubernetes 리소스, 소스·의존성·환경변수 분석 결과 |
 | 3 | AI Planning / Code Adaptation | 대상 차이와 이전 요구사항, 변경된 코드·설정 |
-| 4 | Sandbox Verification | 사전 준비된 Kubernetes Sandbox에서 임시 리소스 테스트 후 결과·오류 반환 및 정리 |
-| 5 | Image Build | 검증된 코드로 최종 이미지를 빌드·저장하고 URI·Digest 확보 |
+| 4 | Image Build | 준비된 소스·Dockerfile로 이미지 빌드·push, URI·Digest 확보 |
+| 5 | Sandbox Verification | 해당 Digest 실행·검증. 실패 후 코드 수정 시 4로 복귀, 통과 Digest·검증 범위·결과 반환 |
 | 6 | Provisioning Planning | 공통 Provisioning 명세 검증, 대상별 구성 변환, Preview 생성 |
 | 7 | User Approval | 실제 생성·변경 대상에 대한 사용자 승인 또는 수정 요청 |
 | 8 | Production Provisioning | 승인 후 Terraform·Helm·Agent 등으로 대상 구성 및 앱·DB 배포, 상태·Endpoint 반환 |
@@ -101,13 +101,13 @@ Redis, Celery, Kafka 같은 별도 작업 큐는 현재 확정 스택에 포함�
 | 10 | Traffic Cutover | 서비스 준비와 동기화 상태를 확인하며 단계적 전환, 가능한 범위의 복귀 관리 |
 | 11 | Final Verification & Handover | 실제 서비스 상태 재확인, 결과와 운영 산출물 인계 |
 
-이는 책임의 상위 순서다. Sandbox 테스트에 필요한 이미지와 최종 배포 이미지의 정확한 생성·검증 순서, 단계 병렬화, Activity 분할, 승인 신호와 재시도 방식은 후속 설계에서 정한다. **최종 배포 이미지는 검증된 코드로부터 생성되어야 한다.**
+이는 책임의 상위 순서다. **코드 수정 → Build → Sandbox 검증을 반복하고 통과한 동일 Digest를 재빌드 없이 배포한다.** Activity 분할·Queue·Retry 수치는 후속 설계이며 새 흐름의 실제 계약 전환은 B-01에서 구현한다. [ADR-003](../decisions/ADR-003.md)을 따른다.
 
 ## 6. 주요 컴포넌트와 Temporal 경계
 
 FastAPI는 사용자와의 외부 접점으로 요청을 접수하고, 업무 DB에 작업·계획·승인 기록을 관리하며, Temporal에 장시간 작업을 요청하고 상태를 전달한다. HTTP 요청 안에서 전체 이전을 동기적으로 실행하지 않는다.
 
-Temporal Workflow는 분석, Sandbox, 빌드, 계획, 승인 대기, 실제 Provisioning, 데이터·트래픽 이전의 **순서와 상태**를 조정한다. AWS API 호출, AI 요청, Terraform·Helm 실행, DB 복제와 트래픽 변경 같은 부수효과는 Activity가 담당한다. 재시도 시 중복 리소스가 생기지 않도록 Activity별 멱등성 또는 기존 상태 확인이 필요하다. Temporal이 외부 작업의 정확히 한 번 실행을 자동 보장하는 것은 아니다. Worker의 논리적 분리는 물리 서버 분리를 요구하지 않는다.
+Temporal Workflow는 분석, 빌드·Sandbox 검증 루프, 계획, 승인 대기, 실제 Provisioning, 데이터·트래픽 이전의 **순서와 상태**를 조정한다. AWS API 호출, AI 요청, Terraform·Helm 실행, DB 복제와 트래픽 변경 같은 부수효과는 Activity가 담당한다. 재시도 시 중복 리소스가 생기지 않도록 Activity별 멱등성 또는 기존 상태 확인이 필요하다. Temporal이 외부 작업의 정확히 한 번 실행을 자동 보장하는 것은 아니다. Worker의 논리적 분리는 물리 서버 분리를 요구하지 않는다.
 
 Analysis, Sandbox, Build, Provisioning, Data Migration, Traffic Migration의 구체적 입력·출력과 제외 책임은 [도메인 경계](domain-boundaries.md)에 정의한다. Workflow 분할·Child Workflow, Task Queue 개수와 이름, 세부 Retry Policy·Heartbeat·Signal은 이 문서에서 확정하지 않는다.
 
@@ -136,7 +136,7 @@ Sandbox에서 수행한 기능 테스트는 실제 배포 후에도 가능한 �
 | 사용자 입력 및 `.env` 참조 | 사용자 / API | Analysis |
 | 원본 인프라·앱 분석 결과 | Analysis | AI Planning / Provisioning Planning |
 | 변환된 코드·설정 | Analysis / AI | Sandbox / Build |
-| Sandbox 테스트 결과·오류 | Sandbox | Workflow / Build / Planning |
+| Sandbox 테스트 결과·오류·검증 Digest | Sandbox | Workflow / 수정 루프 / Planning |
 | 이미지 URI·Digest | Build / ECR | Provisioning |
 | 공통 Provisioning 명세 | Planning | Provider 모듈 / Provisioning |
 | Manifest·Helm Values | Provider 모듈 | Sandbox / Provisioning |
@@ -152,7 +152,7 @@ Sandbox에서 수행한 기능 테스트는 실제 배포 후에도 가능한 �
 - Route 53·Envoy 중계 방식의 최종 채택, 구축·운영 주체, GCP 이전 후 제거 절차와 온프레미스 인계 정책
 - WireGuard를 실제로 사용할 연결 구간과 온프레미스 NAT 환경의 접근 방식
 - 실제 EKS·GKE 클러스터를 데모 중 생성할 범위와 사전 준비할 자원
-- 이미지의 Sandbox 검증용 빌드와 최종 ECR 이미지 빌드·Digest 연결 방식
+- 빌드 실행 환경·Registry 권한과 검증 플랫폼 증거의 구체 형식(동일 Digest 재사용 정책은 ADR-003으로 확정)
 - PostgreSQL 초기 복사·논리 복제의 적용 범위, DB Cutover, 역방향 복제, 정합성 기준과 단계별 롤백 경계
 - 공통 Provisioning 명세의 필드·버전, Provider 모듈의 최종 패키지와 인터페이스
 - Workflow·Task Queue·Worker 배포 단위와 세부 재시도·Heartbeat·승인 이벤트 정책
