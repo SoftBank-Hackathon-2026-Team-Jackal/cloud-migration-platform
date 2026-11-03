@@ -14,7 +14,7 @@
 | [04A 온프레미스 Agent 등록과 공통 K3s 배포 계약](../../tickets/provisioning/04a-onprem-agent-enrollment.md) | DONE | 02, 03, 04 | PROV-005, 006, 009 | [#20](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/20) | ☑ |
 | [04B Sandbox·Provisioning 공통 렌더링 v2](../../tickets/provisioning/04b-shared-render-v2.md) | DONE | 01A, 04A | PROV-004, 005, 006, 010, 011, 012, 021 | [#23](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/23) | ☑ |
 | [B-01 S3 소스 공통 빌드와 ECR Digest 반환](../../tickets/provisioning/b-01-image-build.md) | DONE | ADR-003 | PROV-001, 004, 010, 021 | [#17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/17) | ☑ |
-| [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | TODO | 01A, CP-01 | PROV-002, 003, 007, 014, 021 | 미생성 | ☐ |
+| [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | BLOCKED | 01A, CP-01 | PROV-002, 003, 007, 014, 021 | [#2](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/2) | ☐ |
 | [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | TODO | 01A, CP-01 | PROV-002, 003, 008, 014, 021 | 미생성 | ☐ |
 | [07 Plan Revision 승인과 Temporal 실행 차단](../../tickets/provisioning/07-approval-gate.md) | TODO | 01A, CP-01 | PROV-014, 015, 016, 021 | 미생성 | ☐ |
 | [08 승인된 Plan으로 AWS EKS 기반 준비](../../tickets/provisioning/08-aws-infra-apply.md) | DRAFT | 05, 07 | PROV-007, 015, 016, 017 | 미생성 | ☐ |
