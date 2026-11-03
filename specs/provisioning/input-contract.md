@@ -5,8 +5,8 @@
 - 작업: [Issue #5](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/5), [티켓 01](../../tickets/provisioning/01-provider-spec-validation.md).
 - 2026-11-03 사용자 요청에 따라 기존 정책과 논의한 입력 흐름을 구체화한 **계약 설계안**이다. 실제 Worker/API 구현이나 다른 팀의 wire schema 합의 완료를 뜻하지 않는다.
 - 제품 정책과 [spec.md](spec.md)가 우선한다. 이 문서는 입력 정보의 출처·시점·검증을 다루고 [plan.md](plan.md)는 실행 설계를 다룬다.
-- 논리적 순서: Analysis → Sandbox 통과 → 검증된 코드의 최종 Build → Planning·Preview → 특정 계획 승인 → Production Provisioning.
-- Sandbox용 이미지 준비 방식은 별도 설계다. 최종 이미지를 Sandbox에서 실행한 사실이 없다면 “최종 이미지 실행 검증 완료”라고 표시하지 않는다.
+- 논리적 순서: Analysis/코드 수정 → Build → 해당 Digest로 Sandbox 검증(실패·재수정 시 새 Build) → 통과 Digest로 Planning·Preview → 특정 계획 승인 → Production Provisioning.
+- 통과 후 재빌드하지 않는다. Sandbox 실행·검증 Digest와 Production 배포 Digest를 일치시킨다. [ADR-003](../../docs/decisions/ADR-003.md) 기준이며 기존 내부 v1 구현과의 차이는 §10과 B-01에 기록한다.
 
 ## 2. 세 가지 입력 경계
 
@@ -16,7 +16,7 @@
 | Planning → 공통 Provider 모듈 | 검증된 `ProvisioningSpec` | 순수 Provider 변환·렌더링·검증. 저장소 조회·클라우드 변경 없음 |
 | 승인 대기 이후 → 실행 Activity | Plan ID·Revision, 잠긴 산출물과 승인 기록 참조 | 승인·대상·Digest 재확인 후 Terraform/Helm/Agent 실행 |
 
-Sandbox가 전체 Spec을 작성하거나 다른 Worker를 직접 호출한다고 가정하지 않는다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
+Sandbox가 전체 Spec을 작성한다고 가정하지 않는다. Sandbox/변환 루프가 공통 Build 모듈을 Activity 경계에서 호출하는 구체 인터페이스는 B-01에서 맞춘다. Workflow가 각 단계 결과를 보유·연결하고 Planning이 조합한다. Plan 식별자 발급·저장은 Planning/업무 기록 경계에서 맡으며 Sandbox의 필수 출력이 아니다. 초기 Planning 요청에는 아직 없는 Preview·승인 기록을 요구하지 않는다.
 
 ## 3. Planning이 선행 단계에서 받는 정보
 
@@ -24,9 +24,9 @@ Sandbox가 전체 Spec을 작성하거나 다른 Worker를 직접 호출한다�
 | --- | --- | --- |
 | 상위 실행/업무 기록 | 작업 ID, 입력 계약 버전, 결과별 식별자·버전 | 다른 작업·실행 시도의 결과가 섞이지 않도록 연결 |
 | Analysis | 분석 결과 참조, 앱·PostgreSQL·네트워크 요구사항 참조/버전, 변환된 코드·설정 참조와 Digest | 명세 구성의 근거. 원본 소스와 변환된 소스를 구분 |
-| Sandbox | 검증 상태, 검증한 코드·설정·요구사항 식별자/버전, 결과·테스트 보고서 참조 | 단순 성공 플래그뿐 아니라 무엇을 검증했는지 식별 |
+| Sandbox | 검증 상태, 실행한 Build 참조·이미지 Digest·검증 플랫폼, 코드·설정·요구사항 식별자/버전, 결과·테스트 보고서 참조 | 단순 성공 플래그뿐 아니라 무엇을 검증했는지 식별 |
 | Sandbox | 사용한 검증 Profile·대상 가정, 환경 매핑 규칙 버전, 정리 결과·잔여 자원 참조 | 대상/설정 변경 시 검증 유효 범위 판단. 정리 상태는 테스트 상태와 분리 |
-| Build | 빌드 성공 상태, 사용한 코드·빌드 설정 식별자/Digest, 이미지 URI·Digest, 지원 플랫폼 목록 | 검증된 코드에서 나온 이미지인지 추적. Registry 인증은 별도 참조 |
+| Build | 빌드 성공 상태, 사용한 코드·빌드 설정 식별자/Digest, 이미지 URI·Digest, 지원 플랫폼 목록 | Sandbox가 검증한 Build/이미지와 같은지 추적. Build는 Sandbox 통과 전에 실행되며 Registry 인증은 별도 참조 |
 | API/업무 DB | 대상 Provider·Profile·위치, 사용자 선택 버전, Credential 또는 Agent 참조 | 대상 선택과 접근 요구. 모두 사용자가 직접 입력할 필요는 없음 |
 | 업로드/설정 기록 | 별도 업로드 `.env`의 불변 버전 참조, 키 분류·재매핑 규칙 참조/버전 | 일반 설정·사용자 Secret·동적 바인딩 구분. 원문은 이력에 전달하지 않음 |
 | 대상/운영 정책 | 승인 가능한 Node·네트워크·스토리지·외부 접근 요구, 적용 Profile/템플릿 버전 | 필수 요구와 사용자 선택의 충돌 검사; 정책 기본값의 출처 추적 |
@@ -88,7 +88,7 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 | --- | --- |
 | 필수 결과 누락, 지원하지 않는 계약 버전, 다른 작업의 결과 | 입력 출처·항목이 드러나는 오류. 승인 가능한 Preview 생성 금지 |
 | Sandbox 미통과 또는 Build 실패 | 진행 차단. 누락된 검증·빌드 수행 필요 |
-| Sandbox 검증 코드와 Build 소스의 Digest 불일치 | 재검증/재빌드 필요. 최종 이미지 사용 금지 |
+| Sandbox 검증 코드/설정과 Build 출처 불일치, 검증 Build 참조/이미지 Digest와 배포 이미지 불일치 | 계획 차단. 수정 시 새 빌드·재검증, 통과 후 재빌드 결과로 대체 금지 |
 | Analysis 요구·변환 설정과 Sandbox 검증 근거 불일치 | 입력 불일치 반환. 임의로 최신 결과 선택 금지 |
 | 검증 이후 대상·요구·환경설정 변경 | 영향 확인. 유효성을 입증하지 못하면 재검증 필요 상태; 세부 재검증 정책은 미정 |
 | Node/이미지 아키텍처 불일치, 잘못된 CIDR·충돌, Provider 필수값 누락 | 항목별 오류. 정적 검사와 실제 대상 조회가 필요한 검사를 구분 |
@@ -105,13 +105,13 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 
 ## 8. 결정 기록과 남은 합의
 
-이번 작업은 기존 정책에 따라 입력을 세 경계로 구분하고 출처·버전·코드/이미지 추적을 문서화한다. 새로운 HTTP 경로, 클라우드 구성 제품, 최종 이미지 추가 테스트 의무를 확정하지 않는다. `ADR-001`의 스캐폴드 결정도 변경하지 않는다.
+초기 #5는 입력 세 경계와 출처 추적을 정의했다. 후속 사용자 결정(#17, ADR-003)은 Build 선행·동일 Digest의 Sandbox 검증/운영 재사용을 필수로 변경한다. 새로운 HTTP 경로나 클라우드 제품은 확정하지 않는다. `ADR-001`의 스캐폴드 결정도 변경하지 않는다.
 
 구현 전 또는 관련 티켓에서 합의할 사항:
 
 - Analysis/Sandbox/Build 담당자의 실제 출력 필드, 상태 Enum, 계약 버전, 소스 패키징 및 Digest 산정 범위.
 - 검증 요구/Profile 식별, 변경 시 재검증 범위, Sandbox 정리 실패 시 진행 정책.
-- 최종 이미지 자체를 추가 실행 검증할지와 빌드 재현성/플랫폼별 검증 증거 수준.
+- 동일 이미지 Digest 실행 검증은 필수다. 멀티 플랫폼 manifest의 개별 플랫폼 검증 증거와 Registry 보존/접근 정책은 B-01 착수 시 구체화한다.
 - 산출물 ID 조회 또는 S3 직접 참조의 표준, 불변성·보관·접근 권한 정책.
 - Node 선정 기본값, 신규 클러스터/네트워크 구성 범위(기존 네트워크는 P0 제외), Registry·Secret·TLS 정책 및 Agent 완료 통지.
 
@@ -120,6 +120,8 @@ Temporal은 순서·Activity 결과 전달·재시도를 조정하며 별도의 
 문서 변경은 제품 정책·PROV 요구사항·계획·책임 경계의 정합성과 상대 링크를 검토한다. 티켓 01의 코드 Test Seam은 선행 결과를 해석한 구조화 입력 → 공개 Planning 검증·조합 → 공개 Adapter 결과다. 이 검사는 실제 상위 Worker 성공·S3 권한·클라우드 배포를 증명하지 않는다. 코드 구현과 테스트 결과 없이 티켓 01을 DONE으로 표시하지 않는다.
 
 ## 10. 티켓 01 내부 v1 구현 (2026-11-03, #5)
+
+**구현 전환 대기:** 아래는 이전 순서의 현재 코드 설명이다. `BuildResult.sandbox_ref`를 요구하고 SandboxResult에는 검증 이미지 Digest가 없다. 따라서 현재 `prepare_plan`의 성공은 P-10 동일 이미지 검증 정책의 충족 증거가 아니다. B-01(#17)에서 새 버전 계약·검증으로 전환하고 구 v1 입력을 자동으로 검증 완료 처리하지 않는다. 이번 PR #16의 후속 문서 변경은 런타임 모델/테스트를 변경하지 않는다.
 
 사용자의 이슈 전체 구현 요청에 따라 위 설계에서 **로컬 조합·검증 경계**를 구현했다. 이는 다른 팀의 Activity 반환값을 강제로 바꾸는 wire 계약이 아니다. 외부 참조를 조회한 Activity가 아래 내부 모델로 정규화하여 호출한다. 아직 스캐폴드 Workflow에 연결하지 않았으며, 새 HTTP API도 추가하지 않았다.
 

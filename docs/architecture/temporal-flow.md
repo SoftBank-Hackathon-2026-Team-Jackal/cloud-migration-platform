@@ -8,7 +8,7 @@
 
 ## 2. Temporal을 사용하는 이유
 
-원본 분석, AI 변환, Sandbox 검증, 이미지 빌드, 사용자 승인, 인프라 생성, PostgreSQL 이전과 트래픽 전환은 한 HTTP 요청 안에서 끝나지 않는다. 외부 API·인프라·네트워크 장애가 발생할 수 있고, 사용자 승인은 오래 기다려야 할 수 있다.
+원본 분석, AI 변환, 이미지 빌드·Sandbox 검증 루프, 사용자 승인, 인프라 생성, PostgreSQL 이전과 트래픽 전환은 한 HTTP 요청 안에서 끝나지 않는다. 외부 API·인프라·네트워크 장애가 발생할 수 있고, 사용자 승인은 오래 기다려야 할 수 있다.
 
 Temporal은 실행 이력에 기반해 단계 순서·의존관계, Worker로의 작업 전달, 승인 대기·재개, Timeout·재시도, Worker 장애 후 진행 상황 추적을 맡는다. **Temporal만으로 외부 리소스 작업의 정확히 한 번 실행, 데이터 정합성, 안전한 롤백이 보장되지는 않는다.** 이를 위해 각 Activity의 멱등성·상태 조회와 단계별 검증·복구 정책이 필요하다.
 
@@ -35,9 +35,10 @@ Workflow의 결정을 실행 이력에서 재현할 수 있도록 Workflow 코�
 flowchart TD
     A[FastAPI: 이전 요청 접수] --> B[상위 Migration Workflow 시작]
     B --> C[Analysis: AWS EKS·앱·.env 분석 및 AI 변환]
-    C --> D[Sandbox: 임시 K8s 검증 및 정리]
-    D --> E[Build: 검증된 코드 이미지·Digest]
-    E --> F[Planning: 공통 명세·Provider 변환·Preview]
+    C --> E[Build: 준비된 코드·Dockerfile 빌드 및 push]
+    E --> D[Sandbox: 해당 이미지 Digest 실행·검증]
+    D -->|실패·코드 재수정| C
+    D -->|통과 Digest 고정| F[Planning: 공통 명세·Provider 변환·Preview]
     F --> G{사용자 승인 대기}
     G -->|승인된 계획 확인| H[Production Provisioning]
     G -->|수정 요청·거절| X[계획 재작성 또는 종료: 정책 미정]
@@ -55,7 +56,7 @@ flowchart TD
     L -. 전환 오류 .-> Z
 ```
 
-이는 **상위 책임 순서**다. 특정 상자가 하나의 Activity 또는 Child Workflow와 1:1로 대응한다는 뜻이 아니다. Sandbox에서 실행할 임시 테스트 이미지 준비와 최종 이미지 빌드의 정확한 순서도 미정이다. 다만 최종 배포 이미지는 검증된 코드에서 생성되어야 한다.
+이는 **상위 책임 순서**다. 특정 상자가 하나의 Activity 또는 Child Workflow와 1:1로 대응한다는 뜻이 아니다. 빌드는 Sandbox 워크로드 밖에서 수행하며, 수정 시 새 빌드·검증을 반복하고 통과 후 재빌드하지 않는다. 통과 Digest를 Production에 그대로 전달한다. 현재 스캐폴드/내부 v1 계약은 이 새 루프를 아직 구현하지 않았으며 [B-01](../../tickets/provisioning/b-01-image-build.md)에서 전환한다.
 
 Production Provisioning 직후의 **Ready**는 인프라·워크로드의 준비 상태이며 데이터 이전 완료 상태가 아니다. 대상 PostgreSQL의 스키마·데이터가 아직 준비되지 않은 시점에는 가능한 준비 검사와 데이터 이전 후의 전체 기능 검증을 구분한다. 필요한 검증이 끝나기 전에 트래픽 전환으로 진행하지 않는다.
 
@@ -67,7 +68,7 @@ Production Provisioning 직후의 **Ready**는 인프라·워크로드의 준비
 | --- | --- | --- |
 | Analysis | AWS·EKS·Kubernetes 및 소스·별도 `.env` 분석, AI 코드·설정 변환 | 분석 결과, 실행 요구사항, 변환 산출물 참조 |
 | Sandbox | 임시 K8s 리소스 배포, 앱·DB 연결과 기능 테스트, 성공·실패 후 정리 | 검증 결과·오류·로그 참조, 정리 결과 |
-| Build | 검증된 코드로 이미지 생성·ECR Push, 대상 아키텍처 호환성 확인 | 이미지 URI·Digest |
+| Build | 준비된 소스·Dockerfile로 이미지 생성·Registry Push, 플랫폼 정보 반환 | Build 참조·이미지 URI·Digest·소스/빌드 설정 출처 |
 | Provisioning | 공통 명세·Provider 설정 검증, Preview, 승인 후 Terraform·Helm·Agent 실행, 배포 확인 | 실제 리소스 ID, 앱·DB Endpoint, 연결·Secret 참조 |
 | Data Migration | 필요한 사설 연결, PostgreSQL 초기 복사·변경 동기화·정합성 확인 | 복제 상태·지연, 정합성·DB 전환 가능 여부 |
 | Traffic Migration | 양쪽 서비스 접근·준비 상태 확인, 단계별 트래픽 이전과 가능한 범위의 복귀 | 가중치·헬스·전환 결과 |
@@ -153,13 +154,13 @@ Temporal Query 또는 업무 DB의 상태 Projection을 조회 원천으로 검�
 
 ## 13. 단계 사이 데이터 계약
 
-Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning/input-contract.md)을 따른다. Workflow는 결과 참조·작은 메타데이터를 다음 Activity에 전달하고, Planning Activity가 산출물 조회·권한·Digest와 Sandbox/Build 출처 일치를 검증한다. S3·업무 DB 조회는 Workflow 내부에서 수행하지 않는다. 초기 Planning 입력과 승인 후 실행 입력을 구분하며, 최초 요청에 아직 생성되지 않은 Preview/승인 기록을 요구하지 않는다. 최종 이미지 자체의 실행 검증 여부와 구체적 전달 필드는 별도 합의 대상이다.
+Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning/input-contract.md)을 따른다. Workflow는 결과 참조·작은 메타데이터를 다음 Activity에 전달하고, Planning Activity가 산출물 조회·권한·Digest와 Sandbox/Build 출처 일치를 검증한다. S3·업무 DB 조회는 Workflow 내부에서 수행하지 않는다. 초기 Planning 입력과 승인 후 실행 입력을 구분하며, 최초 요청에 아직 생성되지 않은 Preview/승인 기록을 요구하지 않는다. Sandbox가 실행·검증한 이미지 Digest와 Planning/실행 이미지가 같아야 한다. 구체 필드·버전 전환은 B-01에서 구현한다.
 
 | 단계 | 주요 입력 | 주요 출력 |
 | --- | --- | --- |
 | Analysis | 원본 접근 참조, 소스·별도 `.env` 참조, 대상 환경 | 원본 분석 결과, 변환 코드·설정 참조 |
-| Sandbox | 변환 결과, 앱 실행 요구, 검증 조건 | 테스트 상태·오류·결과 참조, 정리 결과 |
-| Build | 검증된 코드 참조, 빌드·대상 아키텍처 요구 | 이미지 URI·Digest |
+| Sandbox | Build 참조·Digest 고정 이미지, 앱 실행 요구, 검증 조건 | 검증 Digest·플랫폼/설정 범위·상태·보고서, 정리 결과 |
+| Build | 준비된 소스·Dockerfile/빌드 설정, 플랫폼·Registry 참조 | Build 참조·이미지 URI·Digest·출처 |
 | Provisioning Planning | 분석·이미지 정보, 대상 환경 | 공통 Provisioning 명세, 대상별 Preview·계획 참조 |
 | Production Provisioning | 승인된 Plan ID·Revision, 자격 증명 참조 | 리소스 ID, 앱·DB Endpoint, Secret 참조, 준비 결과 |
 | Data Migration | 원본·대상 DB 접근 참조, 연결·이전 정책 | 복제 상태, 정합성·전환 가능 여부 |
@@ -188,7 +189,7 @@ Sandbox 성공과 Production 준비·검증은 구분한다. Production Provisio
 | Task Queue 이름·개수와 Worker 배포 단위 | 실행 자원 격리, 부하·권한 경계, 장애 영향 범위 |
 | Activity별 Timeout·Retry·Heartbeat | 외부 작업 시간, 재시도 안전성, 장애 감지·재연결 방식 |
 | 승인 Signal 외 Update 사용 | API 응답 보장, 승인 기록과 Workflow 처리 시점의 일관성 |
-| Sandbox 테스트 이미지와 최종 이미지 순서 | 실제 테스트 대상과 최종 Digest의 동일성 확인 |
+| 빌드/검증 이미지 계약 | 같은 Digest 재사용은 ADR-003으로 결정. B-01에서 내부 v1 전환·플랫폼별 증거 구현 |
 | Agent 비동기 완료 통지 | NAT·연결 단절·중복 전달·작업 상관관계 |
 | CDC 장기 실행 상태 추적 | 복제 지연·재시작·상태 조회와 무기한 Activity 방지 |
 | 데이터·트래픽 전환의 추가 승인 | 위험 단계와 승인 주체, 사용자 대기 시간 |
@@ -197,7 +198,7 @@ Sandbox 성공과 Production 준비·검증은 구분한다. Production Provisio
 | Route 53·Envoy 안의 채택 | 라우팅·헬스·운영 비용과 기존 Cloudflare 문서와의 충돌 |
 | 온프레미스 중계 서버 인계 | 사용자 접근 지속성, 소유권·운영 주체 |
 
-기존 로컬 스캐폴드에는 Sandbox Worker가 없고 분석·빌드·프로비저닝·이전용 예제 Queue와 간단한 승인 흐름만 있다. 기존 README·코드의 플랫폼 관리 앱·K3s·Cloudflare 방향도 현재 제품 정책의 AWS EKS 원본·EKS/GKE/K3s 대상 범위와 일치하지 않는다. **이번 문서 작업에서 다른 문서와 구현을 수정하지 않으며**, 후속 기능 설계에서 이 차이를 정리해야 한다.
+기존 로컬 스캐폴드에는 Sandbox Worker가 없고 분석·빌드·프로비저닝·이전용 예제 Queue와 간단한 승인 흐름만 있다. 기존 README·코드의 플랫폼 관리 앱·K3s·Cloudflare 방향도 현재 제품 정책의 AWS EKS 원본·EKS/GKE/K3s 대상 범위와 일치하지 않는다. 현재의 제품 문서 결정과 스캐폴드 코드가 다를 수 있으므로 실제 실행 연결은 후속 구현에서 검증해야 한다.
 
 ### 현재 로컬 스캐폴드 확인
 

@@ -1,6 +1,6 @@
 # Tasks: Provisioning
 
-이 파일은 7단계 Provisioning 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 입력 계약·로컬 검증·대상별 구성 예시와 회귀 검증을 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증·전체 186개 테스트를 완료했으며 main 반영은 구현 PR 병합으로 확인한다. 05/06/07은 `TODO`이며 한 티켓씩 순차 진행한다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
+이 파일은 7단계 Provisioning 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 입력 계약·로컬 검증·대상별 구성 예시와 회귀 검증을 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증·전체 186개 테스트를 완료했으며 main 반영은 구현 PR 병합으로 확인한다. B-01(#17)과 05/06/07은 `TODO`이며 한 티켓씩 순차 진행한다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
 
 | ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
@@ -10,6 +10,7 @@
 | [02 PostgreSQL Chart 렌더링과 PVC 검사](../../tickets/provisioning/02-postgres-helm-render.md) | DONE | 01, CP-01 | PROV-005, 006, 011 | [#11](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/11) | ☑ |
 | [03 앱 배포와 .env·Secret 바인딩 렌더링](../../tickets/provisioning/03-app-env-render.md) | DONE | 01, 02 | PROV-004, 005, 010, 012, 021 | [#13](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/13) | ☑ |
 | [04 격리 K3s에서 Agent 배포 경로 검증](../../tickets/provisioning/04-k3s-agent-test-deploy.md) | DONE | 02, 03 | PROV-006, 009, 011, 013 | [#15](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/15) | ☑ |
+| [B-01 공통 이미지 빌드와 통과 Digest 재사용](../../tickets/provisioning/b-01-image-build.md) | TODO | ADR-003, 01 내부 v1 전환 | PROV-001, 004, 010, 015, 021 | [#17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/17) | ☐ |
 | [05 AWS EKS Terraform Plan과 Preview](../../tickets/provisioning/05-aws-preview.md) | TODO | 01, CP-01 | PROV-002, 003, 007, 014, 021 | 미생성 | ☐ |
 | [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | TODO | 01, CP-01 | PROV-002, 003, 008, 014, 021 | 미생성 | ☐ |
 | [07 Plan Revision 승인과 Temporal 실행 차단](../../tickets/provisioning/07-approval-gate.md) | TODO | 01, CP-01 | PROV-014, 015, 016, 021 | 미생성 | ☐ |
@@ -29,6 +30,7 @@
                 ├→ 05 → 08 → 09
                 ├→ 06 → 10 → 11
                 └→ 07 → 08 / 10 / 12
+ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 08, 09, 10, 11, 12, 13 → 14
 ```
 
@@ -44,3 +46,7 @@
 ## 현재 진행 방식
 
 사용자 지시에 따라 CP-01부터 한 티켓씩 순차 진행한다. 병렬 채팅을 만들거나 병렬 준비용 작업을 별도 수행하지 않는다. 문서는 관련 구현 이슈/PR에 함께 반영한다. 실제 공유 인터페이스는 [shared-contracts.md](shared-contracts.md)를 따른다.
+
+## 이미지 흐름 변경 (ADR-003, Issue #17)
+
+이전 내부 v1 Planning은 Build가 Sandbox를 참조하는 순서로 구현돼 있다. 새 제품 정책은 Build 선행·Sandbox 실행 Digest 검증·동일 Digest 배포다. [B-01](../../tickets/provisioning/b-01-image-build.md)에서 코드/fixture를 전환하기 전까지 현재 01의 DONE은 **당시 범위의 완료**이고 새 이미지 동일성 정책의 구현 증거가 아니다. 04의 격리 Agent 배포 테스트도 수정 루프/Build 모듈의 완료 증거가 아니다. 변경은 PR #16 문서에 포함하고 별도 문서 PR을 만들지 않는다.

@@ -2,12 +2,12 @@
 
 ## 1. 기능 개요와 목적
 
-Provisioning은 원본 AWS EKS·애플리케이션 분석, AI 코드·설정 변환, Sandbox 검증과 이미지 빌드를 거쳐 만들어진 **공통 리소스 요구사항**을 대상 환경의 구성으로 변환한다. 사용자에게 생성·변경 계획을 Preview로 보여주고 **승인 후에만** 실제 대상 리소스를 생성·배포한다. 실행 결과와 연결 정보를 Data Migration 및 Traffic Migration에 제공한다.
+Provisioning은 원본 AWS EKS·애플리케이션 분석, AI 코드·설정 변환, 이미지 빌드와 해당 Digest의 Sandbox 검증을 거쳐 만들어진 **공통 리소스 요구사항**을 대상 환경의 구성으로 변환한다. 사용자에게 생성·변경 계획을 Preview로 보여주고 **승인 후에만** 실제 대상 리소스를 생성·배포한다. 실행 결과와 연결 정보를 Data Migration 및 Traffic Migration에 제공한다.
 
 이 문서는 기능이 충족해야 할 조건과 수용 기준을 정의한다. `ProvisioningSpec`과 `ProvisioningResult`는 여기서 **개념적인 입력·출력 계약의 이름**이며, 구체적인 Pydantic 필드·기본값, Terraform 모듈, Helm 차트, Temporal Activity 분할과 API 경로는 후속 설계에서 정한다. 제품 범위는 [제품 정책](../../docs/product/policies.md), 모듈 책임은 [도메인 경계](../../docs/architecture/domain-boundaries.md)를 따른다.
 
 ```text
-AWS EKS·앱 분석 → AI 코드·설정 변환 → Sandbox 검증 → 최종 이미지·Digest
+AWS EKS·앱 분석 → AI 코드·설정 변환 → 이미지 빌드·Digest → 해당 Digest로 Sandbox 검증
   → 공통 ProvisioningSpec → Provider별 구성·Preview → 사용자 승인
   → 실제 인프라 구성·Kubernetes 배포 → 실제 환경 검증
   → ProvisioningResult → Data Migration / Traffic Migration
@@ -21,16 +21,16 @@ Provisioning의 완료는 **대상 인프라와 워크로드가 다음 이전 �
 - **대상:** AWS EKS, GCP GKE, 온프레미스 K3s. AWS·GCP는 승인된 요구사항에 따라 클라우드 인프라를 구성하고 Kubernetes 리소스를 배포한다. 온프레미스는 사용자가 제공하는 K3s 실행 환경에 Agent를 통해 배포한다. macOS에서 K3s 실행에 필요한 Linux 환경의 도구·사전 준비 범위는 미정이다.
 - **P0 우선 리소스:** 대상 Kubernetes 실행 환경, 애플리케이션 Deployment, PostgreSQL 16 StatefulSet, Service, ConfigMap·Secret, DB용 PVC, 외부 접근 네트워크와 대상별 Ingress·Load Balancer, 기본 상태·앱 검증.
 - **P0 제외:** AWS/GCP 기존 네트워크 재사용, 객체 스토리지 자동 생성과 객체 데이터 이전. AWS/GCP는 신규 네트워크 구성이며 ON_PREM 기존 K3s 사용은 유지한다. 원본 앱의 S3 기능을 데모에서 어떻게 처리할지는 확인이 필요하다.
-- **선행 산출물:** 분석·변환 결과, Sandbox 검증 결과, 검증된 코드에서 만든 이미지 URI·Digest, 대상 선택과 접근 참조, 계획에 필요한 공통 요구사항. 모든 입력을 사용자가 직접 작성하는 것은 아니다.
+- **선행 산출물:** 분석·변환 결과, Sandbox 검증 결과, Sandbox가 실행·검증한 이미지 URI·Digest, 대상 선택과 접근 참조, 계획에 필요한 공통 요구사항. 모든 입력을 사용자가 직접 작성하는 것은 아니다.
 - **외부 의존:** 공통 Provider 변환·렌더링·검증 기능, 대상별 인프라·Kubernetes 접근, 이미지 Registry, 계획·승인 기록, 산출물 저장소. 실제 자격 증명은 원문 대신 참조로 다룬다.
 
 ## 3. 개념적인 입력 계약
 
 ### 3.1. 선행 결과와 수신 시점
 
-Planning은 Sandbox 검증 통과 후 최종 Build 결과까지 연결해 입력을 구성한다. 상위 Workflow가 Analysis·Sandbox·Build 결과와 사용자 대상 선택·별도 `.env` 참조를 전달하고, Planning Activity가 조회·검증·조합한다. Sandbox가 완성된 운영 Spec을 단독으로 생성하는 계약은 요구하지 않는다.
+Planning은 Build → Sandbox 검증 루프에서 통과한 Build 결과와 실행 검증 Digest를 연결해 입력을 구성한다. 통과 후 다시 빌드하지 않는다. 상위 Workflow가 Analysis·Sandbox·Build 결과와 사용자 대상 선택·별도 `.env` 참조를 전달하고, Planning Activity가 조회·검증·조합한다. Sandbox가 완성된 운영 Spec을 단독으로 생성하는 계약은 요구하지 않는다.
 
-선행 결과에는 검증한 코드·설정·요구사항의 식별자/버전, Sandbox 상태·보고서, Build 소스 출처·최종 이미지 Digest·아키텍처가 필요하다. 코드/설정의 검증 근거와 빌드 출처가 연결되지 않으면 승인 가능한 계획으로 진행하지 않는다. “검증된 코드에서 빌드”와 “최종 이미지 자체의 실행 검증”은 별개다. 구체적인 수신 정보·참조 형태·미정 사항은 [Provision 입력 계약](input-contract.md)에 기록한다.
+선행 결과에는 검증한 코드·설정·요구사항의 식별자/버전, Sandbox 상태·보고서, Build 소스 출처·최종 이미지 Digest·아키텍처가 필요하다. 코드/설정의 검증 근거와 빌드 출처가 연결되지 않으면 승인 가능한 계획으로 진행하지 않는다. 코드 출처 일치만으로 충분하지 않으며 Build 이미지 Digest와 Sandbox가 실행·검증한 Digest 및 배포 Digest가 같아야 한다. 미검증 플랫폼/설정으로 검증 효력을 확장하지 않는다. 구체적인 수신 정보·참조 형태·미정 사항은 [Provision 입력 계약](input-contract.md)에 기록한다.
 
 ### 3.2. Planning이 조합하는 리소스 명세
 
@@ -165,7 +165,7 @@ Sandbox의 임시 리소스는 Sandbox Worker가, 실제 대상 인프라와 운
 
 #### PROV-010 — Application Deployment
 
-검증된 코드에서 빌드한 컨테이너 이미지를 승인된 앱 실행 요구사항에 따라 대상 Kubernetes에 배포해야 한다.
+Sandbox를 통과한 정확히 동일한 이미지 Digest를 재빌드 없이 승인된 앱 실행 요구사항에 따라 대상 Kubernetes에 배포해야 한다.
 
 **수용 기준**
 

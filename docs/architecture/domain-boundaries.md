@@ -23,8 +23,8 @@ AI의 출력은 곧바로 인프라 실행 명령이 되지 않는다. Sandbox �
 | 항목 | 내용 |
 | --- | --- |
 | 책임 | 미리 준비된 Kubernetes Sandbox 클러스터에 검증 작업별 임시 Namespace·리소스를 만들고 앱·PostgreSQL 테스트 환경을 구성한다. 환경변수·Secret·Service 연결, 실행·헬스·DB 읽기·쓰기와 필요한 기능을 테스트하고 임시 자원을 정리한다. |
-| 주요 입력 | 변환 코드·설정 참조, 테스트용 이미지 또는 빌드 입력, 공통 리소스 요구사항, 테스트 데이터·검증 조건 |
-| 주요 출력 | 항목별 성공·실패, 오류·로그·테스트 결과 참조, 정리 결과 |
+| 주요 입력 | 변환 코드·설정 참조, Build 결과 참조와 Digest 고정 이미지, 공통 리소스 요구사항, 테스트 데이터·검증 조건 |
+| 주요 출력 | 항목별 성공·실패, 검증한 Build 참조·이미지 Digest·플랫폼/설정 범위, 오류·로그·테스트 결과 참조, 정리 결과 |
 | 책임 제외 | Production VPC·클러스터·Load Balancer 생성, 실제 운영 DB 임의 변경, 대상 환경의 최종 성공 판정 |
 | 의존 모듈 | 공통 Provider 변환·렌더링·검증, Helm 차트, Kubernetes API, 기능 테스트, 산출물 저장소 |
 
@@ -34,13 +34,13 @@ Sandbox는 변환 오류를 사전에 찾는 곳이다. **Sandbox 성공은 실�
 
 | 항목 | 내용 |
 | --- | --- |
-| 책임 | 검증된 코드로 최종 컨테이너 이미지를 빌드하고 Registry에 Push한다. 대상 CPU 아키텍처와 호환성에 필요한 정보를 제공한다. |
-| 주요 입력 | 검증을 통과한 소스·설정 참조, 빌드 정의와 대상 아키텍처 요구사항 |
+| 책임 | 준비된 소스·Dockerfile로 Sandbox 검증 전에 컨테이너 이미지를 빌드하고 Registry에 Push한다. 대상 CPU 아키텍처와 호환성에 필요한 정보를 제공한다. |
+| 주요 입력 | 빌드할 소스·Dockerfile/빌드 설정 참조, 시도 ID, Registry 목적지·인증 참조와 대상 플랫폼 |
 | 주요 출력 | 이미지 URI·Digest, 빌드 결과·호환성 정보 |
 | 책임 제외 | 실제 대상 인프라 생성, 데이터 이전, 트래픽 전환 |
-| 의존 모듈 | Sandbox 검증 결과, 이미지 빌드 수단, AWS ECR, 산출물 저장소 |
+| 의존 모듈 | 이미지 빌드 실행 수단, Registry(데모 ECR), 산출물 저장소 |
 
-최종 배포 이미지는 **검증된 코드**에서 생성해야 한다. Sandbox 실행을 위해 사전 이미지가 필요한지, 검증 후 최종 이미지를 어떻게 동일 코드·설정과 연결할지는 후속 설계에서 정한다. 데모 기본 이미지 Registry는 ECR이지만 배포 대상의 이미지 접근 방식은 별도 설계가 필요하다.
+최종 배포 이미지는 **Sandbox가 실행·검증한 동일 Digest**다. 민서가 공통 빌드 모듈(소스·Dockerfile → build/push → Digest 반환)을 맡고 Sandbox/변환 담당자가 수정·빌드 호출·검증 루프를 조정한다. Dockerfile 자동 생성·코드 수정·범용 언어 탐지는 빌드 모듈 범위 밖이다. 호출은 Activity 등 외부 I/O 경계에서 수행하며 Sandbox 워크로드에 builder 권한을 부여하지 않는다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 아직 미구현이다. 데모 기본 이미지 Registry는 ECR이지만 배포 대상의 이미지 접근 방식은 별도 설계가 필요하다.
 
 ## 5. Provisioning Worker
 
@@ -106,14 +106,15 @@ FastAPI는 Temporal에 장시간 작업을 맡기고 상태를 조회한다. Tem
 
 ## 10. Worker 사이 입력·출력 및 의존 관계
 
-Provisioning Planning이 소비할 정보는 [Provision 입력 계약](../../specs/provisioning/input-contract.md)에 구체화한다. 상위 Workflow가 Analysis·Sandbox·Build 및 사용자 선택의 결과 참조를 연결하고 Planning Activity가 조회·검증·명세 조합을 수행하는 설계다. Sandbox는 검증 대상 코드·설정·요구사항 버전과 보고서를, Build는 사용한 소스·설정과 최종 이미지 Digest의 연결을 제공한다. 상세 wire schema는 각 담당 영역과 합의해야 하며, 이 문서 변경이 상위 Worker 구현을 변경하지 않는다.
+Provisioning Planning이 소비할 정보는 [Provision 입력 계약](../../specs/provisioning/input-contract.md)에 구체화한다. 상위 Workflow가 Analysis·Sandbox·Build 및 사용자 선택의 결과 참조를 연결하고 Planning Activity가 조회·검증·명세 조합을 수행하는 설계다. Sandbox는 검증 대상 코드·설정·요구사항 버전, 실행한 Build 참조·이미지 Digest와 보고서를, Build는 사용한 소스·빌드 설정과 이미지 Digest의 연결을 제공한다. 상세 wire schema는 각 담당 영역과 합의해야 하며, 이 문서 변경이 상위 Worker 구현을 변경하지 않는다.
 
 | 경계 | 전달 정보 | 받는 쪽의 책임 |
 | --- | --- | --- |
 | API → Analysis | 원본 AWS 접근 참조, 소스·`.env` 참조, 대상 환경 | 원본 분석·요구사항 도출 |
-| Analysis → Sandbox | 변환 코드·설정과 검증 대상 | 임시 환경에서 실행·검증·정리 |
-| Sandbox → Build / Planning | 테스트 결과·오류 및 검증된 코드 참조 | 최종 이미지와 계획 준비 |
-| Build → Provisioning | 이미지 URI·Digest·호환성 정보 | 계획·배포 입력으로 사용 |
+| Analysis / 수정 루프 → Build | 준비된 소스·Dockerfile·빌드 설정과 플랫폼 | 빌드·push·Digest 반환 |
+| Build → Sandbox | Build 참조·이미지 URI/Digest·출처 | 정확한 Digest를 실행·검증 |
+| Sandbox → Planning | 통과한 Build 참조·검증 Digest·설정·보고서 | 동일성 검증 후 계획·배포 입력으로 사용 |
+| Sandbox 실패 → 수정 루프 | 테스트 오류·실행 시도 참조 | 코드 수정 후 새 Build·재검증 |
 | Analysis / Planning → Provider 모듈 | 공통 Provisioning 요구사항 | 대상별 설정 렌더링 |
 | Provider 모듈 → Sandbox / Provisioning | 공통 또는 대상별 Manifest·Helm Values | 검증 환경 또는 실제 환경에 적용 |
 | Provisioning Planning → API / 사용자 | Preview·변경 정보 | 실제 실행 전 검토·승인 |
@@ -128,7 +129,7 @@ Provisioning Planning이 소비할 정보는 [Provision 입력 계약](../../spe
 
 - **Analysis ↔ Sandbox:** Analysis는 검증할 코드·설정을 제공한다. Sandbox가 임시 실행·테스트·정리와 실패 원인 반환을 책임진다.
 - **Sandbox ↔ Provisioning:** 공통 Provider 라이브러리와 기능 테스트는 공유할 수 있으나, Sandbox는 Production 인프라를 만들지 않고 Provisioning은 Sandbox 임시 자원을 정리하지 않는다.
-- **Build ↔ Sandbox:** 최종 이미지는 검증된 코드에서 나온다. Sandbox용 이미지의 생성 시점과 최종 이미지의 동일성 확인 방식은 별도 설계한다.
+- **Build ↔ Sandbox:** Build는 실행 전에 이미지를 생성하고 Sandbox는 해당 Digest를 검증한다. 통과 후 재빌드하지 않는다. 수정/재시도 판단과 테스트 환경 재사용·초기화는 Sandbox/변환 책임이다.
 - **Provisioning ↔ Data Migration:** Provisioning은 대상 DB와 연결 참조를 준비한다. Data Migration이 원본 데이터를 복사·동기화하고 정합성을 검사한다.
 - **Provisioning ↔ Traffic Migration:** Provisioning은 앱 Endpoint와 준비 상태를 제공한다. Traffic Migration이 라우팅 가중치·전환·복귀를 실행한다.
 - **FastAPI ↔ Temporal:** API는 외부 요청과 승인 인터페이스를 제공한다. Temporal은 장시간 작업의 순서·상태·대기를 관리한다.
