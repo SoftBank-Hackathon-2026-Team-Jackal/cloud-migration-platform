@@ -20,6 +20,7 @@
 | [14 실패 분류·Fixer 루프·Draft PR](../../tickets/analysis-verification/14-fix-loop.md) | DRAFT | 08, 10, 13 | AV-015, AV-019, AV-020 | 미생성 | ☐ |
 | [15 Planning 인계(SandboxResult v2)](../../tickets/analysis-verification/15-planning-handoff.md) | DRAFT | 14, Provisioning Planning v2 합의 | AV-018 | 미생성 | ☐ |
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-021, spec §7 | 미생성 | ☐ |
+| [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 
 ## 선행 관계
 
@@ -32,23 +33,24 @@
 07 + 11 → 12 → 13
 08 + 10 + 13 → 14 → 15 → 16
 06 → 16
+05 + 08 → 17 (후순위)
 ```
 
 정확한 선행 조건은 위 표와 각 티켓을 따른다. 외부 의존: 06은 AWS 테스트 계정, 08은 D-01(실제 LLM 연결 시), 10은 B-01(완료), 11은 Provisioning 02·03(완료), 15는 Planning v2 합의, 16은 데모 앱.
 
-**추천 순서:** 01 → 02 → 03 → 04 → 05 → 07 → 09 → 10 → 11 → 08 → 12 → 13 → 14 → (06, 15) → 16. 외부 의존이 없는 것부터 이어 첫 사이클 뼈대(스캔 → 빌드 → Sandbox 루프)를 먼저 완성한다.
+**추천 순서:** 01 → 02 → 03 → 04 → 05 → 07 → 09 → 10 → 11 → 08 → 12 → 13 → 14 → (06, 15) → 16 → 17. 외부 의존이 없는 것부터 이어 첫 사이클 뼈대(스캔 → 빌드 → Sandbox 루프)를 먼저 완성한다. 17은 첫 사이클이 끝난 뒤 착수한다.
 
 ## 결정 대기
 
 | ID | 내용 | 영향 티켓 | 담당 |
 | --- | --- | --- | --- |
-| D-01 | LLM 공급자·모델·코드 전송 범위(ADR-004로 기록) | 08, 12, 14 | 승철·팀 |
+| D-01 | LLM 공급자·모델·코드 전송 범위(ADR-004로 기록) | 08, 12, 14, 17 | 승철·팀 |
 | D-02 | Planning `SandboxResult`/`BuildResult` v2 필드, `*_ref` 저장 위치 | 01, 15 | 민서·승철 |
 | D-03 | 통합 Sandbox 렌더 함수, 앱 Chart의 내부 Ingress·NetworkPolicy | 11, 13 | 민서 |
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) | 10, 14 | 민서 |
 | D-05 | `sandbox` Task Queue 추가 여부 | 02 | 승철(민서 공유) |
 | D-06 | 소스 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간 | 09, 10 | 민서·승철 |
-| D-07 | 데모 앱 언어·API·DB 형태(RDS vs Pod)·Dockerfile/매니페스트 위치 | 05, 07, 16 | 소울 |
+| D-07 | 데모 앱 언어·API·DB 형태(RDS vs Pod)·Dockerfile/매니페스트 위치 | 05, 07, 16, 17 | 소울 |
 | D-08 | Sandbox 기반 클러스터 준비 주체·시점 | 11, 16 | 민서·승철 |
 | D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 12 | 승철·소울 |
 | D-10 | Production에서 테스트 묶음 재실행 시 데이터·계정·정리 정책 | 15 | 팀 |
