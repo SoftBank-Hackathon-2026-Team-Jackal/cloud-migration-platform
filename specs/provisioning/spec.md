@@ -4,6 +4,8 @@
 
 Provisioning은 원본 AWS EKS·애플리케이션 분석, AI 코드·설정 변환, 이미지 빌드와 해당 Digest의 Sandbox 검증을 거쳐 만들어진 **공통 리소스 요구사항**을 대상 환경의 구성으로 변환한다. 사용자에게 생성·변경 계획을 Preview로 보여주고 **승인 후에만** 실제 대상 리소스를 생성·배포한다. 실행 결과와 연결 정보를 Data Migration 및 Traffic Migration에 제공한다.
 
+새 [Planning 입력 계약 v2](input-contract-v2.md)는 요구사항을 고유 ID·종류를 가진 `resources[]`와 리소스 간 ID 참조로 표현한다. 초기 허용 종류는 APPLICATION·POSTGRESQL이며 미지원 종류와 PostgreSQL 확장은 명시적으로 거절한다. 현재 단일 앱/DB 공통 렌더와 클라우드 실행 완료를 뜻하지 않는다.
+
 이 문서는 기능이 충족해야 할 조건과 수용 기준을 정의한다. `ProvisioningSpec`과 `ProvisioningResult`는 여기서 **개념적인 입력·출력 계약의 이름**이며, 구체적인 Pydantic 필드·기본값, Terraform 모듈, Helm 차트, Temporal Activity 분할과 API 경로는 후속 설계에서 정한다. 제품 범위는 [제품 정책](../../docs/product/policies.md), 모듈 책임은 [도메인 경계](../../docs/architecture/domain-boundaries.md)를 따른다.
 
 ```text

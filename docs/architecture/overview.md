@@ -101,7 +101,7 @@ Redis, Celery, Kafka 같은 별도 작업 큐는 현재 확정 스택에 포함�
 | 10 | Traffic Cutover | 서비스 준비와 동기화 상태를 확인하며 단계적 전환, 가능한 범위의 복귀 관리 |
 | 11 | Final Verification & Handover | 실제 서비스 상태 재확인, 결과와 운영 산출물 인계 |
 
-이는 책임의 상위 순서다. **코드 수정 → Build → Sandbox 검증을 반복하고 통과한 동일 Digest를 재빌드 없이 배포한다.** Activity 분할·Queue·Retry 수치는 후속 설계이며 새 흐름의 실제 계약 전환은 B-01에서 구현한다. [ADR-003](../decisions/ADR-003.md)을 따른다.
+이는 책임의 상위 순서다. **코드 수정 → Build → Sandbox 검증을 반복하고 통과한 동일 Digest를 재빌드 없이 배포한다.** B-01은 공통 빌더를, 01A는 로컬 v2 Planning 출처 검증을 제공한다. Activity 분할·Queue·Retry 수치와 실제 Workflow 연결은 후속 설계다. [ADR-003](../decisions/ADR-003.md)을 따른다.
 
 ## 6. 주요 컴포넌트와 Temporal 경계
 

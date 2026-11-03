@@ -31,6 +31,7 @@ def builder() -> ImageBuilder:
         BuildContext.model_validate(
             {
                 "migration_id": "migration-1",
+                "resource_id": "api-main",
                 "attempt_id": "attempt-1",
                 "ecr_repository": ECR,
                 "platform": "linux/arm64",
@@ -44,7 +45,7 @@ def source_uri(path: Path) -> str:
     return f"s3://source-bucket/sources/{path.name}"
 
 
-def mock_aws_docker(monkeypatch, path: Path, *, existing=False):
+def mock_aws_docker(monkeypatch, path: Path, *, existing=False, version_id=None):
     calls = []
     log_content = []
     published_tags = set()
@@ -52,13 +53,18 @@ def mock_aws_docker(monkeypatch, path: Path, *, existing=False):
     def run(command, **kwargs):
         calls.append(command)
         if command[:3] == ["aws", "s3api", "head-object"]:
+            assert (
+                command[command.index("--version-id") + 1] if "--version-id" in command else None
+            ) == version_id
             return subprocess.CompletedProcess(
                 command,
                 0,
                 stdout=json.dumps({"ContentLength": path.stat().st_size}),
             )
         if command[:3] == ["aws", "s3api", "get-object"]:
-            assert "--version-id" not in command
+            assert (
+                command[command.index("--version-id") + 1] if "--version-id" in command else None
+            ) == version_id
             shutil.copyfile(path, command[-1])
             return subprocess.CompletedProcess(command, 0, stdout="{}")
         if command[:3] == ["aws", "ecr", "describe-repositories"]:
@@ -122,11 +128,12 @@ def test_s3_to_ecr_returns_digest_and_versioned_log(tmp_path, monkeypatch):
     calls, logs = mock_aws_docker(monkeypatch, path)
     result = builder().build(source_uri(path))
     assert result.status == "SUCCEEDED"
+    assert result.resource_id == "api-main"
     assert result.digest == DIGEST
     assert result.image_uri == f"{ECR}@{DIGEST}"
     assert result.source.uri == source_uri(path)
     assert result.source.version_id is None
-    assert result.log.uri == "s3://log-bucket/builds/migration-1/attempt-1.json"
+    assert result.log.uri == "s3://log-bucket/builds/migration-1/api-main/attempt-1.json"
     assert result.log.version_id == "log-v1"
     assert logs[0]["source_sha256"] == path.name.removesuffix(".tar.gz")
     assert [c[:3] for c in calls].count(["docker", "buildx", "build"]) == 1
@@ -156,6 +163,32 @@ def test_new_attempt_uses_a_new_image_tag(tmp_path, monkeypatch):
         build_commands[0][build_commands[0].index("--tag") + 1]
         != (build_commands[1][build_commands[1].index("--tag") + 1])
     )
+
+
+def test_two_resources_with_same_attempt_have_distinct_tags_and_logs(tmp_path, monkeypatch):
+    path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n", "app.py": b"print('ok')"})
+    calls, _ = mock_aws_docker(monkeypatch, path)
+    first = builder()
+    second = ImageBuilder(first.context.model_copy(update={"resource_id": "worker-main"}))
+    first_result = first.build(source_uri(path))
+    second_result = second.build(source_uri(path))
+    assert first_result.log.uri != second_result.log.uri
+    assert second_result.resource_id == "worker-main"
+    build_commands = [c for c in calls if c[:3] == ["docker", "buildx", "build"]]
+    assert len(build_commands) == 2
+    assert (
+        build_commands[0][build_commands[0].index("--tag") + 1]
+        != build_commands[1][build_commands[1].index("--tag") + 1]
+    )
+
+
+def test_source_version_is_pinned_for_head_and_get(tmp_path, monkeypatch):
+    path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n"})
+    calls, _ = mock_aws_docker(monkeypatch, path, existing=True, version_id="source-v1")
+    result = builder().build(source_uri(path), source_version_id="source-v1")
+    assert result.source.version_id == "source-v1"
+    assert [c for c in calls if c[:3] == ["aws", "s3api", "head-object"]]
+    assert [c for c in calls if c[:3] == ["aws", "s3api", "get-object"]]
 
 
 def test_changed_archive_bytes_are_rejected_before_ecr_lookup(tmp_path, monkeypatch):

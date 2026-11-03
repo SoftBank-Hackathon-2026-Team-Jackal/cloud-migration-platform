@@ -25,6 +25,12 @@ Cloud Migration Platform moves an AWS EKS application to EKS, GKE, or K3s. FastA
 - Keep Workflow deterministic. External I/O belongs in Activities. Make Terraform, Helm, and Agent execution retry-aware; never treat scaffold Activities as real cloud execution.
 - Never commit credentials, `.env`, Terraform plan/state, uploaded source archives, or generated secrets.
 
+## Local cloud profiles
+
+- For AWS CLI/SDK checks on this workstation, use the named profile `cmp-aws-prod` (`AWS_PROFILE=cmp-aws-prod` or `--profile cmp-aws-prod`). For GCP CLI checks, use the named gcloud configuration `cmp-gcp-prod` (`--configuration cmp-gcp-prod`). Do not silently use a default profile.
+- Verify the AWS account with `aws sts get-caller-identity --profile cmp-aws-prod` and the GCP project with `gcloud config get-value project --configuration cmp-gcp-prod` before a cloud operation. These profile names point to production-named environments; possessing access does not authorize Apply or cleanup. Follow the reviewed Plan, explicit test scope, cost and cleanup rules in the testing strategy.
+- The gcloud configuration is **not** Terraform/SDK Application Default Credentials. Validate the intended ADC principal and project separately before GCP Provider access. Never copy credential files or tokens into the repository, task output or Temporal history.
+
 # Documentation consistency and completion
 
 - When requirements, design, or decisions change, update the corresponding SDD document and ticket before marking DONE or opening a PR. Record “no documentation change” when behavior and contracts truly did not change.

@@ -12,6 +12,7 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -34,7 +35,7 @@ _MAX_FILES = 20000
 class S3Ref(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     uri: str
-    version_id: str | None = None
+    version_id: Annotated[str, Field(min_length=1)] | None = None
 
     @model_validator(mode="after")
     def valid_uri(self) -> "S3Ref":
@@ -59,6 +60,7 @@ class BuildContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     migration_id: str
+    resource_id: str
     attempt_id: str
     ecr_repository: str
     platform: str
@@ -66,8 +68,11 @@ class BuildContext(BaseModel):
 
     @model_validator(mode="after")
     def valid_context(self) -> "BuildContext":
-        if not _NAME.fullmatch(self.attempt_id) or not _NAME.fullmatch(self.migration_id):
-            raise ValueError("invalid migration or attempt ID")
+        if any(
+            not _NAME.fullmatch(value)
+            for value in (self.migration_id, self.resource_id, self.attempt_id)
+        ):
+            raise ValueError("invalid migration, resource or attempt ID")
         if not _ECR.fullmatch(self.ecr_repository):
             raise ValueError("invalid ECR repository URI")
         if self.platform not in {"linux/amd64", "linux/arm64"}:
@@ -80,6 +85,7 @@ class BuildContext(BaseModel):
 class _BuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     migration_id: str = Field(min_length=1)
+    resource_id: str
     attempt_id: str
     source: S3Ref
     ecr_repository: str
@@ -88,8 +94,11 @@ class _BuildRequest(BaseModel):
 
     @model_validator(mode="after")
     def valid_request(self) -> "_BuildRequest":
-        if not _NAME.fullmatch(self.attempt_id) or not _NAME.fullmatch(self.migration_id):
-            raise ValueError("invalid migration or attempt ID")
+        if any(
+            not _NAME.fullmatch(value)
+            for value in (self.migration_id, self.resource_id, self.attempt_id)
+        ):
+            raise ValueError("invalid migration, resource or attempt ID")
         if not _ECR.fullmatch(self.ecr_repository):
             raise ValueError("invalid ECR repository URI")
         if self.platform not in {"linux/amd64", "linux/arm64"}:
@@ -106,6 +115,7 @@ class _BuildRequest(BaseModel):
 class BuildOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     migration_id: str
+    resource_id: str
     attempt_id: str
     status: str
     source: S3Ref
@@ -364,7 +374,10 @@ def _upload_log(request: _BuildRequest, record: dict, workspace: Path) -> S3Ref:
 def _build_and_push(request: _BuildRequest) -> BuildOutcome:
     """Return a safe result; no raw AWS/Docker output is exposed."""
     sha = _ARCHIVE.fullmatch(PurePosixPath(request.source.key).name).group("sha")
-    identity = f"{request.migration_id}\0{request.attempt_id}\0{request.platform}\0{sha}"
+    identity = (
+        f"{request.migration_id}\0{request.resource_id}\0"
+        f"{request.attempt_id}\0{request.platform}\0{sha}"
+    )
     tag = "cmp-" + hashlib.sha256(identity.encode()).hexdigest()
     digest = None
     error_code = None
@@ -390,6 +403,7 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
                 request,
                 {
                     "migration_id": request.migration_id,
+                    "resource_id": request.resource_id,
                     "attempt_id": request.attempt_id,
                     "status": "FAILED" if error_code else "SUCCEEDED",
                     "error_code": error_code,
@@ -403,6 +417,7 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
             error_code = error_code or "LOG_UPLOAD_FAILED"
     return BuildOutcome(
         migration_id=request.migration_id,
+        resource_id=request.resource_id,
         attempt_id=request.attempt_id,
         status="FAILED" if error_code else "SUCCEEDED",
         source=request.source,
@@ -421,17 +436,19 @@ class ImageBuilder:
     def __init__(self, context: BuildContext) -> None:
         self.context = context
 
-    def build(self, source_uri: str) -> BuildOutcome:
+    def build(self, source_uri: str, *, source_version_id: str | None = None) -> BuildOutcome:
         request = _BuildRequest(
             migration_id=self.context.migration_id,
+            resource_id=self.context.resource_id,
             attempt_id=self.context.attempt_id,
-            source=S3Ref(uri=source_uri),
+            source=S3Ref(uri=source_uri, version_id=source_version_id),
             ecr_repository=self.context.ecr_repository,
             platform=self.context.platform,
             log_destination=S3Ref(
                 uri=(
                     f"s3://{self.context.log_bucket}/builds/"
-                    f"{self.context.migration_id}/{self.context.attempt_id}.json"
+                    f"{self.context.migration_id}/{self.context.resource_id}/"
+                    f"{self.context.attempt_id}.json"
                 )
             ),
         )

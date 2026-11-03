@@ -10,10 +10,10 @@ DONE — [Issue #17](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/clou
 
 ## 입력·출력
 
-- 전체 빌드 실행의 논리적 입력은 `migration_id`, `attempt_id`, `source_uri`, 대상 플랫폼이다. 작업/시도 ID와 플랫폼은 상위 실행 맥락에서 공급한다. `attempt_id`는 코드 수정 뒤 새 빌드와 동일 시도 재시도를 구분한다.
-- Sandbox/변환 담당자가 별도로 제공할 **소스 산출물 정보는 URI 하나**다: SHA-256 이름의 `s3://.../<sha256>.tar.gz`. 파일명에서 해시를 읽어 실제 바이트와 비교하고 Dockerfile·빌드 컨텍스트는 아카이브 루트에 둔다. 별도 해시·상대 경로·VersionId를 요구하지 않는다.
+- 전체 빌드 실행의 논리적 입력은 `migration_id`, `resource_id`, `attempt_id`, `source_uri`, 대상 플랫폼이다. 작업/리소스/시도 ID와 플랫폼은 상위 실행 맥락에서 공급한다. `attempt_id`는 코드 수정 뒤 새 빌드와 동일 시도 재시도를 구분한다.
+- 기본 소스 산출물 정보는 SHA-256 이름의 `s3://.../<sha256>.tar.gz` URI 하나다. S3 객체 버전이 있으면 `source_version_id`로 선택적으로 고정한다. 파일명에서 해시를 읽어 실제 바이트와 비교하고 Dockerfile·빌드 컨텍스트는 아카이브 루트에 둔다. 별도 해시·상대 경로는 요구하지 않는다.
 - ECR 저장소와 로그 S3 버킷은 Builder 실행 설정에서 제공한다. 이들은 소스 산출물 필드가 아니다.
-- 출력: 성공/실패, 소스 SHA-256·시도/플랫폼 출처, 성공 시 ECR manifest Digest와 `repository@sha256:...` 전체 참조, 로그 S3 참조와 가능한 VersionId, 실패 시 안전한 오류 코드.
+- 출력: 성공/실패, 리소스 ID·소스 URI/선택적 버전·SHA-256·시도/플랫폼 출처, 성공 시 ECR manifest Digest와 `repository@sha256:...` 전체 참조, 로그 S3 참조와 가능한 VersionId, 실패 시 안전한 오류 코드.
 - Builder의 IAM 권한으로 S3 읽기/로그 쓰기와 ECR 조회·push를 수행한다. ECR 저장소는 미리 만들고 태그 불변(immutable)으로 설정한다. 인증 값은 함수 인자나 Temporal 이력에 싣지 않는다. 로그는 원시 Docker 출력 대신 상태·Digest·안전한 오류 코드의 구조화 기록이다.
 
 ## 수용 기준
@@ -36,7 +36,7 @@ Dockerfile 생성, 코드 수정·소스 업로드, Sandbox 실행·검증, 최�
 
 ## 호출 예시
 
-Builder가 작업/시도 ID·플랫폼·ECR/로그 설정으로 `ImageBuilder`를 준비한 뒤, 수정 루프는 `builder.build(source_uri)`를 호출한다. 따라서 Python 메서드의 인자는 URI 하나이지만 **빌드 실행 전체에는 ID와 플랫폼이 필요하다**. 공통 모듈은 Temporal Activity가 아니다. 실제 Workflow/Worker 연결은 후속 통합 작업이다.
+Builder가 작업/리소스/시도 ID·플랫폼·ECR/로그 설정으로 `ImageBuilder`를 준비한 뒤, 수정 루프는 `builder.build(source_uri, source_version_id=...)`를 호출한다. Version ID가 없으면 인자를 생략한다. 기본 소스 인자는 URI 하나이지만 **빌드 실행 전체에는 ID와 플랫폼이 필요하다**. 공통 모듈은 Temporal Activity가 아니다. 실제 Workflow/Worker 연결은 후속 통합 작업이다.
 
 ```python
 from cmp_worker.image_build import BuildContext, ImageBuilder
@@ -44,6 +44,7 @@ from cmp_worker.image_build import BuildContext, ImageBuilder
 context = BuildContext.model_validate(
     {
         "migration_id": "migration-001",
+        "resource_id": "api-main",
         "attempt_id": "build-001",
         "ecr_repository": "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/demo",
         "platform": "linux/amd64",
@@ -56,7 +57,7 @@ result = builder.build("s3://source-bucket/migration-001/<sha256>.tar.gz")
 # FAILED -> result.error_code, result.log (로그 업로드 실패 시 None)
 ```
 
-작업/시도 ID는 상위 실행이 고유하게 할당한다. 동일 입력 재시도는 S3 객체 바이트를 다시 확인하고 ECR 불변 태그에 이미 push된 Digest를 재사용한다. 리포지토리 생성·IAM 설정·대상 클러스터의 ECR Pull 권한은 별도 운영/배포 설정이다. 로그 위치는 `s3://<log_bucket>/builds/<migration_id>/<attempt_id>.json`으로 빌더가 생성한다.
+작업/리소스/시도 ID는 상위 실행이 할당한다. 동일 입력 재시도는 S3 객체 바이트를 다시 확인하고 ECR 불변 태그에 이미 push된 Digest를 재사용한다. 서로 다른 리소스는 같은 시도 ID를 쓰더라도 태그와 로그를 분리한다. 리포지토리 생성·IAM 설정·대상 클러스터의 ECR Pull 권한은 별도 운영/배포 설정이다. 로그 위치는 `s3://<log_bucket>/builds/<migration_id>/<resource_id>/<attempt_id>.json`으로 빌더가 생성한다.
 
 ## 검증 결과 (2026-11-03)
 
@@ -65,3 +66,4 @@ result = builder.build("s3://source-bucket/migration-001/<sha256>.tar.gz")
 - `tests/test_image_build.py`: S3/ECR CLI 계약을 격리해 정상·재시도·입력 변조·위험 아카이브·mutable ECR 거부를 검증했다.
 - 실제 S3 버킷/ECR 저장소와 IAM 테스트 권한은 제공되지 않아 AWS 서비스 통합 호출, 대상 클러스터 Pull/Ready는 미검증이다. ECR 저장소는 `IMMUTABLE` 태그 설정이 필요하다. Docker 원시 출력은 로그에 저장하지 않고 안전한 상태·오류 기록만 남긴다.
 - 병합 후 입력 경계 정정: `ImageBuilder(context).build(source_uri)`로 소스 산출물 필드는 URI 하나가 됐다. 작업/시도 ID·아키텍처·ECR/로그 설정은 빌더 준비 맥락으로 분리했다. 새 `attempt_id`가 별도 이미지 태그를 사용하고 동일 시도는 재사용하는지 검증했다. 이 수정의 `make check`는 pytest 197개와 Ruff 검사를 통과했다.
+- 후속 [Issue #1](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/1)에서 다중 APPLICATION 대응을 위해 Builder 맥락에 `resource_id`를 추가하고 선택적 소스 S3 Version ID를 공개 호출에 열었다. 위 원래 #17 수용/검증 기록은 당시 범위를 나타내며 후속 변경의 실 AWS 검증을 뜻하지 않는다.
