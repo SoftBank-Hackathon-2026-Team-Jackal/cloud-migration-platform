@@ -30,7 +30,7 @@ compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
 for attempt in {1..30}; do
   if curl --fail --silent http://127.0.0.1:8000/health | grep -q '"status":"ok"'; then
     echo "CMP demo API healthy"
-    "${compose[@]}" ps --format json
+    "${compose[@]}" ps
     exit 0
   fi
   sleep 2

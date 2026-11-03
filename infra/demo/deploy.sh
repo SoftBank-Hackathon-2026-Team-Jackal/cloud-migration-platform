@@ -68,7 +68,9 @@ command = (
     f"mkdir -p {release}; "
     f"aws s3 cp s3://{bucket}/releases/{revision}.tar.gz /tmp/cmp-release.tar.gz; "
     f"tar -xzf /tmp/cmp-release.tar.gz -C {release}; "
-    f"bash {release}/infra/demo/start.sh {release}"
+    f"if bash {release}/infra/demo/start.sh {release} > /tmp/cmp-demo-start.log 2>&1; "
+    "then tail -n 30 /tmp/cmp-demo-start.log; "
+    "else tail -n 30 /tmp/cmp-demo-start.log; exit 1; fi"
 )
 with open(path, "w", encoding="utf-8") as target:
     json.dump({"InstanceIds": [instance], "DocumentName": "AWS-RunShellScript", "Parameters": {"commands": [command]}}, target)
