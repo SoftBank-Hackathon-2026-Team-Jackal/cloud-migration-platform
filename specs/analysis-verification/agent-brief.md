@@ -7,7 +7,7 @@
 1. `AGENTS.md`: 저장소 공통 규칙(Workflow 결정성, `make check`, 비밀 커밋 금지, 로컬 클라우드 프로필, 커밋·PR 규칙)
 2. `docs/engineering/development-workflow.md`: 티켓 진행 절차. Provisioning용이지만 이 기능에도 그대로 준용한다
 3. `docs/engineering/testing-strategy.md`
-4. `specs/analysis-verification/spec.md`: 무엇을 만들어야 하는지(AV-001~AV-021, 수용 기준)
+4. `specs/analysis-verification/spec.md`: 무엇을 만들어야 하는지(AV-001~AV-022, 수용 기준)
 5. `specs/analysis-verification/plan.md`: 어떻게 만들지(모듈 위치, 처리 흐름, 규칙, Activity 설정, 결정 대기 표)
 6. `specs/analysis-verification/tasks.md`: 티켓 목록·선행 관계·결정 대기
 7. 이번에 맡은 `tickets/analysis-verification/<티켓>.md`
@@ -25,10 +25,10 @@ spec·plan·티켓은 main의 v2 구현(#22, #24, B-01 변경) 기준으로 맞�
 
 **만들어도 되는 곳**
 - `packages/contracts/src/cmp_contracts/analysis.py`, `verification.py` (새 파일)
-- `packages/scanners/`, `packages/agents/`, `packages/testsuite/` (새 패키지. `pyproject.toml`의 `packages`·`package-dir`에 등록)
+- `packages/scanners/`, `packages/agents/`(프롬프트 포함), `packages/testsuite/` (새 패키지. `pyproject.toml`의 `packages`·`package-dir`에 등록)
 - `catalog/`, `skills/`
 - `apps/worker/src/cmp_worker/activities/analysis.py`, `activities/sandbox.py`, `sandbox/`, `workflows/sandbox.py`, `workers/sandbox.py`
-- `tests/analysis/`, `tests/sandbox/`, `tests/integration/sandbox/`, `tests/fixtures/analysis/`
+- `tests/analysis/`, `tests/agents/`, `tests/sandbox/`, `tests/integration/sandbox/`, `tests/fixtures/analysis/`
 - `specs/analysis-verification/`, `tickets/analysis-verification/`
 
 **건드리지 않는 곳 (민서 담당 Provisioning)**
@@ -54,6 +54,8 @@ Provisioning 쪽 모델이 부족하거나 바뀌어야 하면 구현하지 말�
 - `.env` 실제 값은 Sandbox 워커가 Secret을 만들 때만 읽는다. 분석 단계는 이름만 다룬다.
 - 테스트 묶음은 SHA-256 이름으로 S3에 저장하고 `run_suite(suite_ref, base_url, auth_ref, include)`로 실행한다. 테스트마다 `READ_ONLY` / `WRITES_DATA`를 표시한다. Production은 배포 직후 준비 검사만, 테스트 묶음은 데이터 이전 후 실행한다.
 - 루프는 빌드 포함 최대 3회, 넘으면 사람 검토 대기. 어떤 경우에도 `finally`에서 Sandbox를 정리한다.
+- 매핑 뒤 Sandbox 전에 **사용자가 필수 기능을 확정하고 잃는 것(`APPROVAL`)을 승인**한다(AV-022). 자동 승인은 없다. `BLOCK`이 있으면 Sandbox로 가지 않는다.
+- 에이전트(Mapper·Tester·Fixer)는 `cmp_agents.runtime`의 도구 호출 루프로 돌고, 결과는 제출 도구로 스키마를 강제한다. Skill은 `skills/<name>/SKILL.md` 형식이고 필요한 것만 불러온다(plan §2.11).
 
 ## 4. 재사용할 v2 모델 (새로 정의하지 않는다)
 
@@ -105,7 +107,7 @@ Provisioning 쪽 모델이 부족하거나 바뀌어야 하면 구현하지 말�
 
 ## 8. 시작할 티켓
 
-외부 답이 필요 없는 순서: **01 → Q-01 → 02 → 02B → 03 → 04 → 09**. 05(D-07 지원 언어), 06(AWS 계정), 15(D-02 저장 경계)는 외부 입력이 필요하다.
+외부 답이 필요 없는 순서: **01 → Q-01 → 02 → 02B → 03 → 04 → 08A → 09**. 05(D-07 지원 언어), 06(AWS 계정), 15(D-02 저장 경계)는 외부 입력이 필요하다.
 
 ## 9. 사용자에게 줄 시작 지시 예시
 

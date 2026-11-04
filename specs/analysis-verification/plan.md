@@ -1,6 +1,6 @@
 # Implementation plan: 분석·매핑·Sandbox 검증
 
-[spec.md](spec.md)의 `AV-001`~`AV-021`을 Python 3.11, Pydantic v2, Temporal, Helm으로 구현하기 위한 **설계 제안**이다. 함수명·필드명·Activity 분할은 구현하며 확정한다. Provisioning과 맞물리는 계약은 main에 구현된 v2를 따른다: [Planning 입력 v2](../provisioning/input-contract-v2.md)(`cmp_contracts.provisioning_v2`), [공통 렌더 v2](../provisioning/onprem-shared-deployment.md)(`cmp_contracts.shared_deployment_v2`, `cmp_providers.shared_deployment_v2`), [B-01](../../tickets/provisioning/b-01-image-build.md)(`cmp_worker.image_build`). v1 문서(`input-contract.md`, `shared-contracts.md`)는 역사적 기록이다.
+[spec.md](spec.md)의 `AV-001`~`AV-022`를 Python 3.11, Pydantic v2, Temporal, Helm으로 구현하기 위한 **설계 제안**이다. 함수명·필드명·Activity 분할은 구현하며 확정한다. Provisioning과 맞물리는 계약은 main에 구현된 v2를 따른다: [Planning 입력 v2](../provisioning/input-contract-v2.md)(`cmp_contracts.provisioning_v2`), [공통 렌더 v2](../provisioning/onprem-shared-deployment.md)(`cmp_contracts.shared_deployment_v2`, `cmp_providers.shared_deployment_v2`), [B-01](../../tickets/provisioning/b-01-image-build.md)(`cmp_worker.image_build`). v1 문서(`input-contract.md`, `shared-contracts.md`)는 역사적 기록이다.
 
 ## 0. 계약 협의와 v2 구현 상태 (2026-11-04)
 
@@ -32,7 +32,9 @@ packages/contracts/src/cmp_contracts/
   verification.py      # 새로: SourceArchive, BuildAttempt, SandboxAttempt, Verdict,
                        #       SandboxVerification, PlanningRequestV2 투영 함수
 packages/agents/src/cmp_agents/      # 새로: 에이전트 본체 (Temporal 의존 없음)
-  llm.py  mapper.py  tester.py  fixer.py  masking.py
+  llm.py  runtime.py  tools.py  skills.py  masking.py   # 실행 기반(§2.11)
+  mapper.py  tester.py  fixer.py                         # 역할별 에이전트
+  prompts/                                               # 역할별 시스템 프롬프트(버전 관리)
 packages/scanners/src/cmp_scanners/  # 새로: 결정적 스캐너 (Temporal 의존 없음)
   source.py  code_python.py  manifests.py  aws_infra.py  network.py  profile.py  precheck.py
 packages/testsuite/src/cmp_testsuite/ # 새로: 테스트 묶음 형식과 run_suite (Production 재사용)
@@ -63,8 +65,10 @@ MigrationWorkflow (migration)
  │                  ├─ scan_manifests ──┤ 병렬 (asyncio.gather)
  │                  ├─ scan_aws_infra ──┤
  │                  └─ scan_network ────┘
- │   build_requirements → precheck → map_usage(LLM) → check_evidence
- │   (필수 기능 차단이면 여기서 중단·보고)
+ │   build_requirements → precheck → map_usage(LLM, 필수 여부 제안 포함) → check_evidence
+ │   [Signal 대기] 사용자 필수 기능 확정 → compute_treatment
+ │   [Signal 대기] APPROVAL 항목이 있으면 사용자 손실 승인 → record_review
+ │   (BLOCK이 하나라도 있으면 여기서 중단·보고)
  ├─ SandboxVerificationWorkflow (자식, migration queue → sandbox activities)
  │   generate_tests(LLM, 별도 세션) → validate_tests → 고정(lock)
  │   package_source → request_build → BuildAttempt
@@ -149,6 +153,25 @@ network_intent:
 - 처리 표(기계적): `DIRECT`·`API_DIFF` → `PROCEED`. `PARTIAL` → 필수면 대체 방법 증명 시 진행 아니면 `BLOCK`, 선택이면 `APPROVAL`. `NONE` → 필수면 `BLOCK`, 선택이면 `APPROVAL`.
 - 각 의존 서비스에 `MIGRATE` / `KEEP`(원본 유지)을 남긴다. 첫 사이클의 S3는 `KEEP`.
 - `check_evidence`: 근거의 파일·줄 존재, 매니페스트 경로, 리소스 ID 조회. 실패한 행은 `UNVERIFIED`로 둔다.
+
+**필수 기능 확정과 손실 승인 (AV-022)**
+
+```text
+map_usage ──> MappingRow[required_proposed, required_reason]
+   │
+   ▼  Signal: confirm_requirements {migration_id, analysis_ref, required: {capability: bool}, operational: [...], actor}
+compute_treatment ──> treatment 확정 (등급 × 확정된 필수 여부)
+   │  BLOCK 있음 → 중단·보고
+   │  APPROVAL 있음 ↓
+   ▼  Signal: approve_losses {analysis_ref, approvals: {capability: APPROVED | REJECTED}, actor}
+   │  REJECTED → 해당 기능을 필수로 바꿔 compute_treatment 재실행
+record_review ──> ReviewRecord(불변 저장, analysis_ref 버전에 묶음) → Sandbox 진행
+```
+
+- 두 Signal은 FastAPI가 권한을 확인하고 업무 DB에 기록한 뒤 보낸다. 승인 경로·화면은 상헌님과 정한다(현재 OpenAPI에는 없음, 추가 시 `make openapi`).
+- Workflow는 Signal을 기다리며 Query로 "검토 대기 중"과 검토할 항목을 보여 준다. 자동 승인은 없다.
+- Signal이 다른 분석 버전(`analysis_ref`)을 가리키면 거절한다. Sandbox 루프에서 매핑이 바뀌면 바뀐 행만 다시 승인받는다(`publish_final_report` 전에 확인).
+- 데모 시간을 위해 화면 없이도 진행할 수 있게, 같은 Signal을 CLI 스크립트로 보낼 수 있게 한다.
 
 ### 2.4 소스 묶음 (AV-009)
 
@@ -280,6 +303,56 @@ NetworkPolicy(Sandbox 워커 생성):
 
 첫 사이클 이후, 스캐너 결과를 코드 색인(심볼·호출 그래프·환경변수 읽기·라우트)으로 저장하고 에이전트가 `find_calls`·`callers_of`·`env_readers`·`routes`·`snippet`·`resource_graph`로 조회하게 한다. 파일 단위 입력 대신 근거 주변 조각만 LLM에 보내고, 도구가 돌려준 위치를 그대로 `Evidence.locator`로 쓴다. 파일 해시별 캐시로 Fixer 수정 후 바뀐 파일만 다시 파싱한다. 벡터 검색은 쓰지 않는다. 분석 내부 구현이라 외부 계약은 바뀌지 않는다.
 
+### 2.11 에이전트 실행 기반과 Skill
+
+**실행 방식 (`cmp_agents.runtime`)**
+- 에이전트는 Temporal을 모르는 함수다: `run_agent(role, task, tools, skills, budget) -> 결과 모델`. Activity는 입력을 모아 이 함수를 부르고 결과를 저장만 한다.
+- 내부는 LLM 도구 호출 루프다. 매 턴 모델이 도구를 부르면 실행해 결과를 돌려주고, 모델이 **제출 도구**(`submit_mapping`, `submit_tests`, `submit_patch`)를 부르면 끝난다. 제출 인자를 Pydantic으로 검증하고, 실패하면 오류를 돌려줘 같은 루프 안에서 고치게 한다.
+- 예산: 최대 턴 수, 입력·출력 토큰 상한, 벽시계 시간. 넘으면 지금까지의 기록과 함께 실패를 반환한다(Activity 재시도는 2회까지).
+- LLM 클라이언트는 `cmp_agents.llm.LLMClient` 인터페이스 하나로 감싼다. 공급자·모델은 D-01(Claude Agent SDK는 후보). 테스트는 `FakeLLMClient`(정해진 도구 호출 순서를 재생)로 한다.
+- 재현·감사: 각 실행의 프롬프트 버전, 불러온 Skill 목록, 도구 호출과 결과 요약, 제출 결과를 실행 기록으로 저장한다. 승인 화면과 실패 분석에 쓴다. 비밀·`.env` 값은 들어가지 않는다(입력은 마스킹본).
+- 프롬프트는 `packages/agents/src/cmp_agents/prompts/<role>.md`에 두고 버전을 실행 기록에 남긴다.
+
+**도구 (`cmp_agents.tools`)**
+
+| 도구 | 쓰는 역할 | 내용 |
+| --- | --- | --- |
+| `get_evidence`, `list_call_sites`, `get_snippet` | Mapper·Fixer | 스캔 결과 조회(마스킹본). 17번 이후 코드 색인 조회로 확장 |
+| `get_catalog_entry`, `load_skill` | 전 역할 | 카탈로그 항목, Skill 지침·예시 읽기 |
+| `get_usage_profile`, `list_routes` | Tester | 사용 프로필·API 목록 |
+| `get_attempt_report` | Fixer | 실패한 시도의 판정 이유·테스트 결과·로그 요약 |
+| `propose_requirements_patch` | Fixer | `RequirementsV2`·intent 수정안(검증 후 적용) |
+| `propose_code_patch` | Fixer | 작업 공간 diff. 테스트 묶음 경로·`.env`·인증 파일은 거부 |
+| `submit_*` | 역할별 | 최종 결과 제출(스키마 강제) |
+
+도구는 허용 목록으로만 등록한다. 셸 실행, 네트워크, 클라우드 자격 증명 도구는 없다.
+
+**Skill 구조 (`skills/`)**
+
+```text
+skills/<name>/
+  SKILL.md      # 언제 쓰는지, 조사 절차, 판단 기준, 대상별 차이, 수정 패턴, 테스트 패턴
+  scripts/      # 결정적 보조 도구(예: Ingress 어노테이션 추출, boto3 호출 분류)
+  examples/     # 원본 → 대상 변환 예시(입력·기대 출력)
+```
+
+- 카탈로그(`catalog/*.yaml`)는 **사실**: 사용 방식 어휘, 탐지 규칙, 등급 기준, 알려진 차이, 표준 테스트, 그리고 해당 Skill 이름. Skill은 **방법**이다.
+- 로딩은 필요한 것만: 매핑 대상 capability의 카탈로그 항목이 가리키는 Skill의 `SKILL.md`만 컨텍스트에 넣고, `examples/`는 `load_skill(name, part="examples")`로 필요할 때 읽는다.
+- `scripts/`는 에이전트가 직접 실행하지 않는다. 스캐너·검증 단계가 결정적으로 실행하고, 결과를 도구로 조회한다.
+- 첫 사이클 Skill:
+
+| Skill | 다루는 것 |
+| --- | --- |
+| `k8s-workload` | Deployment 자원·probe·replica, ServiceAccount·IRSA, StorageClass, 사이드카·initContainer 판단 |
+| `db-postgres` | 버전·확장·연결 변수, 세션 기능(advisory lock, LISTEN/NOTIFY), 마이그레이션 실행 방식 |
+| `network` | SG·Ingress·ALB·CloudFront → `network_intent`·외부 진입, 외부 호출의 `MIGRATE`/`KEEP` 판단 |
+| `config-env` | `.env` 대조, 원본 환경에 묶인 변수의 제외·대체, 비밀 분류 |
+
+고도화: `storage-s3`(엔드포인트·인증 변경과 코드 수정 패턴).
+
+**평가**
+- 정답을 아는 fixture 앱(감싼 호출, 동적 설정, 누락 변수 포함)으로 Mapper 결과를 채점한다. 실제 LLM은 D-01 이후, 사용자 승인 하에 실행한다.
+
 ## 3. 계약 초안
 
 ```python
@@ -293,12 +366,23 @@ class MappingRow(Contract):
     capability: str
     usage: str
     grade: Literal["DIRECT", "API_DIFF", "PARTIAL", "NONE"]
-    required: bool
+    required_proposed: bool  # Mapper 제안
+    required_reason: str  # 제안 근거 요약
+    required: bool | None  # 사용자 확정 전에는 None
     disposition: Literal["MIGRATE", "KEEP"]
     loses: list[str]
-    treatment: Literal["PROCEED", "APPROVAL", "BLOCK"]
+    treatment: Literal["PROCEED", "APPROVAL", "BLOCK"] | None  # 확정 전에는 None
     status: Literal["UNVERIFIED", "EVIDENCE_CHECKED", "SANDBOX_VERIFIED"]
     evidence: list[Evidence]
+
+
+class ReviewRecord(Contract):  # AV-022 확정·승인 기록
+    analysis_ref: VersionRef
+    required: dict[str, bool]  # capability → 확정된 필수 여부
+    operational: list[str]  # 확정된 운영 요구사항(HA·백업 등)
+    approvals: dict[str, Literal["APPROVED", "REJECTED"]]  # APPROVAL 항목별 결정
+    actor: str
+    decided_at: datetime
 
 
 class EnvExceptions(Contract):  # mapping_ref가 가리키는 내용
@@ -361,6 +445,7 @@ class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvi
 | `readiness_check`, `reset_test_data` | sandbox | 2분 | 2 | |
 | `run_tests` | sandbox | 3분 | 1 | 테스트 실패는 결과값 |
 | `judge`, `classify_failure` | sandbox | 30초 | 2 | 결정적 |
+| `compute_treatment`, `record_review` | analysis | 30초 | 3 | 결정적. 사용자 응답 대기는 Workflow의 Signal 대기(Activity 아님) |
 | `publish_final_report` | sandbox | 1분 | 3 | 불변 저장, 같은 내용이면 같은 참조 |
 | `teardown_sandbox` | sandbox | 3분 | 5 | 취소·실패에도 실행, TTL 이중 정리 |
 
@@ -375,6 +460,9 @@ class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvi
 | LLM 출력 스키마 오류 | 2회 재시도 후 사람 검토 |
 | 근거 확인 실패 | 해당 행 `UNVERIFIED`, 진행은 처리 규칙에 따름 |
 | 필수 기능 대응 없음 | 분석 단계에서 차단, Sandbox로 가지 않음 |
+| 사용자 확정·승인 미응답 | 대기 유지(타이머 상한 후에도 자동 승인 없음), Query로 대기 상태 표시 |
+| 다른 분석 버전에 대한 승인 Signal | 거절, 현재 버전으로 다시 요청 |
+| 에이전트 예산 초과·스키마 실패 반복 | 실행 기록과 함께 실패, 사람 검토 |
 | 확장 요구가 있는 앱 | 분석에서 `BLOCK` 보고(Planning이 거절하므로). D-14 이후 재검토 |
 | 빌드 실패 | §2.5 분류 |
 | Helm 적용 실패 | Release 상태 조회 → 같은 Values로 재시도, 바꿀 수 없는 필드면 재생성 분기 |
@@ -417,7 +505,7 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 | AV-004 | §2.2 | 04 |
 | AV-005 | §2.2 | 06 |
 | AV-006 | §2.2 | 07 |
-| AV-007, AV-008 | §2.3, §2.9, §2.10 | 08, 17 |
+| AV-007, AV-008 | §2.3, §2.9, §2.10, §2.11 | 08A, 08, 17 |
 | AV-009 | §2.4 | 09 |
 | AV-010 | §2.5 | 10 |
 | AV-011 | §2.6 | 11, 11B |
@@ -430,6 +518,7 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 | AV-019 | §2.1 | 14 |
 | AV-020 | §6 | 전 티켓 |
 | AV-021 | §4, §5 | Q-01, 02, 02B, 전 티켓 |
+| AV-022 | §2.3 | 08B |
 
 ## 9. 결정 대기
 

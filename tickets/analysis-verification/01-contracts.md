@@ -13,7 +13,7 @@ AV-001, AV-017, AV-018, AV-020
 Blocked by: 없음
 
 ## 작업 범위
-- 포함: `cmp_contracts.analysis`(AnalysisRequest, Evidence, MappingRow, UsageProfile, PrecheckReport, ExternalEntry, EnvExceptions, AnalysisReport)와 `cmp_contracts.verification`(SourceArchive, BuildAttempt, SandboxAttempt, Verdict, SandboxVerification, `PlanningRequestV2` 투영 함수), 요구사항 JSON 정규 직렬화(같은 내용 → 같은 바이트·SHA-256), fixture
+- 포함: `cmp_contracts.analysis`(AnalysisRequest, Evidence, MappingRow(`required_proposed`·`required`·`treatment` 확정 전 null 허용), ReviewRecord, UsageProfile, PrecheckReport, ExternalEntry, EnvExceptions, AnalysisReport)와 `cmp_contracts.verification`(SourceArchive, BuildAttempt, SandboxAttempt, Verdict, SandboxVerification, `PlanningRequestV2` 투영 함수), 요구사항 JSON 정규 직렬화(같은 내용 → 같은 바이트·SHA-256), fixture
 - 제외: Provisioning 모델(`provisioning`, `provisioning_v2`, `shared_deployment*`) 수정, 스캐너·Activity 구현, `*_ref` 저장 위치(D-02)
 
 ## 수용 기준
@@ -41,6 +41,7 @@ fixture 하나로 분석 결과·요구사항·검증 결과를 만들고, 투�
 ## 설계 변경 기록
 - 2026-11-04: 계약 협의안 v2(리소스 목록·validated_workloads) 반영, AnalysisReport로 이름 변경, 완료 조건을 '공유까지'로 축소.
 - 2026-11-04(v2 동기화): main의 v2 구현(#22, #24, B-01 변경) 기준으로 수정.
+- 2026-11-04(목적 점검): 필수 여부 제안·확정 필드와 ReviewRecord 추가(AV-022).
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
