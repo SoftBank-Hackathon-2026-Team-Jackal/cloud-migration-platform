@@ -81,7 +81,7 @@ Blocked by: 08, 09, 10, 11, 12, 13
 
 - 실제 Temporal 서버·Worker 프로세스 강제 종료가 아니라, Temporal 테스트 서버에서 Worker를 중지하고 새 Worker를 시작해 프로세스 종료를 재현했다. 그래서 중지된 Worker 안의 Terraform/Helm 실행은 같은 프로세스의 스레드로 끝까지 진행됐다. 실제 프로세스가 죽을 때 하위 Terraform/Helm이 함께 종료되는 경우(부분 적용·잠금 잔존)는 실측하지 않았다. 그 경우에도 새 Revision Plan은 S3 State에서 만들어지며, 잠금이 남아 있으면 Plan이 실패하므로 수동 확인이 필요하다.
 - GKE r1은 Activity가 유실돼 refs가 보고되지 않아 `partial_resources`가 비어 있다. 실제 생성 자원(DB Release)은 다음 Revision의 Release 조회로 확인됐다.
-- `make smoke-temporal`(로컬 Docker Temporal 서버)은 이번에도 실행하지 않았다. Workflow 변경은 Temporal 테스트 환경에서 확인했다.
+- `make smoke-temporal`: 2026-11-05 로컬 Temporal에서 실행했다. 저장소 스크립트는 분석 #45 이후 Sandbox Worker가 빠져 실패하므로, Sandbox Worker를 더한 같은 스크립트로 `scaffold_complete`를 확인했다(MNP-01 #51 검증 기록). 이 smoke는 `MigrationWorkflow` 스캐폴드만 실행하며, 승인 Workflow 변경은 Temporal 테스트 환경에서 확인했다.
 - 상위 `MigrationWorkflow`, 실제 데이터·트래픽 롤백은 범위 밖이다.
 - 검증 자원은 F6에 따라 자동 삭제하지 않았고, 아래 "검증 자원 정리"처럼 사용자 결정으로 정리했다. 로컬 k3d 클러스터·Registry는 검증 직후 삭제했다.
 

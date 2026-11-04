@@ -70,6 +70,7 @@ WireGuard 구축, CIDR/NAT/라우트/방화벽/MTU 자동 수정, CDC/slot/publi
 | --- | --- |
 | `uv run pytest tests/test_network_preflight.py tests/test_network_preflight_k8s.py` | 39개 통과. CIDR 충돌·입력 누락, 라우트 4종(미확인·없음·예상 밖 경로·허용 밖 목적지), 공개 인터넷 우회 FAIL, DB 단계 5종 구분, 64 KiB 이후 끊김·짧은 수신·시간 초과, ICMP만 막힘은 통과, 실행 위치 불가, CIDR 실패 시 현장 검사 생략, 경로·Endpoint·TLS·터널·위치 변경 시 이전 PASS 재사용 거절, 결과에 비밀값 없음, 상한, K8s 매니페스트(고정 스크립트·`secretKeyRef`·허용 이미지·`hostNetwork` 라우트 Pod·정리), Activity·미설정 Worker |
 | `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` | Ruff·전체 634개 통과 |
+| `make smoke-temporal` (로컬 compose Temporal, 2026-11-05) | 저장소 스크립트 그대로는 `MigrationWorkflow`가 `sandbox` 단계에서 멈춰 실패했다. 분석 #45가 Sandbox child Workflow를 추가했지만 스크립트에 Sandbox Worker가 빠져 있기 때문이다(main에 원래 있던 문제, 분석 담당 범위라 수정하지 않음). Sandbox Worker만 추가한 같은 스크립트로 실행해 `scaffold_complete`를 확인했다. Provisioning Worker(`get_migration_handoff` 포함)와 Migration Activity Worker(`run_network_preflight` 포함) 등록에 문제가 없다. |
 | 격리 k3d `cmp-preflight`(K3s v1.36.4, ARM64) + 원본 역할 PostgreSQL 16, 실제 `KubernetesProbeExecutor` | 정상 4 MiB PASS(0.08초)·32 MiB PASS(0.92초), 시작 판정 허용 → 포트 변경 시 `PREFLIGHT_INPUT_CHANGED`로 거절. 잘못된 비밀번호 `AUTH_FAILED`, TLS 필수인데 서버 미지원 `TLS_FAILED`, 없는 이름 `DNS_FAILED`(라우트 `ROUTE_UNVERIFIED`), NetworkPolicy 수신 차단 `TCP_UNREACHABLE`, 기대 터널 `wg0`인데 실제 `eth0` → `UNEXPECTED_PATH`, CIDR 중복 → 현장 검사 생략. 검사 Pod 잔존 0, 결과에 비밀번호 없음. 증거: [mnp-01-k3d.json](../../docs/verification/mnp-01-k3d.json). 정리: k3d 클러스터 삭제, 기본 kubeconfig 해시 동일 |
 
 ### 미검증·남은 작업
