@@ -1,7 +1,7 @@
 # Ticket 03 — 소스 확보·운영 커밋 고정·마스킹
 
 ## 상태
-DRAFT — 사용자 검토 전
+IN_PROGRESS — 사용자 검토 완료, Test Seam 확인, Issue #48
 
 ## 목적
 분석할 소스를 격리된 작업 공간에 고정된 커밋으로 확보하고, 빌드용 원본과 LLM용 마스킹본을 분리한다.
@@ -24,7 +24,7 @@ Blocked by: 01
 - [ ] 작업 공간 경로가 Migration·커밋별로 분리되고 서비스 프로세스 디렉터리 밖이다.
 
 ## 테스트 전략
-- 제안 Test Seam: `fetch_source`의 공개 함수 결과와 마스킹 함수 출력. 잡는 것: 커밋 고정·비밀 유입. 못 잡는 것: 실제 GitHub 권한·대용량 저장소 시간.
+- 합의된 Test Seam: `fetch_source`의 공개 함수 결과와 마스킹 함수 출력. 잡는 것: 커밋 고정·비밀 유입. 못 잡는 것: 실제 GitHub 권한·대용량 저장소 시간.
 - 실행: fixture 저장소(로컬 bare repo)로 `uv run pytest tests/analysis/test_source.py`
 
 ## 완료 시 확인할 동작
@@ -37,6 +37,7 @@ fixture 저장소를 넣으면 커밋 고정된 원본·마스킹본과 `.env` �
 
 ## 설계 변경 기록
 - 2026-11-04: `.env` 값은 Sandbox 워커만 Secret 생성 때 읽는다는 결정 반영(이 티켓은 이름만).
+- 2026-11-05(사용자 결정): 작업 공간은 설정 `ANALYSIS_WORKSPACE_ROOT`(없으면 OS 임시 디렉터리) 아래 `<migration_id>/<commit_sha>/`에 두고 같은 Worker 안에서만 재사용한다(서비스 디렉터리와 겹치면 거절, 권한 0700). 여러 Worker로 나뉘면 재클론한다. 작업 공간 정리는 구현하지 않는다(D-06·11에서 결정). S3 업로드는 09에서 한다.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
