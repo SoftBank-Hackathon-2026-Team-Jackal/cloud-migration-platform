@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://platform:platform@localhost:5433/platform"
     agent_enrollment_admin_key: str | None = None
     approval_admin_key: str | None = None
+    # P0 platform artifact store for approved ON_PREM rollout bytes (digest filenames; S3 later).
+    artifact_store_dir: str | None = None
 
 
 settings = Settings()
