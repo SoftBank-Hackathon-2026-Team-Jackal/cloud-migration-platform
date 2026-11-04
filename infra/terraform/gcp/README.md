@@ -63,3 +63,28 @@ must include the email scope to expose its identity in Google tokeninfo; an
 absent or different identity fails closed. S3 bucket access needs the State key
 and `.tflock` permissions. A real S3-backed Plan and project permission check
 must be reviewed before any operational approval. Ticket 06 never runs Apply.
+
+## Approved Plan Apply (ticket 10)
+
+`gcp-gke-v2` adds non-sensitive outputs (project, network, subnetwork, cluster name/location, node
+pool) and turns `deletion_protection` into a variable (default `true`; it can only be lifted by a
+new reviewed Plan before cleanup).
+
+After the 07 approval claim, `execute_gcp_plan` (`cmp_providers.gcp_apply`) verifies:
+
+- the stored `spec.json`/`saved.tfplan` bytes against the manifest ArtifactRefs
+- the project/region/State identity/key `cmp/gcp/<environment_id>/terraform.tfstate`
+- the Plan mode recorded in `evidence.json` is `S3` (`LOCAL_TEST`/`LOCAL_PROJECT` are refused)
+- the template and lockfile fingerprint
+- the Google ADC principal (`PROVISIONING_GCP_ADC_EMAIL`)
+- the AWS account holding the central State
+
+It then applies only the saved Plan with no re-plan, destroy or retry, and records non-sensitive
+outputs plus `gcloud container clusters/node-pools describe` status.
+
+One-time project prerequisites outside Terraform (ticket 10 G6): enable `container.googleapis.com`
+and create the node service account `cmp-gke-nodes` with only
+`roles/container.defaultNodeServiceAccount`.
+
+Worker settings: `PROVISIONING_ARTIFACT_ROOT`, `PROVISIONING_AWS_PROFILE` (S3 State),
+`PROVISIONING_GCLOUD_CONFIGURATION`, `PROVISIONING_GCP_ADC_EMAIL`, `TERRAFORM_BIN`.
