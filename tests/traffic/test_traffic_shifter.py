@@ -211,9 +211,9 @@ def test_failures_inside_thin_windows_still_count() -> None:
 
 def test_p99_ratio_is_ignored_below_the_absolute_floor() -> None:
     tiny_base = Sample(requests=100, failed=0, p99_ms=2)
-    ok = Sample(requests=100, failed=0, p99_ms=30)  # 15배지만 하한 50ms 아래
+    ok = Sample(requests=100, failed=0, p99_ms=90)  # 45배지만 하한 200ms 아래
     assert evaluate_step(TrafficPolicy(), tiny_base, ok, 1).decision == "advance"
-    slow = Sample(requests=100, failed=0, p99_ms=80)
+    slow = Sample(requests=100, failed=0, p99_ms=300)
     assert evaluate_step(TrafficPolicy(), tiny_base, slow, 1).decision == "rollback"
 
 

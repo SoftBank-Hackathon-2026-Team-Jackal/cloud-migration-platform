@@ -15,8 +15,9 @@ class TrafficPolicy(BaseModel):
     max_step_seconds: float = Field(default=600, gt=0)
     max_failed_requests: int = Field(default=0, ge=0)
     max_p99_ratio: float = Field(default=1.5, gt=0)
-    # 원본 p99가 아주 작을 때 비율만으로 롤백하지 않도록 두는 절대 하한(ms)
-    p99_floor_ms: float = Field(default=50, ge=0)
+    # 원본 p99가 아주 작을 때(또는 WAN 지연이 더해질 때) 비율만으로 롤백하지 않도록 두는 절대 하한(ms).
+    # 실제 WAN 시험에서 대상 p99가 73~97ms였기 때문에 기본값을 200으로 둔다.
+    p99_floor_ms: float = Field(default=200, ge=0)
     # 이보다 적은 요청으로는 판단하지 않는다(모르면 안전한 쪽: 올리지 않는다).
     min_requests: int = Field(default=30, ge=1)
     # 마지막(100%) 단계 전에 "DB 쓰기 주체가 대상이고 역방향 복제가 정상"이 확인돼야 하는지.
