@@ -96,5 +96,5 @@ Blocked by: 08, 09, 10, 11, 12, 13
 | GKE `cmp-demo-target`·`cmp-recovery-test` | Ingress 삭제(GCE LB·NEG·방화벽 제거) → Helm uninstall → Namespace·PV 삭제 → Retain PD 2개 삭제 | forwarding rule·proxy·URL map·backend·NEG·`pvc-*` 디스크 0 |
 | GKE 인프라 | 검토된 Plan으로 `deletion_protection` true→false만 변경(1 change) → `plan -destroy`(7개 삭제만, 전부 `cmp-target-gke-*`) → Apply | `7 destroyed`, State 자원 0, 클러스터·VPC·Router·NAT·NAT IP 없음 |
 | 이전 티켓 잔존물 점검 | 미부착 EBS, ELB·Target Group, EIP, 스냅샷, IAM, GCP 디스크·주소·방화벽 조회 | 잔존물 없음. 남은 ALB·EIP 2개는 원본 `demo-source` ALB 소유 |
-| GKE 노드 SA `cmp-gke-nodes` | 삭제 시도 | 자동 승인 검토에서 비가역 삭제로 거부돼 **미삭제**. 사용자가 직접 삭제 필요 |
+| GKE 노드 SA `cmp-gke-nodes` | 자동 승인 검토에서 비가역 삭제로 거부돼, 사용자가 직접 `gcloud iam service-accounts delete` 실행 | 삭제 확인. 프로젝트에는 기본 Compute SA만 남음 |
 
