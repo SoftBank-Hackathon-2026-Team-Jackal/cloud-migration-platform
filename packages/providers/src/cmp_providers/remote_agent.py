@@ -60,7 +60,11 @@ class AgentControlClient:
                 return response.read() if raw else json.load(response)
         except AgentTransportError:
             raise
-        except (HTTPError, URLError, OSError, ValueError):
+        except HTTPError as exc:
+            # Revoked/unknown credentials must be distinguishable so the Agent stops (ticket 15).
+            code = "AGENT_UNAUTHORIZED" if exc.code in {401, 403} else "PLATFORM_REQUEST_FAILED"
+            raise AgentTransportError(code) from None
+        except (URLError, OSError, ValueError):
             raise AgentTransportError("PLATFORM_REQUEST_FAILED") from None
 
     def register(self, *, enrollment_token: str, agent_id: str, cluster_uid: str) -> str:

@@ -97,6 +97,8 @@ identity = approval_target(manifest, preview)
 
 ## 온프레미스 Preview 생성 (12A)
 
+15(#69)는 새 공유 계약을 만들지 않는다. 04A 등록 계약의 `cluster_uid`를 발급 시 선택으로 바꾸고 Agent 마지막 접속·폐기 상태를 추가했다. 상세는 [공통 배포 계약 §상시 실행·설치·폐기](onprem-shared-deployment.md#상시-실행설치폐기-15-69)를 따른다.
+
 `cmp_providers.onprem_preview.onprem_preview(manifest, contents)`는 ON_PREM WORKLOADS/FULL 계획이 고정한 `database_values`·`application_values` 바이트를 `verify_artifact_bytes`로 확인하고 공통 `Preview`를 만든다. 보여 주는 내용은 기존 K3s·Agent·Namespace, DB StatefulSet·PVC, 앱 Deployment·Service, 외부 공개 없음, 적용 기본값(Namespace 생성, DB 비밀번호 Secret 생성)이다. 클러스터를 조회하지 않으므로 경고 `CLUSTER_STATE_NOT_INSPECTED`를 붙인다. 사용자 Secret은 이름·키만 `USER_SECRET_REQUIRED` 경고로 표시하고 환경변수·Secret 값은 넣지 않는다. Values의 대상·이미지가 manifest와 다르면 `errors`에 `VALUES_TARGET_MISMATCH`/`IMAGE_MISMATCH`를 넣어 `approval_issues`가 승인을 거절하게 한다. Digest 불일치·비 ON_PREM은 `ProvisioningInputError`로 Preview를 만들지 않는다. Planning 저장 경계와의 연결은 후속이다. 상세는 [12A 티켓](../../tickets/provisioning/12a-onprem-preview.md)을 따른다.
 
 ## Provisioning 결과 인계 (13)

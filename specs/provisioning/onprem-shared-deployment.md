@@ -166,7 +166,13 @@ P0는 공개 회원가입 대신 플랫폼의 최소 소유자 식별자에 Agen
 
 Agent가 접속하는 대상 K3s는 사용자 측에 있고 Sandbox 클러스터는 플랫폼이 미리 준비한 별도 자원이다. 공통 모듈이 플랫폼 서버 내부에 앱/DB를 띄우는 것은 아니다.
 
-04A에서는 플랫폼 운영자 키를 가진 호출만 `POST /agent-enrollments`로 토큰을 발급한다. Agent는 `POST /agents/register`로 토큰을 한 번 사용해 인증 값을 받고, `POST /agents/{agent_id}/jobs/claim`과 결과 보고 API로 자기 작업만 다룬다. DB에는 토큰·인증 값의 SHA-256 Digest만 저장한다. 전송 가능한 작업 본문은 `SANDBOX_TEST`의 버전 참조와 12의 `PRODUCTION_ROLLOUT`(아래)이다. `remote_agent` CLI의 `poll-once`는 참조 조회만 하고, 승인된 운영 배포는 `python -m cmp_providers.onprem_agent`가 실행한다.
+04A에서는 플랫폼 운영자 키를 가진 호출만 `POST /agent-enrollments`로 토큰을 발급한다. Agent는 `POST /agents/register`로 토큰을 한 번 사용해 인증 값을 받고, `POST /agents/{agent_id}/jobs/claim`과 결과 보고 API로 자기 작업만 다룬다. DB에는 토큰·인증 값의 SHA-256 Digest만 저장한다. 전송 가능한 작업 본문은 `SANDBOX_TEST`의 버전 참조와 12의 `PRODUCTION_ROLLOUT`(아래)이다. `remote_agent` CLI의 `poll-once`는 참조 조회만 하고, 승인된 운영 배포는 `python -m cmp_providers.onprem_agent`(1회) 또는 장기 실행 `python -m cmp_providers.agent_runtime`(15)이 실행한다.
+
+### 상시 실행·설치·폐기 (15, #69)
+
+- 발급 시 `cluster_uid`는 선택이다. 비우면 최초 등록 때 Agent가 보고한 kube-system UID로 고정되고, 지정했다면 기존처럼 일치해야 한다. 빈 UID 등록은 거절한다.
+- 인증된 Agent 요청마다 `registered_agents.last_seen_at`을 갱신한다. 운영자는 관리자 키로 `GET /agent-admin/agents/{agent_id}`(상태)와 `POST /agent-admin/agents/{agent_id}/revoke`(폐기)를 호출한다. 폐기(`revoked_at`)된 Agent는 claim·결과 보고·산출물 다운로드·자기 상태 조회가 모두 403이고, Agent ID는 재사용하지 않으며 남은 작업은 지우지 않는다. 결과 보고의 인증 실패는 이제 409가 아니라 403이다.
+- 장기 실행 Agent(`cmp_providers.agent_runtime`)는 등록 → 폴링 루프를 하나로 합치고 사용자 K3s 안에서 ServiceAccount로 실행한다(`ClusterTarget.in_cluster`). 설치·운영 절차는 [onprem-agent-install.md](onprem-agent-install.md)를 따른다.
 
 ## 승인된 운영 배포 (12, #36)
 

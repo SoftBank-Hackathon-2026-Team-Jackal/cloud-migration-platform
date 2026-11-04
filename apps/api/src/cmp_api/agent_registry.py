@@ -31,7 +31,8 @@ class Enrollment(Base):
     token_digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     owner_id: Mapped[str] = mapped_column(ForeignKey("agent_owners.id"), nullable=False)
     agent_id: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
-    cluster_uid: Mapped[str] = mapped_column(String(120), nullable=False)
+    # None: bind the kube-system UID the Agent reports at registration (ticket 15, H3).
+    cluster_uid: Mapped[str | None] = mapped_column(String(120))
     expires_at: Mapped[int] = mapped_column(Integer, nullable=False)
     used_at: Mapped[int | None] = mapped_column(Integer)
 
@@ -43,6 +44,8 @@ class RegisteredAgent(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("agent_owners.id"), nullable=False)
     cluster_uid: Mapped[str] = mapped_column(String(120), nullable=False)
     credential_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_seen_at: Mapped[int | None] = mapped_column(Integer)
+    revoked_at: Mapped[int | None] = mapped_column(Integer)
 
 
 class AgentJob(Base):
@@ -75,11 +78,11 @@ def create_enrollment(
     *,
     owner_id: str,
     agent_id: str,
-    cluster_uid: str,
+    cluster_uid: str | None,
     ttl: timedelta = timedelta(minutes=10),
     now: datetime | None = None,
 ) -> str:
-    if not owner_id or not agent_id or not cluster_uid or not 0 < ttl.total_seconds() <= 3600:
+    if not owner_id or not agent_id or cluster_uid == "" or not 0 < ttl.total_seconds() <= 3600:
         raise AgentRegistrationError("INVALID_ENROLLMENT")
     if session.get(RegisteredAgent, agent_id) or session.scalar(
         select(Enrollment).where(Enrollment.agent_id == agent_id)
@@ -117,7 +120,8 @@ def redeem_enrollment(
         or enrollment.used_at is not None
         or enrollment.expires_at <= _epoch(now)
         or enrollment.agent_id != agent_id
-        or enrollment.cluster_uid != cluster_uid
+        or not cluster_uid
+        or (enrollment.cluster_uid is not None and enrollment.cluster_uid != cluster_uid)
         or session.get(RegisteredAgent, agent_id) is not None
     ):
         raise AgentRegistrationError("INVALID_ENROLLMENT")
@@ -135,11 +139,29 @@ def redeem_enrollment(
     return credential
 
 
-def authenticate_agent(session: Session, *, agent_id: str, credential: str) -> RegisteredAgent:
+def authenticate_agent(
+    session: Session, *, agent_id: str, credential: str, now: datetime | None = None
+) -> RegisteredAgent:
     agent = session.get(RegisteredAgent, agent_id)
-    if agent is None or not hmac.compare_digest(agent.credential_digest, _digest(credential)):
+    if (
+        agent is None
+        or agent.revoked_at is not None
+        or not hmac.compare_digest(agent.credential_digest, _digest(credential))
+    ):
         raise AgentRegistrationError("AGENT_UNAUTHORIZED")
+    agent.last_seen_at = _epoch(now)
+    session.commit()
     return agent
+
+
+def revoke_agent(session: Session, *, agent_id: str, now: datetime | None = None) -> None:
+    """Operator revocation. Jobs are kept as the state source; the Agent ID is never reused."""
+    agent = session.get(RegisteredAgent, agent_id)
+    if agent is None:
+        raise AgentRegistrationError("AGENT_NOT_FOUND")
+    if agent.revoked_at is None:
+        agent.revoked_at = _epoch(now)
+        session.commit()
 
 
 def enqueue_job(

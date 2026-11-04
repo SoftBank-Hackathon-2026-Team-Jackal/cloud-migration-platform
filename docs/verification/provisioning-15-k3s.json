@@ -1,0 +1,143 @@
+{
+  "cluster": {
+    "context": "k3d-cmp-agent-install"
+  },
+  "steps": {
+    "install_register": {
+      "agent": {
+        "agent_id": "agent-install-smoke",
+        "owner_id": "owner-smoke",
+        "cluster_uid": "c0996e35-36b0-40a4-b4c9-4aed1f988411",
+        "last_seen_at": 1793816811,
+        "revoked": false
+      },
+      "registered_uid_matches_kube_system": true,
+      "secrets_in_agent_namespace": [
+        "cmp-agent-credential",
+        "sh.helm.release.v1.cmp-agent.v1"
+      ],
+      "agent_log_events": [
+        "registered"
+      ]
+    },
+    "rollout_ready": {
+      "activity": {
+        "status": "SUCCEEDED",
+        "code": "READY",
+        "resource_refs": {
+          "job_id": "rollout-23d0a1fc6da16776771b2107",
+          "namespace": "cmp-prod-demo",
+          "database_release": "demo-db",
+          "application_release": "demo-app",
+          "database_endpoint": "demo-db.cmp-prod-demo.svc:5432",
+          "application_endpoint": "demo-app.cmp-prod-demo.svc:8080",
+          "database_secret": "demo-db-auth/password",
+          "agent_id": "agent-install-smoke",
+          "cluster_uid": "c0996e35-36b0-40a4-b4c9-4aed1f988411",
+          "storage_class": "local-path",
+          "db_release": "demo-db",
+          "db_host": "demo-db.cmp-prod-demo.svc",
+          "db_port": "5432",
+          "db_secret_ref": "demo-db-auth/password",
+          "app_release": "demo-app",
+          "app_port": "8080",
+          "app_health_path": "/health",
+          "app_internal_endpoint": "http://demo-app.cmp-prod-demo.svc:8080",
+          "db_name": "appdb",
+          "db_user": "appuser",
+          "db_version": "16",
+          "db_storage_size_gib": "1",
+          "app_replicas": "1"
+        }
+      },
+      "helm_revisions": {
+        "demo-db": 1,
+        "demo-app": 1
+      }
+    },
+    "restart_and_lost_report": {
+      "job_result": {
+        "code": "READY"
+      },
+      "new_pod_log_events": [
+        "job"
+      ],
+      "re_registered": false,
+      "helm_revisions": {
+        "demo-db": 1,
+        "demo-app": 1
+      },
+      "activity": {
+        "status": "SUCCEEDED",
+        "code": "READY",
+        "resource_refs": {
+          "job_id": "rollout-23d0a1fc6da16776771b2107",
+          "namespace": "cmp-prod-demo",
+          "database_release": "demo-db",
+          "application_release": "demo-app",
+          "database_endpoint": "demo-db.cmp-prod-demo.svc:5432",
+          "application_endpoint": "demo-app.cmp-prod-demo.svc:8080",
+          "database_secret": "demo-db-auth/password",
+          "agent_id": "agent-install-smoke",
+          "cluster_uid": "c0996e35-36b0-40a4-b4c9-4aed1f988411",
+          "storage_class": "local-path",
+          "db_release": "demo-db",
+          "db_host": "demo-db.cmp-prod-demo.svc",
+          "db_port": "5432",
+          "db_secret_ref": "demo-db-auth/password",
+          "app_release": "demo-app",
+          "app_port": "8080",
+          "app_health_path": "/health",
+          "app_internal_endpoint": "http://demo-app.cmp-prod-demo.svc:8080",
+          "db_name": "appdb",
+          "db_user": "appuser",
+          "db_version": "16",
+          "db_storage_size_gib": "1",
+          "app_replicas": "1"
+        }
+      }
+    },
+    "platform_outage": {
+      "retry_events": [
+        {
+          "code": "PLATFORM_REQUEST_FAILED",
+          "seconds": 1
+        },
+        {
+          "code": "PLATFORM_REQUEST_FAILED",
+          "seconds": 2
+        },
+        {
+          "code": "PLATFORM_REQUEST_FAILED",
+          "seconds": 4
+        },
+        {
+          "code": "PLATFORM_REQUEST_FAILED",
+          "seconds": 8
+        }
+      ],
+      "resumed_last_seen_at": 1793816885,
+      "pod_restarts": 0
+    },
+    "revoked": {
+      "exit_code": 2,
+      "stop_event": {
+        "event": "stopped",
+        "code": "AGENT_UNAUTHORIZED"
+      },
+      "admin_status": {
+        "agent_id": "agent-install-smoke",
+        "owner_id": "owner-smoke",
+        "cluster_uid": "c0996e35-36b0-40a4-b4c9-4aed1f988411",
+        "last_seen_at": 1793816885,
+        "revoked": true
+      }
+    }
+  },
+  "cleanup": {
+    "agent_release_uninstalled": true,
+    "namespace_cmp-prod-demo_deleted": true,
+    "namespace_cmp-system_deleted": true
+  },
+  "default_kubeconfig_unchanged": true
+}
