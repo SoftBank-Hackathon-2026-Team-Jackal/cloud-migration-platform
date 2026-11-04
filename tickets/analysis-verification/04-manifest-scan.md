@@ -44,6 +44,10 @@ fixture 매니페스트로 클라우드 의존 목록, 실행 요구, 원본 DB 
 - PostgreSQL 탐지는 이미지 이름에 `postgres`가 들어간 경우이며 `exporter`는 제외한다. 별칭 이미지는 놓칠 수 있다.
 - 모르는 어노테이션은 허용 접두사 목록(`kubernetes.io/`, `helm.sh/` 등) 기준이라 목록 밖의 일반 어노테이션이 모두 보고된다.
 
+## 보강 (Issue #75)
+- 실제 원본 매니페스트(`demo-api`)로 돌려 보고 빠진 부분을 보강했다: NetworkPolicy egress(앱 → 앱, 포트)를 `network_rules`로, 파드 템플릿 라벨을 `Workload.labels`로, ConfigMap 키(`configmaps`)와 `env`·`envFrom`·`secretKeyRef`로 주입되는 변수 이름(`Workload.env_names`)을 수집한다. 값은 읽지 않는다. DNS·다른 네임스페이스·CIDR egress는 앱 간 통신 의도가 아니라 제외한다.
+- `tests/fixtures/analysis/source-like/stack.yaml`(실제 파일이 아니라 같은 모양으로 새로 쓴 가짜 값 fixture)로 확인한다. 실제 파일 확인은 환경 변수 `CMP_REAL_SOURCE_YAML`로 경로를 줄 때만 도는 로컬 테스트다(저장소에는 넣지 않음).
+
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)

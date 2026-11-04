@@ -213,6 +213,23 @@ def _bindings(names: set[str], db_id: str | None, unmapped: list[str]):
     return bindings
 
 
+def _matching_resources(
+    selector: Mapping[str, str],
+    namespace: str | None,
+    workloads: Mapping[str, Workload],
+    resource_ids: Mapping[str, str],
+) -> list[str]:
+    if not selector:
+        return []  # an empty selector means every pod; not a specific app-to-app intent
+    return sorted(
+        resource_ids[key]
+        for key, workload in workloads.items()
+        if key in resource_ids
+        and all(workload.labels.get(k) == v for k, v in selector.items())
+        and not (namespace and workload.namespace and workload.namespace != namespace)
+    )
+
+
 def build_requirements(
     manifests: ManifestScan,
     code: CodeScan,
@@ -228,22 +245,35 @@ def build_requirements(
         )
         for e in code.extension_creations
     ]
-    declared = {n for names in env_names.values() for n in names}
     reads = {s.target for s in code.call_sites if s.kind == "ENV_READ"}
 
     taken: set[str] = set()
     postgres_by_resource = {p.resource: p for p in manifests.postgres_images}
     workloads = {f"{w.kind}/{w.name}": w for w in manifests.workloads}
+    # Names the manifests inject (ConfigMap keys, env entries) count as declared, like `.env` names.
+    declared = {n for names in env_names.values() for n in names} | {
+        n
+        for key, w in workloads.items()
+        if w.kind in {"Deployment", "StatefulSet"} and key not in postgres_by_resource
+        for n in w.env_names
+    }
     databases: list[PostgresRequirement] = []
+    resource_ids: dict[str, str] = {}
     for resource, image in postgres_by_resource.items():
         built = _postgres_requirement(
             workloads[resource], image.image, manifests, taken, assumptions, blocks
         )
         if built:
             databases.append(built)
+            resource_ids[resource] = built.id
     if len(databases) > 1:
         unmapped.append("MULTIPLE_POSTGRES: DB env variables are bound to the first database only")
     db = databases[0] if databases else None
+    if db is None and not blocks and any(s.kind == "DB_DRIVER" for s in code.call_sites):
+        unmapped.append(
+            "DB_NOT_IN_CLUSTER: the app uses a database driver but no PostgreSQL Pod was found; "
+            "the first cycle only supports a PostgreSQL Pod (RDS and other external databases are out of scope)"
+        )
 
     bindings = _bindings(declared | reads, db.id if db else None, unmapped)
     apps: list[ApplicationRequirement] = []
@@ -264,9 +294,11 @@ def build_requirements(
         ):  # fmt: skip
             if value is None:
                 assumptions.append(f"{code_}_NOT_DECLARED: {resource} uses the default")
+        app_id = _resource_id(workload.name, taken)
+        resource_ids[resource] = app_id
         apps.append(
             ApplicationRequirement(
-                id=_resource_id(workload.name, taken),
+                id=app_id,
                 kind="APPLICATION",
                 replicas=workload.replicas or 1,
                 cpu_millicores=cpu or DEFAULT_APP_CPU_MILLICORES,
@@ -279,20 +311,41 @@ def build_requirements(
     if not apps:
         unmapped.append("NO_APPLICATION_WORKLOAD: no Deployment or StatefulSet found for the app")
 
-    intents: list[NetworkIntent] = []
+    intents: dict[tuple, NetworkIntent] = {}
+
+    def add_intent(source: str, destination: str, port: int, protocol: str = "TCP") -> None:
+        intents.setdefault(
+            (source, destination, port, protocol),
+            NetworkIntent(
+                source_resource_id=source,
+                destination_resource_id=destination,
+                port=port,
+                protocol=protocol,
+            ),
+        )
+
     if db and any(s.kind == "DB_DRIVER" for s in code.call_sites):
         db_workload = workloads[next(iter(postgres_by_resource))]
         db_port = next((p for c in db_workload.containers for p in c.ports), DEFAULT_POSTGRES_PORT)
-        intents = [
-            NetworkIntent(source_resource_id=a.id, destination_resource_id=db.id, port=db_port)
-            for a in apps
-        ]
+        for app in apps:
+            add_intent(app.id, db.id, db_port)
+    for rule in manifests.network_rules:
+        sources = _matching_resources(rule.source_selector, rule.namespace, workloads, resource_ids)
+        destinations = _matching_resources(
+            rule.destination_selector, rule.namespace, workloads, resource_ids
+        )
+        for source in sources:
+            for destination in destinations:
+                if source != destination:
+                    add_intent(source, destination, rule.port, rule.protocol)
     assumptions.append("EXTERNAL_INTENT_DEFERRED: external host intents come from the network scan")
 
     requirements = None
     if apps and not blocks:
         requirements = RequirementsV2(
-            contract_version="2", resources=[*apps, *databases], network_intent=intents
+            contract_version="2",
+            resources=[*apps, *databases],
+            network_intent=list(intents.values()),
         )
     excluded = sorted(n for n in declared | reads if n.startswith("AWS_"))
     replaced = {name: f"{db.id}.{b.output}" for name, b in bindings.items()} if db else {}

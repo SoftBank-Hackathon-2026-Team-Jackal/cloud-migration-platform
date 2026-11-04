@@ -46,6 +46,15 @@ Blocked by: 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로
 - 헬스 체크 경로는 매니페스트 probe에서만 찾는다(코드의 `/healthz` 라우트는 보지 않는다). 세션 탐지는 라이브러리 이름 기준이다. 클라우드 주소는 `amazonaws.com` 호스트만 본다.
 - 02의 `build_requirements`·`precheck` Activity는 mock 그대로이며 연결은 후속에서 한다.
 
+## 보강 (Issue #75)
+- NetworkPolicy 규칙의 라벨 선택자를 워크로드와 맞춰 앱 → DB 같은 `network_intent`를 만든다(코드 스캔 결과 없이도 나오고, DB 드라이버에서 나온 의도와 중복되지 않는다).
+- ConfigMap 키와 `secretKeyRef`로 주입되는 변수 이름을 선언된 변수로 보아 `.env`가 없는 배포에서도 `missing`·`replaced`가 맞게 나온다.
+- 앱 코드에 DB 드라이버가 있는데 클러스터 안 PostgreSQL Pod가 없으면 `DB_NOT_IN_CLUSTER`로 지원 범위 밖임을 보고한다(첫 사이클은 RDS 없이 Pod로 결정).
+- 실제 원본 매니페스트로 확인했다: 앱 → DB 5432 의도가 나오고 DB 변수 5개가 바인딩으로 대체되며 누락은 없다.
+
+## 후속 (D-16, 민서님 구현 대기)
+- 단일 URL 연결 변수(`DATABASE_URL` 등)는 V2에 `connection_url_secret_ref` 출력이 추가된 뒤 그 출력으로 바인딩한다. 지금은 `DB_CONNECTION_URL_VARIABLE`로 표현 불가를 보고한다. 병합 후 `_bindings`가 `*_URL`·`*_URI` 변수를 새 출력으로 바인딩하고 `replaced`에 넣으며, DSN 형식은 계속 보고만 한다. Sandbox(11)는 같은 방식으로 URL Secret을 만들어 앱 연결을 검증한다.
+
 ## 결정 대기
 - 확장 지원(D-14)
 - DB 내부 상태 점검 담당(D-13)

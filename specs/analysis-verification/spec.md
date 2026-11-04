@@ -24,7 +24,7 @@
 
 ## 2. 적용 범위와 전제
 
-- **원본:** AWS EKS의 데모 앱. Deployment·Service·Ingress(ALB)·ConfigMap·Secret·PVC, PostgreSQL 16(클러스터 내 Pod 가정, RDS 여부는 소울 확인), VPC·Subnet·Route Table·Security Group.
+- **원본:** AWS EKS의 데모 앱. Deployment·Service·Ingress(ALB)·ConfigMap·Secret·PVC, PostgreSQL 16(클러스터 내 Pod. 첫 사이클은 RDS를 쓰지 않고 Pod로 한다고 결정, 2026-11-05), VPC·Subnet·Route Table·Security Group.
 - **대상:** AWS EKS, GCP GKE, 온프레미스 K3s(P-02). 대상 선택은 **분석 시작 전에** 받는다. 선택에는 Provider와 **capabilities**(CPU 아키텍처, 사용 가능한 StorageClass, 이미지 접근 여부 등 실제 제약)가 들어 있다. 이름 붙은 Profile은 선택 기본값일 뿐 필수가 아니다.
 - **첫 사이클 우선:** 컨테이너 실행, PostgreSQL, 환경변수, 네트워크, Ingress, 볼륨, Pod 신원. 리소스 종류는 `APPLICATION`·`POSTGRESQL`만 지원하고 나머지는 거절된다(공통 모듈 기준).
 - **첫 사이클 제외:** S3 의존 코드 수정(사이클 완성 직후 고도화). S3는 원본에 남겨 두고 쓰는 서비스로 취급한다. 대응 없음 등급 서비스(DynamoDB 고유 기능, Step Functions, Lambda 중심, Kinesis)는 차단 사유로만 표시.
@@ -280,7 +280,7 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 
 ## 8. 확인 필요
 
-- 원본 PostgreSQL이 RDS인지 Pod인지, 데모 앱 언어·API 목록·LLM 사용 여부·Dockerfile/매니페스트 위치 (소울)
+- (결정됨: 첫 사이클은 클러스터 안 Pod) 데모 앱 언어·API 목록·LLM 사용 여부·Dockerfile/매니페스트 위치 (소울)
 - DB 이미지를 선택하는 "대상 구성 단계"의 소유자와, 그 결과를 Sandbox·Production이 같이 쓰는 방식 (민서, D-11)
 - Build 호출을 어느 Worker 프로세스에서 하는지(권한 배치)와 전체 시간 상한 (민서, D-12)
 - Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 (민서, D-04)

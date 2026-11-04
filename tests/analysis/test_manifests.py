@@ -145,4 +145,30 @@ def test_postgres_identity_and_volume_claims_are_extracted_without_secrets():
     assert ("PVC", "pgdata") in {
         (r.kind, r.name) for r in result.references if r.source == db.evidence.split("#")[1]
     }
-    assert "POSTGRES_PASSWORD" not in result.model_dump_json()
+    assert "POSTGRES_PASSWORD" not in db.containers[0].env_literals  # names only, never values
+
+
+SOURCE_LIKE = Path(__file__).parent.parent / "fixtures/analysis/source-like"
+
+
+def test_network_policy_egress_between_pods_becomes_a_network_rule():
+    rules = scan_manifests(SOURCE_LIKE).network_rules
+    assert [
+        (r.policy, r.namespace, r.source_selector, r.destination_selector, r.port, r.protocol)
+        for r in rules
+    ] == [("orders-api-egress", "orders", {"app": "orders-api"}, {"app": "orders-db"}, 5432, "TCP")]
+    assert rules[0].evidence.startswith("stack.yaml#NetworkPolicy/orders-api-egress")
+
+
+def test_workloads_carry_pod_labels_and_declared_env_names_without_values():
+    result = scan_manifests(SOURCE_LIKE)
+    api = next(w for w in result.workloads if w.name == "orders-api")
+    assert api.labels == {"app": "orders-api"}
+    assert api.env_names == [
+        "APP_PORT", "DB_HOST", "DB_NAME", "DB_PASSWORD", "DB_PORT", "DB_USER", "FEATURE_X", "WRITE_TOKEN",
+    ]  # fmt: skip
+    assert [(c.name, c.keys) for c in result.configmaps] == [
+        ("orders-config", ["APP_PORT", "DB_HOST", "DB_NAME", "DB_PORT", "DB_USER", "FEATURE_X"])
+    ]
+    dumped = result.model_dump_json()
+    assert "not-a-real-secret" not in dumped and "svc.cluster.local" not in dumped

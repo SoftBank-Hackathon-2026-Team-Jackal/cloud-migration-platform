@@ -65,6 +65,8 @@ class Workload(_Model):
     replicas: int | None
     containers: list[ContainerInfo]
     evidence: str
+    labels: dict[str, str] = {}
+    env_names: list[str] = []
 
 
 class CloudDependency(_Model):
@@ -102,6 +104,23 @@ class VolumeClaim(_Model):
     evidence: str
 
 
+class ConfigMapInfo(_Model):
+    name: str
+    namespace: str | None
+    keys: list[str]
+    evidence: str
+
+
+class NetworkRule(_Model):
+    policy: str
+    namespace: str | None
+    source_selector: dict[str, str]
+    destination_selector: dict[str, str]
+    port: int
+    protocol: str
+    evidence: str
+
+
 class Reference(_Model):
     source: str
     kind: Literal["ConfigMap", "Secret", "PVC"]
@@ -121,6 +140,8 @@ class ManifestScan(_Model):
     secrets: list[SecretInfo]
     references: list[Reference]
     volume_claims: list[VolumeClaim]
+    configmaps: list[ConfigMapInfo]
+    network_rules: list[NetworkRule]
     unparsed: list[Unparsed]
 
 
@@ -219,6 +240,26 @@ def _scan_workload(doc, rel, resource, evidence, out) -> None:
             )
         )
     _references(resource, pod, out)
+    template_meta = (
+        _dig(doc, path[:-1] + ("metadata",)) if kind != "Pod" else doc.get("metadata") or {}
+    )
+    labels = {str(k): str(v) for k, v in (template_meta.get("labels") or {}).items()}
+    env_names = sorted(
+        {e["name"] for c in pod.get("containers") or [] for e in c.get("env") or [] if "name" in e}
+    )
+    from_configmaps = [
+        src["configMapRef"].get("name", "")
+        for c in pod.get("containers") or []
+        for src in c.get("envFrom") or []
+        if "configMapRef" in src
+    ]
+    from_secrets = [
+        src["secretRef"].get("name", "")
+        for c in pod.get("containers") or []
+        for src in c.get("envFrom") or []
+        if "secretRef" in src
+    ]
+    out["_env"][resource] = (env_names, from_configmaps, from_secrets)
     for index, template in enumerate((doc.get("spec") or {}).get("volumeClaimTemplates") or []):
         claim_name = (template.get("metadata") or {}).get("name", "")
         _add_claim(template, claim_name, f"{evidence}/spec/volumeClaimTemplates/{index}", out)
@@ -233,6 +274,7 @@ def _scan_workload(doc, rel, resource, evidence, out) -> None:
             replicas=replicas if isinstance(replicas, int) else None,
             containers=containers,
             evidence=evidence,
+            labels=labels,
         )
     )
 
@@ -248,6 +290,33 @@ def _add_claim(doc: dict[str, Any], name: str, evidence: str, out) -> None:
             evidence=evidence,
         )
     )
+
+
+def _scan_network_policy(doc: dict[str, Any], meta: dict[str, Any], evidence: str, out) -> None:
+    spec = doc.get("spec") or {}
+    if "Egress" not in (spec.get("policyTypes") or []):
+        return
+    source = (spec.get("podSelector") or {}).get("matchLabels") or {}
+    for rule_index, rule in enumerate(spec.get("egress") or []):
+        for peer in rule.get("to") or []:
+            if "podSelector" not in peer or "namespaceSelector" in peer or "ipBlock" in peer:
+                continue  # DNS, other namespaces and CIDR rules are not app-to-app intents
+            destination = (peer.get("podSelector") or {}).get("matchLabels") or {}
+            for port in rule.get("ports") or []:
+                number = port.get("port")
+                protocol = port.get("protocol", "TCP")
+                if isinstance(number, int) and protocol in {"TCP", "UDP"}:
+                    out["network_rules"].append(
+                        NetworkRule(
+                            policy=meta.get("name", ""),
+                            namespace=meta.get("namespace"),
+                            source_selector={str(k): str(v) for k, v in source.items()},
+                            destination_selector={str(k): str(v) for k, v in destination.items()},
+                            port=number,
+                            protocol=protocol,
+                            evidence=f"{evidence}/spec/egress/{rule_index}",
+                        )
+                    )
 
 
 def _references(resource: str, pod: dict[str, Any], out) -> None:
@@ -342,6 +411,18 @@ def _scan_document(doc: dict[str, Any], rel: str, out) -> None:
                 kind="EBS_STORAGE_CLASS", resource=resource, evidence=f"{evidence}/provisioner"
             )
         )
+    if kind == "ConfigMap":
+        keys = sorted({*(doc.get("data") or {}), *(doc.get("binaryData") or {})})
+        out["configmaps"].append(
+            ConfigMapInfo(
+                name=meta.get("name", ""),
+                namespace=meta.get("namespace"),
+                keys=keys,
+                evidence=evidence,
+            )
+        )
+    if kind == "NetworkPolicy":
+        _scan_network_policy(doc, meta, evidence, out)
     if kind == "PersistentVolumeClaim":
         _add_claim(doc, meta.get("name", ""), evidence, out)
     if kind == "Secret":
@@ -358,14 +439,22 @@ def _scan_document(doc: dict[str, Any], rel: str, out) -> None:
         _scan_workload(doc, rel, resource, evidence, out)
 
 
+_RESULT_KEYS = (
+    "workloads",
+    "cloud_dependencies",
+    "postgres_images",
+    "unconvertible",
+    "secrets",
+    "references",
+    "volume_claims",
+    "configmaps",
+    "network_rules",
+    "unparsed",
+)
+
+
 def scan_manifests(path: Path | str) -> ManifestScan:
-    out: dict[str, list] = {
-        k: []
-        for k in (
-            "workloads", "cloud_dependencies", "postgres_images",
-            "unconvertible", "secrets", "references", "volume_claims", "unparsed",
-        )
-    }  # fmt: skip
+    out: dict = {"_env": {}, **{key: [] for key in _RESULT_KEYS}}
     for file, rel in _files(Path(path)):
         try:
             documents = list(yaml.safe_load_all(file.read_text()))
@@ -375,6 +464,19 @@ def scan_manifests(path: Path | str) -> ManifestScan:
         for doc in documents:
             if isinstance(doc, dict) and "kind" in doc and "apiVersion" in doc:
                 _scan_document(doc, rel, out)
+    env = out.pop("_env")
+    configmap_keys = {c.name: c.keys for c in out["configmaps"]}
+    secret_keys = {sec.name: sec.keys for sec in out["secrets"]}
+    filled = []
+    for workload in out["workloads"]:
+        names, from_maps, from_secrets = env.get(f"{workload.kind}/{workload.name}", ([], [], []))
+        declared = {
+            *names,
+            *(k for n in from_maps for k in configmap_keys.get(n, [])),
+            *(k for n in from_secrets for k in secret_keys.get(n, [])),
+        }
+        filled.append(workload.model_copy(update={"env_names": sorted(declared)}))
+    out["workloads"] = filled
     return ManifestScan(**out)
 
 
