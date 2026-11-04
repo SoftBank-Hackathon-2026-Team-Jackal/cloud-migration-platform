@@ -20,7 +20,7 @@
 | [08 승인된 Plan으로 AWS EKS 기반 준비](../../tickets/provisioning/08-aws-infra-apply.md) | DONE | 05, 07 | PROV-007, 015, 016, 017 | [#2](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/2) | ☑ |
 | [09 AWS EKS에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/09-aws-workloads.md) | DONE | 02, 03, 08 | PROV-010, 011, 012, 013, 018 | [#37](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/37) | ☑ |
 | [10 승인된 Plan으로 GCP GKE 기반 준비](../../tickets/provisioning/10-gcp-infra-apply.md) | DRAFT | 06, 07 | PROV-008, 015, 016, 017 | 미생성 | ☐ |
-| [11 GCP GKE에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/11-gcp-workloads.md) | DRAFT | 02, 03, 10 | PROV-010, 011, 012, 013, 018 | 미생성 | ☐ |
+| [11 GCP GKE에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/11-gcp-workloads.md) | IN_PROGRESS | 02, 03, 10 | PROV-010, 011, 012, 013, 018 | [#43](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/43) | ☐ |
 | [12 승인된 K3s Agent 운영 배포](../../tickets/provisioning/12-k3s-approved-rollout.md) | DONE | 04A, 07 | PROV-009, 015, 016, 017, 018 | [#36](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/36) | ☑ |
 | [12A 온프레미스 K3s Plan Preview 생성](../../tickets/provisioning/12a-onprem-preview.md) | DONE | 04B, 07, 12 | PROV-009, 014, 015, 021 | [#41](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/41) | ☑ |
 | [13 실제 검증 결과와 Migration 인계](../../tickets/provisioning/13-result-handoff.md) | DRAFT | 12 | PROV-018, 019, 020, 021 | 미생성 | ☐ |
