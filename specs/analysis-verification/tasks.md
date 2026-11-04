@@ -73,6 +73,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: 08B 구현: `AnalysisWorkflow`에 확정·승인 Signal과 검토 Query를 두고 `ReviewGate`로 처리 표를 적용. 차단은 자식 실패(`ANALYSIS_BLOCKED`)로 멈춘다.
 - 2026-11-05: D-16 결정: 단일 URL 연결 변수는 `connection_url_secret_ref` 출력으로 바인딩한다(민서님이 V2·공통 렌더러·Secret 주입을 구현한 뒤 07이 바인딩을 만들고 11이 같은 방식으로 검증). 그 전까지 07은 `DB_CONNECTION_URL_VARIABLE`로 표현 불가 보고만 한다. DSN(key=value) 형식은 이번에 지원하지 않는다.
 - 2026-11-05: 04·07 보강(Issue #75): 실제 원본 매니페스트로 NetworkPolicy 통신 의도, ConfigMap·secretKeyRef 변수 이름 수집, 클러스터 밖 DB 보고를 추가. 첫 사이클의 원본 PostgreSQL은 RDS가 아니라 클러스터 안 Pod로 결정.
 - 2026-11-05: D-01 일부 결정: LLM 공급자는 Claude이고 Anthropic SDK(Messages API 도구 호출)를 쓴다(Agent SDK는 자체 도구·루프가 08A의 허용 목록 정책과 겹쳐 쓰지 않는다). 모델·코드 전송 범위·키 관리·비용 한도는 ADR-004에서 정한다. 실제 연결은 08에서 `LLMClient` 뒤에 어댑터로 붙인다.

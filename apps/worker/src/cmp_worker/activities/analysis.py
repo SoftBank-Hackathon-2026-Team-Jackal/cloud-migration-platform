@@ -1,4 +1,6 @@
-from cmp_contracts.analysis import AnalysisReport
+from datetime import UTC, datetime
+
+from cmp_contracts.analysis import AnalysisReport, ReviewRecord
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from temporalio import activity
 
@@ -85,3 +87,11 @@ async def check_evidence(payload: dict) -> dict:
             "unverified_risks": ["Scaffold: no scan performed"],
         }
     ).model_dump(mode="json")
+
+
+@activity.defn
+async def record_review(payload: dict) -> dict:
+    """Stamp the user's decisions with the decision time. Immutable storage is decided in D-02."""
+    return ReviewRecord.model_validate({**payload, "decided_at": datetime.now(UTC)}).model_dump(
+        mode="json"
+    )

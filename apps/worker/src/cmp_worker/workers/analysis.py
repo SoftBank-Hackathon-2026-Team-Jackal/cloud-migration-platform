@@ -9,6 +9,7 @@ from cmp_worker.activities.analysis import (
     fetch_source,
     map_usage,
     precheck,
+    record_review,
     scan_aws_infra,
     scan_code,
     scan_manifests,
@@ -31,5 +32,6 @@ def create_worker(client: Client) -> Worker:
             precheck,
             map_usage,
             check_evidence,
+            record_review,
         ],
     )

@@ -182,6 +182,7 @@ record_review ──> ReviewRecord(불변 저장, analysis_ref 버전에 묶음)
 - Workflow는 Signal을 기다리며 Query로 "검토 대기 중"과 검토할 항목을 보여 준다. 자동 승인은 없다.
 - Signal이 다른 분석 버전(`analysis_ref`)을 가리키면 거절한다. 확정·승인 키는 해당 버전의 행 ID이며, Sandbox 루프에서 매핑이 바뀌면 바뀐 행만 다시 승인받는다(`publish_final_report` 전에 확인).
 - 데모 시간을 위해 화면 없이도 진행할 수 있게, 같은 Signal을 CLI 스크립트로 보낼 수 있게 한다.
+- 구현 메모: Signal은 호출자에게 오류를 돌려주지 못하므로 거절한 Signal은 무시하고 거절 기록(코드만, 내용 없음)을 Query의 `rejections`에 남긴다. `BLOCK`이면 부모 공유 파일을 바꾸지 않고 멈추기 위해 자식이 `ANALYSIS_BLOCKED`로 실패하고(부모가 자식 실패를 전파), 사유·대안은 종료 후에도 Query로 조회한다. 상태 기계는 `cmp_worker.review_gate.ReviewGate`, 전송은 `cmp_worker.review_client`(Query 후 Signal)와 `scripts/review_signal.py`다.
 
 ### 2.4 소스 묶음 (AV-009)
 
