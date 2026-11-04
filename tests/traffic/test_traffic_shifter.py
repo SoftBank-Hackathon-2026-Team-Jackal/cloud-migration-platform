@@ -192,3 +192,18 @@ def test_shift_result_is_a_plain_serializable_model() -> None:
     result = shifter(FakeProxy(), FakeObserver([GOOD] * 3)).run(TrafficPolicy(), READY)
     assert isinstance(result, ShiftResult)
     assert ShiftResult.model_validate_json(result.model_dump_json()) == result
+
+
+def test_thin_windows_accumulate_inside_a_step_until_there_is_enough_data() -> None:
+    thin = Sample(requests=12, failed=0, p99_ms=50)
+    proxy = FakeProxy()
+    observer = FakeObserver([thin, thin, thin, GOOD, GOOD])
+    result = shifter(proxy, observer).run(TrafficPolicy(), READY)
+    assert result.status == "DONE"  # 12+12+12=36건이 모여 첫 단계를 통과
+    assert [w["target"] for w in proxy.applied] == [10, 50, 100]
+
+
+def test_failures_inside_thin_windows_still_count() -> None:
+    bad_thin = Sample(requests=12, failed=1, p99_ms=50)
+    result = shifter(FakeProxy(), FakeObserver([bad_thin, bad_thin])).run(TrafficPolicy(), READY)
+    assert result.status == "ROLLED_BACK"

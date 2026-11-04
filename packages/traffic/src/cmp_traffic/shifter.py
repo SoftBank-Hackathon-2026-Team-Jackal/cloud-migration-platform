@@ -105,12 +105,19 @@ class TrafficShifter:
                 return self._rollback(events, step, f"설정 적용 confirm 실패: {exc}")
 
             began = self.clock()
+            total = Sample(requests=0, failed=0, p99_ms=0)
             while True:
                 try:
-                    observed = self.observer.sample_target(policy.observe_seconds)
+                    window = self.observer.sample_target(policy.observe_seconds)
                 except Exception as exc:  # noqa: BLE001
                     return self._rollback(events, step, f"관측 실패: {exc}")
-                outcome = evaluate_step(policy, baseline, observed, self.clock() - began)
+                # 요청이 적은 단계에서도 판단할 수 있도록 같은 단계 안의 관측값을 누적한다.
+                total = Sample(
+                    requests=total.requests + window.requests,
+                    failed=total.failed + window.failed,
+                    p99_ms=max(total.p99_ms, window.p99_ms),
+                )
+                outcome = evaluate_step(policy, baseline, total, self.clock() - began)
                 if outcome.decision != "hold":
                     break
                 self.sleep(policy.observe_seconds)
