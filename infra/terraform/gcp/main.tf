@@ -59,7 +59,7 @@ resource "google_container_cluster" "target" {
   subnetwork               = google_compute_subnetwork.target.id
   remove_default_node_pool = true
   initial_node_count       = 1
-  deletion_protection      = true
+  deletion_protection      = var.deletion_protection
 
   release_channel { channel = var.release_channel }
   ip_allocation_policy {

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     terraform_bin: str = "terraform"
     # Ticket 03: directory for analysis source workspaces; must be outside the service directory.
     analysis_workspace_root: str | None = None
+    # Ticket 10: gcloud configuration and the expected Google ADC principal for GCP Apply.
+    provisioning_gcloud_configuration: str | None = None
+    provisioning_gcp_adc_email: str | None = None
 
 
 settings = Settings()

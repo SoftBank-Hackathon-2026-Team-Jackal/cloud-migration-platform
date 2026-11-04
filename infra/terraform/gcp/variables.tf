@@ -11,3 +11,7 @@ variable "node_machine_type" { type = string }
 variable "node_count" { type = number }
 variable "node_disk_gib" { type = number }
 variable "node_service_account_email" { type = string }
+variable "deletion_protection" {
+  type    = bool
+  default = true
+}
