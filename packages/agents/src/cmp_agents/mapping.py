@@ -5,7 +5,7 @@ same output and no model output can raise a row's verification status by itself.
 """
 
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +28,24 @@ def compute_treatment(
     if grade == "PARTIAL" and required and alternative_proven:
         return "PROCEED"
     return "BLOCK" if required else "APPROVAL"
+
+
+def compute_treatments(
+    rows: Sequence[MappingRow], required: Mapping[str, bool]
+) -> list[MappingRow]:
+    """Fill `required` and `treatment` from confirmed values; unconfirmed rows stay empty."""
+    result = []
+    for item in rows:
+        confirmed = required.get(item.id)
+        result.append(
+            item.model_copy(
+                update={
+                    "required": confirmed,
+                    "treatment": compute_treatment(item.grade, confirmed),
+                }
+            )
+        )
+    return result
 
 
 def stabilize_row_ids(

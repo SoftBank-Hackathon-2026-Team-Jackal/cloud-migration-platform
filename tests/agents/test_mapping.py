@@ -3,6 +3,7 @@ from cmp_agents.mapping import (
     apply_dispositions,
     check_evidence,
     compute_treatment,
+    compute_treatments,
     stabilize_row_ids,
 )
 from cmp_contracts.analysis import Evidence, MappingRow
@@ -147,3 +148,22 @@ def test_cloud_side_evidence_stays_unverified_without_a_known_resource(workspace
 def test_sandbox_verified_rows_are_never_lowered(workspace):
     verified = row(status="SANDBOX_VERIFIED", evidence=[code("main.go:99")])
     assert check([verified], workspace)[0].status == "SANDBOX_VERIFIED"
+
+
+def test_confirmed_required_values_fill_in_treatments_for_every_row():
+    rows = [
+        row(id="a", grade="DIRECT"),
+        row(id="b", grade="PARTIAL"),
+        row(id="c", grade="NONE"),
+    ]
+    result = compute_treatments(rows, {"a": True, "b": False, "c": True})
+    assert [(r.required, r.treatment) for r in result] == [
+        (True, "PROCEED"),
+        (False, "APPROVAL"),
+        (True, "BLOCK"),
+    ]
+
+
+def test_rows_without_a_confirmed_value_keep_an_empty_treatment():
+    result = compute_treatments([row(id="a", grade="NONE")], {})
+    assert (result[0].required, result[0].treatment) == (None, None)

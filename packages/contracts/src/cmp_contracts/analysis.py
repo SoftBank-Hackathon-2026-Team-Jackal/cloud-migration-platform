@@ -56,6 +56,23 @@ class ReviewRecord(Contract):
     decided_at: datetime
 
 
+class ConfirmRequirementsSignal(Contract):
+    """User confirms which mapping rows are required; keys are mapping row IDs."""
+
+    analysis_ref: VersionRef
+    required: dict[Text, bool]
+    operational: list[Text] = Field(default_factory=list)
+    actor: Text
+
+
+class ApproveLossesSignal(Contract):
+    """User approves or rejects the loss of each APPROVAL row; keys are mapping row IDs."""
+
+    analysis_ref: VersionRef
+    approvals: dict[Text, Literal["APPROVED", "REJECTED"]]
+    actor: Text
+
+
 class EnvExceptions(Contract):
     excluded: list[str]
     replaced: dict[str, str]
