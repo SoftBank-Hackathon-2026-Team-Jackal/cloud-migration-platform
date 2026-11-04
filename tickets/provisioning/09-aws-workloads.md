@@ -1,7 +1,7 @@
 # Ticket 09 — AWS EKS에 DB·앱 배포 및 연결 확인
 
 ## 상태
-IN_PROGRESS — [Issue #37](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/37); 08(실행 분기·클러스터)은 다른 세션에서 진행 중
+DONE — [Issue #37](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/37); 08이 만든 실제 EKS `cmp-target-aws`에서 Activity 실검증 완료. 08 병합 후 승인 Workflow 연결 확인은 아래 미검증 항목
 
 ## 목적
 준비된 EKS에 PostgreSQL과 앱을 배포하고 데이터 이전 전 준비 상태를 검증한다.
@@ -17,9 +17,9 @@ Blocked by: 02, 03, 08
 - 제외: 데이터 이전·트래픽 가중치 변경
 
 ## 수용 기준
-- [ ] DB PVC Bound·접속과 앱 Pod Ready·헬스를 별도로 확인한다.
-- [ ] ALB Ingress 주소와 실제 외부 접근 경로를 확인한다.
-- [ ] 이미지 Pull·Secret 참조·PVC 오류가 있으면 `READY`를 반환하지 않는다.
+- [x] DB PVC Bound·접속과 앱 Pod Ready·헬스를 별도로 확인한다.
+- [x] ALB Ingress 주소와 실제 외부 접근 경로를 확인한다.
+- [x] 이미지 Pull·Secret 참조·PVC 오류가 있으면 `READY`를 반환하지 않는다.
 
 ## 테스트 전략
 - 제안 Test Seam: EKS 배포 요청 → Kubernetes/Ingress/앱 준비 결과. 데이터 정합성은 확인하지 못한다.
@@ -37,11 +37,11 @@ EKS에서 실제 DB·앱 준비와 Endpoint를 조회할 수 있다.
 - 구현 중 변경: 2026-11-04 착수 결정 W1~W11 참조(ECR Pull·TLS 없음·Ingress·Controller/StorageClass·Secret·READY 판정).
 
 ## 완료 체크리스트
-- [ ] 수용 기준과 Test Seam 확인
-- [ ] 관련 테스트 통과와 회귀 확인
-- [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
-- [ ] 미검증 항목과 결과 증거 기록
+- [x] 수용 기준과 Test Seam 확인
+- [x] 관련 테스트 통과와 회귀 확인
+- [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
+- [x] 구현·계약 정합성 및 최종 리뷰 (자체 리뷰; PR 리뷰 대기)
+- [x] 미검증 항목과 결과 증거 기록
 
 ## P0 정책 갱신 (2026-11-03)
 
@@ -88,16 +88,21 @@ Worker 환경변수는 08과 같은 `PROVISIONING_ARTIFACT_ROOT`, `PROVISIONING_
 
 | 명령·환경 | 결과 |
 | --- | --- |
-| `uv run pytest tests/test_aws_workloads.py` (macOS, Python 3.11) | 36 passed, 1 skipped(08 스키마 필요한 DB resolver 테스트) |
-| `make check` | 339 passed, 1 skipped |
+| `uv run pytest tests/test_aws_workloads.py` (macOS, Python 3.11) | 37 passed, 1 skipped(08 스키마 필요한 DB resolver 테스트) |
+| `make check` | 340 passed, 1 skipped |
 | 임시 worktree에서 `feat/aws-infra-apply`(08) 병합 후 전체 `pytest` | 359 passed, skip 없음(DB resolver 테스트 통과). 충돌은 `tasks.md`와 Worker 등록 한 줄뿐 |
+| 실제 EKS `cmp-target-aws`(08, ap-northeast-2, 714066696240, Node 2 Ready), Namespace `cmp-demo-target`, 실제 `CliRuntime` | 1차: `FAILED/LB_CONTROLLER_NOT_READY`(Helm v4에 `helm list -a` 없음 → 상태 필터 플래그로 수정·회귀 테스트). 2차: `SUCCEEDED/WORKLOADS_READY`, 재실행도 `WORKLOADS_READY` |
+| 독립 확인(kubectl/helm/curl) | Helm Release 3개 모두 revision 1(재실행 시 재설치·업그레이드 없음), PVC `cmp-demo-db` Bound 10Gi `cmp-gp3`(ebs.csi.aws.com, gp3, Retain), DB·앱 Pod 1/1 Running, DB 인증 접속 PostgreSQL 16·복제 권한 true, 외부 `http://<ALB>/health` 200, LB Controller SA에 08 IRSA ARN, DB Secret은 키 이름만 확인·last-applied 주석 없음. 증거: [provisioning-09-eks.json](../../docs/verification/provisioning-09-eks.json) |
 | 소스 EKS `cmp-demo-source` 읽기 전용 조회 | 데모 env 이름·이미지 Digest·ALB 주석·LB Controller 3.6.2 확인. 변경 없음, Secret 값 미조회(키 이름만) |
 
 Chart 변경은 없어 `helm lint`/`helm template` 대상이 아니다(기존 렌더 테스트는 `make check`에 포함). HTTP 라우트 변경이 없어 `make openapi`는 해당 없음. Workflow 코드는 수정하지 않았고 승인 Workflow 연결 테스트는 08 병합 후 실행한다.
 
 ### 미검증·차단
 
-- **BLOCKED — 실제 EKS 검증:** 08의 신규 클러스터(`cmp-target-aws` 예정) Apply가 사용자 승인 대기 중이다. 클러스터가 준비되면 전용 Namespace `cmp-demo-target`에 데모 동등 DB·앱을 배포하고 PVC Bound·DB 접속·Pod Ready·헬스·ALB 주소와 재실행 멱등성을 기록한다. 클러스터는 삭제하지 않는다.
-- 실제 kubectl/Helm(로컬 Helm v4.3.1, 저장소 기준 3.17.3) 인자·`helm list` JSON 필드 호환성, IRSA·EBS CSI·ALB 조정 시간은 위 실검증 전까지 미확인이다.
+- 승인 Workflow를 거친 실행이 아니다. 실검증은 임시 SQLite 업무 DB에 WORKLOADS Revision을 게시·승인하고 `ActivityEnvironment`로 실제 Activity를 호출했다. 클러스터 대상은 08 실행 refs를 같은 키로 전달했다.
+- 실제 실패 주입(이미지 Pull·PVC Pending·Secret 참조 오류)은 가짜 런타임 테스트로만 확인했다. 실제 클러스터에서는 첫 시도의 LB Controller 실패가 코드로만 보고되고 이후 단계가 실행되지 않은 것만 관찰했다.
+- 저장소 기준 Helm 3.17.3이 아니라 로컬 Helm v4.3.1로 검증했다. 상태 필터 플래그는 두 버전 모두 지원한다.
 - 08 병합 후 `ProvisioningApprovalWorkflow` → `execute_aws_workloads` Temporal 테스트·`make smoke-temporal`.
 - 사용자 `USER_SECRET`·`CONFIG_MAP`의 실제 생성 경로(업로드 `.env` 해석)는 Planning/업로드 통합 범위다. 09는 존재와 키만 확인한다.
+
+실검증 자원(클러스터·LB Controller·`cmp-gp3`·`cmp-demo-target`의 DB/앱/ALB)은 지시에 따라 삭제하지 않았다. 사용자 Secret `cmp-demo-secrets`는 검증용으로 새로 만든 무작위 토큰이며 원본 데모 토큰을 복사하지 않았다. ALB는 인터넷 공개 HTTP라 비용·노출이 남으므로 정리 시점은 사용자가 결정한다.
