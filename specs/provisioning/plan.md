@@ -190,6 +190,10 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 장시간 Apply와 Agent 실행은 Heartbeat 또는 주기적 상태 조회를 두어 Worker 종료를 감지한다. 외부 프로세스가 계속 실행 중일 수 있으므로 Heartbeat timeout만 보고 같은 Apply/Agent 명령을 즉시 재발행하지 않는다. 실행 표식(`plan_id`, `revision`, `step`, 외부 작업 ID)과 State/Release/Agent 실제 상태를 먼저 조회한다. Activity Retry는 일시 오류에 한정하고 권한·검증·승인 불일치는 사용자/운영자 조치 상태로 보낸다. 취소 요청은 실행 중 외부 작업의 안전한 중단 가능성을 조회한 뒤 상태를 기록하며 인프라 자동 삭제로 해석하지 않는다. 이력에는 참조·상태·작은 오류만 남기고 Plan/Secret 원문을 싣지 않는다.
 
+### 07 구현 (#34)
+
+[07 착수 결정 D1~D6](../../tickets/provisioning/07-approval-gate.md#착수-결정-2026-11-04)을 구현했다. 업무 DB `provisioning_plan_revisions`(불변·증가 Revision, 최대값이 활성), `provisioning_approvers`(자격 증명 digest·허용 migration), `provisioning_approvals`(Revision당 결정 1건·전달 상태), `provisioning_executions`(`plan_id`·`revision`·`step` 고유 실행 표식)를 Alembic `20261104_01`로 만든다. API는 `cmp_api.routes.approvals`, 저장·재검증은 `cmp_api.approvals`, 전달은 Signal-With-Start(`cmp_api.approval_delivery`)다. `ProvisioningApprovalWorkflow`(`migration` queue)는 `approval_id`만 받고 `execute_approved_plan` Activity(`provisioning` queue)가 실행 직전 DB 승인·최신 Revision·`verify_approval_target`을 다시 확인한다. 기본 executor는 표식만 남기는 no-op이며 Terraform·Helm·Agent는 08/10/12에서 연결한다. 실행 표식이 이미 있으면(RUNNING/FAILED 포함) executor를 재호출하지 않으며, 실제 상태 조회 후 재개는 후속 실행 티켓 범위다.
+
 ## 11. ProvisioningResult와 후속 단계 (`PROV-018`~`020`)
 
 `ProvisioningResult` 제안 필드는 `plan_id`, `revision`, `provider`, `status`, `region/namespace`, `cluster_ref`, `network_resource_refs`, `app_internal_endpoint`, `app_external_endpoint`, `app_port`, `health_path`, `db_host`, `db_port`, `db_name`, `db_user`, `db_secret_ref`, `helm_release_refs`, `plan/state/manifest/values_refs`, `verification`, `failure_stage`, `error_code`, `recoverability`다. 성공·부분 실패 모두 구조화된 결과를 저장하되 필수 항목이 빠진 부분 실패를 `READY`로 간주하지 않는다. 실패 시 아직 생성되지 않은 Endpoint는 비워 두고 완료된 자원만 기록한다. 비밀번호·`.env` 원문은 결과에 넣지 않는다.

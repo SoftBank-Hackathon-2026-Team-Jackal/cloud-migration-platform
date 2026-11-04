@@ -3,7 +3,10 @@
 from logging.config import fileConfig
 
 from alembic import context
-from cmp_api import agent_registry  # noqa: F401  # Register Agent tables in metadata.
+from cmp_api import (
+    agent_registry,  # noqa: F401  # Register Agent tables in metadata.
+    approvals,  # noqa: F401  # Register Plan approval tables in metadata.
+)
 from cmp_api.config import settings
 from cmp_api.db import Base
 from sqlalchemy import engine_from_config, pool

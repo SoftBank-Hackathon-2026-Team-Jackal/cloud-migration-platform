@@ -3,6 +3,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from cmp_worker.activities.migration import copy_data, shift_traffic, verify_target
+from cmp_worker.workflows.approval import ProvisioningApprovalWorkflow
 from cmp_worker.workflows.migration import MigrationWorkflow
 
 
@@ -13,4 +14,8 @@ def create_activity_worker(client: Client) -> Worker:
 
 
 def create_workflow_worker(client: Client) -> Worker:
-    return Worker(client, task_queue=WORKFLOW_QUEUE, workflows=[MigrationWorkflow])
+    return Worker(
+        client,
+        task_queue=WORKFLOW_QUEUE,
+        workflows=[MigrationWorkflow, ProvisioningApprovalWorkflow],
+    )
