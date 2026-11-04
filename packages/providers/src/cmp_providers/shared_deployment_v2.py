@@ -18,12 +18,15 @@ from cmp_contracts.shared_deployment_v2 import (
     RenderedDatabaseV2,
     ResolvedEnvV2,
     SecretEnvSourceV2,
+    SecretInputBindingV2,
+    SecretRefV2,
     SharedDeploymentRequestV2,
     SharedDeploymentResultV2,
 )
 from pydantic import ValidationError
 
 from cmp_providers.artifacts import canonical_json_bytes
+from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
 
 
 def _issue(code: str, path: str) -> ValidationIssue:
@@ -111,6 +114,24 @@ def render_shared_deployment_v2(
                 issues.append(
                     _issue("UNSUPPORTED_RESOURCE_OUTPUT", f"resources.{index}.env_bindings.<env>")
                 )
+    # The URL Secret is platform-managed: it must not share a name with any other Secret here.
+    url_names = {
+        connection_url_secret_name(resource.release_name): index
+        for index, resource in enumerate(request.resources)
+        if isinstance(resource, DatabaseResourceV2)
+    }
+    for index, resource in enumerate(request.resources):
+        if isinstance(resource, DatabaseResourceV2):
+            names = [(resource.database.password_secret_ref.name, "database.password_secret_ref")]
+        else:
+            names = [
+                (binding.secret_ref.name, "env_bindings.<env>")
+                for binding in resource.env_bindings.values()
+                if isinstance(binding, SecretInputBindingV2)
+            ]
+        for name, path in names:
+            if name in url_names:
+                issues.append(_issue("SECRET_NAME_CONFLICT", f"resources.{index}.{path}"))
     if issues:
         raise ProvisioningInputError(issues)
 
@@ -146,6 +167,9 @@ def render_shared_deployment_v2(
             name=db.name,
             username=db.username,
             password_secret_ref=db.password_secret_ref,
+            connection_url_secret_ref=SecretRefV2(
+                name=connection_url_secret_name(resource.release_name), key=URL_SECRET_KEY
+            ),
         )
         outputs[resource.id] = output
         rendered[resource.id] = RenderedDatabaseV2(
@@ -163,7 +187,7 @@ def render_shared_deployment_v2(
             if isinstance(binding, ResourceOutputBinding):
                 database = outputs[binding.resource_id]
                 value = getattr(database, binding.output)
-                if binding.output == "password_secret_ref":
+                if binding.output in {"password_secret_ref", "connection_url_secret_ref"}:
                     resolved_value = SecretReference(secret_name=value.name, secret_key=value.key)
                 else:
                     resolved_value = str(value)

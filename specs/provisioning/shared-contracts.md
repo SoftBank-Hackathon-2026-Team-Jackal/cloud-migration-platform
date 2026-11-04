@@ -10,7 +10,8 @@
 | --- | --- | --- |
 | `ArtifactRef`, `RenderedChart` | `cmp_contracts.artifact` | 불변 ID·버전·종류·바이트 크기·SHA-256 및 Chart/Values/Manifest 참조 |
 | `PostgresChartValues` | `cmp_contracts.chart` | Sandbox/Production 공통 DB 입력. 환경·Provider·Release·Namespace·이미지·DB·Pod 자원·StorageClass/PVC |
-| `DynamicBinding` | `cmp_contracts.chart` | 허용된 DB host/Secret 이름 위치와 값 출처 |
+| `DynamicBinding` | `cmp_contracts.chart` | 허용된 DB host/Secret 이름/URL Secret 이름 위치와 값 출처 |
+| `connection_url`, `connection_url_secret_name` | `cmp_providers.database_url` | DB 연결 URL 형식과 URL Secret 이름 규칙(19). Sandbox·운영 실행 주체가 함께 사용 |
 | `PlanManifest`, `Preview`, `ApprovalTarget` | `cmp_contracts.plan` | Plan/Revision·템플릿 버전·대상·실행 범위·산출물 연결, 표시 요약, 승인 대상 식별 |
 | `sha256_bytes`, `canonical_json_bytes`, `sha256_json`, `verify_artifact_bytes` | `cmp_providers.artifacts` | 순수 바이트/정규화 JSON Digest 및 조회한 실제 바이트 검증 |
 | `approval_issues`, `approval_target`, `verify_approval_target` | `cmp_providers.plans` | 계획 완전성·Preview 일치·기록된 승인 대상 및 요청 실행 범위 비교 |
@@ -50,7 +51,7 @@ Preview는 manifest Digest와 허용된 자원 변경 요약(종류·행위·이
 
 이름은 초기 구현에서 보수적인 Kubernetes label 형태, Secret key는 영숫자·점·밑줄·하이픈으로 제한한다. 이미지가 실제 PostgreSQL 16인지, Secret/PVC가 존재하는지는 렌더/실환경 검증에서 확인한다. DB Chart의 Helm 템플릿은 02에서 `infra/helm/postgres`에 구현했다. 사용법·렌더 제한은 [Helm 안내](../../infra/helm/README.md)를 따른다. 현재 Chart는 해결되지 않은 `registry_auth_ref`를 거절하며, 실제 Secret/StorageClass 존재·이미지 실행 검증은 후속 배포 경계다.
 
-동적 바인딩은 `database.host ← DATABASE_HOST`, `database.secret_name ← DATABASE_SECRET_NAME`만 지원한다. 이는 런타임 DB 연결을 쓰는 Values 템플릿의 자리이며 DB Chart에 host 필드를 추가한다는 뜻은 아니다. 대상 자리가 미리 존재하고 null이어야 한다. 비밀번호 원문 대신 생성된 Kubernetes Secret **이름**을 전달한다. 제공한 source key가 빠지거나 남으면, 경로가 중복되거나 source/target이 어긋나면 실패한다. 원본 템플릿은 변경하지 않는다.
+동적 바인딩은 `database.host ← DATABASE_HOST`, `database.secret_name ← DATABASE_SECRET_NAME`, `database.url_secret_name ← DATABASE_URL_SECRET_NAME`(19)만 지원한다. 마지막 자리는 선택 항목이라 미설정 시 직렬화에서 빠지며(이미 승인된 Values 바이트 유지), 앱이 `connection_url_secret_ref`를 쓸 때만 규칙이 생긴다. 이는 런타임 DB 연결을 쓰는 Values 템플릿의 자리이며 DB Chart에 host 필드를 추가한다는 뜻은 아니다. 대상 자리가 미리 존재하고 null이어야 한다. 비밀번호 원문 대신 생성된 Kubernetes Secret **이름**을 전달한다. 제공한 source key가 빠지거나 남으면, 경로가 중복되거나 source/target이 어긋나면 실패한다. 원본 템플릿은 변경하지 않는다.
 
 `verify_bound_values`는 실제 Values가 승인 템플릿에 승인된 참조만 채운 값과 정확히 일치하는지 검사한다. 이미지/Replica/임의 필드를 바꾸거나 주입된 DB 참조가 실제 결과와 달라지면 실패한다. 템플릿·바인딩 규칙의 실제 바이트는 호출 전에 승인된 ArtifactRef로 검증해야 한다.
 

@@ -6,6 +6,7 @@ value into the last-applied annotation). kubeconfig lives in a 0700 temporary di
 duration of one `connect` and is deleted afterwards (provider runtimes own that).
 """
 
+import base64
 import json
 import os
 import subprocess
@@ -140,6 +141,33 @@ class KubectlSession:
             "stringData": data,
         }
         self._kubectl("create", "-f", "-", stdin=json.dumps(manifest).encode())
+
+    def secret_managed(self, namespace: str, name: str) -> bool | None:
+        item = self._get("secret", name, namespace)
+        if item is None:
+            return None
+        labels = (item.get("metadata") or {}).get("labels") or {}
+        return labels.get("app.kubernetes.io/managed-by") == FIELD_MANAGER
+
+    def secret_value(self, namespace: str, name: str, key: str) -> str | None:
+        """Decoded value in memory only (ticket 19 URL build); never logged or returned."""
+        item = self._get("secret", name, namespace)
+        encoded = ((item or {}).get("data") or {}).get(key)
+        return base64.b64decode(encoded).decode("utf-8") if encoded else None
+
+    def apply_secret(self, namespace: str, name: str, data: dict[str, str]) -> None:
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {
+                "name": name,
+                "namespace": namespace,
+                "labels": {"app.kubernetes.io/managed-by": FIELD_MANAGER},
+            },
+            "type": "Opaque",
+            "stringData": data,
+        }
+        self._kubectl("apply", "-f", "-", stdin=json.dumps(manifest).encode())
 
     def configmap_keys(self, namespace: str, name: str) -> set[str] | None:
         item = self._get("configmap", name, namespace)

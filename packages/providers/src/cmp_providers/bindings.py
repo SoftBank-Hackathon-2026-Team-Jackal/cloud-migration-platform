@@ -10,7 +10,13 @@ from cmp_providers.artifacts import canonical_json_bytes
 
 def bind_values(template: dict, rules: list[DynamicBinding], resolved: dict[str, str]) -> dict:
     canonical_json_bytes(template)
-    allowed = {"database.host": "DATABASE_HOST", "database.secret_name": "DATABASE_SECRET_NAME"}
+    allowed = {
+        "database.host": "DATABASE_HOST",
+        "database.secret_name": "DATABASE_SECRET_NAME",
+        "database.url_secret_name": "DATABASE_URL_SECRET_NAME",
+    }
+    # Optional slots are omitted from serialized Values while unset (ticket 19).
+    optional = {"database.url_secret_name"}
     seen = set()
     if set(resolved) != {rule.source for rule in rules}:
         raise ValueError("Resolved binding keys differ from the approved sources")
@@ -20,14 +26,16 @@ def bind_values(template: dict, rules: list[DynamicBinding], resolved: dict[str,
             raise ValueError("Invalid or duplicate binding rule")
         seen.add(rule.target)
         section, key = rule.target.split(".")
-        if not isinstance(result.get(section), dict) or key not in result[section]:
+        if not isinstance(result.get(section), dict) or (
+            key not in result[section] and rule.target not in optional
+        ):
             raise ValueError("Approved binding slot is absent")
-        if result[section][key] is not None:
+        if result[section].get(key) is not None:
             raise ValueError("Approved binding slot must be null before resolution")
         value = resolved[rule.source]
         if not isinstance(value, str) or not value or value.strip() != value:
             raise ValueError("Invalid resolved connection reference")
-        if rule.source == "DATABASE_SECRET_NAME":
+        if rule.source in {"DATABASE_SECRET_NAME", "DATABASE_URL_SECRET_NAME"}:
             try:
                 TypeAdapter(KubernetesName).validate_python(value)
             except ValidationError:

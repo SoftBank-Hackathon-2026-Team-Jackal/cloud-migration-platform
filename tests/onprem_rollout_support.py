@@ -33,6 +33,7 @@ def render_request(
     health_path="/health",
     port=8080,
     user_secret=True,
+    url_binding=False,
 ):
     env = {
         "DB_HOST": {"resource_id": "postgres-main", "output": "host"},
@@ -41,6 +42,11 @@ def render_request(
         "DB_USER": {"resource_id": "postgres-main", "output": "username"},
         "DB_PASSWORD": {"resource_id": "postgres-main", "output": "password_secret_ref"},
     }
+    if url_binding:  # ticket 19: single-variable connection URL
+        env["DATABASE_URL"] = {
+            "resource_id": "postgres-main",
+            "output": "connection_url_secret_ref",
+        }
     if user_secret:
         env["API_KEY"] = {"secret_ref": {"name": "demo-app-env", "key": "API_KEY"}}
     return {
