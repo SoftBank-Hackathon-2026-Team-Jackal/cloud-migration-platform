@@ -247,3 +247,60 @@ async def test_rollout_status_route_requires_approver_grant(db, store, setup, cl
         "job_id": rollout_job_id("plan-k3s", 1),
         "agent_id": "agent-a",
     }
+
+
+async def test_approval_workflow_dispatches_on_prem_and_records_ready(db, store, setup):
+    """After 08: real ProvisioningApprovalWorkflow → claim → execute_on_prem_plan → complete."""
+    from cmp_api.approval_delivery import TemporalApprovalDelivery
+    from cmp_api.approvals import PlanApproval, execution_refs, execution_status
+    from cmp_contracts.queues import PROVISIONING_QUEUE, WORKFLOW_QUEUE, approval_workflow_id
+    from cmp_worker.activities.approval import ApprovalActivities
+    from cmp_worker.workflows.approval import ProvisioningApprovalWorkflow
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    approval = ApprovalActivities(db)
+
+    async def agent():
+        while True:
+            await asyncio.sleep(0.05)
+            with db() as session:
+                claimed = poll_job(session, agent_id="agent-a", credential=setup["credential"])
+                if claimed:
+                    report_job(
+                        session,
+                        agent_id="agent-a",
+                        credential=setup["credential"],
+                        job_id=claimed["job_id"],
+                        status="SUCCEEDED",
+                        result={"code": "READY"},
+                    )
+                    return
+
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(env.client, task_queue=WORKFLOW_QUEUE, workflows=[ProvisioningApprovalWorkflow]),
+        Worker(
+            env.client,
+            task_queue=PROVISIONING_QUEUE,
+            activities=[
+                approval.claim_approved_execution,
+                approval.complete_approved_execution,
+                activities(db, store, wait=10).execute_on_prem_plan,
+            ],
+        ),
+    ):
+        request = setup["request"]
+        await TemporalApprovalDelivery(env.client).deliver(
+            approval_id=request["approval_id"], plan_id="plan-k3s", revision=1
+        )
+        handle = env.client.get_workflow_handle(approval_workflow_id("plan-k3s", 1))
+        outcome, _ = await asyncio.gather(asyncio.wait_for(handle.result(), 30), agent())
+    assert (outcome["status"], outcome["code"]) == ("EXECUTED", "READY")
+    with db() as session:
+        record = session.get(PlanApproval, request["approval_id"])
+        assert execution_status(session, record) == "SUCCEEDED"
+        assert execution_refs(session, record)["database_endpoint"] == (
+            "demo-db.cmp-prod-demo.svc:5432"
+        )
+    assert len(jobs(db)) == 1

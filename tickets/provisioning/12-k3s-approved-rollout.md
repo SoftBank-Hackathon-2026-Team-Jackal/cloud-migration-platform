@@ -1,7 +1,7 @@
 # Ticket 12 — 승인된 K3s Agent 운영 배포
 
 ## 상태
-DONE — [Issue #36](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/36). 테스트 DB·ActivityEnvironment·격리 k3d 기준. 08의 Workflow dispatch 병합 후 경유 실행은 미검증(아래).
+DONE — [Issue #36](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/36). 테스트 DB·Temporal 테스트 환경(08 dispatch 경유)·격리 k3d 기준(아래).
 
 ## 목적
 승인된 K3s 계획을 Agent에 보내고 기존 클러스터에서 DB·앱 준비를 확인한다.
@@ -70,8 +70,8 @@ Blocked by: 04A, 07
 
 | 명령·환경 | 결과 |
 | --- | --- |
-| `make check` (ruff + pytest, macOS, Python 3.11) | 324 passed |
-| `uv run pytest tests/test_onprem_rollout.py tests/test_onprem_agent.py tests/test_remote_agent.py` | 승인/전송/Activity 8건 + Agent 결정 12건 + 클라이언트 3건 통과 |
+| `make check` (ruff + pytest, macOS, Python 3.11) | 324 passed; main(08 #39) 병합 후 344 passed |
+| `uv run pytest tests/test_onprem_rollout.py tests/test_onprem_agent.py tests/test_remote_agent.py` | 승인/전송/Activity 8건 + 08 Workflow 경유 1건 + Agent 결정 12건 + 클라이언트 3건 통과 |
 | `make openapi` | Agent 산출물 다운로드·rollout 상태 2개 경로, claim payload 확장, `x-sdd-agreed-capabilities.approved-onprem-rollout` 반영. 생성 결과 검토 |
 | `make smoke-temporal` (기존 로컬 Temporal) | `scaffold_complete` — provisioning Worker에 `execute_on_prem_plan` 등록 후 회귀 없음 |
 | `scripts/smoke_onprem_rollout.py` (k3d v5.9.0 / K3s v1.36.4+k3s1 / ARM64, Helm v4.3.1, 전용 kubeconfig, context `k3d-cmp-prov-rollout`) | [증거](../../docs/verification/provisioning-12-k3s.json): ① Agent 미폴링 → `UNKNOWN AGENT_OFFLINE`, 작업 `WAITING_AGENT` 보존 ② 재접속 Agent가 같은 작업 처리 → `SUCCEEDED READY`, 내부 Endpoint refs ③ 결과 보고 유실 주입(작업을 RUNNING으로 되돌림) → 재설치 없이 검증 복구, Helm revision 1 유지 ④ 이미지 Pull 불가 앱의 새 승인 Revision → `FAILED WORKLOAD_NOT_READY`, READY 아님 ⑤ Namespace 삭제, 기본 kubeconfig 불변 |
@@ -82,7 +82,7 @@ TDD 메모: API/Activity 슬라이스는 모듈 부재 RED → GREEN 한 단계�
 
 ### 미검증·제한 사항
 
-- 실행 dispatch는 08 소유다. 08이 병합되기 전이라 `ProvisioningApprovalWorkflow` → `claim_approved_execution` → `execute_on_prem_plan` → `complete_approved_execution` 전체 경로는 확인하지 않았다(Activity 직접 실행으로 대체). 08 병합 후 `workers/provisioning.py` 등록 줄 충돌 해소와 함께 확인해야 한다.
+- 실행 dispatch는 08 소유다. 08(#39) 병합 후 `test_approval_workflow_dispatches_on_prem_and_records_ready`로 실제 `ProvisioningApprovalWorkflow` → `claim_approved_execution` → `execute_on_prem_plan` → `complete_approved_execution`(가짜 Agent 보고)을 확인했다. 이 Workflow 경유 경로를 실제 k3d·실제 Temporal 서버에서 함께 실행하지는 않았다(k3d 검증은 Activity 직접 실행).
 - 실제 NAT 뒤 HTTPS 원격 Agent, 장기 실행 감독(반복 폴링 루프·lease), 다양한 사용자 K3s 배포판·제한 RBAC는 확인하지 않았다. Agent는 kubeconfig 권한으로 Namespace·Secret 생성과 Helm 설치를 수행한다.
 - 산출물 저장소는 로컬 Digest 디렉터리(`ARTIFACT_STORE_DIR`)이며 S3 연결과 Planning의 Chart 패키징·Plan 게시 연결은 후속이다.
 - READY는 대상 내부 검사만 포함한다. 외부 Ingress·트래픽 경로, Sandbox 기능 테스트 재사용과 데이터 검증, `ProvisioningResult` 저장·인계는 13 범위다.

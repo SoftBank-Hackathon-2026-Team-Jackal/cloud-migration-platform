@@ -689,6 +689,7 @@ components:
           - RUNNING
           - SUCCEEDED
           - FAILED
+          - UNKNOWN
           title: Execution Status
         workflow_state:
           type: string

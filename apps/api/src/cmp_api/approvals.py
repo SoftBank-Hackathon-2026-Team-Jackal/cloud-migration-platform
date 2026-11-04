@@ -10,7 +10,6 @@ import hashlib
 import hmac
 import secrets
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -97,7 +96,7 @@ class PlanApproval(Base):
 
 
 class PlanExecution(Base):
-    """Unique execution marker; its existence means the executor may already have run."""
+    """Unique execution marker; its existence means provider execution may already have run."""
 
     __tablename__ = "provisioning_executions"
 
@@ -110,6 +109,8 @@ class PlanExecution(Base):
     status: Mapped[str] = mapped_column(String(12), nullable=False)
     started_at: Mapped[int] = mapped_column(Integer, nullable=False)
     finished_at: Mapped[int | None] = mapped_column(Integer)
+    code: Mapped[str | None] = mapped_column(String(64))
+    resource_refs: Mapped[dict | None] = mapped_column(JSON)
 
 
 def _now(now: datetime | None = None) -> int:
@@ -289,19 +290,20 @@ def execution_status(session: Session, record: PlanApproval) -> str:
     return marker.status if marker else "NOT_STARTED"
 
 
-Executor = Callable[[dict], None]
+ExecutionStatus = Literal["SUCCEEDED", "FAILED", "UNKNOWN"]
 
 
-def record_only_executor(request: dict) -> None:
-    """Safe default: performs no Terraform, Helm or Agent action. The marker is the record."""
+def execution_refs(session: Session, record: PlanApproval) -> dict[str, str]:
+    marker = session.get(PlanExecution, (record.plan_id, record.revision, EXECUTION_STEP))
+    return dict(marker.resource_refs or {}) if marker else {}
 
 
-def execute_approved(
-    session: Session, approval_id: str, executor: Executor, *, now: datetime | None = None
-) -> dict:
-    """Re-check the DB approval, latest Revision and Digest, then run the executor at most once.
+def claim_execution(session: Session, approval_id: str, *, now: datetime | None = None) -> dict:
+    """Re-check the DB approval, latest Revision and Digests, then claim execution once.
 
-    Returns only small codes. BLOCKED outcomes create no execution marker.
+    A claim writes the RUNNING marker before any provider Activity runs, so a re-delivered or
+    restarted Workflow can never start provider execution twice. Returns small codes only;
+    BLOCKED/REJECTED outcomes create no marker.
     """
     record = session.get(PlanApproval, approval_id)
     if record is None:
@@ -343,24 +345,38 @@ def execute_approved(
     except IntegrityError:
         session.rollback()
         return {**outcome, "status": "ALREADY_EXECUTED", "code": "EXECUTION_RUNNING"}
-    marker = session.get(PlanExecution, (record.plan_id, record.revision, EXECUTION_STEP))
-    try:
-        executor(
-            {
-                "plan_id": record.plan_id,
-                "revision": record.revision,
-                "scope": record.scope,
-                "manifest_digest": record.manifest_digest,
-                "approval_id": record.id,
-            }
-        )
-    except Exception:  # noqa: BLE001 - boundary: record, never hide or re-raise
-        # Never re-issue automatically: a real executor may have partially applied changes.
-        marker.status = "FAILED"
+    return {
+        **outcome,
+        "status": "CLAIMED",
+        "code": "EXECUTION_CLAIMED",
+        "provider": manifest.target.provider,
+        "scope": record.scope,
+        "manifest_digest": record.manifest_digest,
+    }
+
+
+def complete_execution(
+    session: Session,
+    approval_id: str,
+    *,
+    status: ExecutionStatus,
+    code: str,
+    resource_refs: dict[str, str],
+    now: datetime | None = None,
+) -> dict:
+    """Record the provider result on a RUNNING marker. A finished marker is never rewritten."""
+    record = session.get(PlanApproval, approval_id)
+    marker = (
+        session.get(PlanExecution, (record.plan_id, record.revision, EXECUTION_STEP))
+        if record
+        else None
+    )
+    if marker is None:
+        return {"status": "BLOCKED", "code": "EXECUTION_NOT_CLAIMED"}
+    if marker.status == "RUNNING":
+        marker.status = status
+        marker.code = code
+        marker.resource_refs = {str(k): str(v) for k, v in resource_refs.items()}
         marker.finished_at = _now(now)
         session.commit()
-        return {**outcome, "status": "FAILED", "code": "EXECUTOR_FAILED"}
-    marker.status = "SUCCEEDED"
-    marker.finished_at = _now(now)
-    session.commit()
-    return {**outcome, "status": "EXECUTED", "code": "EXECUTION_SUCCEEDED"}
+    return {"status": marker.status, "code": marker.code or code}
