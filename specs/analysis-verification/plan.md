@@ -157,7 +157,9 @@ def build_archive(root: Path, files: list[Path]) -> tuple[bytes, str]:
         with tarfile.open(fileobj=gz, mode="w") as tar:
             for p in sorted(files):
                 info = tar.gettarinfo(root / p, arcname=str(p))
-                info.mtime = 0; info.uid = info.gid = 0; info.uname = info.gname = ""
+                info.mtime = 0
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
                 with open(root / p, "rb") as f:
                     tar.addfile(info, f)
     data = buf.getvalue()
@@ -171,14 +173,18 @@ def build_archive(root: Path, files: list[Path]) -> tuple[bytes, str]:
 ### 2.5 Build 모듈 연계 (AV-010)
 
 ```python
-context = BuildContext.model_validate({
-    "migration_id": migration_id,
-    "attempt_id": f"{run_id}-b{n}",        # 코드 변경마다 새 n, 같은 빌드 재시도는 같은 n
-    "ecr_repository": settings.ecr_repository,
-    "platform": capabilities.architecture, # 대상 capabilities에서 결정
-    "log_bucket": settings.build_log_bucket,
-})
-outcome = ImageBuilder(context).build(source_uri)   # 현재 B-01 방식(함수). D-12에 따라 Activity 호출로 바뀔 수 있음
+context = BuildContext.model_validate(
+    {
+        "migration_id": migration_id,
+        "attempt_id": f"{run_id}-b{n}",  # 코드 변경마다 새 n, 같은 빌드 재시도는 같은 n
+        "ecr_repository": settings.ecr_repository,
+        "platform": capabilities.architecture,  # 대상 capabilities에서 결정
+        "log_bucket": settings.build_log_bucket,
+    }
+)
+outcome = ImageBuilder(context).build(
+    source_uri
+)  # 현재 B-01 방식(함수). D-12에 따라 Activity 호출로 바뀔 수 있음
 ```
 
 - **호출 방식(D-12):** B-01은 루프가 함수를 직접 호출하는 설계라, 그대로면 Sandbox 워커에 Docker·ECR push 권한이 필요하다. `build` Queue의 `prepare_image` 스캐폴드를 실제 빌드 Activity로 바꾸는 방안을 민서님께 질문했다. 결정 전에는 `request_build` 뒤에 감춰 어느 쪽이든 바꿀 수 있게 한다.
@@ -275,8 +281,9 @@ NetworkPolicy(Sandbox 워커 생성):
 ```python
 class Evidence(Contract):
     kind: Literal["CODE", "MANIFEST", "CLOUD_RESOURCE", "IAM_POLICY", "CLOUDTRAIL", "CONFIG"]
-    locator: str            # 파일:줄, 매니페스트 경로, 리소스 ID, 이벤트 ID
+    locator: str  # 파일:줄, 매니페스트 경로, 리소스 ID, 이벤트 ID
     verified: bool = False  # check_evidence 결과
+
 
 class MappingRow(Contract):
     capability: str
@@ -289,14 +296,16 @@ class MappingRow(Contract):
     status: Literal["UNVERIFIED", "EVIDENCE_CHECKED", "SANDBOX_VERIFIED"]
     evidence: list[Evidence]
 
-class EnvExceptions(Contract):          # mapping_ref가 가리키는 내용
-    excluded: list[str]                 # 원본 환경에 묶여 빼는 변수
-    replaced: dict[str, str]            # 대체 값이 비밀이 아닌 변수만
-    missing: list[str]                  # 코드가 읽지만 .env에 없는 변수
 
-class AnalysisReport(Contract):         # Provisioning v1 AnalysisResult와 별개
+class EnvExceptions(Contract):  # mapping_ref가 가리키는 내용
+    excluded: list[str]  # 원본 환경에 묶여 빼는 변수
+    replaced: dict[str, str]  # 대체 값이 비밀이 아닌 변수만
+    missing: list[str]  # 코드가 읽지만 .env에 없는 변수
+
+
+class AnalysisReport(Contract):  # Provisioning v1 AnalysisResult와 별개
     migration_id: str
-    ref: VersionRef                     # Sandbox 통과 시점 버전
+    ref: VersionRef  # Sandbox 통과 시점 버전
     base_commit: str
     commit_verified: bool
     usage_profile: UsageProfile
@@ -305,6 +314,7 @@ class AnalysisReport(Contract):         # Provisioning v1 AnalysisResult와 별�
     unmapped_items: list[str]
     unverified_risks: list[str]
 
+
 class ValidatedWorkload(Contract):
     resource_id: str
     build_ref: VersionRef
@@ -312,14 +322,15 @@ class ValidatedWorkload(Contract):
     platform: str
     source_sha256: str
 
-class SandboxVerification(Contract):    # Planning 입력 v2의 sandbox 블록으로 투영
+
+class SandboxVerification(Contract):  # Planning 입력 v2의 sandbox 블록으로 투영
     migration_id: str
     ref: VersionRef
     status: Literal["PASSED", "FAILED", "NEEDS_REVIEW", "STOPPED_RENDER"]
     validated_workloads: list[ValidatedWorkload]
     requirements_ref: ContentRef
     report_ref: ContentRef
-    test_suite_ref: S3ContentRef        # uri, version_id(null 허용), sha256
+    test_suite_ref: S3ContentRef  # uri, version_id(null 허용), sha256
     attempts: list[SandboxAttemptSummary]
     cleanup_status: Literal["CLEANED", "FAILED", "PENDING"]
 ```
