@@ -5,7 +5,7 @@
 | ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
 | [01 분석·검증 계약 모델](../../tickets/analysis-verification/01-contracts.md) | DONE (PR #31 병합) | 없음 | AV-001, AV-017, AV-018, AV-020, AV-022 | #29 | ☑ |
-| [Q-01 `sandbox` Task Queue·Worker 등록](../../tickets/analysis-verification/q-01-sandbox-queue.md) | IN_PROGRESS | 없음 (D-05 결정) | AV-021 | #32 | ☐ |
+| [Q-01 `sandbox` Task Queue·Worker 등록](../../tickets/analysis-verification/q-01-sandbox-queue.md) | DONE (PR #33 병합) | 없음 (D-05 결정) | AV-021 | #32 | ☑ |
 | [02 분석 Activity 골격](../../tickets/analysis-verification/02-temporal-skeleton.md) | DRAFT | 01 | AV-001, AV-021 | 미생성 | ☐ |
 | [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | DRAFT | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | 미생성 | ☐ |
 | [03 소스 확보·운영 커밋 고정·마스킹](../../tickets/analysis-verification/03-source-fetch.md) | DRAFT | 01 | AV-002, AV-020 | 미생성 | ☐ |

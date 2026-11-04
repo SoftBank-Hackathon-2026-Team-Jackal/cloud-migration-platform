@@ -1,7 +1,7 @@
 # Ticket Q-01 — `sandbox` Task Queue·Worker 등록
 
 ## 상태
-IN_PROGRESS — 사용자 검토 완료, D-05 결정, Issue #32
+DONE — 사용자 최종 리뷰 완료, PR #33 main 병합, Issue #32
 
 ## 목적
 공유 파일(`queues.py`, `run.py`, `run_all.py`)을 건드리는 Queue 추가를 작은 PR로 먼저 반영해 이후 티켓의 충돌을 줄인다.
@@ -21,7 +21,7 @@ Blocked by: 없음. D-05: Sandbox 전용 Queue 분리 결정.
 - [x] `run_all`이 sandbox Worker를 함께 띄운다.
 - [x] 단독 실행과 `run_all` 등록에서 Worker가 `SANDBOX_QUEUE`를 사용하며, pytest의 Temporal 테스트 환경에서 무해한 scaffold Activity 요청을 완료한다.
 - [x] 기존 `make smoke-temporal`을 임시 Temporal 테스트 서버에서 추가 실행해 결과를 기록한다.
-- [ ] 민서님께 공유할 변경 파일·영향 요약을 PR 설명에 정리한다. 전달은 사용자가 한다.
+- [x] 민서님께 공유할 변경 파일·영향 요약을 PR 설명에 정리한다. 전달은 사용자가 한다(사용자 확인).
 
 ## 테스트 전략
 - 합의된 Test Seam: Worker factory·단독 실행 및 `run_all` 등록을 테스트하고, pytest의 Temporal 테스트 환경에서 `sandbox` Queue의 무해한 scaffold Activity 완료를 확인한다. 잡는 것: Queue·등록 오류와 Task 전달. 못 잡는 것: 실제 Sandbox Activity·클러스터 동작.
@@ -57,5 +57,5 @@ Temporal 테스트 환경에서 sandbox Worker가 해당 Queue의 Activity를 �
 - [x] 수용 기준과 Test Seam 확인
 - [x] 관련 테스트 통과와 회귀 확인
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
+- [x] 구현·계약 정합성 및 최종 리뷰
 - [x] 미검증 항목과 결과 증거 기록
