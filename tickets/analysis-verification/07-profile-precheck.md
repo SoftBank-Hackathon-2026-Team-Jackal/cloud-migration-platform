@@ -52,6 +52,9 @@ Blocked by: 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로
 - 앱 코드에 DB 드라이버가 있는데 클러스터 안 PostgreSQL Pod가 없으면 `DB_NOT_IN_CLUSTER`로 지원 범위 밖임을 보고한다(첫 사이클은 RDS 없이 Pod로 결정).
 - 실제 원본 매니페스트로 확인했다: 앱 → DB 5432 의도가 나오고 DB 변수 5개가 바인딩으로 대체되며 누락은 없다.
 
+## 후속 (D-16, 민서님 구현 대기)
+- 단일 URL 연결 변수(`DATABASE_URL` 등)는 V2에 `connection_url_secret_ref` 출력이 추가된 뒤 그 출력으로 바인딩한다. 지금은 `DB_CONNECTION_URL_VARIABLE`로 표현 불가를 보고한다. 병합 후 `_bindings`가 `*_URL`·`*_URI` 변수를 새 출력으로 바인딩하고 `replaced`에 넣으며, DSN 형식은 계속 보고만 한다. Sandbox(11)는 같은 방식으로 URL Secret을 만들어 앱 연결을 검증한다.
+
 ## 결정 대기
 - 확장 지원(D-14)
 - DB 내부 상태 점검 담당(D-13)

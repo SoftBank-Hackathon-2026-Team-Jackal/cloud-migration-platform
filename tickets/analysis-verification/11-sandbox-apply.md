@@ -41,6 +41,7 @@ fixture 요구사항·이미지로 Sandbox가 뜨고 준비 검사 후 정리까
 
 ## 설계 변경 기록
 - 2026-11-04: 호출부 결정 방식(구체 값·Secret 생성은 Sandbox 워커)과 계약 v2 반영. 갱신·초기화는 11B로 분할. v2 동기화로 `render_shared_deployment_v2` 사용.
+- 2026-11-05(D-16): 앱이 DB 연결을 단일 URL 변수로 받으면 `env_bindings`가 `connection_url_secret_ref` 출력을 가리킨다. Sandbox 워커는 접속 URL(`postgresql://사용자:비밀번호@호스트:포트/DB이름`, 비밀번호 URL 인코딩)을 만들어 Secret에 저장하고 앱에는 Secret 이름·키만 주입한다. 운영 배포와 같은 형식·키 이름을 쓴다(형식은 민서님과 확정). V2 반영 전에는 이 경로를 구현하지 않는다.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
