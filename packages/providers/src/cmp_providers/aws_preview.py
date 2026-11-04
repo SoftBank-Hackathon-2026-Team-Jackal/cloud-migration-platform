@@ -41,6 +41,10 @@ _RESOURCE_TYPES = {
     "aws_iam_role_policy_attachment": ("CLUSTER", "EKS IAM 정책 연결"),
     "aws_eks_cluster": ("CLUSTER", "EKS 클러스터"),
     "aws_eks_node_group": ("NODE", "관리형 노드 그룹"),
+    # Ticket 08 (E6): IRSA prerequisites for EBS CSI and AWS Load Balancer Controller.
+    "aws_iam_openid_connect_provider": ("CLUSTER", "IAM OIDC 공급자"),
+    "aws_eks_addon": ("CLUSTER", "EKS EBS CSI 애드온"),
+    "aws_iam_policy": ("CLUSTER", "Load Balancer Controller IAM 정책"),
 }
 _ACTIONS = {
     "create": "CREATE",
@@ -234,7 +238,10 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
         ValidationIssue(
             code="ALB_NOT_DEPLOYED",
             path="external_access",
-            message="ALB Controller·Ingress·TLS·공개 서비스는 이 Plan의 범위 밖입니다.",
+            message=(
+                "Load Balancer Controller IAM 역할만 준비합니다. Controller 설치·Ingress·TLS·"
+                "공개 서비스는 이 Plan의 범위 밖입니다(09)."
+            ),
         ),
         ValidationIssue(
             code="SINGLE_NAT_AZ",
