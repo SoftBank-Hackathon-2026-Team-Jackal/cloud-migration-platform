@@ -13,14 +13,15 @@ AV-010
 Blocked by: 09, Provisioning B-01(DONE)
 
 ## 작업 범위
-- 포함: `request_build`(현재는 `BuildContext`·`ImageBuilder` 함수 호출, D-12에 따라 Activity 호출로 교체 가능하게 감쌈), 플랫폼은 capabilities 아키텍처, `attempt_id` 규칙(`<run>-b<n>`), `(source_sha256, platform)` 재사용 기록, 실패 코드 분류표, Heartbeat
+- 포함: `request_build`(`BuildContext(resource_id 포함)`·`ImageBuilder.build(source_uri, source_version_id=...)` 함수 호출, D-12에 따라 호출 위치를 바꿀 수 있게 감쌈), 플랫폼은 capabilities 아키텍처, `attempt_id` 규칙(`<run>-b<n>`), `(resource_id, source_sha256, platform)` 재사용 기록, Build 결과 불변 저장과 `platforms[]` 정규화, 실패 코드 분류표, Heartbeat
 - 제외: Build 모듈 수정(민서님 영역)
 
 ## 수용 기준
 - [ ] 같은 소스 해시·플랫폼으로 두 번 요청하면 두 번째는 Build 모듈을 부르지 않고 같은 Digest를 쓴다.
 - [ ] `DOCKERFILE_MISSING`은 수정 대상, 아카이브 오류 코드는 재패키징, `ECR_*`는 재시도 후 사람 검토로 분류된다.
 - [ ] `EXTERNAL_COMMAND_FAILED`는 같은 `attempt_id`로 1회 재시도 후 빌드 실패로 처리된다.
-- [ ] 성공 결과의 `image_uri`가 `repo@sha256:`이고 `image_digest`와 일치한다.
+- [ ] 성공 결과의 `image_uri`가 `repo@sha256:`이고 `image_digest`와 일치하며, `source_ref`가 요청한 아카이브와 같다.
+- [ ] 저장한 Build 결과가 `BuildEvidenceV2`(`result_ref`, `platforms[]`) 형태로 바뀐다.
 - [ ] 자격 증명이 Activity 인자·결과·이력에 없다.
 
 ## 테스트 전략
@@ -31,7 +32,7 @@ Blocked by: 09, Provisioning B-01(DONE)
 fixture 아카이브로 Digest 고정 이미지 참조가 나오고 실패 코드별 다음 행동이 정해진다.
 
 ## 결정 대기
-- D-12 호출 방식(함수 vs Activity)·전체 시간 상한·`resource_id`·`source_version_id`
+- D-12 호출 Worker(권한 배치)·전체 시간 상한
 - D-04 빌드 실패 상세(급하지 않음)
 
 ## 관련 문서
@@ -40,7 +41,7 @@ fixture 아카이브로 Digest 고정 이미지 참조가 나오고 실패 코�
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 2026-11-04: capabilities 기반 플랫폼, 호출 방식 미정(D-12) 반영.
+- 2026-11-04: capabilities 기반 플랫폼, 호출 방식 미정(D-12) 반영. v2 동기화로 `resource_id`·`source_version_id`·새 반환 필드 반영.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

@@ -10,10 +10,10 @@ Sandbox 워커가 구체 환경 값을 정하고 공통 차트로 Sandbox를 띄
 AV-011, AV-016, AV-020
 
 ## 선행 작업
-Blocked by: 02B, 07, Provisioning 02·03(DONE)
+Blocked by: 02B, 07, Provisioning 공통 렌더 v2(#24, DONE)
 
 ## 작업 범위
-- 포함: 로컬 k3d Sandbox(`cmp-sandbox`), `prepare_sandbox`(Namespace·Release 이름 규칙, capabilities에서 StorageClass, DB 비밀번호 Secret 무작위 생성, `.env`와 예외 목록으로 앱 env Secret 생성, 변수별 `env_bindings`), 공통 모듈 v2 호출(구현 전에는 기존 DB·앱 Chart 함수), `helm upgrade --install --wait`, 준비 검사(Pod Ready·`SELECT version()`·SQL·헬스), Namespace 삭제 정리, 실행 ID·만료 라벨, 만료 정리 작업
+- 포함: 로컬 k3d Sandbox(`cmp-sandbox`), `prepare_sandbox`(Namespace·Release 이름 규칙, capabilities에서 StorageClass, DB 비밀번호 Secret 무작위 생성, `.env`와 예외 목록으로 앱 env Secret 생성, 변수별 `env_bindings`), `SharedDeploymentRequestV2` 구성과 `render_shared_deployment_v2` 호출, DB 이미지는 D-11 결과(그 전까지 공식 `postgres:16` Digest 고정값), `helm upgrade --install --wait`, 준비 검사(Pod Ready·`SELECT version()`·SQL·헬스), Namespace 삭제 정리, 실행 ID·만료 라벨, 만료 정리 작업
 - 제외: 제자리 갱신·데이터 초기화(11B), NetworkPolicy(13), 내부 Ingress(차트 미지원), GKE/EKS Sandbox
 
 ## 수용 기준
@@ -31,9 +31,8 @@ Blocked by: 02B, 07, Provisioning 02·03(DONE)
 fixture 요구사항·이미지로 Sandbox가 뜨고 준비 검사 후 정리까지 끝난다.
 
 ## 결정 대기
-- 공통 모듈 v2 구현 시점(그 전에는 기존 부품 사용)
 - D-08 Sandbox 기반 클러스터 준비 주체
-- D-11 대체 DB 이미지(NEEDS_REPLACEMENT일 때)
+- D-11 DB 이미지를 고르는 대상 구성 단계의 소유자
 
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
@@ -41,7 +40,7 @@ fixture 요구사항·이미지로 Sandbox가 뜨고 준비 검사 후 정리까
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 2026-11-04: 호출부 결정 방식(구체 값·Secret 생성은 Sandbox 워커)과 계약 v2 반영. 갱신·초기화는 11B로 분할.
+- 2026-11-04: 호출부 결정 방식(구체 값·Secret 생성은 Sandbox 워커)과 계약 v2 반영. 갱신·초기화는 11B로 분할. v2 동기화로 `render_shared_deployment_v2` 사용.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

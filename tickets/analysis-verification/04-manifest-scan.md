@@ -19,7 +19,7 @@ Blocked by: 01
 ## 수용 기준
 - [ ] ALB Ingress 어노테이션, IRSA 어노테이션, EBS StorageClass가 클라우드 의존으로 감지된다.
 - [ ] CPU·메모리·replica·probe·포트가 근거 경로와 함께 나온다.
-- [ ] PostgreSQL StatefulSet/Deployment의 이미지가 Digest(태그면 조회 필요 표시)와 함께 기록된다.
+- [ ] PostgreSQL StatefulSet/Deployment의 이미지가 Digest(태그면 조회 필요 표시)와 함께 분석 결과에 정보로 기록된다(요구사항에는 넣지 않음).
 - [ ] 사이드카·initContainer·CRD·모르는 어노테이션이 변환 못 할 항목으로 나오고, ACK 등 AWS 리소스 CR은 AWS 전용 서비스로 분류된다.
 - [ ] Secret은 이름·키만 읽고 `data` 값은 버린다.
 
@@ -36,7 +36,7 @@ fixture 매니페스트로 클라우드 의존 목록, 실행 요구, 원본 DB 
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 2026-11-04: 원본 DB 이미지 우선 방침(D-11)에 따라 이미지 기록 추가.
+- 2026-11-04: 원본 DB 이미지 기록 추가. v2 동기화로 요구사항이 아닌 `AnalysisReport` 정보로 변경(이미지 선택은 D-11).
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

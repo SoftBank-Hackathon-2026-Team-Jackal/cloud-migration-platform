@@ -4,7 +4,7 @@
 DRAFT — 사용자 검토 전
 
 ## 목적
-원본 AWS의 EKS·네트워크·IAM·CloudTrail을 읽기 전용으로 조회하고 Security Group·Ingress를 리소스 ID 기준 `network_intent`로 바꾼다.
+원본 AWS의 EKS·네트워크·IAM·CloudTrail을 읽기 전용으로 조회하고 Security Group·Ingress를 `RequirementsV2`의 `network_intent` 목록과 외부 진입 정보로 바꾼다.
 
 ## 관련 요구사항
 AV-005, AV-020
@@ -13,11 +13,12 @@ AV-005, AV-020
 Blocked by: 01, AWS 테스트 계정(외부)
 
 ## 작업 범위
-- 포함: `get_session(credential_ref)`(개발용 SSO 프로필), EKS·클러스터 리소스, VPC·Subnet·Route Table·SG, ELBv2, IRSA 역할 정책, CloudTrail LookupEvents, `network_intent`(exposure·flows·egress·source_cidrs) 변환, 스캔 시간 측정, 권한 목록 문서
+- 포함: `get_session(credential_ref)`(개발용 SSO 프로필), EKS·클러스터 리소스, VPC·Subnet·Route Table·SG, ELBv2, IRSA 역할 정책, CloudTrail LookupEvents, `network_intent` 목록(`{source_resource_id, destination_resource_id 또는 external_host, port, protocol}`) 변환, 외부 진입·원본 CIDR은 `AnalysisReport`에 기록, 스캔 시간 측정, 권한 목록 문서
 - 제외: 비밀 값 조회, S3 데이터 이벤트
 
 ## 수용 기준
-- [ ] `exposure`(443 → api-main:8080)와 `flows`(api-main → postgres-main:5432)가 리소스 ID 기준으로 나오고 원본 VPC CIDR이 기록된다.
+- [ ] api-main → postgres-main:5432가 `network_intent` 항목으로 나오고 `RequirementsV2` 검증을 통과한다.
+- [ ] 외부 진입(443 → api-main:8080, ALB·CloudFront 등 진입 서비스)과 원본 VPC CIDR이 `AnalysisReport`에 기록된다.
 - [ ] 대상 CIDR·Security Group ID 같은 환경 값이 intent에 들어가지 않는다.
 - [ ] 권한 거부는 재시도 없이 필요한 권한 이름과 함께 실패한다. 스로틀링만 재시도한다.
 - [ ] 비밀 값 조회 API를 호출하지 않는다(정책·코드 검사).
@@ -40,7 +41,7 @@ Blocked by: 01, AWS 테스트 계정(외부)
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 2026-11-04: intent 형식을 리소스 ID 기준 환경 중립 표현으로 확정.
+- 2026-11-04: v2 동기화로 intent 형식을 `RequirementsV2.network_intent`로 변경. 외부 진입 표현은 D-15.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

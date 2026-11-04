@@ -1,32 +1,36 @@
 # Implementation plan: 분석·매핑·Sandbox 검증
 
-[spec.md](spec.md)의 `AV-001`~`AV-021`을 Python 3.11, Pydantic v2, Temporal, Helm으로 구현하기 위한 **설계 제안**이다. 함수명·필드명·Activity 분할은 구현하며 확정한다. Provisioning과 맞물리는 계약은 민서님 계약 협의안 v2(2026-11-04), [Provision 입력 계약](../provisioning/input-contract.md), [공유 계약](../provisioning/shared-contracts.md), [앱 렌더링](../provisioning/application-rendering.md), [B-01](../../tickets/provisioning/b-01-image-build.md)을 따른다.
+[spec.md](spec.md)의 `AV-001`~`AV-021`을 Python 3.11, Pydantic v2, Temporal, Helm으로 구현하기 위한 **설계 제안**이다. 함수명·필드명·Activity 분할은 구현하며 확정한다. Provisioning과 맞물리는 계약은 main에 구현된 v2를 따른다: [Planning 입력 v2](../provisioning/input-contract-v2.md)(`cmp_contracts.provisioning_v2`), [공통 렌더 v2](../provisioning/onprem-shared-deployment.md)(`cmp_contracts.shared_deployment_v2`, `cmp_providers.shared_deployment_v2`), [B-01](../../tickets/provisioning/b-01-image-build.md)(`cmp_worker.image_build`). v1 문서(`input-contract.md`, `shared-contracts.md`)는 역사적 기록이다.
 
-## 0. 계약 협의 결과 요약 (2026-11-03~04, 민서)
+## 0. 계약 협의와 v2 구현 상태 (2026-11-04)
 
 | 항목 | 결정 | 상태 |
 | --- | --- | --- |
 | 공통 모듈 역할 | 렌더 전용. 구체 환경 값은 호출부가 정함. 차트는 Sandbox·Production 공유 | 합의 |
-| 모듈 입력 구조 | `resources[]`(id·kind) + ID 참조 연결. 첫 단계는 `APPLICATION`·`POSTGRESQL`만 | 민서 제안, 수용 |
-| 대상 정보 | 필수 Profile 대신 capabilities(아키텍처·StorageClass·이미지 접근). Profile은 선택 기본값 | 민서 제안, 수용 |
+| 렌더 입력 구조 | `SharedDeploymentRequestV2`: `resources[]`(id·kind) + ID 참조. `APPLICATION`·`POSTGRESQL`만 | 구현됨(#24) |
+| 요구사항 형식 | `RequirementsV2`(`resources[]`, `network_intent[]`). 분석이 이 모델로 출력 | 구현됨(#22) |
+| Planning 입력 | `PlanningRequestV2`(`analysis`·`builds[]`·`sandbox.validated_workloads`·`test_suite_ref`·`capabilities_ref`) | 구현됨(#22) |
+| 대상 정보 | 필수 Profile 대신 capabilities(아키텍처·StorageClass·이미지 접근). Profile은 선택 기본값 | 구현됨(#22) |
 | `.env` | 워커가 `.env`와 예외 목록을 처리해 변수별 `env_bindings`·Secret 생성. 렌더러에는 Secret 이름·키 또는 리소스 출력 참조만 | 수용 |
 | `config_ref` | 별도 수정 설정 파일 산출물이 있을 때만 | 수용 |
 | `source_ref` | 리소스별 S3 URI·SHA-256 | 수용 |
 | `network_intent` | 분석이 기록, 각 워커가 환경 정책으로 변환. Sandbox 전용 규칙은 별도 | 수용 |
 | 배포 후 테스트 | 배포 직후 준비 검사만, 테스트 묶음은 데이터 이전 후 | 수용 |
-| `test_suite_ref` | S3 SHA-256, `run_suite` 제공 | 승철 제안 |
-| DB 이미지 | 원본 이미지 우선(분석 확정), 대체 선택 주체 미정 | **결정 대기 D-11** |
-| Build 호출 방식·시간 상한·`source_version_id` | 미정 | **결정 대기 D-12** |
+| `test_suite_ref` | S3 SHA-256(`S3ArchiveRef`), `run_suite` 제공 | 계약 구현됨, `run_suite`는 승철 |
+| PostgreSQL 확장 | 비어 있지 않으면 Planning이 거절 | 구현됨. 지원은 D-14 |
+| DB 이미지 | 요구사항에 넣지 않음. 대상 구성 단계에서 선택·검증. 원본 이미지는 분석 결과에 정보로 | 방향 확정, 단계 소유자 **D-11** |
+| Build 모듈 | `BuildContext`에 `resource_id`, `build(source_uri, source_version_id=...)`, 반환 `image_digest`·`source_ref`·`log` | 구현됨. Worker 권한 배치·전체 시간 상한은 **D-12** |
+| 외부 진입 표현 | v2 `network_intent`는 출발지가 리소스여야 해서 인터넷 → 앱을 표현할 수 없음 | **결정 대기 D-15** |
 
 ## 1. Affected modules and contracts
 
 ```text
 packages/contracts/src/cmp_contracts/
   analysis.py          # 새로: AnalysisRequest, Evidence, MappingRow, UsageProfile, PrecheckReport,
-                       #       NetworkIntent, ResourceRequirement(APPLICATION/POSTGRESQL),
-                       #       Requirements, EnvExceptions, AnalysisReport
+                       #       ExternalEntry, EnvExceptions, AnalysisReport
+                       #       (요구사항은 provisioning_v2.RequirementsV2를 import해 사용)
   verification.py      # 새로: SourceArchive, BuildAttempt, SandboxAttempt, Verdict,
-                       #       ValidatedWorkload, SandboxVerification (Planning 입력 v2로 투영)
+                       #       SandboxVerification, PlanningRequestV2 투영 함수
 packages/agents/src/cmp_agents/      # 새로: 에이전트 본체 (Temporal 의존 없음)
   llm.py  mapper.py  tester.py  fixer.py  masking.py
 packages/scanners/src/cmp_scanners/  # 새로: 결정적 스캐너 (Temporal 의존 없음)
@@ -43,10 +47,11 @@ apps/worker/src/cmp_worker/
 tests/analysis/, tests/sandbox/, tests/fixtures/analysis/
 ```
 
-- 분석 결과 모델 이름은 `AnalysisReport`로 한다. Provisioning v1의 `cmp_contracts.provisioning.AnalysisResult`(Planning 입력용)와 혼동하지 않기 위해서다. Planning에 넘길 때 v2 입력 형태로 투영한다.
+- 분석 결과 모델 이름은 `AnalysisReport`로 한다. Provisioning v1의 `cmp_contracts.provisioning.AnalysisResult`와 혼동하지 않기 위해서다.
+- 요구사항은 새로 정의하지 않고 `cmp_contracts.provisioning_v2.RequirementsV2`(`ApplicationRequirement`, `PostgresRequirement`, `NetworkIntent`)로 출력한다. Planning에는 `PlanningRequestV2` 형태로 투영한다.
 - Enum 값은 대문자로 통일한다(`DIRECT`, `PROCEED`, `SANDBOX_VERIFIED`, `PASSED`, `CLEANED`).
 - 새 Python 패키지는 `pyproject.toml`의 `packages`·`package-dir`에 등록한다.
-- 기존 `cmp_contracts.provisioning` v1 모델은 **수정하지 않는다**. v2 전환은 민서와 합의한 뒤 공동 작업으로 한다(§9).
+- Provisioning 모델(`provisioning`, `provisioning_v2`, `shared_deployment*`)은 **수정하지 않는다**. 부족한 점은 민서에게 요청한다.
 - Queue: 기존 `analysis`를 쓰고, Sandbox는 새 `sandbox` Queue를 제안한다. `queues.py`·`run.py`·`run_all.py`·Workflow는 공유 파일이라 **Q-01 작은 PR로 먼저** 올린다(D-05).
 
 ## 2. Design and data flow
@@ -75,7 +80,7 @@ MigrationWorkflow (migration)
  │   3회 초과 → 사람 검토 Signal 대기
  │   통과 → publish_final_report (최종 AnalysisReport·요구사항 버전 발행)
  │   finally: teardown_sandbox
- └─ AnalysisReport + Requirements + SandboxVerification 참조 → Planning 입력 조립(민서)
+ └─ AnalysisReport + RequirementsV2 + SandboxVerification 참조 → PlanningRequestV2 조립·prepare_plan_v2(민서)
 ```
 
 - 자식 Workflow로 분리하는 이유: 독립 취소·정리(finally teardown), 시도별 이력 구분, 사람 검토 대기. temporal-flow.md §7의 분리 근거(별도 취소·정리)에 해당한다.
@@ -94,51 +99,48 @@ MigrationWorkflow (migration)
 | 스캐너 | 방식 | 결과 |
 | --- | --- | --- |
 | `code_python` | 표준 `ast`: `boto3.client/resource(...)` 호출과 메서드, `os.environ`/`getenv`, `psycopg`/`sqlalchemy` import·URL, `requests`/`httpx` 외부 호스트, 마이그레이션의 `CREATE EXTENSION` | 호출 지점 목록(파일·줄) |
-| `manifests` | YAML 파싱, Helm 차트는 `helm template` 후 | 리소스별 클라우드 의존, 원본 DB 이미지 Digest |
+| `manifests` | YAML 파싱, Helm 차트는 `helm template` 후 | 리소스별 클라우드 의존, 원본 DB 이미지 Digest(정보) |
 | `aws_infra` | boto3 읽기 전용(EKS, EC2 VPC/Subnet/RouteTable/SG, ELBv2, IAM role policy, CloudTrail LookupEvents) | 리소스 설정 |
-| `network` | SG·Ingress·코드 외부 호출 → `NetworkIntent` | 통신 의도 |
-| `profile` | 위 결과 병합 + Dockerfile 파싱(`COPY`/`ADD` 경로 존재 확인) → `UsageProfile`, `Requirements` | 요구사항 |
+| `network` | SG·Ingress·코드 외부 호출 → `NetworkIntent` 목록 + 외부 진입·원본 CIDR | 통신 의도 |
+| `profile` | 위 결과 병합 + Dockerfile 파싱(`COPY`/`ADD` 경로 존재 확인) → `UsageProfile`, `RequirementsV2` | 요구사항 |
 | `precheck` | 코드·매니페스트에서 보이는 단서(세션 기능, 확장, 헬스체크, 노출 주소) | `PrecheckReport` |
 
 교차 해석: 코드 + CloudTrail 일치 = 확실히 사용, 코드에만 = 드문 경로, 권한에만 = 미사용 권한(거버넌스 항목). CloudTrail은 S3 데이터 이벤트를 기본 기록하지 않는다는 한계를 결과에 표시한다.
 
 자격 증명은 `get_session(credential_ref)` 인터페이스 뒤에 둔다. 개발 중에는 SSO 프로필, 이후 환경 연결(민서)이 발급한 참조로 교체한다. 개발용 역할에도 스캔용 정책(읽기 전용, 비밀 값 조회 금지)을 그대로 붙이고 그 정책을 권한 목록으로 전달한다.
 
-`network_intent` 형식(환경 중립, 리소스 ID 기준):
+요구사항 형식은 `RequirementsV2`(구현 기준)다:
 
 ```yaml
-network_intent:
-  exposure:   [{ protocol: HTTPS, port: 443, target: api-main, target_port: 8080 }]
-  flows:      [{ from: api-main, to: postgres-main, port: 5432 }]
-  egress:     [{ host: api.example.com, port: 443, purpose: "외부 API", source_service: KEEP }]
-  source_cidrs: [10.0.0.0/16]   # 정보용
-```
-
-요구사항 형식(공통 모듈 v2 입력과 같은 id·kind):
-
-```yaml
+contract_version: "2"
 resources:
   - id: postgres-main
     kind: POSTGRESQL
     version: "16"
-    extensions: []
-    extensions_created_by_app: true      # 마이그레이션이 CREATE EXTENSION을 하는지
-    image: { uri: "<원본 이미지>@sha256:...", status: CONFIRMED }  # 또는 NEEDS_REPLACEMENT
+    extensions: []          # 비어 있지 않으면 Planning이 거절(D-14)
     database: { name: appdb, username: appuser }
-    resources: { cpu_millicores: 250, memory_mib: 512 }
-    storage: { size_gib: 5 }
+    cpu_millicores: 250
+    memory_mib: 512
+    storage_gib: 5
   - id: api-main
     kind: APPLICATION
     replicas: 1
-    resources: { cpu_millicores: 250, memory_mib: 256 }
+    cpu_millicores: 250
+    memory_mib: 256
     port: 8080
     health_path: /health
-    env_links:
+    env_bindings:           # DB 연결만. 다른 변수는 .env 참조와 예외 목록으로 처리
       DB_HOST: { resource_id: postgres-main, output: host }
       DB_PASSWORD: { resource_id: postgres-main, output: password_secret_ref }
+network_intent:
+  - { source_resource_id: api-main, destination_resource_id: postgres-main, port: 5432, protocol: TCP }
+  - { source_resource_id: api-main, external_host: api.example.com, port: 443, protocol: TCP }
 ```
 
-DB 이미지 확정 규칙: 원본 이미지의 manifest가 capabilities 아키텍처를 지원하면 `CONFIRMED`, 아니면(또는 RDS라 이미지가 없으면) `NEEDS_REPLACEMENT`로 두고 대체 선택을 요청한다(D-11).
+- 요구사항 JSON은 저장한 **정확한 바이트**의 SHA-256을 `requirements_ref`로 쓴다. 키 순서 등 직렬화를 고정해 같은 내용이면 같은 해시가 나오게 한다.
+- v2 intent에 자리가 없는 정보는 `AnalysisReport`에 둔다: 외부 진입(`{protocol: HTTPS, port: 443, target_resource_id, target_port}`), 원본 CIDR, 외부 목적지별 `MIGRATE`/`KEEP` 구분. 외부 진입을 v2 intent로 옮길지는 D-15.
+- 원본 DB 이미지 Digest는 `AnalysisReport`에 정보로 남기고, 요구사항에는 넣지 않는다(이미지 선택은 대상 구성 단계, D-11).
+- 앱이 확장을 요구하면 Planning이 거절하므로, 분석 단계에서 해당 기능을 `BLOCK`으로 보고한다.
 
 ### 2.3 매핑 (AV-007, AV-008)
 
@@ -176,20 +178,21 @@ def build_archive(root: Path, files: list[Path]) -> tuple[bytes, str]:
 context = BuildContext.model_validate(
     {
         "migration_id": migration_id,
+        "resource_id": resource_id,  # APPLICATION ID
         "attempt_id": f"{run_id}-b{n}",  # 코드 변경마다 새 n, 같은 빌드 재시도는 같은 n
         "ecr_repository": settings.ecr_repository,
         "platform": capabilities.architecture,  # 대상 capabilities에서 결정
         "log_bucket": settings.build_log_bucket,
     }
 )
-outcome = ImageBuilder(context).build(
-    source_uri
-)  # 현재 B-01 방식(함수). D-12에 따라 Activity 호출로 바뀔 수 있음
+# B-01 구현 기준 함수 호출. 반환: image_uri, image_digest, source_ref{uri, version_id, sha256}, log
+outcome = ImageBuilder(context).build(source_uri, source_version_id=None)
 ```
 
-- **호출 방식(D-12):** B-01은 루프가 함수를 직접 호출하는 설계라, 그대로면 Sandbox 워커에 Docker·ECR push 권한이 필요하다. `build` Queue의 `prepare_image` 스캐폴드를 실제 빌드 Activity로 바꾸는 방안을 민서님께 질문했다. 결정 전에는 `request_build` 뒤에 감춰 어느 쪽이든 바꿀 수 있게 한다.
+- **호출 위치(D-12):** B-01은 루프가 함수를 직접 호출하는 설계라, 그대로면 호출하는 Worker에 Docker·ECR push 권한이 필요하다. `build` Queue의 `prepare_image` 스캐폴드를 실제 빌드 Activity로 바꾸는 방안을 질문했다. 결정 전에는 `request_build` 뒤에 감춰 어느 쪽이든 바꿀 수 있게 한다.
+- **결과 저장:** Planning의 `builds[]`는 `BuildOutcome`을 그대로 받지 않는다. 결과를 불변 기록으로 저장해 `result_ref`를 발급하고, `platform`을 `platforms[]`로 정규화해 넘긴다(저장 위치는 D-02).
 - **시간 상한:** 외부 명령마다 600초가 기본이고 전체 상한은 없다. Activity timeout은 D-12 답변으로 정한다.
-- **재사용은 호출 측에서:** `(source_sha256, platform) → BuildOutcome`을 실행 기록에 남기고, 같은 키면 Build 모듈을 부르지 않는다.
+- **재사용은 호출 측에서:** `(resource_id, source_sha256, platform) → BuildOutcome`을 실행 기록에 남기고, 같은 키면 Build 모듈을 부르지 않는다.
 - 실패 코드 분류(B-01 구현 기준):
 
 | 코드 | 분류 | 처리 |
@@ -213,10 +216,10 @@ outcome = ImageBuilder(context).build(
 | DB 비밀번호 Secret | `<namespace>-<db id>-auth`, 무작위 생성. 재시도·갱신 때 다시 만들지 않음 |
 | 앱 env Secret | `<namespace>-<app id>-env`. `.env`에서 예외 목록의 제외 변수와 DB 연결 변수를 뺀 나머지, 대체 변수는 대체값으로 |
 | `env_bindings` | DB 변수는 `{resource_id, output}`, 나머지는 `{secret_ref: {name, key}}` |
-| DB 이미지 | 요구사항의 확정 이미지(`CONFIRMED`). `NEEDS_REPLACEMENT`면 D-11 결과를 기다림 |
+| DB 이미지 | 대상 구성 단계(D-11)가 정한 Digest. 그 전까지 개발은 공식 `postgres:16` Digest 고정값 |
 | NetworkPolicy | §2.7 |
 
-공통 모듈 v2(`resources[]`)를 `environment: SANDBOX`로 호출하고, 반환된 Helm Values로 `helm upgrade --install --wait`을 실행한다. 렌더 모듈 구현 전에는 기존 부품(`PostgresChartValues` + `infra/helm/postgres`, `prepare/resolve/render_application` + `infra/helm/application`)으로 같은 결과를 만든다.
+`SharedDeploymentRequestV2`(`environment: SANDBOX`)를 만들어 `render_shared_deployment_v2(payload, database_chart_dir=infra/helm/postgres, application_chart_dir=infra/helm/application)`로 렌더하고, 반환된 `SharedDeploymentResultV2`의 Values로 `helm upgrade --install --wait`을 실행한다. DB 리소스의 `database.password_secret_ref`와 앱의 `{secret_ref: {name, key}}`는 워커가 미리 만든 Secret을 가리킨다.
 
 갱신 규칙:
 
@@ -239,8 +242,9 @@ outcome = ImageBuilder(context).build(
 
 NetworkPolicy(Sandbox 워커 생성):
 - Namespace 기본 차단(ingress·egress).
-- `flows` 허용(리소스 라벨 기준), DNS(kube-dns) 허용.
-- 외부 egress는 출구 프록시로만 허용. 프록시 허용 목록 = intent `egress` + 매핑에서 `KEEP`인 서비스 주소.
+- `network_intent`의 리소스 간 항목(`destination_resource_id`) 허용(리소스 라벨 기준), DNS(kube-dns) 허용.
+- 외부 진입(`AnalysisReport`의 진입 정보)은 테스트 실행기·Ingress Controller에서 앱 포트로의 접근만 허용.
+- 외부 egress는 출구 프록시로만 허용. 프록시 허용 목록 = intent의 `external_host` 항목 + 매핑에서 `KEEP`인 서비스 주소.
 - `MIGRATE` 서비스의 원본 주소(원본 DB, 원본 ALB 등)와 목록 밖 호스트는 차단·기록 → 판정 실패 → `SPEC`(의도 누락)으로 분류.
 
 테스트:
@@ -303,6 +307,14 @@ class EnvExceptions(Contract):  # mapping_ref가 가리키는 내용
     missing: list[str]  # 코드가 읽지만 .env에 없는 변수
 
 
+class ExternalEntry(Contract):  # v2 network_intent에 자리가 없는 외부 진입(D-15)
+    protocol: Literal["HTTP", "HTTPS"]
+    port: int
+    target_resource_id: ResourceId
+    target_port: int
+    source_service: str  # 예: ALB, CloudFront (정보)
+
+
 class AnalysisReport(Contract):  # Provisioning v1 AnalysisResult와 별개
     migration_id: str
     ref: VersionRef  # Sandbox 통과 시점 버전
@@ -311,31 +323,27 @@ class AnalysisReport(Contract):  # Provisioning v1 AnalysisResult와 별개
     usage_profile: UsageProfile
     mapping: list[MappingRow]
     precheck: PrecheckReport
+    external_entries: list[ExternalEntry]
+    source_cidrs: list[str]  # 정보용
+    source_db_images: dict[ResourceId, str]  # 원본 DB 이미지 Digest(정보, D-11 참고용)
     unmapped_items: list[str]
     unverified_risks: list[str]
 
 
-class ValidatedWorkload(Contract):
-    resource_id: str
-    build_ref: VersionRef
-    image_digest: str
-    platform: str
-    source_sha256: str
-
-
-class SandboxVerification(Contract):  # Planning 입력 v2의 sandbox 블록으로 투영
+class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvidenceV2로 투영
     migration_id: str
     ref: VersionRef
     status: Literal["PASSED", "FAILED", "NEEDS_REVIEW", "STOPPED_RENDER"]
-    validated_workloads: list[ValidatedWorkload]
+    validated_workloads: list[ValidatedWorkloadV2]  # provisioning_v2 모델 재사용
     requirements_ref: ContentRef
     report_ref: ContentRef
-    test_suite_ref: S3ContentRef  # uri, version_id(null 허용), sha256
+    test_suite_ref: S3ArchiveRef  # provisioning_v2 모델 재사용
     attempts: list[SandboxAttemptSummary]
     cleanup_status: Literal["CLEANED", "FAILED", "PENDING"]
 ```
 
-Planning v2 입력과의 대응: `analysis.result_ref` ← `AnalysisReport.ref`, `analysis.requirements_ref` ← 요구사항 참조, `analysis.source_refs` ← 리소스별 최종 소스 아카이브, `sandbox.*` ← `SandboxVerification`, `environment.mapping_ref` ← `EnvExceptions` 참조. 대조 방식은 Planning(민서)이 정한다.
+- `ResourceId`, `S3ArchiveRef`, `ValidatedWorkloadV2`, `RequirementsV2`는 `cmp_contracts.provisioning_v2`에서 import한다.
+- Planning 입력 v2(`PlanningRequestV2`)로의 투영: `analysis.result_ref` ← `AnalysisReport.ref`, `analysis.requirements_ref` ← 요구사항 JSON 바이트 참조(SHA-256), `analysis.source_refs` ← APPLICATION ID별 최종 소스 아카이브, `builds[]` ← 저장된 Build 결과(`platforms[]`로 정규화), `sandbox` ← `SandboxVerification`(`PASSED`일 때만, 내부 상태 `NEEDS_REVIEW`·`STOPPED_RENDER`는 넘기지 않음), `environment.mapping_ref` ← `EnvExceptions` 참조. 대조는 `prepare_plan_v2`(민서)가 한다.
 
 ## 4. Activity 경계와 실행 설정
 
@@ -367,7 +375,7 @@ Planning v2 입력과의 대응: `analysis.result_ref` ← `AnalysisReport.ref`,
 | LLM 출력 스키마 오류 | 2회 재시도 후 사람 검토 |
 | 근거 확인 실패 | 해당 행 `UNVERIFIED`, 진행은 처리 규칙에 따름 |
 | 필수 기능 대응 없음 | 분석 단계에서 차단, Sandbox로 가지 않음 |
-| DB 이미지 `NEEDS_REPLACEMENT` | D-11 결과 전까지 Sandbox 진입 대기 |
+| 확장 요구가 있는 앱 | 분석에서 `BLOCK` 보고(Planning이 거절하므로). D-14 이후 재검토 |
 | 빌드 실패 | §2.5 분류 |
 | Helm 적용 실패 | Release 상태 조회 → 같은 Values로 재시도, 바꿀 수 없는 필드면 재생성 분기 |
 | 준비 검사 실패 | 테스트 없이 실패 판정, 원인 분류로 |
@@ -428,15 +436,16 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 | ID | 항목 | 현재 방향 | 담당 |
 | --- | --- | --- | --- |
 | D-01 | LLM 공급자·모델·전송 범위 | ADR-004로 기록. 근거 주변 코드 조각만 전송 | 승철·팀 |
-| D-02 | Planning 입력 v2 확정, `*_ref` 저장 위치 | 민서 협의안 v2 기준으로 구현, 확정 대기 | 민서·승철 |
+| D-02 | `*_ref` 저장 위치, Build 결과 저장·정규화 Activity 담당 | Planning 입력 v2는 #22로 확정. 저장 경계만 남음 | 민서·승철 |
 | D-04 | Build 실패 상세 | 급하지 않음 | 민서 |
 | D-05 | `sandbox` Queue 추가 | Q-01 작은 PR로 먼저 | 승철(민서 공유) |
 | D-06 | 소스·테스트 묶음 버킷 소유·정리 규칙 | 플랫폼 소유 버킷, 실행 종료 후 N일 | 민서·승철 |
-| D-07 | 데모 앱 언어·DB 형태·위치 | 스캐너 범위 결정 | 소울 |
+| D-07 | 첫 사이클 지원 언어 | 승철이 결정(데모 앱은 그 언어에 맞춤) | 승철 |
 | D-08 | Sandbox 기반 클러스터 준비 주체·시점 | | 민서·승철 |
 | D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | | 승철·소울 |
-| D-10 | Production 테스트 묶음 실행 시점·데이터 정리 | 데이터 이전 후·트래픽 전환 전(민서 협의안) | 민서·소울·상헌 |
-| D-11 | 원본 DB 이미지를 못 쓸 때 대체 Digest 선택 주체 | 원본 이미지 우선은 분석이 확정 | 민서 |
-| D-12 | Build 호출 방식(함수 vs Activity)·전체 시간 상한·`resource_id`·`source_version_id` | Activity 등록 제안 | 민서 |
+| D-10 | Production 테스트 묶음 실행 시점·데이터 정리 | 데이터 이전 후·트래픽 전환 전 | 민서·소울·상헌 |
+| D-11 | DB 이미지를 고르는 "대상 구성 단계"의 소유자, Sandbox·Production 공유 방식 | 요구사항엔 이미지 없음(#22). 원본 이미지는 분석 결과에 정보로 | 민서 |
+| D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한 | `resource_id`·`source_version_id`는 구현됨. 함수 호출 유지 | 민서 |
 | D-13 | DB 내부 상태 사전 점검 담당(기본 키·시퀀스·복제 설정) | Data Migration 쪽 제안 | 소울 |
-| D-14 | 확장을 앱이 만들지 않을 때 `CREATE EXTENSION` 실행 주체 | 데모 앱 확인 후 | 민서 |
+| D-14 | PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체 | 현재 확장 요구는 Planning이 거절 | 민서 |
+| D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법 | 그 전까지 `AnalysisReport.external_entries`에 기록 | 민서 |

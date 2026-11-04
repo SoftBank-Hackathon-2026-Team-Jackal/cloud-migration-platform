@@ -10,14 +10,14 @@ DRAFT — 사용자 검토 전
 AV-018
 
 ## 선행 작업
-Blocked by: 14, D-02(Planning 입력 v2 확정)
+Blocked by: 14, D-02(저장 경계)
 
 ## 작업 범위
-- 포함: `AnalysisReport`·요구사항·`SandboxVerification` → Planning v2(`analysis.result_ref`·`requirements_ref`·`source_refs`, `builds[]`, `sandbox.validated_workloads`·`test_suite_ref`, `environment.mapping_ref`) 투영, 검증 후 대상·요구사항 변경 시 무효 처리, `run_suite` 사용 예시 문서
+- 포함: `AnalysisReport`·`RequirementsV2` 바이트·저장된 Build 결과·`SandboxVerification` → `PlanningRequestV2` 투영(`analysis`, `builds[]`, `sandbox`, `environment.mapping_ref`), 검증 후 대상·요구사항 변경 시 무효 처리, `run_suite` 사용 예시 문서
 - 제외: Planning·Preview 구현과 대조 규칙(민서님), Production 테스트 실행 시점(D-10)
 
 ## 수용 기준
-- [ ] 투영 결과가 민서님 Planning v2 입력 검증을 통과한다.
+- [ ] 투영 결과가 `prepare_plan_v2(envelope, requirements_bytes=...)` 검증을 통과한다.
 - [ ] 리소스별 Build Digest와 `validated_workloads`의 Digest가 같다.
 - [ ] 검증 뒤 대상 선택 버전이 바뀌면 이전 검증을 넘기지 않는다.
 - [ ] `run_suite`를 다른 `base_url`·인증 참조로 실행하는 예시와, 배포 직후에는 준비 검사만·데이터 이전 후 테스트 묶음 실행이라는 순서가 문서화된다.
@@ -30,7 +30,7 @@ Blocked by: 14, D-02(Planning 입력 v2 확정)
 통과한 검증 결과로 Planning이 계획 초안을 만든다.
 
 ## 결정 대기
-- D-02 Planning 입력 v2 확정·`*_ref` 저장 위치
+- D-02 `*_ref` 저장 위치·Build 결과 저장 Activity 담당
 - D-10 Production 테스트 실행 시점·데이터 정리
 
 ## 관련 문서
@@ -39,7 +39,7 @@ Blocked by: 14, D-02(Planning 입력 v2 확정)
 - [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
-- 2026-11-04: 계약 협의안 v2 형식과 배포 후 테스트 시점 반영.
+- 2026-11-04: 계약 협의안 v2 형식과 배포 후 테스트 시점 반영. v2 동기화로 투영 대상을 `PlanningRequestV2`·`prepare_plan_v2`로 확정.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

@@ -1,6 +1,6 @@
 # 분석·매핑·Sandbox 검증 기능 요구사항
 
-담당: 박승철 · 기준일: 2026-11-04 · 상태: 초안(사용자 검토 전)
+담당: 박승철 · 기준일: 2026-11-04(v2 구현 동기화) · 상태: 초안(사용자 검토 전)
 
 ## 1. 기능 개요와 목적
 
@@ -19,7 +19,7 @@
 
 핵심 원칙: **등급은 서비스가 아니라 앱의 사용 방식이 정한다. AI가 판단하고 Sandbox가 증명한다. 판정은 AI가 아니라 객관적 신호(테스트 결과·호출 기록)가 내린다.**
 
-이 문서는 기능이 충족할 조건과 수용 기준을 정의한다. 필드명·함수명·Activity 분할은 [plan.md](plan.md)의 제안이다. Provisioning과의 계약은 민서님과의 계약 협의안 v2(2026-11-04)를 기준으로 하며 합의 후 확정한다. 제품 범위는 [제품 정책](../../docs/product/policies.md), 책임은 [도메인 경계](../../docs/architecture/domain-boundaries.md), 빌드·Digest 정책은 [ADR-003](../../docs/decisions/ADR-003.md)을 따른다.
+이 문서는 기능이 충족할 조건과 수용 기준을 정의한다. 필드명·함수명·Activity 분할은 [plan.md](plan.md)의 제안이다. Provisioning과의 계약은 main에 구현된 v2를 따른다: [Planning 입력 v2](../provisioning/input-contract-v2.md)(`cmp_contracts.provisioning_v2`, 요구사항 형식 `RequirementsV2` 포함), [공통 렌더 v2](../provisioning/onprem-shared-deployment.md)(`cmp_contracts.shared_deployment_v2`), [B-01](../../tickets/provisioning/b-01-image-build.md). 제품 범위는 [제품 정책](../../docs/product/policies.md), 책임은 [도메인 경계](../../docs/architecture/domain-boundaries.md), 빌드·Digest 정책은 [ADR-003](../../docs/decisions/ADR-003.md)을 따른다.
 
 ## 2. 적용 범위와 전제
 
@@ -36,9 +36,9 @@
 | --- | --- | --- |
 | 소스 | 클론·커밋 고정·소스 묶음·S3 업로드 | — |
 | 빌드 | Build 모듈 호출, 결과 해석, 수정·재빌드 루프 | Build 모듈(S3 URI → build/push → Digest) |
-| 요구사항 | 환경 중립 요구사항(`resources[]`·ID 연결·PostgreSQL 버전·확장·`network_intent`), 환경변수 예외 목록 | 요구사항을 대상 구성으로 해석 |
-| DB 이미지 | 원본 DB 이미지 Digest를 찾고, capabilities 아키텍처로 실행 가능하면 요구사항에 확정 | 원본 이미지를 못 쓸 때 대체 Digest 선택(결정 대기 D-11) |
-| 렌더 | 공통 모듈 호출 | 공통 모듈(렌더 전용, 리소스 종류별 렌더러) |
+| 요구사항 | `RequirementsV2` 형식의 환경 중립 요구사항(`resources[]`·ID 연결·PostgreSQL 버전·확장·`network_intent`), 환경변수 예외 목록 | 요구사항 형식(`RequirementsV2`)과 대상 구성 해석 |
+| DB 이미지 | 원본 DB 이미지 Digest를 `AnalysisReport`에 정보로 기록 | 대상 구성 단계에서 요구를 만족하는 Digest 선택·검증(그 단계의 소유자는 D-11) |
+| 렌더 | 공통 렌더 v2(`render_shared_deployment_v2`) 호출 | 공통 렌더 v2(렌더 전용, 리소스 종류별 렌더러) |
 | **SANDBOX 구체 값** | Namespace, Release 이름, StorageClass(capabilities에서), DB 비밀번호·앱 env Secret 생성, 변수별 `env_bindings`, NetworkPolicy | — |
 | 적용·정리 | **SANDBOX**: `helm upgrade --install`·정리 | **PRODUCTION**: 승인 후 적용 |
 | 검사 | 앱 기능 테스트 묶음과 실행기(`run_suite`), Sandbox 판정 | 배포 직후 준비 검사, 데이터 이전 후 테스트 묶음 실행 시점 결정(소울·상헌과) |
@@ -62,7 +62,7 @@
 | 출력 | 받는 쪽 |
 | --- | --- |
 | 분석 결과(`AnalysisReport`): 사용 프로필, 매핑 행, 사전 점검, 변환 못 한 항목, 미검증 위험 | Planning(Preview 경고), 상헌(승인 화면), 소울(코드에서 보이는 DB 사용 단서) |
-| 요구사항: `resources[]`(id·kind), 리소스 간 ID 연결, PostgreSQL 버전·확장·확정 DB 이미지, `network_intent` | Planning(`requirements_ref`) |
+| 요구사항: `RequirementsV2`(`resources[]`, 리소스 간 ID 연결, PostgreSQL 버전·확장, `network_intent`) | Planning(`requirements_ref`, 정확한 바이트의 SHA-256) |
 | 리소스별 소스 참조(`source_refs`): S3 URI·SHA-256 | Planning |
 | 환경변수 예외 목록(`mapping_ref`): 원본 환경에 묶인 변수의 제외·대체, 누락 변수 | Planning, Sandbox·Production 워커 |
 | Sandbox 검증 결과: 상태, `validated_workloads`(리소스별 Build 참조·Digest·플랫폼·소스 SHA-256), 요구사항 참조, 보고서, 테스트 묶음 참조, 정리 상태 | Planning |
@@ -100,21 +100,23 @@
 #### AV-004 — 매니페스트·클러스터 리소스 스캔
 
 - Deployment(이미지·자원·replica·probe·포트), Service, Ingress(ALB 어노테이션), ServiceAccount(IRSA), PVC·StorageClass, ConfigMap·Secret 참조를 읽는다. 저장소에 없으면 클러스터에서 읽고, Helm 차트는 렌더 후 읽는다.
-- PostgreSQL이 Pod로 실행 중이면 **원본 DB 이미지 Digest**를 기록한다.
+- PostgreSQL이 Pod로 실행 중이면 **원본 DB 이미지 Digest**를 `AnalysisReport`에 정보로 기록한다(대상 구성 단계의 이미지 선택에 참고).
 - ALB Ingress 어노테이션, IRSA 어노테이션, EBS StorageClass를 클라우드 의존 항목으로 감지한다.
 - 사이드카·initContainer·CRD·모르는 어노테이션은 "변환 못 한 항목"으로 낸다. ACK 등 AWS 리소스를 나타내는 CR은 카탈로그에서 AWS 전용 서비스로 분류한다.
 
 #### AV-005 — 인프라·네트워크 스캔과 통신 의도
 
 - VPC·Subnet·Route Table·Security Group, ALB Listener·Target Group, IRSA 역할 정책, CloudTrail 관리 이벤트를 읽기 전용으로 조회한다.
-- Security Group·Ingress·코드의 외부 호출을 **`network_intent`**로 바꾼다. 형식은 리소스 ID 기준의 환경 중립 표현이다: `exposure`(외부 진입), `flows`(리소스 간 통신·포트), `egress`(외부 목적지·포트·용도), `source_cidrs`(원본 대역, 정보용).
+- Security Group·Ingress·코드의 외부 호출을 **`network_intent`**로 바꾼다. 형식은 `RequirementsV2`의 목록이다: `{source_resource_id, destination_resource_id 또는 external_host, port, protocol}`. 리소스 간 통신은 `destination_resource_id`, 외부 목적지는 `external_host`로 쓴다.
+- 외부 진입(인터넷 → 앱 포트·TLS)과 원본 CIDR은 v2 intent에 자리가 없으므로 `AnalysisReport`에 기록한다(외부 진입 표현은 D-15).
 - 대상 CIDR·NAT·LB 종류·Security Group ID는 넣지 않는다.
 - 권한 거부는 필요한 권한 이름과 함께 실패로 반환한다. 코드 스캔과 병렬로 실행한다.
 
 #### AV-006 — 요구사항·사용 프로필과 사전 점검
 
-- 요구사항을 **`resources[]`(id·kind)와 ID 참조 연결**로 만든다. 첫 사이클의 kind는 `APPLICATION`·`POSTGRESQL`이다. 환경변수의 DB 연결은 `{resource_id, output}` 참조로 표현한다.
-- PostgreSQL 리소스에는 버전·확장 요구와 DB 이미지를 기록한다. 원본 이미지가 capabilities 아키텍처에서 실행 가능하면 그 Digest로 확정하고, 아니면 "대체 이미지 필요"로 표시한다(D-11).
+- 요구사항을 **`cmp_contracts.provisioning_v2.RequirementsV2`** 형식으로 만든다(새 모델을 정의하지 않는다). kind는 `APPLICATION`·`POSTGRESQL`이고, 앱의 DB 연결은 `env_bindings`의 `{resource_id, output}` 참조로 표현한다. DB 외 환경변수는 요구사항에 넣지 않고 `.env` 참조와 예외 목록으로 처리한다.
+- PostgreSQL 리소스에는 버전(`"16"`)·확장·DB 이름·사용자·자원·`storage_gib`를 기록한다. DB 이미지는 요구사항에 넣지 않는다.
+- 앱이 PostgreSQL 확장을 요구하면 현재 Planning이 거절하므로, 분석 단계에서 해당 기능을 차단 사유로 보고한다(확장 지원은 D-14).
 - 기능별 사용 방식·호출 지점·근거, 상태 목록(DB·파일·세션·큐·백그라운드)을 담은 사용 프로필을 만든다.
 - Dockerfile 유무·위치와 `COPY`·`ADD` 경로 누락(빌드 컨텍스트 점검)을 기록한다.
 - 사전 점검은 **코드·매니페스트에서 보이는 단서**(세션 단위 기능, 확장 사용, 헬스체크 경로, 노출된 클라우드 기본 주소)를 낸다. 기본 키 없는 테이블·시퀀스·`wal_level` 등 DB 내부 상태 점검은 Data Migration(소울)과 담당을 정한다.
@@ -147,17 +149,17 @@
 
 #### AV-010 — Build 모듈 호출과 결과 해석
 
-- 공통 Build 모듈에 작업 ID·리소스 ID·시도 ID·S3 URI·대상 플랫폼(capabilities 아키텍처)으로 빌드를 요청하고 Digest 고정 이미지 참조와 로그 위치를 받는다.
+- 공통 Build 모듈(`ImageBuilder(BuildContext).build(source_uri, source_version_id=...)`)에 작업 ID·리소스 ID·시도 ID·S3 URI·대상 플랫폼(capabilities 아키텍처)으로 빌드를 요청하고 `image_uri`·`image_digest`·`source_ref`·로그 위치를 받는다.
 - 같은 `source_sha256` + 플랫폼으로 이미 성공한 빌드가 있으면 다시 요청하지 않고 기존 Digest를 쓴다.
 - 실패 코드를 **수정 대상(Fixer) / 재패키징 / 재시도 / 사람 검토**로 분류한다.
-- Sandbox 안에서 빌드하지 않는다(ADR-003). 호출 방식(함수 직접 호출 vs `build` Queue Activity)은 결정 대기(D-12).
+- Sandbox 안에서 빌드하지 않는다(ADR-003). 현재 호출은 함수 직접 호출이며, Worker 권한 배치와 전체 시간 상한은 결정 대기(D-12).
 
 ### Sandbox 검증
 
 #### AV-011 — Sandbox 구성·적용과 갱신
 
-- Sandbox 워커가 구체 값을 정한다: Namespace·Release 이름(실행 ID 기준 규칙), StorageClass(capabilities에서 선택), DB 비밀번호 Secret(무작위 생성), 앱 env Secret(`.env`에서 예외 목록의 제외 변수와 DB 변수를 뺀 나머지), 변수별 `env_bindings`(DB 변수는 `{resource_id, output}`, 나머지는 Secret 이름·키).
-- 공통 모듈을 `SANDBOX`로 호출해 렌더 결과를 받고 `helm upgrade --install`로 적용한다.
+- Sandbox 워커가 구체 값을 정한다: Namespace·Release 이름(실행 ID 기준 규칙), StorageClass(capabilities에서 선택), DB 이미지(D-11 결과), DB 비밀번호 Secret(무작위 생성), 앱 env Secret(`.env`에서 예외 목록의 제외 변수와 DB 변수를 뺀 나머지), 변수별 `env_bindings`(DB 변수는 `{resource_id, output}`, 나머지는 `{secret_ref: {name, key}}`).
+- 공통 렌더 v2(`SharedDeploymentRequestV2`, `environment: SANDBOX`)로 렌더 결과를 받고 `helm upgrade --install`로 적용한다.
 - 실행(run)마다 Sandbox 하나를 띄우고, 시도마다 **제자리 갱신**한다. 설정·매핑만 바뀌면 재렌더·갱신, 이미지만 바뀌면 새 Digest로 갱신한다. Secret 내용만 바뀐 경우에도 Pod가 새 값을 쓰도록 재시작을 보장한다.
 - 바꿀 수 없는 필드 변경, DB 메이저 버전 변경, 환경 손상일 때만 해당 부분을 다시 만든다.
 - 시도마다 어떤 Digest·어떤 렌더 결과로 돌았는지 기록한다.
@@ -174,7 +176,7 @@
 
 #### AV-013 — 통신 규칙과 실행 기록
 
-- Sandbox 워커가 `network_intent`로 Sandbox 전용 NetworkPolicy를 만든다: 기본 차단, `flows` 허용, `egress` 허용, DNS 등 클러스터 기본 통신 허용.
+- Sandbox 워커가 `network_intent`로 Sandbox 전용 NetworkPolicy를 만든다: 기본 차단, 리소스 간 항목(`destination_resource_id`) 허용, 외부 목적지 항목(`external_host`)은 출구 프록시 허용 목록에 추가, 외부 진입(분석 결과의 진입 정보) 허용, DNS 등 클러스터 기본 통신 허용.
 - 원본에 **남겨 두는** 서비스(첫 사이클의 S3 등)로의 호출은 매핑 결과에 따라 허용하고 기록한다.
 - **이전하는** 서비스의 원본 주소와 intent에 없는 외부 호출은 차단·기록한다. 이 차단으로 인한 실패는 분석의 의도 누락으로 분류한다(AV-015).
 - 발견된 클라우드 의존 호출 지점의 실행 커버리지를 기록한다(100%도 기능 동등성 증명은 아님).
@@ -200,7 +202,8 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 
 #### AV-017 — 분석 결과 반환
 
-- `AnalysisReport`(사용 프로필, 매핑 행, 사전 점검, 변환 못 한 항목, 미검증 위험, 기준 커밋), 요구사항(`resources[]`·연결·`network_intent`), 환경변수 예외 목록을 경계 전용 Pydantic 계약으로 낸다. Provisioning v1 계약의 `AnalysisResult`와 이름을 구분한다.
+- `AnalysisReport`(사용 프로필, 매핑 행, 사전 점검, 변환 못 한 항목, 미검증 위험, 기준 커밋, 원본 DB 이미지, 외부 진입, 원본 CIDR), 요구사항(`RequirementsV2`), 환경변수 예외 목록을 낸다. `AnalysisReport`·예외 목록은 이 기능의 계약이고, 요구사항은 Provisioning의 `RequirementsV2`를 그대로 쓴다. Provisioning v1 계약의 `AnalysisResult`와 이름을 구분한다.
+- 요구사항은 JSON 바이트를 불변 저장하고 그 SHA-256을 `requirements_ref`로 넘긴다(Planning이 같은 바이트를 다시 검증한다).
 - 비밀은 이름만 담는다. 값은 담지 않는다.
 - **Sandbox 통과 시점의 최종 버전**으로 발행한다. 루프 중 수정된 요구사항과 소스가 반영된다.
 - 별도 수정 설정 파일 산출물이 없으면 `config_ref`를 내지 않는다.
@@ -208,7 +211,7 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 
 #### AV-018 — Sandbox 검증 결과와 Planning 인계
 
-- `validated_workloads`(리소스별 Build 참조·이미지 Digest·플랫폼·소스 SHA-256), 요구사항 참조, 보고서, `test_suite_ref`, 정리 상태를 낸다.
+- Planning 입력 v2(`PlanningRequestV2`)의 `analysis`·`builds[]`·`sandbox` 블록을 채울 수 있게 낸다: `validated_workloads`(리소스별 Build 참조·이미지 Digest·플랫폼·소스 SHA-256), 요구사항 참조, 보고서, `test_suite_ref`, 정리 상태. Build 결과는 불변 기록으로 저장해 `result_ref`를 발급한다.
 - 통과 후 다시 빌드하지 않는다. 통과 Digest = Build Digest = Production 배포 Digest(P-10).
 - 검증 이후 대상 선택이나 요구사항이 바뀌면 이전 검증을 그대로 넘기지 않는다.
 - Production에서는 배포 직후 준비 검사만 하고, 테스트 묶음은 데이터 이전 후·트래픽 전환 전에 실행한다(실행 시점은 해당 파트 결정).
@@ -249,24 +252,25 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 
 ## 7. 통합 수용 조건
 
-1. 데모 앱 저장소와 EKS 환경을 입력하면 요구사항에 `APPLICATION`·`POSTGRESQL` 리소스와 ID 연결이, 분석 결과에 컨테이너 실행·PostgreSQL·환경변수·네트워크·Ingress 행이 각각 근거와 함께 나온다.
-2. ALB Ingress·IRSA 어노테이션과 EBS StorageClass가 클라우드 의존 항목으로 감지되고, Pod DB의 원본 이미지 Digest가 기록된다.
-3. `ingress → app:8080`, `app → db:5432`가 `network_intent`로 나오고 원본 VPC CIDR이 기록된다.
+1. 데모 앱 저장소와 EKS 환경을 입력하면 `RequirementsV2` 검증을 통과하는 요구사항(`APPLICATION`·`POSTGRESQL`와 ID 연결)이, 분석 결과에 컨테이너 실행·PostgreSQL·환경변수·네트워크·Ingress 행이 각각 근거와 함께 나온다.
+2. ALB Ingress·IRSA 어노테이션과 EBS StorageClass가 클라우드 의존 항목으로 감지되고, Pod DB의 원본 이미지 Digest가 분석 결과에 기록된다.
+3. 앱 → DB 5432가 `network_intent`로 나오고, 외부 진입(443 → 앱 8080)과 원본 VPC CIDR이 분석 결과에 기록된다.
 4. `.env` 대조 결과가 "안 쓰는 변수"와 "누락 변수"로 나뉜다.
 5. 결과·로그·이력·LLM 입력 어디에도 비밀 값이 없다.
 6. 일부러 틀린 설정(예: 포트 오류)을 넣으면 실패 → 수정 → 갱신 → 통과가 Temporal 이력에 남는다. intent에서 외부 목적지를 지우면 차단 → 의도 누락 분류 → 수정 → 통과가 남는다.
 7. 3회 실패 시 사람 검토 대기로 멈추고 Sandbox 정리가 실행된다.
-8. 통과 결과의 이미지 Digest가 Build 결과 Digest와 같고, Planning 입력 검증을 통과한다.
+8. 통과 결과의 이미지 Digest가 Build 결과 Digest와 같고, 투영한 입력이 `prepare_plan_v2` 검증을 통과한다.
 9. 첫 사이클 분석·검증이 데모 환경에서 5분 안에 끝난다(Sandbox 기반과 첫 빌드는 미리 준비 가능).
 
 ## 8. 확인 필요
 
 - 원본 PostgreSQL이 RDS인지 Pod인지, 데모 앱 언어·API 목록·LLM 사용 여부·Dockerfile/매니페스트 위치 (소울)
-- 원본 DB 이미지를 못 쓸 때 대체 Digest를 누가 어디서 정하는지, 확정 이미지를 Sandbox·Production이 같이 쓰는 방식 (민서, D-11)
-- Build 모듈 호출 방식(함수 vs `build` Queue Activity)과 전체 시간 상한, Build 입력의 `resource_id`·`source_version_id` 반영 여부 (민서, D-12)
+- DB 이미지를 선택하는 "대상 구성 단계"의 소유자와, 그 결과를 Sandbox·Production이 같이 쓰는 방식 (민서, D-11)
+- Build 호출을 어느 Worker 프로세스에서 하는지(권한 배치)와 전체 시간 상한 (민서, D-12)
 - Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 (민서, D-04)
-- 계약 v2(리소스 목록·capabilities·`validated_workloads`) 최종 확정과 `*_ref` 저장 위치 (민서·팀, D-02)
-- 확장을 앱 마이그레이션이 만들지 않을 때 `CREATE EXTENSION` 실행 주체 (민서)
+- `*_ref` 저장 위치(S3 내용 해시 vs 업무 DB)와 Build 결과 저장·정규화 Activity 담당 (민서·팀, D-02)
+- PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체 (민서, D-14)
+- `network_intent`에 외부 진입(인터넷 → 앱)을 표현하는 방법 (민서, D-15)
 - Production(K3s)에서 NetworkPolicy가 필요해지면 공유 차트로 합칠지 (민서)
 - DB 내부 상태 사전 점검 담당 (소울)
 - 소스 묶음·테스트 묶음 S3 버킷 소유·정리 규칙, Sandbox 이미지 보존 기간 (민서·승철)
