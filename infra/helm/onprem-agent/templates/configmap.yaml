@@ -1,0 +1,11 @@
+{{- if .Values.platform.caBundle }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cmp-agent-platform-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent.labels" . | nindent 4 }}
+data:
+  ca.crt: {{ .Values.platform.caBundle | quote }}
+{{- end }}

@@ -368,6 +368,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/agents/{agent_id}:
+    get:
+      tags:
+      - on-premises agents
+      summary: Operator Agent Status
+      description: 'Operator view: last authenticated contact (epoch seconds) and
+        revocation (ticket 15).'
+      operationId: operator_agent_status_agent_admin_agents__agent_id__get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentAdminStatus'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/agents/{agent_id}/revoke:
+    post:
+      tags:
+      - on-premises agents
+      summary: Operator Revoke Agent
+      operationId: operator_revoke_agent_agent_admin_agents__agent_id__revoke_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentAdminStatus'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/approvers:
     post:
       tags:
@@ -636,6 +706,34 @@ paths:
                 title: Response Health Health Get
 components:
   schemas:
+    AgentAdminStatus:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        owner_id:
+          type: string
+          title: Owner Id
+        cluster_uid:
+          type: string
+          title: Cluster Uid
+        last_seen_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Seen At
+        revoked:
+          type: boolean
+          title: Revoked
+      additionalProperties: false
+      type: object
+      required:
+      - agent_id
+      - owner_id
+      - cluster_uid
+      - last_seen_at
+      - revoked
+      title: AgentAdminStatus
     AgentStatus:
       properties:
         agent_id:
@@ -911,9 +1009,11 @@ components:
           pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
           title: Agent Id
         cluster_uid:
-          type: string
-          minLength: 1
-          pattern: ^\S(?:.*\S)?$
+          anyOf:
+          - type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          - type: 'null'
           title: Cluster Uid
         ttl_seconds:
           type: integer
@@ -926,7 +1026,6 @@ components:
       required:
       - owner_id
       - agent_id
-      - cluster_uid
       title: EnrollmentRequest
     EnrollmentResponse:
       properties:

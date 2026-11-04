@@ -29,16 +29,17 @@ from onprem_rollout_support import (
 )
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from temporalio.testing import ActivityEnvironment
 
 
 @pytest.fixture
-def db():
+def db(tmp_path):
+    # Activities use the DB from worker threads while the fake Agent polls on the event loop.
+    # A file DB gives every session its own connection; a shared in-memory StaticPool
+    # connection lets one session's commit/rollback cut into another thread's transaction.
     engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        f"sqlite+pysqlite:///{tmp_path / 'business.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
     )
     Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine)

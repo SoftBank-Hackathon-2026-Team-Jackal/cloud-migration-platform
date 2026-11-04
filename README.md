@@ -30,7 +30,7 @@ curl -N "http://localhost:8000/migrations/$WORKFLOW_ID/events"
 
 ## 온프레미스 Agent 등록 경계
 
-업무 DB에 `uv run alembic upgrade head`를 적용하고, 플랫폼 운영자는 실제 비밀값인 `AGENT_ENROLLMENT_ADMIN_KEY`를 Git 밖에서 설정한다. 운영자만 `POST /agent-enrollments`로 소유자 ID·Agent ID·K3s 클러스터 UID에 묶인 일회용 등록 토큰을 발급할 수 있다. 공개 회원가입은 없다. API 계약은 [OpenAPI](docs/contracts/openapi.yaml), 공통 렌더 입출력은 [배포 계약](specs/provisioning/onprem-shared-deployment.md)을 따른다.
+업무 DB에 `uv run alembic upgrade head`를 적용하고, 플랫폼 운영자는 실제 비밀값인 `AGENT_ENROLLMENT_ADMIN_KEY`를 Git 밖에서 설정한다. 운영자만 `POST /agent-enrollments`로 소유자 ID·Agent ID(선택: K3s 클러스터 UID)에 묶인 일회용 등록 토큰을 발급할 수 있다. 공개 회원가입은 없다. API 계약은 [OpenAPI](docs/contracts/openapi.yaml), 공통 렌더 입출력은 [배포 계약](specs/provisioning/onprem-shared-deployment.md)을 따른다.
 
 사용자 측 Agent는 등록 토큰을 권한 `0600` 파일로 받은 후 아웃바운드로 등록한다. 원격 플랫폼 URL은 HTTPS여야 하며 로컬 개발 주소만 HTTP를 허용한다. 등록 후 반환된 Agent 자격 증명은 지정한 새 파일에 `0600`으로 저장하고 표준 출력에 표시하지 않는다.
 
@@ -45,7 +45,9 @@ uv run python -m cmp_providers.remote_agent poll-once \
   --agent-id demo-agent --credential-file /secure/agent-credential
 ```
 
-현재 CLI의 `poll-once`는 자신에게 할당된 작업 참조를 조회한다. 운영 K3s 자동 적용은 07·12 티켓 후에 연결하며, 이 명령만으로 앱/DB가 배포되지는 않는다.
+현재 CLI의 `poll-once`는 자신에게 할당된 작업 참조를 조회한다. 이 명령만으로 앱/DB가 배포되지는 않는다.
+
+사용자 K3s에 계속 실행되는 Agent를 설치하려면 Helm Chart(`infra/helm/onprem-agent`)를 쓴다. 등록 토큰 발급 시 클러스터 UID는 생략할 수 있고, Agent가 최초 등록 때 직접 조회한다. 승인된 ON_PREM 배포 작업을 받아 처리하며, 운영자는 `GET /agent-admin/agents/{agent_id}`로 마지막 접속 시각을 보고 `POST .../revoke`로 폐기한다. 설치·권한·폐기 절차는 [Agent 설치·운영](specs/provisioning/onprem-agent-install.md)을 따른다.
 
 ## 프로젝트 구조와 파일별 역할
 
@@ -97,11 +99,13 @@ uv run python -m cmp_providers.remote_agent poll-once \
 | `packages/providers/src/cmp_providers/application.py`, `app_renderer.py`, `bindings.py` | 앱 바인딩 계획·검사 및 Helm 렌더 |
 | `packages/providers/src/cmp_providers/shared_deployment.py` | DB/App Chart 조합과 공통 Values·Manifest·DB 연결 참조 반환 |
 | `packages/providers/src/cmp_providers/agent.py`, `k3s_agent.py` | 로컬 영속 작업 spool과 격리 K3s 테스트 적용·검증·정리 |
-| `packages/providers/src/cmp_providers/remote_agent.py` | 사용자 측 Agent의 아웃바운드 등록·인증·작업 폴링 클라이언트; 운영 Apply 미연결 |
+| `packages/providers/src/cmp_providers/remote_agent.py` | 사용자 측 Agent의 아웃바운드 등록·인증·작업 폴링 클라이언트 |
+| `packages/providers/src/cmp_providers/agent_runtime.py` | 사용자 K3s에서 계속 실행되는 Agent: 등록·자격 증명 보관·폴링 루프·백오프(15) |
 | `packages/providers/src/cmp_providers/artifacts.py`, `plans.py` | 산출물 Digest·승인 대상의 순수 검증 |
 | `infra/local/compose.yaml` | 업무 PostgreSQL과 Temporal 전용 PostgreSQL, Temporal Server·UI |
 | `infra/terraform/README.md` | 향후 AWS/GCP 모듈과 State 운영 규칙 |
 | `infra/helm/postgres/`, `application/` | Sandbox/Production 공통 PostgreSQL·앱 Helm Chart |
+| `infra/helm/onprem-agent/`, `infra/onprem-agent/` | 온프레미스 Agent 설치 Chart와 이미지(릴리스: `.github/workflows/agent-release.yml`) |
 | `infra/helm/README.md` | 두 Chart의 사용법과 현재 검증 범위 |
 | `tests/` | 계약·렌더링·Agent 등록/로컬 K3s·이미지 빌드 회귀 테스트 |
 | `.github/workflows/check.yml` | PR에서 Python 형식 검사와 테스트 실행 |

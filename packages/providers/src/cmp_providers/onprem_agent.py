@@ -11,6 +11,7 @@ kubectl/helm output, Values and Secret values are never reported.
 import argparse
 import base64
 import json
+import os
 import secrets
 import subprocess
 import tempfile
@@ -41,14 +42,68 @@ class ClusterUnavailable(RolloutAgentError):
         super().__init__("KUBERNETES_UNAVAILABLE", "UNKNOWN")
 
 
+SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+IN_CLUSTER_CONTEXT = "cmp-in-cluster"
+
+
 class ClusterTarget:
-    """Every kubectl/helm call uses the dedicated kubeconfig and explicit context."""
+    """Every kubectl/helm call uses a dedicated kubeconfig and explicit context: the operator's
+    file (host CLI) or one generated from the Pod's ServiceAccount (in-cluster, ticket 15 H1)."""
 
     def __init__(self, kubeconfig: Path, context: str, cluster_uid: str, helm_timeout: str = "5m"):
         if not Path(kubeconfig).is_file() or not context:
             raise RolloutAgentError("EXPLICIT_TARGET_REQUIRED")
         self.kubeconfig, self.context = Path(kubeconfig), context
         self.cluster_uid, self.helm_timeout = cluster_uid, helm_timeout
+
+    @classmethod
+    def in_cluster(
+        cls,
+        *,
+        cluster_uid: str | None = None,
+        helm_timeout: str = "5m",
+        service_account_dir: Path = SERVICE_ACCOUNT_DIR,
+        work_dir: Path | None = None,
+    ) -> "ClusterTarget":
+        """kubectl's implicit in-cluster fallback is not reliable across versions, so write an
+        explicit kubeconfig that references the token *file* (rotation-safe, value not copied)."""
+        host = os.environ.get("KUBERNETES_SERVICE_HOST")
+        port = os.environ.get("KUBERNETES_SERVICE_PORT")
+        token, ca = Path(service_account_dir) / "token", Path(service_account_dir) / "ca.crt"
+        if not host or not port or not token.is_file() or not ca.is_file():
+            raise RolloutAgentError("SERVICE_ACCOUNT_REQUIRED")
+        server = f"https://[{host}]:{port}" if ":" in host else f"https://{host}:{port}"
+        directory = Path(work_dir or Path(tempfile.gettempdir()) / "cmp-agent-kube")
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = directory / "config"
+        cluster = {"server": server, "certificate-authority": str(ca)}
+        config = {
+            "apiVersion": "v1",
+            "kind": "Config",
+            "clusters": [{"name": "in-cluster", "cluster": cluster}],
+            "users": [{"name": "agent", "user": {"tokenFile": str(token)}}],
+            "contexts": [
+                {"name": IN_CLUSTER_CONTEXT, "context": {"cluster": "in-cluster", "user": "agent"}}
+            ],
+            "current-context": IN_CLUSTER_CONTEXT,
+        }
+        descriptor = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(config, output)
+        return cls(path, IN_CLUSTER_CONTEXT, cluster_uid, helm_timeout)
+
+    def discover_cluster_uid(self) -> str:
+        """kube-system Namespace UID identifies the cluster; it is what registration binds."""
+        uid = ((self.get("namespace", "kube-system") or {}).get("metadata") or {}).get("uid")
+        if not uid:
+            raise ClusterUnavailable()
+        self.cluster_uid = uid
+        return uid
+
+    def delete_secret(self, name: str, namespace: str) -> None:
+        result = self.kubectl("delete", "secret", name, "-n", namespace, "--ignore-not-found")
+        if result.returncode:
+            raise ClusterUnavailable()
 
     def _exec(self, argv: list[str], content: bytes | None, timeout: int):
         try:
@@ -59,33 +114,12 @@ class ClusterTarget:
             raise ClusterUnavailable() from None
 
     def kubectl(self, *args: str, content: bytes | None = None, timeout: int = 40):
-        return self._exec(
-            [
-                "kubectl",
-                "--kubeconfig",
-                str(self.kubeconfig),
-                "--context",
-                self.context,
-                "--request-timeout=30s",
-                *args,
-            ],
-            content,
-            timeout,
-        )
+        explicit = ["--kubeconfig", str(self.kubeconfig), "--context", self.context]
+        return self._exec(["kubectl", *explicit, "--request-timeout=30s", *args], content, timeout)
 
     def helm(self, *args: str, timeout: int = 60):
-        return self._exec(
-            [
-                "helm",
-                "--kubeconfig",
-                str(self.kubeconfig),
-                "--kube-context",
-                self.context,
-                *args,
-            ],
-            None,
-            timeout,
-        )
+        explicit = ["--kubeconfig", str(self.kubeconfig), "--kube-context", self.context]
+        return self._exec(["helm", *explicit, *args], None, timeout)
 
     def get(self, kind: str, name: str, namespace: str | None = None) -> dict | None:
         args = ["get", kind, name, "-o", "json", "--ignore-not-found"]

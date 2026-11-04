@@ -1,0 +1,32 @@
+# Required: the Agent ID the operator used when issuing the enrollment token.
+agentId: ""
+
+platform:
+  # HTTPS only (the Agent rejects plain HTTP to non-loopback hosts).
+  url: ""
+  # Optional PEM bundle for a private CA that signed the platform certificate.
+  caBundle: ""
+
+# One-time enrollment token. Needed only for the first install; after registration the Agent
+# stores its credential in the `cmp-agent-credential` Secret (not managed by Helm) and deletes
+# the token Secret. Leave empty on `helm upgrade`.
+enrollmentToken: ""
+
+image:
+  repository: ghcr.io/softbank-hackathon-2026-team-jackal/cmp-onprem-agent
+  # Releases pin the digest. `tag` is for local builds only and is used when digest is empty.
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+helmTimeout: 5m
+idleSeconds: 10
+# Must exceed the longest Helm step (helm --wait is bounded by 900s in the Agent).
+terminationGracePeriodSeconds: 960
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
