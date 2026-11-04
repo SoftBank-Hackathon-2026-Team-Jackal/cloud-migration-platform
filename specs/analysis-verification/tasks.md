@@ -5,7 +5,7 @@
 | ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
 | [01 분석·검증 계약 모델](../../tickets/analysis-verification/01-contracts.md) | DONE (PR #31 병합) | 없음 | AV-001, AV-017, AV-018, AV-020, AV-022 | #29 | ☑ |
-| [Q-01 `sandbox` Task Queue·Worker 등록](../../tickets/analysis-verification/q-01-sandbox-queue.md) | DRAFT | D-05(Queue 분리 결정) | AV-021 | 미생성 | ☐ |
+| [Q-01 `sandbox` Task Queue·Worker 등록](../../tickets/analysis-verification/q-01-sandbox-queue.md) | IN_PROGRESS | 없음 (D-05 결정) | AV-021 | #32 | ☐ |
 | [02 분석 Activity 골격](../../tickets/analysis-verification/02-temporal-skeleton.md) | DRAFT | 01 | AV-001, AV-021 | 미생성 | ☐ |
 | [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | DRAFT | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | 미생성 | ☐ |
 | [03 소스 확보·운영 커밋 고정·마스킹](../../tickets/analysis-verification/03-source-fetch.md) | DRAFT | 01 | AV-002, AV-020 | 미생성 | ☐ |
@@ -45,7 +45,7 @@ Q-01 ────┴→ 02B ─┐
 05 + 08 → 17 (후순위)
 ```
 
-정확한 선행 조건은 위 표와 각 티켓을 따른다. 외부 의존: Q-01은 D-05, 06은 AWS 테스트 계정, 08은 D-01(실제 LLM 연결 시), 10은 B-01(완료)과 D-12, 11은 공통 렌더 v2(완료)와 D-11, 15는 D-02, 16은 데모 앱·Sandbox 기반(D-08).
+정확한 선행 조건은 위 표와 각 티켓을 따른다. D-05는 Sandbox 전용 Queue를 추가하기로 결정했다. 외부 의존: 06은 AWS 테스트 계정, 08은 D-01(실제 LLM 연결 시), 10은 B-01(완료)과 D-12, 11은 공통 렌더 v2(완료)와 D-11, 15는 D-02, 16은 데모 앱·Sandbox 기반(D-08).
 
 **추천 순서:** 01 → Q-01 → 02 → 02B → 03 → 04 → 05 → 07 → 08A → 08 → 08B → 09 → 10 → 11 → 11B → 12 → 13 → 14 → (06, 15) → 16 → 17. 외부 의존이 없는 것부터 이어 첫 사이클 뼈대(스캔 → 빌드 → Sandbox 루프)를 먼저 완성한다. 17은 첫 사이클이 끝난 뒤 착수한다.
 
@@ -56,7 +56,7 @@ Q-01 ────┴→ 02B ─┐
 | D-01 | LLM 공급자·모델·코드 전송 범위(ADR-004, 근거 주변 조각만 전송) | 08, 12, 14, 17 | 승철·팀 |
 | D-02 | `*_ref` 저장 위치, Build 결과 저장·정규화 Activity 담당(Planning 입력 v2 형식은 #22로 확정) | 10, 15 | 민서·승철 |
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 | 10, 14 | 민서 |
-| D-05 | `sandbox` Task Queue 추가 여부 | Q-01, 02B | 승철(민서 공유) |
+| D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
 | D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간 | 09, 10, 12 | 민서·승철 |
 | D-07 | 첫 사이클 지원 언어(데모 앱은 그 언어에 맞춤) | 05, 16, 17 | 승철 |
 | D-08 | Sandbox 기반 클러스터 준비 주체·시점 | 11, 16 | 민서·승철 |
@@ -70,6 +70,8 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.
+- 2026-11-04: 분석을 고정 ID `analysis-<migration_id>`의 자식 Workflow로 분리하고, 검토 Signal은 상태 Query 후 자식에 직접 보낸다. Q-01은 Temporal 테스트 환경을 기본 기동 검증으로 사용한다.
 - 2026-11-04(목적 점검): 원래 목적(필수 기능을 잃지 않고 옮김) 대비 빠진 단계를 보완. AV-022(필수 기능 확정·손실 승인)와 08B 게이트, 에이전트 실행 기반·Skill 형식(08A, plan §2.11) 추가. 14에 변경 행 재승인과 매핑 행 `SANDBOX_VERIFIED` 갱신 추가.
 - 2026-11-04(v2 동기화): main에 병합된 v2 구현(#22 Planning 입력 v2·`RequirementsV2`, #24 공통 렌더 v2, B-01 `resource_id`·`source_version_id`) 기준으로 spec·plan·티켓을 맞춤. 요구사항은 `RequirementsV2` 재사용, DB 이미지는 대상 구성 단계(D-11), 확장 요구는 차단 보고(D-14), 외부 진입 표현은 D-15로 분리. D-07을 '첫 사이클 지원 언어(승철 결정)'로 변경.
 - 2026-11-04: 민서님 계약 협의안 v2 반영(리소스 목록, capabilities, 변수별 env_bindings, validated_workloads, 배포 후 테스트 시점). 호출부 결정 방식에 따라 Sandbox 구체 값·Secret·NetworkPolicy를 Sandbox 워커 책임으로 명시. 리뷰 피드백으로 02→02·02B, 11→11·11B 분할, Q-01 신설, 01 완료 조건 축소, AnalysisReport 이름 변경. D-11~D-14 추가.
