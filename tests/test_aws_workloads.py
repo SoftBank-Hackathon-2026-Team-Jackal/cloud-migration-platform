@@ -765,3 +765,23 @@ def test_cli_sends_secret_only_through_stdin_create(tmp_path):
     assert b"s3cret-value-xyz" in create_stdin
     assert keys is None  # not found
     assert all("json" not in arg for arg in calls[1][0])  # key names only, never values
+
+
+def test_cli_release_lookup_uses_flags_valid_on_helm_3_and_4(tmp_path):
+    from cmp_worker.activities.aws_workloads_cli import CliRuntime, KubectlSession
+
+    calls = []
+
+    class Recording(CliRuntime):
+        def run(self, args, *, stdin=None, timeout=300):
+            calls.append(args)
+            if "list" in args:
+                return b'[{"name": "cmp-demo-db", "status": "pending-install", "chart": "postgres-0.1.0"}]'
+            return b"{}"
+
+    found = KubectlSession(Recording(), tmp_path / "k", tmp_path).release(NAMESPACE, "cmp-demo-db")
+
+    listing = calls[0]
+    assert "-a" not in listing  # removed in Helm 4
+    assert {"--deployed", "--failed", "--pending"} <= set(listing)
+    assert found == {"status": "pending-install", "chart": "postgres-0.1.0", "values": {}}

@@ -189,7 +189,19 @@ class KubectlSession:
 
     def release(self, namespace: str, name: str) -> dict | None:
         listed = json.loads(
-            self._helm("list", "-n", namespace, "-a", "--filter", f"^{name}$", "-o", "json")
+            self._helm(
+                # Explicit status filters: Helm 3 hides pending without them, Helm 4 dropped -a.
+                "list",
+                "-n",
+                namespace,
+                "--deployed",
+                "--failed",
+                "--pending",
+                "--filter",
+                f"^{name}$",
+                "-o",
+                "json",
+            )
         )
         match = [item for item in listed if item.get("name") == name]
         if not match:
