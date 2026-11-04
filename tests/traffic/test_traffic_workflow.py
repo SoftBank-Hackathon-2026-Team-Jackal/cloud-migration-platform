@@ -109,3 +109,24 @@ async def test_db_gate_required_blocks_the_last_step() -> None:
 
 def test_workers_register_the_traffic_activities_and_workflow() -> None:
     assert create_activity_worker is not None and create_workflow_worker is not None
+
+
+@pytest.mark.asyncio
+async def test_workflow_history_replays_without_nondeterminism() -> None:
+    from temporalio.worker import Replayer
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        workflow_worker = Worker(
+            env.client, task_queue=WORKFLOW_QUEUE, workflows=[TrafficShiftWorkflow]
+        )
+        bad = {"requests": 100, "failed": 9, "p99_ms": 100.0}
+        async with workflow_worker, fake_worker(env.client, [GOOD, bad]):
+            handle = await env.client.start_workflow(
+                TrafficShiftWorkflow.run,
+                {"handover": READY, "policy": POLICY},
+                id=f"traffic-{uuid.uuid4()}",
+                task_queue=WORKFLOW_QUEUE,
+            )
+            await handle.result()
+        history = await handle.fetch_history()
+    await Replayer(workflows=[TrafficShiftWorkflow]).replay_workflow(history)

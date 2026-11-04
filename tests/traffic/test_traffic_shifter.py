@@ -215,3 +215,11 @@ def test_p99_ratio_is_ignored_below_the_absolute_floor() -> None:
     assert evaluate_step(TrafficPolicy(), tiny_base, ok, 1).decision == "advance"
     slow = Sample(requests=100, failed=0, p99_ms=80)
     assert evaluate_step(TrafficPolicy(), tiny_base, slow, 1).decision == "rollback"
+
+
+def test_p99_gate_still_applies_with_the_absolute_floor_when_origin_had_no_baseline() -> None:
+    no_base = Sample(requests=0, failed=0, p99_ms=0)
+    slow = Sample(requests=100, failed=0, p99_ms=400)
+    assert evaluate_step(TrafficPolicy(), no_base, slow, 1).decision == "rollback"
+    fine = Sample(requests=100, failed=0, p99_ms=20)
+    assert evaluate_step(TrafficPolicy(), no_base, fine, 1).decision == "advance"
