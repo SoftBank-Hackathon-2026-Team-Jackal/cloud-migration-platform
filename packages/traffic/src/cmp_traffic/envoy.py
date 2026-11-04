@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -21,6 +22,7 @@ from typing import Any
 from .contracts import Sample
 
 FetchJson = Callable[[str], dict[str, Any]]
+FetchText = Callable[[str], str]
 
 RDS_STAT = r"http\.ingress\.rds\.local_route\.(version_text|update_rejected)$"
 CLUSTER_STAT = r"cluster\.cluster_(origin|target)\.(upstream_rq_(total|5xx|timeout|time))$"
@@ -29,6 +31,40 @@ CLUSTER_STAT = r"cluster\.cluster_(origin|target)\.(upstream_rq_(total|5xx|timeo
 def http_get_json(url: str, timeout: float = 2) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout) as response:
         return json.loads(response.read() or b"{}")
+
+
+def http_get_text(url: str, timeout: float = 2) -> str:
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return response.read().decode("utf-8", "replace")
+
+
+_BUCKET = re.compile(
+    r'^envoy_cluster_upstream_rq_time_bucket\{envoy_cluster_name="cluster_(?P<side>\w+)",le="(?P<le>[^"]+)"\}\s+(?P<n>[0-9.]+)',
+    re.MULTILINE,
+)
+
+
+def _buckets(text: str, side: str) -> dict[float, float]:
+    out: dict[float, float] = {}
+    for match in _BUCKET.finditer(text):
+        if match["side"] == side:
+            le = float("inf") if match["le"] == "+Inf" else float(match["le"])
+            out[le] = float(match["n"])
+    return out
+
+
+def window_p99(before: str, after: str, side: str) -> float:
+    """관찰 창 앞뒤 히스토그램 버킷의 차이로 그 창의 p99(ms)를 구한다. 샘플이 없으면 0."""
+    first, last = _buckets(before, side), _buckets(after, side)
+    deltas = {le: max(0.0, last[le] - first.get(le, 0.0)) for le in last}
+    total = deltas.get(float("inf"), 0.0)
+    if total <= 0:
+        return 0.0
+    need = math.ceil(total * 0.99)
+    for le in sorted(deltas):
+        if deltas[le] >= need:
+            return 0.0 if le == float("inf") else le
+    return 0.0
 
 
 def build_route_config(
@@ -57,7 +93,17 @@ def build_route_config(
         {"match": {"prefix": "/__cmp"}, "direct_response": forbidden},
         {
             "match": {"prefix": "/"},
-            "route": {"weighted_clusters": {"clusters": clusters}, "timeout": "5s"},
+            "route": {
+                "weighted_clusters": {"clusters": clusters},
+                "timeout": "5s",
+                # 연결 실패는 요청이 나가기 전이라 다시 보내도 중복이 생기지 않는다.
+                # 실제 WAN 시험에서 새 연결의 1~2%가 연결 제한에 걸려 오탐 롤백이 났다.
+                "retry_policy": {
+                    "retry_on": "connect-failure",
+                    "num_retries": 2,
+                    "per_try_timeout": "3s",
+                },
+            },
         },
     ]
     return {
@@ -158,9 +204,12 @@ class EnvoyObserver:
         self,
         admin_url: str = "http://127.0.0.1:9901",
         fetch: FetchJson | None = None,
+        fetch_text: FetchText | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.admin_url = admin_url.rstrip("/")
+        # 직접 주입하지 않은 실제 연결에서는 Prometheus 버킷으로 창 p99를 계산한다.
+        self.fetch_text = fetch_text or (http_get_text if fetch is None else None)
         self.fetch = fetch or http_get_json
         self.sleep = sleep
 
@@ -168,14 +217,27 @@ class EnvoyObserver:
         query = urllib.parse.urlencode({"format": "json", "filter": CLUSTER_STAT})
         return self.fetch(f"{self.admin_url}/stats?{query}")
 
+    def _text(self) -> str:
+        query = urllib.parse.urlencode(
+            {"filter": r"cluster\.cluster_(origin|target)\.upstream_rq_time"}
+        )
+        assert self.fetch_text is not None
+        return self.fetch_text(f"{self.admin_url}/stats/prometheus?{query}")
+
     def _sample(self, side: str, seconds: float) -> Sample:
         first = parse_cluster_stats(self._read(), side)
+        first_text = self._text() if self.fetch_text else ""
         self.sleep(seconds)
         last = parse_cluster_stats(self._read(), side)
+        requests = max(0, int(last["requests"] - first["requests"]))
+        if self.fetch_text:
+            p99 = window_p99(first_text, self._text(), side) if requests else 0.0
+        else:
+            p99 = last["p99_ms"] if last["requests"] > first["requests"] else 0
         return Sample(
-            requests=max(0, int(last["requests"] - first["requests"])),
+            requests=requests,
             failed=max(0, int(last["failed"] - first["failed"])),
-            p99_ms=last["p99_ms"] if last["requests"] > first["requests"] else 0,
+            p99_ms=p99,
         )
 
     def sample_origin(self, seconds: float) -> Sample:

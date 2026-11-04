@@ -95,7 +95,7 @@ def test_failed_requests_over_limit_rolls_back_to_origin_immediately() -> None:
 
 def test_slow_p99_rolls_back() -> None:
     slow = Sample(requests=100, failed=0, p99_ms=400)
-    result = shifter(FakeProxy(), FakeObserver([slow])).run(TrafficPolicy(), READY)
+    result = shifter(FakeProxy(), FakeObserver([slow, slow])).run(TrafficPolicy(), READY)
     assert result.status == "ROLLED_BACK"
     assert "p99" in result.events[-1].reason
 
@@ -223,3 +223,32 @@ def test_p99_gate_still_applies_with_the_absolute_floor_when_origin_had_no_basel
     assert evaluate_step(TrafficPolicy(), no_base, slow, 1).decision == "rollback"
     fine = Sample(requests=100, failed=0, p99_ms=20)
     assert evaluate_step(TrafficPolicy(), no_base, fine, 1).decision == "advance"
+
+
+def test_single_slow_window_is_an_outlier_not_a_rollback() -> None:
+    slow = Sample(requests=100, failed=0, p99_ms=1000)
+    proxy = FakeProxy()
+    result = shifter(proxy, FakeObserver([slow, GOOD, GOOD, GOOD])).run(TrafficPolicy(), READY)
+    assert result.status == "DONE"
+    assert [w["target"] for w in proxy.applied] == [10, 50, 100]
+
+
+def test_two_consecutive_slow_windows_roll_back() -> None:
+    slow = Sample(requests=100, failed=0, p99_ms=1000)
+    result = shifter(FakeProxy(), FakeObserver([slow, slow])).run(TrafficPolicy(), READY)
+    assert result.status == "ROLLED_BACK"
+    assert "p99" in result.events[-1].reason
+
+
+def test_a_good_window_resets_the_slow_streak() -> None:
+    slow = Sample(requests=100, failed=0, p99_ms=1000)
+    observer = FakeObserver([slow, GOOD, slow, GOOD, GOOD, GOOD])
+    result = shifter(FakeProxy(), observer).run(TrafficPolicy(), READY)
+    assert result.status == "DONE"
+
+
+def test_evaluate_step_without_streak_still_judges_immediately() -> None:
+    slow = Sample(requests=100, failed=0, p99_ms=1000)
+    assert evaluate_step(TrafficPolicy(), GOOD, slow, 1).decision == "rollback"
+    assert evaluate_step(TrafficPolicy(), GOOD, slow, 1, p99_streak=1).decision == "hold"
+    assert evaluate_step(TrafficPolicy(), GOOD, slow, 1, p99_streak=2).decision == "rollback"

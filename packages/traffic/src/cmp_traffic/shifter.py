@@ -48,16 +48,29 @@ def check_handover(handover: Handover) -> Precheck:
     return Precheck(ok=True)
 
 
+def p99_limit(policy: TrafficPolicy, baseline: Sample) -> float:
+    return max(baseline.p99_ms * policy.max_p99_ratio, policy.p99_floor_ms)
+
+
 def evaluate_step(
-    policy: TrafficPolicy, baseline: Sample, observed: Sample, elapsed_s: float
+    policy: TrafficPolicy,
+    baseline: Sample,
+    observed: Sample,
+    elapsed_s: float,
+    p99_streak: int | None = None,
 ) -> StepOutcome:
-    """한 단계의 관측값으로 advance/hold/rollback을 판정한다(순수 함수)."""
+    """한 단계의 관측값으로 advance/hold/rollback을 판정한다(순수 함수).
+
+    p99_streak: 지금까지 연속으로 p99 기준을 넘은 관측 창 수(이번 창 포함). None이면 바로 판정한다.
+    """
     base = {"step": 0, "weights": {}}
     if observed.failed > policy.max_failed_requests:
         reason = f"실패 요청 {observed.failed}건 (허용 {policy.max_failed_requests}건)"
         return StepOutcome(**base, decision="rollback", reason=reason)
-    limit = max(baseline.p99_ms * policy.max_p99_ratio, policy.p99_floor_ms)
+    limit = p99_limit(policy, baseline)
     if observed.p99_ms > limit:
+        if p99_streak is not None and p99_streak < policy.p99_breach_windows:
+            return StepOutcome(**base, decision="hold", reason="p99 일시 초과, 다음 창 확인")
         reason = (
             f"p99 {observed.p99_ms:.0f}ms > 원본 {baseline.p99_ms:.0f}ms x {policy.max_p99_ratio}"
         )
@@ -107,18 +120,20 @@ class TrafficShifter:
 
             began = self.clock()
             total = Sample(requests=0, failed=0, p99_ms=0)
+            streak = 0
             while True:
                 try:
                     window = self.observer.sample_target(policy.observe_seconds)
                 except Exception as exc:  # noqa: BLE001
                     return self._rollback(events, step, f"관측 실패: {exc}")
                 # 요청이 적은 단계에서도 판단할 수 있도록 같은 단계 안의 관측값을 누적한다.
+                streak = streak + 1 if window.p99_ms > p99_limit(policy, baseline) else 0
                 total = Sample(
                     requests=total.requests + window.requests,
                     failed=total.failed + window.failed,
-                    p99_ms=max(total.p99_ms, window.p99_ms),
+                    p99_ms=window.p99_ms,  # p99는 누적이 아니라 가장 최근 창 기준
                 )
-                outcome = evaluate_step(policy, baseline, total, self.clock() - began)
+                outcome = evaluate_step(policy, baseline, total, self.clock() - began, streak)
                 if outcome.decision != "hold":
                     break
                 self.sleep(policy.observe_seconds)

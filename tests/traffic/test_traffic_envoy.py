@@ -140,3 +140,58 @@ def test_observer_treats_missing_p99_as_zero_and_never_goes_negative() -> None:
     calls = iter([first, second])
     observer = EnvoyObserver(fetch=lambda url: next(calls), sleep=lambda s: None)
     assert observer.sample_origin(1) == Sample(requests=0, failed=0, p99_ms=0)
+
+
+def test_route_retries_connect_failures_only() -> None:
+    doc = build_route_config({"origin": 90, "target": 10}, version=1)
+    route = doc["resources"][0]["virtual_hosts"][0]["routes"][-1]["route"]
+    assert route["retry_policy"]["retry_on"] == "connect-failure"
+    assert route["retry_policy"]["num_retries"] == 2
+
+
+PROM_HEAD = "# TYPE envoy_cluster_upstream_rq_time histogram\n"
+
+
+def prom(cluster: str, buckets: dict[str, int]) -> str:
+    lines = [PROM_HEAD]
+    for le, count in buckets.items():
+        lines.append(
+            f'envoy_cluster_upstream_rq_time_bucket{{envoy_cluster_name="cluster_{cluster}",le="{le}"}} {count}\n'
+        )
+    return "".join(lines)
+
+
+def test_window_p99_comes_from_bucket_deltas_not_cumulative_history() -> None:
+    from cmp_traffic.envoy import window_p99
+
+    before = prom("target", {"10": 100, "100": 100, "1000": 100, "+Inf": 100})
+    after = prom("target", {"10": 190, "100": 190, "1000": 200, "+Inf": 200})
+    assert (
+        window_p99(before, after, "target") == 1000
+    )  # 새 100건 중 10건이 1초대 -> p99는 1000ms 버킷
+    after_fast = prom("target", {"10": 200, "100": 200, "1000": 200, "+Inf": 200})
+    assert window_p99(before, after_fast, "target") == 10
+
+
+def test_window_p99_is_zero_without_new_samples() -> None:
+    from cmp_traffic.envoy import window_p99
+
+    same = prom("target", {"10": 5, "+Inf": 5})
+    assert window_p99(same, same, "target") == 0
+
+
+def test_observer_uses_prometheus_buckets_for_p99_when_available() -> None:
+    counters = iter(
+        [stats_payload(100, 0, 0, 0.0, "target"), stats_payload(160, 0, 0, 0.0, "target")]
+    )
+    texts = iter(
+        [
+            prom("target", {"10": 100, "1000": 100, "+Inf": 100}),
+            prom("target", {"10": 150, "1000": 160, "+Inf": 160}),
+        ]
+    )
+    observer = EnvoyObserver(
+        fetch=lambda url: next(counters), fetch_text=lambda url: next(texts), sleep=lambda s: None
+    )
+    sample = observer.sample_target(5)
+    assert sample.requests == 60 and sample.p99_ms == 1000

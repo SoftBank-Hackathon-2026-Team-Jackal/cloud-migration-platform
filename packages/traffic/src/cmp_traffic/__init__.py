@@ -12,6 +12,7 @@ from .shifter import (
     TrafficShifter,
     check_handover,
     evaluate_step,
+    p99_limit,
     weights_for,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "TrafficShifter",
     "check_handover",
     "evaluate_step",
+    "p99_limit",
     "weights_for",
 ]

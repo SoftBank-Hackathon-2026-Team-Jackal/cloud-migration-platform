@@ -24,7 +24,7 @@ def _cluster(name: str, host: str, port: int, health_path: str) -> dict:
     return {
         "name": name,
         "type": "STRICT_DNS",
-        "connect_timeout": "1s",
+        "connect_timeout": "3s",  # WAN 구간 기준(실측 후 조정)
         "health_checks": [
             {
                 "timeout": "1s",

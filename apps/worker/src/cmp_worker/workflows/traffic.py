@@ -16,6 +16,7 @@ with workflow.unsafe.imports_passed_through():
         TrafficPolicy,
         check_handover,
         evaluate_step,
+        p99_limit,
         weights_for,
     )
     from cmp_traffic.snapshot import build_snapshot
@@ -119,6 +120,7 @@ class TrafficShiftWorkflow:
 
             began = workflow.time()
             total = Sample(requests=0, failed=0, p99_ms=0)
+            streak = 0
             while True:
                 self._publish(
                     policy, weights, step, baseline, total, policy.observe_seconds, "observing"
@@ -134,12 +136,13 @@ class TrafficShiftWorkflow:
                     )
                 except ActivityError as exc:
                     return await self._rollback(policy, baseline, step, f"관측 실패: {exc.cause}")
+                streak = streak + 1 if window.p99_ms > p99_limit(policy, baseline) else 0
                 total = Sample(
                     requests=total.requests + window.requests,
                     failed=total.failed + window.failed,
-                    p99_ms=max(total.p99_ms, window.p99_ms),
+                    p99_ms=window.p99_ms,
                 )
-                outcome = evaluate_step(policy, baseline, total, workflow.time() - began)
+                outcome = evaluate_step(policy, baseline, total, workflow.time() - began, streak)
                 self._publish(policy, weights, step, baseline, total, 0, "gate")
                 if outcome.decision != "hold":
                     break
