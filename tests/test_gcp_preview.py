@@ -282,3 +282,47 @@ def test_reject_unreviewed_or_noncreate_plan():
         }
         with pytest.raises(ProvisioningInputError, match=code):
             preview_from_plan(payload, request(), "a" * 64)
+
+
+GCP_KINDS = [
+    "google_compute_network",
+    "google_compute_subnetwork",
+    "google_compute_router",
+    "google_compute_router_nat",
+    "google_compute_firewall",
+    "google_container_cluster",
+    "google_container_node_pool",
+]
+
+
+def _plan(action_for) -> dict:
+    return {
+        "resource_changes": [
+            {"mode": "managed", "type": kind, "change": {"actions": [action_for(kind)]}}
+            for kind in GCP_KINDS
+        ]
+    }
+
+
+def test_recovery_continuation_plan_after_earlier_apply_is_reviewable():
+    """Ticket 14 F9: a new Revision over this environment's own State may keep resources."""
+    partial = _plan(lambda kind: "create" if kind == "google_container_node_pool" else "no-op")
+    preview = preview_from_plan(partial, request(), "a" * 64)
+    actions = {(c.name, c.action) for c in preview.changes}
+    assert ("VPC Network", "NO_CHANGE") in actions and ("GKE node pool", "CREATE") in actions
+    assert "RECOVERY_CONTINUATION" in {w.code for w in preview.warnings}
+    fresh = preview_from_plan(_plan(lambda kind: "create"), request(), "a" * 64)
+    assert "RECOVERY_CONTINUATION" not in {w.code for w in fresh.warnings}
+
+
+def test_recovery_plan_still_rejects_changes_and_missing_resources():
+    with pytest.raises(ProvisioningInputError, match="NON_CREATE_PLAN"):
+        preview_from_plan(
+            _plan(lambda kind: "update" if kind == "google_container_cluster" else "no-op"),
+            request(),
+            "a" * 64,
+        )
+    missing = _plan(lambda kind: "no-op")
+    missing["resource_changes"].pop()
+    with pytest.raises(ProvisioningInputError, match="INCOMPLETE_NEW_PLAN"):
+        preview_from_plan(missing, request(), "a" * 64)

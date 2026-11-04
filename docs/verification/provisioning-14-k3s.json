@@ -1,0 +1,204 @@
+{
+ "ticket": "14",
+ "issue": 56,
+ "date": "2026-11-05",
+ "cluster": {
+  "context": "k3d-cmp-recovery",
+  "k3d": "v5.9.0",
+  "k3s": "v1.36.4+k3s1",
+  "arch": "linux/arm64"
+ },
+ "ticket12_smoke_rerun": {
+  "offline": {
+   "status": "UNKNOWN",
+   "code": "AGENT_OFFLINE",
+   "helm_revisions": null
+  },
+  "reconnect_ready": {
+   "status": "SUCCEEDED",
+   "code": "READY",
+   "helm_revisions": {
+    "demo-db": 1,
+    "demo-app": 1
+   }
+  },
+  "lost_report_recovery": {
+   "status": "SUCCEEDED",
+   "code": "READY",
+   "helm_revisions": {
+    "demo-db": 1,
+    "demo-app": 1
+   }
+  },
+  "not_ready_revision": {
+   "status": "FAILED",
+   "code": "WORKLOAD_NOT_READY",
+   "helm_revisions": null
+  },
+  "r4_keys_present": [
+   "agent_id",
+   "app_health_path",
+   "app_internal_endpoint",
+   "app_port",
+   "app_release",
+   "app_replicas",
+   "cluster_uid",
+   "db_host",
+   "db_name",
+   "db_port",
+   "db_release",
+   "db_secret_ref",
+   "db_storage_size_gib",
+   "db_user",
+   "db_version"
+  ]
+ },
+ "workflow_path": {
+  "harness": "Temporal test env ProvisioningApprovalWorkflow + real execute_on_prem_plan + in-process platform API + real outbound Agent",
+  "r1_agent_offline": {
+   "outcome": {
+    "approval_id": "1a65dddb-276c-47d5-a30b-94af1056867d",
+    "code": "AGENT_OFFLINE",
+    "plan_id": "plan-k3s",
+    "revision": 1,
+    "status": "UNKNOWN"
+   },
+   "handoff": {
+    "DATA_MIGRATION": {
+     "proceed": false,
+     "blocked_by": [
+      "PROVISIONING_NOT_READY"
+     ]
+    },
+    "TRAFFIC_MIGRATION": {
+     "proceed": false,
+     "blocked_by": [
+      "PROVISIONING_NOT_READY"
+     ]
+    }
+   },
+   "result": {
+    "plan_id": "plan-k3s",
+    "revision": 1,
+    "provider": "ON_PREM",
+    "scope": "WORKLOADS",
+    "status": "UNKNOWN",
+    "code": "AGENT_OFFLINE",
+    "data_state": "NOT_MIGRATED",
+    "cluster": {
+     "kind": "K3s",
+     "name": null,
+     "location": null,
+     "account_id": null,
+     "agent_id": "agent-14",
+     "cluster_uid": null,
+     "network_refs": {}
+    },
+    "namespace": "cmp-prod-demo",
+    "failure": {
+     "stage": "WORKLOAD_DEPLOY",
+     "code": "AGENT_OFFLINE",
+     "recoverability": "CHECK_STATE_FIRST"
+    },
+    "partial_resources": {
+     "job_id": "rollout-23d0a1fc6da16776771b2107"
+    },
+    "warnings": [],
+    "checks": {
+     "cluster_access": "UNKNOWN",
+     "storage_class": "UNKNOWN",
+     "secret_refs": "UNKNOWN",
+     "helm_releases": "UNKNOWN",
+     "pods_ready": "UNKNOWN",
+     "service_endpoints": "UNKNOWN",
+     "pvc_bound": "UNKNOWN",
+     "db_ready": "UNKNOWN",
+     "internal_health": "UNKNOWN",
+     "external_health": "NOT_RUN",
+     "functional_tests": "NOT_RUN"
+    },
+    "database_ready": false,
+    "app_external_endpoint": null
+   }
+  },
+  "r2_new_revision": {
+   "outcome": {
+    "approval_id": "a8a04c89-01af-4446-a878-7ba59ffe03d0",
+    "code": "READY",
+    "plan_id": "plan-k3s",
+    "revision": 2,
+    "status": "EXECUTED"
+   },
+   "handoff": {
+    "DATA_MIGRATION": {
+     "proceed": true,
+     "blocked_by": []
+    },
+    "TRAFFIC_MIGRATION": {
+     "proceed": false,
+     "blocked_by": [
+      "EXTERNAL_ENDPOINT_UNAVAILABLE"
+     ]
+    }
+   },
+   "result": {
+    "plan_id": "plan-k3s",
+    "revision": 2,
+    "provider": "ON_PREM",
+    "scope": "WORKLOADS",
+    "status": "READY",
+    "code": "READY",
+    "data_state": "NOT_MIGRATED",
+    "cluster": {
+     "kind": "K3s",
+     "name": null,
+     "location": null,
+     "account_id": null,
+     "agent_id": "agent-14",
+     "cluster_uid": "20a23f15-c942-4964-a192-b2e72e458b2e",
+     "network_refs": {}
+    },
+    "namespace": "cmp-prod-demo",
+    "failure": null,
+    "partial_resources": {},
+    "warnings": [
+     "REPLICATION_NOT_VERIFIED",
+     "EXTERNAL_ENDPOINT_UNAVAILABLE"
+    ],
+    "checks": {
+     "cluster_access": "PASSED",
+     "storage_class": "PASSED",
+     "secret_refs": "PASSED",
+     "helm_releases": "PASSED",
+     "pods_ready": "PASSED",
+     "service_endpoints": "PASSED",
+     "pvc_bound": "PASSED",
+     "db_ready": "PASSED",
+     "internal_health": "PASSED",
+     "external_health": "NOT_RUN",
+     "functional_tests": "NOT_RUN"
+    },
+    "database_ready": true,
+    "app_external_endpoint": null
+   }
+  },
+  "agent_jobs": {
+   "rollout-23d0a1fc6da16776771b2107": [
+    "FAILED",
+    "STALE_REVISION"
+   ],
+   "rollout-82ff68560cc40028295cbbab": [
+    "SUCCEEDED",
+    "READY"
+   ]
+  },
+  "helm_revisions": {
+   "demo-db": 1,
+   "demo-app": 1
+  }
+ },
+ "cleanup": {
+  "namespace_deleted": true,
+  "default_kubeconfig_unchanged": true
+ }
+}

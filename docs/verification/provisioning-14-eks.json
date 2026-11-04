@@ -1,0 +1,199 @@
+{
+ "ticket": "14",
+ "issue": 56,
+ "date": "2026-11-05",
+ "account": "714066696240",
+ "region": "ap-northeast-2",
+ "plan_input": "same reviewed spec as ticket 08 (plan-aws-target r1), plan_id plan-aws-recovery",
+ "harness": "Temporal test env ProvisioningApprovalWorkflow + real execute_aws_plan / execute_aws_workloads + SQLite business DB",
+ "r1_apply_worker_killed": {
+  "kill_after_seconds": 240.0,
+  "outcome": {
+   "approval_id": "36d73821-b0d3-42e6-8f82-ffe9ba0c00e6",
+   "code": "PROVIDER_ACTIVITY_LOST",
+   "plan_id": "plan-aws-recovery",
+   "revision": 1,
+   "status": "UNKNOWN"
+  },
+  "terraform_finished_after_worker_death_seconds": 430,
+  "result": {
+   "plan_id": "plan-aws-recovery",
+   "revision": 1,
+   "provider": "AWS",
+   "scope": "INFRASTRUCTURE",
+   "status": "UNKNOWN",
+   "code": "PROVIDER_ACTIVITY_LOST",
+   "data_state": "NOT_MIGRATED",
+   "cluster": {
+    "kind": "EKS",
+    "name": null,
+    "location": "ap-northeast-2",
+    "agent_id": null,
+    "cluster_uid": null,
+    "network_refs": {}
+   },
+   "namespace": null,
+   "failure": {
+    "stage": "INFRASTRUCTURE",
+    "code": "PROVIDER_ACTIVITY_LOST",
+    "recoverability": "CHECK_STATE_FIRST"
+   },
+   "partial_resources": {},
+   "warnings": [],
+   "checks": {
+    "terraform_apply": "UNKNOWN",
+    "cluster_ready": "UNKNOWN"
+   },
+   "database_ready": null,
+   "app_external_endpoint": null
+  },
+  "state_after": {
+   "serial": 12,
+   "managed_resources": 29
+  },
+  "real_resources": "EKS cmp-target-aws ACTIVE, node group ACTIVE"
+ },
+ "r2_first_attempt": {
+  "preview": "rejected INCOMPLETE_NEW_PLAN (new-network-only rule) -> fixed by F9"
+ },
+ "r2_recovery_plan": {
+  "preview_actions": "17 changes, all NO_CHANGE, 0 CREATE",
+  "warnings": [
+   "ALB_NOT_DEPLOYED",
+   "SINGLE_NAT_AZ",
+   "RECOVERY_CONTINUATION"
+  ]
+ },
+ "r2_recovery_apply": {
+  "outcome": {
+   "approval_id": "cceecf4f-264b-4137-9f20-535f14e5952a",
+   "code": "TERRAFORM_APPLIED",
+   "plan_id": "plan-aws-recovery",
+   "revision": 2,
+   "status": "EXECUTED"
+  },
+  "result": {
+   "plan_id": "plan-aws-recovery",
+   "revision": 2,
+   "provider": "AWS",
+   "scope": "INFRASTRUCTURE",
+   "status": "INFRASTRUCTURE_READY",
+   "code": "TERRAFORM_APPLIED",
+   "data_state": "NOT_MIGRATED",
+   "cluster": {
+    "kind": "EKS",
+    "name": "cmp-target-aws",
+    "location": "ap-northeast-2",
+    "agent_id": null,
+    "cluster_uid": null,
+    "network_refs": {
+     "vpc_id": "vpc-0320e0023e571040d"
+    }
+   },
+   "namespace": null,
+   "failure": null,
+   "partial_resources": {},
+   "warnings": [],
+   "checks": {
+    "terraform_apply": "PASSED",
+    "cluster_ready": "PASSED"
+   },
+   "database_ready": null,
+   "app_external_endpoint": null
+  },
+  "state_after": {
+   "serial": 13,
+   "managed_resources": 29
+  }
+ },
+ "no_duplicates": {
+  "vpc_10.40.0.0/16": 1,
+  "nat_gateways": 1,
+  "target_eks_clusters": 1,
+  "node_groups": 1,
+  "subnets": 4,
+  "oidc_provider_for_cluster": 1
+ },
+ "workloads": {
+  "r1": {
+   "outcome": {
+    "approval_id": "5940ea54-fd45-4d7f-9f9f-fe09b0933909",
+    "code": "WORKLOADS_READY",
+    "plan_id": "plan-aws-workloads",
+    "revision": 1,
+    "status": "EXECUTED"
+   },
+   "helm_after": {
+    "cmp-demo-api": [
+     "deployed",
+     "1"
+    ],
+    "cmp-demo-db": [
+     "deployed",
+     "1"
+    ]
+   },
+   "result": {
+    "plan_id": "plan-aws-workloads",
+    "revision": 1,
+    "provider": "AWS",
+    "scope": "WORKLOADS",
+    "status": "READY",
+    "code": "WORKLOADS_READY",
+    "data_state": "NOT_MIGRATED",
+    "cluster": {
+     "kind": "EKS",
+     "name": "cmp-target-aws",
+     "location": "ap-northeast-2",
+     "account_id": "714066696240",
+     "agent_id": null,
+     "cluster_uid": null,
+     "network_refs": {}
+    },
+    "namespace": "cmp-demo-target",
+    "failure": null,
+    "partial_resources": {},
+    "warnings": [],
+    "checks": {
+     "cluster_access": "PASSED",
+     "ingress_controller": "PASSED",
+     "storage_class": "PASSED",
+     "secret_refs": "PASSED",
+     "db_release": "PASSED",
+     "pvc_bound": "PASSED",
+     "db_pod_ready": "PASSED",
+     "db_auth_connect": "PASSED",
+     "app_release": "PASSED",
+     "app_pod_ready": "PASSED",
+     "internal_health": "PASSED",
+     "external_address": "PASSED",
+     "external_health": "PASSED",
+     "functional_tests": "NOT_RUN"
+    },
+    "database_ready": true,
+    "app_external_endpoint": "http://k8s-cmpdemot-cmpdemoa-ecc950e231-1595871507.ap-northeast-2.elb.amazonaws.com"
+   }
+  },
+  "r2_idempotent_rerun": {
+   "outcome": {
+    "approval_id": "8a8def9a-e202-4a9f-a24a-05dab1bbbad3",
+    "code": "WORKLOADS_READY",
+    "plan_id": "plan-aws-workloads",
+    "revision": 2,
+    "status": "EXECUTED"
+   },
+   "helm_after": {
+    "cmp-demo-api": [
+     "deployed",
+     "1"
+    ],
+    "cmp-demo-db": [
+     "deployed",
+     "1"
+    ]
+   }
+  },
+  "external_health": "GET http://<alb>/health -> 200 x5"
+ },
+ "not_destroyed": true
+}

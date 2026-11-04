@@ -238,6 +238,8 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 | Agent 연결 끊김 | 작업 ID·Agent 상태 유지, 재연결 후 조회. 중복 제출 억제 |
 | 헬스·DB·외부 접근 실패 | 실패 검사와 실제 리소스 상태 반환, Data/Traffic 진행 차단 |
 
+**14 구현 (#56):** 복구는 같은 Revision 재실행이 아니라 실제 상태 확인 후 새 Revision 승인으로만 한다. 인프라 복구 Plan은 같은 환경 State의 기존 자원을 NO_CHANGE로 유지하고 부족한 자원만 만든다(`RECOVERY_CONTINUATION`). Workflow 취소는 `UNKNOWN`/`EXECUTION_CANCELLED`로 기록하며 삭제로 표시하지 않는다. 결정 F1~F9와 실측 증거는 [티켓 14](../../tickets/provisioning/14-recovery-integration.md)에 있다.
+
 Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하지 않는다. 각 실행 단계는 작업 식별자·현재 대상 상태를 확인하고 같은 요청의 중복 실행을 억제한다. Production 취소·부분 실패의 자동 자원 정리 범위는 미정이며, 데이터가 들어간 PVC와 공유 네트워크는 특히 보존 여부를 먼저 판단한다. 트래픽 복귀는 Traffic Migration, DB 복구는 Data Migration의 설계 영역이다.
 
 ## 13. Verification — 설계 검증과 구현 우선순위
