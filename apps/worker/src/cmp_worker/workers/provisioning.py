@@ -5,6 +5,7 @@ from temporalio.worker import Worker
 
 from cmp_worker.activities.approval import ApprovalActivities
 from cmp_worker.activities.aws_infra import AwsInfraActivities
+from cmp_worker.activities.aws_workloads_cli import build_aws_workloads_activities
 from cmp_worker.activities.provisioning import prepare_plan, provision_target
 from cmp_worker.config import settings
 
@@ -26,5 +27,6 @@ def create_worker(client: Client) -> Worker:
             approval.claim_approved_execution,
             approval.complete_approved_execution,
             aws_infra.execute_aws_plan,
+            build_aws_workloads_activities(SessionLocal).execute_aws_workloads,
         ],
     )
