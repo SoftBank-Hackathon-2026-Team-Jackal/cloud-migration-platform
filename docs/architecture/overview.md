@@ -97,7 +97,7 @@ Redis, Celery, Kafka 같은 별도 작업 큐는 현재 확정 스택에 포함�
 | 6 | Provisioning Planning | 공통 Provisioning 명세 검증, 대상별 구성 변환, Preview 생성 |
 | 7 | User Approval | 실제 생성·변경 대상에 대한 사용자 승인 또는 수정 요청 |
 | 8 | Production Provisioning | 승인 후 Terraform·Helm·Agent 등으로 대상 구성 및 앱·DB 배포, 상태·Endpoint 반환 |
-| 9 | Data Migration | 원본·대상 연결, PostgreSQL 초기 복사·변경 동기화·정합성 확인 |
+| 9 | Data Migration | ON_PREM이면 실제 이전 경로 Preflight 통과 후 원본·대상 연결, PostgreSQL 초기 복사·변경 동기화·정합성 확인 |
 | 10 | Traffic Cutover | 서비스 준비와 동기화 상태를 확인하며 단계적 전환, 가능한 범위의 복귀 관리 |
 | 11 | Final Verification & Handover | 실제 서비스 상태 재확인, 결과와 운영 산출물 인계 |
 
