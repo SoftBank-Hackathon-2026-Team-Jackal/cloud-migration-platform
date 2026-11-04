@@ -229,6 +229,9 @@ class RolloutRunner:
             or status.get("observedGeneration", 0) < resource["metadata"]["generation"]
             or status.get("readyReplicas", 0) != desired
             or status.get("updatedReplicas", 0) != desired
+            # A stuck rolling update still has a Ready old Pod; require no surplus/unavailable.
+            or status.get("replicas", desired) != desired
+            or status.get("unavailableReplicas", 0) != 0
         ):
             raise RolloutAgentError("WORKLOAD_NOT_READY")
 

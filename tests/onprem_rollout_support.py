@@ -182,4 +182,5 @@ def claim_request(record: PlanApproval, manifest: PlanManifest) -> dict:
         "provider": "ON_PREM",
         "scope": record.scope,
         "manifest_digest": manifest_digest(manifest),
+        "resource_refs": {},  # refs from earlier steps (08 contract); ignored by ON_PREM
     }

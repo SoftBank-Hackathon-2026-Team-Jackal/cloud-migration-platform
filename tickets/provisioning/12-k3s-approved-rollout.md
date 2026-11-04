@@ -1,7 +1,7 @@
 # Ticket 12 — 승인된 K3s Agent 운영 배포
 
 ## 상태
-IN_PROGRESS — [Issue #36](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/36). 2026-11-04 착수 결정 E1~E9와 Test Seam 검토 완료(아래).
+DONE — [Issue #36](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/36). 테스트 DB·ActivityEnvironment·격리 k3d 기준. 08의 Workflow dispatch 병합 후 경유 실행은 미검증(아래).
 
 ## 목적
 승인된 K3s 계획을 Agent에 보내고 기존 클러스터에서 DB·앱 준비를 확인한다.
@@ -18,9 +18,9 @@ Blocked by: 04A, 07
 - 제외: 온프레미스 외부 중계·Envoy·WireGuard 생명주기
 
 ## 수용 기준
-- [ ] 승인되지 않거나 변경된 Plan의 Agent 배포 요청을 거부한다.
-- [ ] Agent가 오프라인이면 작업 상태를 보존하고 재연결 후 조회한다.
-- [ ] PVC·DB·앱 상태와 내부 Endpoint를 확인하고 실패 시 `READY` 금지다.
+- [x] 승인되지 않거나 변경된 Plan의 Agent 배포 요청을 거부한다.
+- [x] Agent가 오프라인이면 작업 상태를 보존하고 재연결 후 조회한다.
+- [x] PVC·DB·앱 상태와 내부 Endpoint를 확인하고 실패 시 `READY` 금지다.
 
 ## 테스트 전략
 - 제안 Test Seam: 승인 Workflow → Agent 작업/실제 K3s 상태. 외부 트래픽 경로는 확인하지 못한다.
@@ -38,11 +38,11 @@ Blocked by: 04A, 07
 - 구현 중 변경: 2026-11-04 착수 결정 E1~E9 참조(실행 연결은 08 소유 dispatch 계약, 작업 본문·산출물 전달·오프라인 보존·READY 기준).
 
 ## 완료 체크리스트
-- [ ] 수용 기준과 Test Seam 확인
-- [ ] 관련 테스트 통과와 회귀 확인
-- [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
-- [ ] 미검증 항목과 결과 증거 기록
+- [x] 수용 기준과 Test Seam 확인
+- [x] 관련 테스트 통과와 회귀 확인
+- [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
+- [x] 구현·계약 정합성 및 최종 리뷰 (자체 리뷰; PR 리뷰 대기)
+- [x] 미검증 항목과 결과 증거 기록
 
 ## 착수 결정 (2026-11-04)
 
@@ -65,3 +65,27 @@ Blocked by: 04A, 07
 - Seam: (1) FastAPI `TestClient` + SQLite 업무 DB의 Agent claim·산출물 다운로드·결과 보고·rollout 조회 경계, (2) `temporalio.testing.ActivityEnvironment`의 실제 `execute_on_prem_plan` + 로컬 ArtifactStore + 가짜 Agent(실제 claim/report 서비스 함수 호출), (3) 격리 k3d의 실제 Agent runner(Helm·kubectl) 배포·재연결·READY 차단.
 - 잡아내는 것: 미승인·거절·오래된 Revision·Digest/산출물 변조 작업의 차단, 동일 Plan Revision 재실행 시 작업 1건 유지, Agent 오프라인 시 작업 보존과 재접속 후 결과 반영, 결과 유실 후 재설치 없는 검증 복구, PVC/워크로드/DB/앱 헬스 실패 시 READY 금지, Secret 원문 미노출.
 - 놓치는 것: 08 병합 전 실제 `ProvisioningApprovalWorkflow` 경유 실행(병합 후 확인), 실제 NAT·HTTPS 원격 연결, 다양한 사용자 K3s 배포판·RBAC, 외부 트래픽 경로, S3 산출물 저장소, 장시간 운영 lease.
+
+## 검증 기록 (2026-11-04)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `make check` (ruff + pytest, macOS, Python 3.11) | 324 passed |
+| `uv run pytest tests/test_onprem_rollout.py tests/test_onprem_agent.py tests/test_remote_agent.py` | 승인/전송/Activity 8건 + Agent 결정 12건 + 클라이언트 3건 통과 |
+| `make openapi` | Agent 산출물 다운로드·rollout 상태 2개 경로, claim payload 확장, `x-sdd-agreed-capabilities.approved-onprem-rollout` 반영. 생성 결과 검토 |
+| `make smoke-temporal` (기존 로컬 Temporal) | `scaffold_complete` — provisioning Worker에 `execute_on_prem_plan` 등록 후 회귀 없음 |
+| `scripts/smoke_onprem_rollout.py` (k3d v5.9.0 / K3s v1.36.4+k3s1 / ARM64, Helm v4.3.1, 전용 kubeconfig, context `k3d-cmp-prov-rollout`) | [증거](../../docs/verification/provisioning-12-k3s.json): ① Agent 미폴링 → `UNKNOWN AGENT_OFFLINE`, 작업 `WAITING_AGENT` 보존 ② 재접속 Agent가 같은 작업 처리 → `SUCCEEDED READY`, 내부 Endpoint refs ③ 결과 보고 유실 주입(작업을 RUNNING으로 되돌림) → 재설치 없이 검증 복구, Helm revision 1 유지 ④ 이미지 Pull 불가 앱의 새 승인 Revision → `FAILED WORKLOAD_NOT_READY`, READY 아님 ⑤ Namespace 삭제, 기본 kubeconfig 불변 |
+
+TDD 메모: API/Activity 슬라이스는 모듈 부재 RED → GREEN 한 단계로 진행했고, Agent 결정 테스트는 구현 후 작성해 핵심 분기를 일시적으로 깨는 변이 검사로 실패를 확인했다. k3d ④의 첫 실행에서 롤링 업데이트 중 이전 Pod가 Ready여서 워크로드 검사가 통과하고 `RELEASE_NOT_DEPLOYED`로만 차단되는 약점을 발견해, 실패 테스트(`test_rollout_still_serving_old_pod_is_not_ready`)를 먼저 추가한 뒤 `replicas`·`unavailableReplicas` 조건을 보강했다(RED → GREEN, 재실행에서 `WORKLOAD_NOT_READY`).
+
+정리: `KUBECONFIG=<전용> k3d cluster delete cmp-prov-rollout`로 클러스터와 Registry(`cmp-rollout-reg`)가 함께 제거됐고 `k3d cluster list`/`registry list`가 비어 있음을 확인했다. minikube·기본 kubeconfig(전후 SHA 동일)는 건드리지 않았다. 로컬 Docker에 `postgres:16-alpine` 이미지가 남아 있다. k3d는 사용자 승인으로 Homebrew 설치했다.
+
+### 미검증·제한 사항
+
+- 실행 dispatch는 08 소유다. 08이 병합되기 전이라 `ProvisioningApprovalWorkflow` → `claim_approved_execution` → `execute_on_prem_plan` → `complete_approved_execution` 전체 경로는 확인하지 않았다(Activity 직접 실행으로 대체). 08 병합 후 `workers/provisioning.py` 등록 줄 충돌 해소와 함께 확인해야 한다.
+- 실제 NAT 뒤 HTTPS 원격 Agent, 장기 실행 감독(반복 폴링 루프·lease), 다양한 사용자 K3s 배포판·제한 RBAC는 확인하지 않았다. Agent는 kubeconfig 권한으로 Namespace·Secret 생성과 Helm 설치를 수행한다.
+- 산출물 저장소는 로컬 Digest 디렉터리(`ARTIFACT_STORE_DIR`)이며 S3 연결과 Planning의 Chart 패키징·Plan 게시 연결은 후속이다.
+- READY는 대상 내부 검사만 포함한다. 외부 Ingress·트래픽 경로, Sandbox 기능 테스트 재사용과 데이터 검증, `ProvisioningResult` 저장·인계는 13 범위다.
+- `UNKNOWN`(오프라인·검사 필요) 이후 자동 재개 정책과 실패 Release 정리 정책은 14 범위다. Agent는 실패/중단 Release를 자동 삭제·재적용하지 않는다.
+- k3d 검증의 앱 헬스는 04 테스트 앱(SQL 쓰기/읽기 포함)이다. 임의 운영 앱은 health_path 2xx만 확인한다.
+- `spec.md` 요구사항·수용 기준은 바뀌지 않아 수정하지 않았다.

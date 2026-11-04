@@ -243,3 +243,25 @@ def test_agent_reports_only_codes():
     [report] = client.reports
     assert report["status"] == "SUCCEEDED" and report["code"] == "READY"
     assert "c2VjcmV0" not in json.dumps(report)
+
+
+def test_rollout_still_serving_old_pod_is_not_ready():
+    """k3d finding: a stuck rolling update keeps the old Pod Ready (ready=1, updated=1)."""
+    cluster = FakeCluster()
+    cluster.broken.add("demo-app")
+    original = cluster.helm
+
+    def stuck(*args, timeout=60):
+        result = original(*args, timeout=timeout)
+        if args[2] == "demo-app":
+            cluster.objects[("deployment", "demo-app")]["status"] = {
+                "observedGeneration": 1,
+                "replicas": 2,
+                "readyReplicas": 1,
+                "updatedReplicas": 1,
+                "unavailableReplicas": 1,
+            }
+        return result
+
+    cluster.helm = stuck
+    assert run(cluster) == ("FAILED", "WORKLOAD_NOT_READY")

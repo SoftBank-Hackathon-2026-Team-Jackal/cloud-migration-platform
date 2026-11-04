@@ -78,7 +78,16 @@ async def execute(db, store, request, wait):
 
 async def execute_with_agent(db, store, request, agent):
     """Activity waits while the Agent claims, deploys and reports in another thread."""
-    agent_result = asyncio.to_thread(agent.poll_once)
+
+    def poll_until_claimed():
+        for _ in range(120):  # the Activity queues the job concurrently
+            result = agent.poll_once()
+            if result is not None:
+                return result
+            time.sleep(0.5)
+        return None
+
+    agent_result = asyncio.to_thread(poll_until_claimed)
     activity, polled = await asyncio.gather(execute(db, store, request, 600), agent_result)
     return activity, polled
 
