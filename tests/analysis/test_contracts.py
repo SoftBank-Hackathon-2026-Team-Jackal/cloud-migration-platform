@@ -216,3 +216,20 @@ def test_stale_or_unpassed_evidence_is_rejected(planning_inputs, change):
     with pytest.raises(ValueError):
         request = project_planning(**inputs)
         prepare_plan_v2(request.model_dump(mode="json"), requirements_bytes=content)
+
+
+def test_sandbox_attempt_accepts_infra_failure_class():
+    from cmp_contracts.verification import SandboxAttempt
+
+    attempt = SandboxAttempt.model_validate(
+        {
+            "attempt": 1,
+            "verdict": {"passed": False, "reasons": ["cluster unreachable"]},
+            "failure_class": "INFRA",
+        }
+    )
+    assert attempt.failure_class == "INFRA"
+    with pytest.raises(ValidationError):
+        SandboxAttempt.model_validate(
+            {"attempt": 1, "verdict": {"passed": False, "reasons": []}, "failure_class": "infra"}
+        )

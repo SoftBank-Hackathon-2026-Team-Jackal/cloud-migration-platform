@@ -10,7 +10,7 @@
 | [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | DRAFT | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | 미생성 | ☐ |
 | [03 소스 확보·운영 커밋 고정·마스킹](../../tickets/analysis-verification/03-source-fetch.md) | DRAFT | 01 | AV-002, AV-020 | 미생성 | ☐ |
 | [04 매니페스트·클러스터 리소스 스캔](../../tickets/analysis-verification/04-manifest-scan.md) | DRAFT | 01 | AV-004 | 미생성 | ☐ |
-| [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DRAFT | 03 | AV-003 | 미생성 | ☐ |
+| [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DRAFT | 03, D-07(언어별 어댑터만) | AV-003 | 미생성 | ☐ |
 | [06 AWS 인프라·네트워크 스캔과 통신 의도](../../tickets/analysis-verification/06-aws-infra-scan.md) | DRAFT | 01, AWS 테스트 계정(외부) | AV-005, AV-020 | 미생성 | ☐ |
 | [07 요구사항·사용 프로필·사전 점검 조립](../../tickets/analysis-verification/07-profile-precheck.md) | DRAFT | 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시) | AV-006, AV-017 | 미생성 | ☐ |
 | [08A 에이전트 실행 기반과 Skill 형식](../../tickets/analysis-verification/08a-agent-runtime.md) | DRAFT | 01 | AV-007, AV-020 | 미생성 | ☐ |

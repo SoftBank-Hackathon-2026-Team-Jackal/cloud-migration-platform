@@ -62,7 +62,7 @@ class Verdict(Contract):
 class SandboxAttempt(Contract):
     attempt: int = Field(ge=1, le=3)
     verdict: Verdict
-    failure_class: Literal["SPEC", "CODE", "BUILD", "RENDER"] | None = None
+    failure_class: Literal["SPEC", "CODE", "BUILD", "RENDER", "INFRA"] | None = None
 
 
 class SandboxVerification(Contract):

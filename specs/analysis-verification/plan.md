@@ -81,6 +81,7 @@ MigrationWorkflow (migration)
  │        SPEC(통신 의도 누락 포함) → fix_mapping(LLM) → (다음 시도: 재render, 같은 Digest)
  │        CODE/BUILD → fix_code(LLM) → package_source → request_build → (새 Digest)
  │        RENDER → 중단, Provisioning 담당 보고
+ │        INFRA → 수정 없이 같은 입력으로 재시도(시도 횟수에 넣지 않음), 연속 2회면 사람 검토
  │   3회 초과 → 사람 검토 Signal 대기
  │   통과 → publish_final_report (최종 AnalysisReport·요구사항 버전 발행)
  │   finally: teardown_sandbox
@@ -102,7 +103,7 @@ MigrationWorkflow (migration)
 
 | 스캐너 | 방식 | 결과 |
 | --- | --- | --- |
-| `code_python` | 표준 `ast`: `boto3.client/resource(...)` 호출과 메서드, `os.environ`/`getenv`, `psycopg`/`sqlalchemy` import·URL, `requests`/`httpx` 외부 호스트, 마이그레이션의 `CREATE EXTENSION` | 호출 지점 목록(파일·줄) |
+| `code` | 언어 공통 `CodeScanner` 인터페이스 + 언어별 어댑터. 찾는 것: 클라우드 SDK 클라이언트·호출, 환경변수 읽기, DB 드라이버·연결 URL, 외부 호스트 호출. 첫 어댑터 언어는 D-07 결정 후 정한다(미정). 언어와 무관한 부분(언어 감지와 미지원 파일 "스캔 불가" 표시, SQL 마이그레이션의 `CREATE EXTENSION`, `.env` 이름 대조)은 먼저 만든다 | 호출 지점 목록(파일·줄) |
 | `manifests` | YAML 파싱, Helm 차트는 `helm template` 후 | 리소스별 클라우드 의존, 원본 DB 이미지 Digest(정보) |
 | `aws_infra` | boto3 읽기 전용(EKS, EC2 VPC/Subnet/RouteTable/SG, ELBv2, IAM role policy, CloudTrail LookupEvents) | 리소스 설정 |
 | `network` | SG·Ingress·코드 외부 호출 → `NetworkIntent` 목록 + 외부 진입·원본 CIDR | 통신 의도 |
@@ -285,7 +286,7 @@ NetworkPolicy(Sandbox 워커 생성):
 ### 2.8 판정과 실패 분류 (AV-014, AV-015)
 
 - `judge`는 결정적 함수: 필수 테스트 결과, 앱 로그의 미지원 호출 패턴, 프록시 차단 기록, 매핑 대조 → `Verdict{passed, reasons[]}`.
-- `classify_failure` 순서: (1) 렌더 결과가 요구사항과 필드 단위로 다르면 `RENDER` (2) 빌드 실패면 `BUILD` (3) 프록시 차단이 있으면 `SPEC`(의도 누락) (4) 테스트 실패 + 스택트레이스가 앱 코드면 `CODE` (5) 나머지 `SPEC`. 애매하면 Fixer가 원인 후보를 제안하고 다음 시도의 결과로 확인한다.
+- `classify_failure` 순서: (0) Sandbox 환경 자체가 실패했으면 `INFRA`: 클러스터 API 접근 불가, 노드 NotReady, 레지스트리 접근·인증 실패로 이미지를 못 받음, Helm·Kubernetes API 시간 초과인데 앱 Pod 이벤트·로그에 앱 원인이 없음. 앱이나 요구사항을 고쳐서 풀리는 문제가 아니므로 Fixer를 부르지 않는다 (1) 렌더 결과가 요구사항과 필드 단위로 다르면 `RENDER` (2) 빌드 실패면 `BUILD` (3) 프록시 차단이 있으면 `SPEC`(의도 누락) (4) 테스트 실패 + 스택트레이스가 앱 코드면 `CODE` (5) 나머지 `SPEC`. 애매하면 Fixer가 원인 후보를 제안하고 다음 시도의 결과로 확인한다.
 
 ### 2.9 에이전트 (Mapper·Tester·Fixer)
 
