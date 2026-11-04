@@ -12,6 +12,7 @@ from cmp_worker.workers.analysis import create_worker as analysis_worker
 from cmp_worker.workers.build import create_worker as build_worker
 from cmp_worker.workers.migration import create_workflow_worker
 from cmp_worker.workers.provisioning import create_worker as provisioning_worker
+from cmp_worker.workers.sandbox import create_worker as sandbox_worker
 from cmp_worker.workflows.analysis import AnalysisWorkflow
 from cmp_worker.workflows.migration import MigrationWorkflow
 from temporalio import activity, workflow
@@ -75,6 +76,7 @@ async def test_analysis_child_runs_on_migration_queue():
     ) as env:
         async with (
             analysis_worker(env.client),
+            sandbox_worker(env.client),
             build_worker(env.client),
             provisioning_worker(env.client),
             create_workflow_worker(env.client),
@@ -91,6 +93,8 @@ async def test_analysis_child_runs_on_migration_queue():
                 e.start_child_workflow_execution_initiated_event_attributes
                 for e in history.events
                 if e.HasField("start_child_workflow_execution_initiated_event_attributes")
+                and e.start_child_workflow_execution_initiated_event_attributes.workflow_type.name
+                == "AnalysisWorkflow"
             ]
             assert len(starts) == 1
             assert starts[0].workflow_id == "analysis-parent-test"

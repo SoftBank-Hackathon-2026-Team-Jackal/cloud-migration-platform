@@ -19,6 +19,7 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.activities.migration import copy_data, shift_traffic, verify_target
     from cmp_worker.activities.provisioning import prepare_plan, provision_target
     from cmp_worker.workflows.analysis import AnalysisWorkflow
+    from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
 
 
 @workflow.defn
@@ -103,6 +104,49 @@ class MigrationWorkflow:
         ):
             if name == "analysis" and workflow.patched("analysis-child-v1"):
                 continue
+            if name == "build" and workflow.patched("sandbox-child-v1"):
+                if self.cancel_requested:
+                    self.phase = "cancelled"
+                    return "cancelled"
+                self.phase = "sandbox"
+                child = await workflow.start_child_workflow(
+                    SandboxVerificationWorkflow.run,
+                    workflow.info().workflow_id,
+                    id=f"sandbox-{workflow.info().workflow_id}",
+                    task_queue=WORKFLOW_QUEUE,
+                    parent_close_policy=workflow.ParentClosePolicy.TERMINATE,
+                )
+                cancel_wait = asyncio.create_task(
+                    workflow.wait_condition(lambda: self.cancel_requested)
+                )
+                child_cancel_requested = False
+                try:
+                    await workflow.wait([child, cancel_wait], return_when=asyncio.FIRST_COMPLETED)
+                    if self.cancel_requested:
+                        child_cancel_requested = True
+                        child.cancel()
+                        try:
+                            await asyncio.shield(child)
+                        except ChildWorkflowError as exc:
+                            if not isinstance(exc.cause, CancelledError):
+                                raise
+                        self.phase = "cancelled"
+                        return "cancelled"
+                    result = await child
+                    if result["status"] != "PASSED":
+                        self.phase = result["status"].lower()
+                        return self.phase
+                except asyncio.CancelledError:
+                    if not child_cancel_requested:
+                        child.cancel()
+                    try:
+                        await asyncio.shield(child)
+                    except ChildWorkflowError as exc:
+                        if not isinstance(exc.cause, CancelledError):
+                            raise
+                    raise
+                finally:
+                    cancel_wait.cancel()
             await self._step(name, fn, project_id, queue)
             if self.cancel_requested:
                 return "cancelled"

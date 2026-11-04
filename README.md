@@ -14,7 +14,7 @@ make infra-up
 
 별도 터미널에서 `make workers`, `make api`를 실행한다. API 문서는 `http://localhost:8000/docs`, Temporal UI는 `http://localhost:8080`이다. Docker가 시작되지 않았다면 두 프로세스도 Temporal에 연결되지 않는다.
 
-Temporal만 빠르게 확인할 때는 `make infra-up` 후 `make smoke-temporal`을 실행한다. 이 명령은 테스트 Worker를 잠시 실행하고 승인 대기·재개·완료를 확인한다. **Task Queue 경계와 Worker 실행 방법은 [Temporal 사용 가이드](docs/architecture/temporal-flow.md)**에 정리했다.
+Temporal만 빠르게 확인할 때는 `make infra-up` 후 별도 터미널에서 Sandbox Worker(`make worker QUEUE=sandbox`)를 띄우고 `make smoke-temporal`을 실행한다. Sandbox Worker가 없으면 새 마이그레이션은 Sandbox 단계에서 대기하다 시간 초과로 실패한다. 이 명령은 테스트 Worker를 잠시 실행하고 승인 대기·재개·완료를 확인한다. **Task Queue 경계와 Worker 실행 방법은 [Temporal 사용 가이드](docs/architecture/temporal-flow.md)**에 정리했다.
 
 ```bash
 curl -X POST http://localhost:8000/migrations \

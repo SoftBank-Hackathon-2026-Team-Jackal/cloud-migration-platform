@@ -1,7 +1,7 @@
 # Ticket 02 — 분석 Activity 골격
 
 ## 상태
-IN_PROGRESS — 사용자 검토 및 Test Seam 확인, Issue #44
+DONE — 사용자 결정에 따라 02B 진행, Issue #44. 민서님 공동 리뷰와 CI 결과 확인은 남음.
 
 ## 목적
 `AnalysisWorkflow` 자식에 분석 Activity 묶음과 병렬 스캔 흐름을 fixture 반환으로 연결한다.
@@ -17,13 +17,13 @@ Blocked by: 01
 - 제외: Sandbox 자식 Workflow(02B), 실제 스캔·LLM
 
 ## 수용 기준
-- [ ] 스캔 4종이 병렬로 실행되는 것이 이력에서 보인다.
-- [ ] 분석 결과로 01의 `AnalysisReport`·`RequirementsV2` fixture가 반환된다.
-- [ ] Workflow 코드에 외부 I/O·시각·난수가 없다(Temporal 샌드박스 통과).
-- [ ] 기존 승인 대기 스캐폴드 흐름이 깨지지 않는다.
+- [x] 스캔 4종이 병렬로 실행되는 것이 이력에서 보인다.
+- [x] 분석 결과로 01의 `AnalysisReport`·`RequirementsV2` fixture가 반환된다.
+- [x] Workflow 코드에 외부 I/O·시각·난수가 없다(Temporal 샌드박스 통과).
+- [x] 기존 승인 대기 스캐폴드 흐름이 깨지지 않는다.
 - [ ] 부모가 분석 자식의 완료·실패·취소를 처리한다. 공유 부모 파일의 변경 범위와 replay 결과를 PR 설명에 기록해 민서님께 공유한다.
-- [ ] 기존 진행 중 Workflow 이력과의 replay 호환성을 검토·검증하고 필요하면 안전한 버전 분기를 적용한다.
-- [ ] 기존 Temporal 기본 Data Converter를 유지한다. Activity 경계에서 Pydantic 모델을 `model_dump(mode="json")`·`model_validate`로 처리하고, Workflow·Activity 경계의 fixture 왕복과 잘못된 입력 거절을 실제 Converter로 검증한다. 이력에는 참조·작은 메타데이터만 담는다.
+- [x] 기존 진행 중 Workflow 이력과의 replay 호환성을 검토·검증하고 필요하면 안전한 버전 분기를 적용한다(검증한 이력의 범위는 아래 참조).
+- [x] 기존 Temporal 기본 Data Converter를 유지한다. Activity 경계에서 Pydantic 모델을 `model_dump(mode="json")`·`model_validate`로 처리하고, Workflow·Activity 경계의 fixture 왕복과 잘못된 입력 거절을 실제 Converter로 검증한다. 이력에는 참조·작은 메타데이터만 담는다.
 
 ## 테스트 전략
 - 합의된 Test Seam: Temporal 테스트 환경의 Workflow 결과·이력과 실제 기본 Data Converter, 변경 전 Workflow 이력 replay. 잡는 것: 순서·병렬·계약 직렬화, 기존 승인·취소 및 replay 회귀. 못 잡는 것: 실제 스캔 시간·외부 자원 접근.
@@ -40,6 +40,7 @@ Blocked by: 01
 - macOS ARM64, Python 3.11, 임시 Helm 3.16.4와 Temporal 테스트 서버: 리뷰 수정 후 `make check` 402 통과(경고 3건). `make smoke-temporal`은 테스트 서버에서 `scaffold_complete`를 반환했다. Docker Compose의 실제 Temporal 서버는 사용하지 않았다.
 - 초기 테스트에서 외부 Workflow 취소 후 자식이 남는 것을 확인해 명시적인 자식 취소 요청을 추가했다. 테스트 서버에서 부모와 자식의 취소를 확인한다. 부모가 강제 종료되는 경우의 실제 서버 ParentClosePolicy 실행은 별도로 검증하지 않았다.
 - 자식 실패 후 Query의 phase는 기존 scaffold의 Activity 실패와 같이 `analysis`로 남는다. 실패 상태의 외부 API 표현은 이번 공유 Workflow 변경 범위 밖이며, 이 값만으로 실행 성공·진행 중 여부를 판단할 수 없다. GitHub Actions에서는 테스트 서버 자동 다운로드를 사용하므로 실제 CI 네트워크 성공 여부는 미확인이다.
+- 구·신 Worker의 혼합 버전 배포와 모든 가능한 진행 중 Workflow 이력의 replay는 검증하지 않았다. 민서님 공동 리뷰와 PR 설명·CI 확인은 남아 있다.
 - 실스캔·클라우드 접근·LLM은 범위 밖이다. 가짜 `.env` 값 검사만으로 임의 문자열의 비밀 여부를 판별하지는 못한다. Activity의 실제 오류별 재시도 분류와 스캔 heartbeat는 후속 실구현에서 검증한다.
 
 ## 관련 문서

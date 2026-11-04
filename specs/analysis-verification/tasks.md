@@ -6,8 +6,8 @@
 | --- | --- | --- | --- | --- | --- |
 | [01 분석·검증 계약 모델](../../tickets/analysis-verification/01-contracts.md) | DONE (PR #31 병합) | 없음 | AV-001, AV-017, AV-018, AV-020, AV-022 | #29 | ☑ |
 | [Q-01 `sandbox` Task Queue·Worker 등록](../../tickets/analysis-verification/q-01-sandbox-queue.md) | DONE (PR #33 병합) | 없음 (D-05 결정) | AV-021 | #32 | ☑ |
-| [02 분석 Activity 골격](../../tickets/analysis-verification/02-temporal-skeleton.md) | IN_PROGRESS | 01 | AV-001, AV-021 | #44 | ☐ |
-| [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | DRAFT | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | 미생성 | ☐ |
+| [02 분석 Activity 골격](../../tickets/analysis-verification/02-temporal-skeleton.md) | DONE (사용자 결정, 공동 리뷰 대기) | 01 | AV-001, AV-021 | #44 | ☑ |
+| [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | IN_PROGRESS | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | #45 | ☐ |
 | [03 소스 확보·운영 커밋 고정·마스킹](../../tickets/analysis-verification/03-source-fetch.md) | DRAFT | 01 | AV-002, AV-020 | 미생성 | ☐ |
 | [04 매니페스트·클러스터 리소스 스캔](../../tickets/analysis-verification/04-manifest-scan.md) | DRAFT | 01 | AV-004 | 미생성 | ☐ |
 | [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DRAFT | 03, D-07(언어별 어댑터만) | AV-003 | 미생성 | ☐ |
