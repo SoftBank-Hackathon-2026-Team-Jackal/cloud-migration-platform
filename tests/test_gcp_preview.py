@@ -21,7 +21,7 @@ def request() -> GcpPlanInput:
     return GcpPlanInput.model_validate(
         {
             "migration_id": "migration-001",
-            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "gcp-gke-v1"},
+            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "gcp-gke-v2"},
             "environment_id": "demo-001",
             "project_id": "sbh26-test",
             "region": "asia-northeast3",

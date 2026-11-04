@@ -3,7 +3,7 @@
   "plan": {
     "plan_id": "plan-local",
     "revision": 1,
-    "template_version": "gcp-gke-v1"
+    "template_version": "gcp-gke-v2"
   },
   "environment_id": "demo-local",
   "project_id": "cmp-plan-local",
