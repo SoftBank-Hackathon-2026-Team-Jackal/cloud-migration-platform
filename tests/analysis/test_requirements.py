@@ -1,4 +1,5 @@
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -214,3 +215,58 @@ def test_precheck_reports_extension_health_cloud_address_and_sessions(tmp_path):
 def test_precheck_is_empty_for_a_clean_app(stack):
     _, manifests, code, workspace = stack
     assert precheck(workspace, manifests, code).findings == []
+
+
+def test_database_driver_without_a_postgres_pod_is_reported_as_outside_scope(tmp_path):
+    (tmp_path / "app.yaml").write_text(
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: api}\nspec:\n"
+        "  template:\n    spec:\n      containers:\n        - {name: a, image: 'x:1'}\n"
+    )
+    workspace = go_workspace(tmp_path / "w", ["DB_HOST"])
+    code = scan_code(workspace, {}, [GoAdapter()])
+    result = build_requirements(scan_manifests(tmp_path), code, {})
+    assert any("DB_NOT_IN_CLUSTER" in item for item in result.unmapped_items)
+    assert [r.kind for r in result.requirements.resources] == ["APPLICATION"]
+
+
+def test_network_policy_gives_the_app_to_database_intent_without_any_code_scan(tmp_path):
+    manifests = scan_manifests(Path(__file__).parent.parent / "fixtures/analysis/source-like")
+    result = build_requirements(manifests, scan_code(go_workspace(tmp_path, []), {}, []), {})
+    assert [
+        (n.source_resource_id, n.destination_resource_id, n.port)
+        for n in result.requirements.network_intent
+    ] == [("orders-api", "orders-db", 5432)]
+
+
+def test_driver_and_policy_intents_are_not_duplicated(tmp_path):
+    manifests = scan_manifests(Path(__file__).parent.parent / "fixtures/analysis/source-like")
+    code = scan_code(go_workspace(tmp_path, ["DB_HOST"]), {}, [GoAdapter()])
+    result = build_requirements(manifests, code, {})
+    assert len(result.requirements.network_intent) == 1
+
+
+def test_names_declared_in_configmaps_and_secrets_count_as_declared(tmp_path):
+    manifests = scan_manifests(Path(__file__).parent.parent / "fixtures/analysis/source-like")
+    code = scan_code(
+        go_workspace(tmp_path, ["DB_HOST", "APP_PORT", "WRITE_TOKEN", "NOT_DECLARED"]),
+        {},
+        [GoAdapter()],
+    )
+    result = build_requirements(manifests, code, {})
+    assert result.env_exceptions.missing == ["NOT_DECLARED"]
+    assert set(result.env_exceptions.replaced) == {
+        "DB_HOST",
+        "DB_NAME",
+        "DB_PASSWORD",
+        "DB_PORT",
+        "DB_USER",
+    }
+
+
+@pytest.mark.skipif(not os.environ.get("CMP_REAL_SOURCE_YAML"), reason="local real-manifest check")
+def test_real_source_manifest_builds_valid_requirements(tmp_path):
+    manifests = scan_manifests(os.environ["CMP_REAL_SOURCE_YAML"])
+    result = build_requirements(manifests, scan_code(go_workspace(tmp_path, []), {}, []), {})
+    assert result.requirements is not None
+    assert {r.kind for r in result.requirements.resources} == {"APPLICATION", "POSTGRESQL"}
+    assert result.requirements.network_intent

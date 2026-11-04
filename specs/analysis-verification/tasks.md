@@ -72,6 +72,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: 04·07 보강(Issue #75): 실제 원본 매니페스트로 NetworkPolicy 통신 의도, ConfigMap·secretKeyRef 변수 이름 수집, 클러스터 밖 DB 보고를 추가. 첫 사이클의 원본 PostgreSQL은 RDS가 아니라 클러스터 안 Pod로 결정.
 - 2026-11-05: D-01 일부 결정: LLM 공급자는 Claude이고 Anthropic SDK(Messages API 도구 호출)를 쓴다(Agent SDK는 자체 도구·루프가 08A의 허용 목록 정책과 겹쳐 쓰지 않는다). 모델·코드 전송 범위·키 관리·비용 한도는 ADR-004에서 정한다. 실제 연결은 08에서 `LLMClient` 뒤에 어댑터로 붙인다.
 - 2026-11-05: 04(PR #54, Issue #50)와 05(PR #58, Issue #57, Go 어댑터 포함) 완료. 둘 다 fixture 기준 검증이며 실제 EKS 매니페스트·실제 Helm 렌더는 검증하지 못함.
 - 2026-11-05: 공개 GitHub 소스 선택을 기존 분석 입력에 연결하는 Ticket 18/Issue #60 등록. 구현 방식은 분석 담당자와 조율 후 확정한다.

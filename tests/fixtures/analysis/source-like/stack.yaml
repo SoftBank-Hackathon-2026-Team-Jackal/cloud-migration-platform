@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: orders-config, namespace: orders}
+data:
+  APP_PORT: "8080"
+  DB_HOST: orders-db.orders.svc.cluster.local
+  DB_PORT: "5432"
+  DB_NAME: ordersdb
+  DB_USER: ordersuser
+  FEATURE_X: "off"
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: orders-secrets, namespace: orders}
+stringData:
+  DB_PASSWORD: not-a-real-secret-value-1
+  WRITE_TOKEN: not-a-real-secret-value-2
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: orders-db, namespace: orders}
+spec:
+  replicas: 1
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        resources: {requests: {storage: 10Gi}}
+  template:
+    metadata:
+      labels: {app: orders-db}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports: [{containerPort: 5432}]
+          env:
+            - {name: POSTGRES_DB, value: ordersdb}
+            - {name: POSTGRES_USER, value: ordersuser}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: orders-secrets, key: DB_PASSWORD}}
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: orders-api, namespace: orders}
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels: {app: orders-api}
+    spec:
+      containers:
+        - name: api
+          image: IMAGE_URI_REPLACE_ME
+          ports: [{containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: orders-config}
+          env:
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: orders-secrets, key: DB_PASSWORD}}
+            - name: WRITE_TOKEN
+              valueFrom: {secretKeyRef: {name: orders-secrets, key: WRITE_TOKEN}}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: orders-api-egress, namespace: orders}
+spec:
+  podSelector:
+    matchLabels: {app: orders-api}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: orders-db}
+      ports:
+        - {protocol: TCP, port: 5432}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
