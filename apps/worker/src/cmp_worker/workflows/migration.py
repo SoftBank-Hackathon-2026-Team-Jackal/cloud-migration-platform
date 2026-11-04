@@ -1,7 +1,9 @@
+import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import CancelledError, ChildWorkflowError
 
 with workflow.unsafe.imports_passed_through():
     from cmp_contracts.queues import (
@@ -9,12 +11,14 @@ with workflow.unsafe.imports_passed_through():
         BUILD_QUEUE,
         MIGRATION_QUEUE,
         PROVISIONING_QUEUE,
+        WORKFLOW_QUEUE,
     )
 
     from cmp_worker.activities.analysis import analyze_project
     from cmp_worker.activities.build import prepare_image
     from cmp_worker.activities.migration import copy_data, shift_traffic, verify_target
     from cmp_worker.activities.provisioning import prepare_plan, provision_target
+    from cmp_worker.workflows.analysis import AnalysisWorkflow
 
 
 @workflow.defn
@@ -56,11 +60,49 @@ class MigrationWorkflow:
 
     @workflow.run
     async def run(self, project_id: str) -> str:
+        if workflow.patched("analysis-child-v1"):
+            if self.cancel_requested:
+                self.phase = "cancelled"
+                return "cancelled"
+            self.phase = "analysis"
+            migration_id = workflow.info().workflow_id
+            child = await workflow.start_child_workflow(
+                AnalysisWorkflow.run,
+                migration_id,
+                id=f"analysis-{migration_id}",
+                task_queue=WORKFLOW_QUEUE,
+                parent_close_policy=workflow.ParentClosePolicy.TERMINATE,
+            )
+            cancel_wait = asyncio.create_task(
+                workflow.wait_condition(lambda: self.cancel_requested)
+            )
+            child_cancel_requested = False
+            try:
+                await workflow.wait([child, cancel_wait], return_when=asyncio.FIRST_COMPLETED)
+                if self.cancel_requested:
+                    child_cancel_requested = True
+                    child.cancel()
+                    try:
+                        await asyncio.shield(child)
+                    except ChildWorkflowError as exc:
+                        if not isinstance(exc.cause, CancelledError):
+                            raise
+                    self.phase = "cancelled"
+                    return "cancelled"
+                await child
+            except asyncio.CancelledError:
+                if not child_cancel_requested:
+                    child.cancel()
+                raise
+            finally:
+                cancel_wait.cancel()
         for name, fn, queue in (
             ("analysis", analyze_project, ANALYSIS_QUEUE),
             ("build", prepare_image, BUILD_QUEUE),
             ("planning", prepare_plan, PROVISIONING_QUEUE),
         ):
+            if name == "analysis" and workflow.patched("analysis-child-v1"):
+                continue
             await self._step(name, fn, project_id, queue)
             if self.cancel_requested:
                 return "cancelled"

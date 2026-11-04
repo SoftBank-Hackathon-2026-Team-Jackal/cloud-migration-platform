@@ -1,7 +1,7 @@
 # Ticket 02 — 분석 Activity 골격
 
 ## 상태
-DRAFT — 사용자 검토 전
+IN_PROGRESS — 사용자 검토 및 Test Seam 확인, Issue #44
 
 ## 목적
 `AnalysisWorkflow` 자식에 분석 Activity 묶음과 병렬 스캔 흐름을 fixture 반환으로 연결한다.
@@ -26,11 +26,21 @@ Blocked by: 01
 - [ ] 기존 Temporal 기본 Data Converter를 유지한다. Activity 경계에서 Pydantic 모델을 `model_dump(mode="json")`·`model_validate`로 처리하고, Workflow·Activity 경계의 fixture 왕복과 잘못된 입력 거절을 실제 Converter로 검증한다. 이력에는 참조·작은 메타데이터만 담는다.
 
 ## 테스트 전략
-- 제안 Test Seam: Temporal 테스트 환경의 Workflow 결과·이력과 실제 기본 Data Converter, 변경 전 Workflow 이력 replay. 잡는 것: 순서·병렬·계약 직렬화, 기존 승인·취소 및 replay 회귀. 못 잡는 것: 실제 스캔 시간·외부 자원 접근.
+- 합의된 Test Seam: Temporal 테스트 환경의 Workflow 결과·이력과 실제 기본 Data Converter, 변경 전 Workflow 이력 replay. 잡는 것: 순서·병렬·계약 직렬화, 기존 승인·취소 및 replay 회귀. 못 잡는 것: 실제 스캔 시간·외부 자원 접근.
+- 구현 전 기존 Workflow를 실행해 JSON 이력을 저장한다. 이력에서 자식 ID `analysis-<migration_id>`와 Workflow Queue `migration`을 확인하고, 가짜 `.env` 비밀값과 비밀 형태의 문자열이 이력에 없는지 검사한다.
+- 자식 실패는 부모 실패로 전파해 후속 단계로 진행하지 않는다. 부모의 `request_cancel` Signal은 자식 취소를 요청하고 완료를 기다린 뒤 `cancelled`를 반환한다. 부모의 외부 취소 시에도 자식 취소를 요청한다. 부모가 그 밖의 이유로 종료될 때 남은 자식은 `ParentClosePolicy.TERMINATE`로 종료한다.
 - 실행: `uv run pytest tests/analysis/test_workflow.py`, `make check`, `make smoke-temporal`
 
 ## 완료 시 확인할 동작
 로컬 Temporal에서 분석 단계가 fixture로 끝까지 돈다.
+
+## 검증 증거 (진행 중)
+- 변경 전 Workflow를 Temporal 테스트 서버에서 실행해 51개 이벤트를 `tests/fixtures/analysis/migration-before-02.json`에 보관했다. 변경 후 이력 replay가 통과했다.
+- `CMP_TEST_SERVER_PATH=<로컬 테스트 서버> uv run pytest tests/analysis/test_workflow.py -q`: 10 통과. 동시 이전의 자식 ID·Queue·ParentClosePolicy, 스캔 병렬 스케줄, fixture 모델 검증, 잘못된 요구사항 거절, 가짜 `.env` 값 비노출, 실패 전파, Signal과 외부 취소의 경합을 확인했다. 변경 전 승인 대기 이력과 패치가 있는 새 이력도 replay했다.
+- macOS ARM64, Python 3.11, 임시 Helm 3.16.4와 Temporal 테스트 서버: 리뷰 수정 후 `make check` 402 통과(경고 3건). `make smoke-temporal`은 테스트 서버에서 `scaffold_complete`를 반환했다. Docker Compose의 실제 Temporal 서버는 사용하지 않았다.
+- 초기 테스트에서 외부 Workflow 취소 후 자식이 남는 것을 확인해 명시적인 자식 취소 요청을 추가했다. 테스트 서버에서 부모와 자식의 취소를 확인한다. 부모가 강제 종료되는 경우의 실제 서버 ParentClosePolicy 실행은 별도로 검증하지 않았다.
+- 자식 실패 후 Query의 phase는 기존 scaffold의 Activity 실패와 같이 `analysis`로 남는다. 실패 상태의 외부 API 표현은 이번 공유 Workflow 변경 범위 밖이며, 이 값만으로 실행 성공·진행 중 여부를 판단할 수 없다. GitHub Actions에서는 테스트 서버 자동 다운로드를 사용하므로 실제 CI 네트워크 성공 여부는 미확인이다.
+- 실스캔·클라우드 접근·LLM은 범위 밖이다. 가짜 `.env` 값 검사만으로 임의 문자열의 비밀 여부를 판별하지는 못한다. Activity의 실제 오류별 재시도 분류와 스캔 heartbeat는 후속 실구현에서 검증한다.
 
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
@@ -38,6 +48,7 @@ Blocked by: 01
 - [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
+- 2026-11-04(리뷰): migration ID를 부모 Workflow ID로 통일하고 자식 취소 대기 중 외부 취소가 삼켜지거나 중복 요청되지 않도록 수정했다. 사용하지 않는 `analysis_ref`는 제거했다.
 - 2026-11-04: 리뷰 피드백으로 기존 02를 분석 골격(02)과 Sandbox 자식 Workflow(02B)로 분할.
 - 2026-11-04(전체 재검토): 모델 이름을 `RequirementsV2`로 정정.
 - 2026-11-04(공유 파일 경계): 분석 Workflow 연결에 필요한 `workflows/migration.py` 변경을 허용하고 기존 이력 replay·모델 직렬화 확인을 명시한다.
