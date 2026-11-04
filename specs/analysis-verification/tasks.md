@@ -10,7 +10,7 @@
 | [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | DONE (PR #46 병합) | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | #45 | ☑ |
 | [03 소스 확보·운영 커밋 고정·마스킹](../../tickets/analysis-verification/03-source-fetch.md) | DONE (main 반영) | 01 | AV-002, AV-020 | #48 | ☑ |
 | [04 매니페스트·클러스터 리소스 스캔](../../tickets/analysis-verification/04-manifest-scan.md) | IN_PROGRESS | 01 | AV-004 | #50 | ☐ |
-| [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DRAFT | 03, D-07(언어별 어댑터만) | AV-003 | 미생성 | ☐ |
+| [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | IN_PROGRESS | 03, D-07(언어별 어댑터만) | AV-003 | #57 | ☐ |
 | [06 AWS 인프라·네트워크 스캔과 통신 의도](../../tickets/analysis-verification/06-aws-infra-scan.md) | DRAFT | 01, AWS 테스트 계정(외부) | AV-005, AV-020 | 미생성 | ☐ |
 | [07 요구사항·사용 프로필·사전 점검 조립](../../tickets/analysis-verification/07-profile-precheck.md) | DRAFT | 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시) | AV-006, AV-017 | 미생성 | ☐ |
 | [08A 에이전트 실행 기반과 Skill 형식](../../tickets/analysis-verification/08a-agent-runtime.md) | DRAFT | 01 | AV-007, AV-020 | 미생성 | ☐ |
@@ -58,7 +58,7 @@ Q-01 ────┴→ 02B ─┐
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 | 10, 14 | 민서 |
 | D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
 | D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간 | 09, 10, 12 | 민서·승철 |
-| D-07 | 첫 사이클 지원 언어(데모 앱은 그 언어에 맞춤) | 05, 16, 17 | 승철 |
+| D-07 | 결정됨 — 첫 사이클 지원 언어는 Go(데모 앱 `demo-app`이 Go) | 05, 16, 17 | 승철 |
 | D-08 | Sandbox 기반 클러스터 준비 주체·시점 | 11, 16 | 민서·승철 |
 | D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 12 | 승철·소울 |
 | D-10 | Production 테스트 묶음 실행 시점(데이터 이전 후·트래픽 전환 전)·데이터 정리 | 15 | 민서·소울·상헌 |
@@ -70,6 +70,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: D-07 결정: 첫 사이클 지원 언어는 Go. 05의 언어 어댑터를 Go로 구현한다(데모 앱 저장소 `demo-app`은 Go 1.24, 의존성은 pgx).
 - 2026-11-05: 03 완료(Issue #48). 브랜치 upstream 설정 때문에 PR 없이 main에 직접 반영됐으며 push CI는 통과.
 - 2026-11-05: 02·02B를 PR #46으로 병합(이슈 #44, #45 종료). 14·15의 부모 Workflow 변경 범위를 plan에 기록하고 14에 종료 상태 정리 수용 기준을 추가.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
