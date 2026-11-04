@@ -20,6 +20,7 @@ Blocked by: 02, Q-01
 - [ ] mock 판정에 실패 1회를 주입하면 분류 → 수정 → 재시도 → 통과가 이력에 남는다(SPEC이면 빌드 없이, CODE면 재빌드 경로).
 - [ ] 실패를 3회 주입하면 `NEEDS_REVIEW`로 Signal을 기다리고 정리 Activity가 실행된다.
 - [ ] RENDER 분류면 수정 없이 중단되고 정리된다.
+- [ ] INFRA 분류면 수정 없이 같은 입력으로 재시도하고 시도 횟수가 늘지 않는다. 연속 2회면 사람 검토로 넘어간다.
 - [ ] Workflow 취소 시에도 정리 Activity가 실행된다.
 - [ ] 진행 Query가 현재 단계·시도 번호·판정을 돌려준다.
 
@@ -33,10 +34,11 @@ Blocked by: 02, Q-01
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
-- [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
+- [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
 - 2026-11-04: 기존 02에서 분리.
+- 2026-11-04(INFRA·D-07 반영): 환경 실패(INFRA)는 수정 없이 재시도하는 분기 추가.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

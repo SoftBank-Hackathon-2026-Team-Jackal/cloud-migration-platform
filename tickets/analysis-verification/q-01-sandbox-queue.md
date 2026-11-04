@@ -20,7 +20,7 @@ Blocked by: D-05(Queue 분리 결정)
 - [ ] `SANDBOX_QUEUE`가 `cmp_contracts.queues`에 있고 기존 Queue 이름은 바뀌지 않는다.
 - [ ] `run_all`이 sandbox Worker를 함께 띄운다.
 - [ ] 기존 `make smoke-temporal`이 그대로 통과한다.
-- [ ] PR 전에 민서님께 변경 파일을 공유한다.
+- [ ] 민서님께 공유할 변경 파일·영향 요약을 PR 설명에 정리한다. 전달은 사용자가 한다.
 
 ## 테스트 전략
 - 제안 Test Seam: Worker 기동과 기존 smoke 결과. 잡는 것: 등록 누락·회귀. 못 잡는 것: 실제 Activity 동작.
@@ -35,10 +35,11 @@ Blocked by: D-05(Queue 분리 결정)
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
-- [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
+- [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
 - 2026-11-04: 리뷰 피드백(공유 파일 충돌 위험)으로 신설.
+- 2026-11-04(전체 재검토): 공유는 요약 준비까지로 조정(01과 같은 기준).
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

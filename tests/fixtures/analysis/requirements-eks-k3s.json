@@ -1,0 +1,26 @@
+{
+  "contract_version": "2",
+  "resources": [
+    {
+      "id": "db",
+      "kind": "POSTGRESQL",
+      "version": "16",
+      "database": {"name": "appdb", "username": "appuser"},
+      "cpu_millicores": 250,
+      "memory_mib": 512,
+      "storage_gib": 5
+    },
+    {
+      "id": "app",
+      "kind": "APPLICATION",
+      "replicas": 1,
+      "cpu_millicores": 250,
+      "memory_mib": 256,
+      "port": 8080,
+      "health_path": "/health"
+    }
+  ],
+  "network_intent": [
+    {"source_resource_id": "app", "destination_resource_id": "db", "port": 5432}
+  ]
+}

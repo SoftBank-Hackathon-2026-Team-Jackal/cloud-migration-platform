@@ -10,7 +10,7 @@ Sandbox와 Production에서 같은 정의로 돌릴 앱 기능 테스트 묶음�
 AV-012, AV-020
 
 ## 선행 작업
-Blocked by: 07, 11
+Blocked by: 07, 08A, 11
 
 ## 작업 범위
 - 포함: HTTP 시나리오 형식, 테스트별 `READ_ONLY`/`WRITES_DATA`·외부 부수효과 표시, 표준 테스트(헬스, DB 쓰기→읽기 일치, 재시작 후 유지), `generate_tests`(Tester, 별도 세션), `validate_tests` 네 조건, SHA-256 묶음 S3 저장, `packages/testsuite`의 `run_suite(suite_ref, base_url, auth_ref, include)`
@@ -38,10 +38,11 @@ Blocked by: 07, 11
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
-- [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
+- [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
 - 2026-11-04: test_suite_ref 형식(S3 SHA-256)·run_suite 제공·테스트 표시 반영.
+- 2026-11-04(목적 점검): Tester가 08A 실행 기반을 쓰도록 선행 작업 추가.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
