@@ -1,7 +1,7 @@
 # Ticket 03 — 소스 확보·운영 커밋 고정·마스킹
 
 ## 상태
-IN_PROGRESS — 사용자 검토 완료, Test Seam 확인, Issue #48
+DONE — main에 반영됨(PR 없이 직접 push, CI 통과 확인), Issue #48
 
 ## 목적
 분석할 소스를 격리된 작업 공간에 고정된 커밋으로 확보하고, 빌드용 원본과 LLM용 마스킹본을 분리한다.
@@ -36,6 +36,8 @@ fixture 저장소를 넣으면 커밋 고정된 원본·마스킹본과 `.env` �
 - 구현: `packages/scanners/src/cmp_scanners/`(`source.py`, `masking.py`, `envfile.py`)를 `pyproject.toml`에 등록했다. 설정 `ANALYSIS_WORKSPACE_ROOT`와 `.env.example` 항목을 추가했다.
 - 문서 변경: 작업 공간 위치·재사용 범위 결정은 설계 변경 기록에 반영했다. spec·plan 변경 없음(AV-002·AV-020 범위 안).
 
+- 반영 경위: 브랜치의 upstream이 `origin/main`으로 잡혀 있어 PR 없이 `main`에 직접 push됐다. `main`의 push CI는 통과했다. PR 리뷰 기록은 없다.
+
 ## 한계와 미검증
 - 02의 `fetch_source` Activity는 mock 그대로다. 저장소·커밋·토큰 입력이 Activity에 들어오는 경로(`AnalysisRequest.source_access_ref`의 해석)가 정해지지 않아 연결은 후속(07·15)에서 한다.
 - 운영 커밋 조회는 `resolve_production_commit` 인터페이스와 기본 stub(없음)만 있다. 실제 OCI 라벨 조회는 06에서 연결한다.
@@ -56,5 +58,5 @@ fixture 저장소를 넣으면 커밋 고정된 원본·마스킹본과 `.env` �
 - [x] 수용 기준과 Test Seam 확인
 - [x] 관련 테스트 통과와 회귀 확인
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
+- [x] 구현·계약 정합성 및 최종 리뷰
 - [x] 미검증 항목과 결과 증거 기록
