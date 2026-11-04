@@ -71,7 +71,9 @@ class ProvisioningApprovalWorkflow:
         for name in steps:
             self.state = "EXECUTING"
             try:
-                result = await workflow.execute_activity(name, claim, **PROVIDER_ACTIVITY)
+                # Later steps (e.g. FULL workloads) receive refs produced by earlier steps.
+                request = {**claim, "resource_refs": dict(refs)}
+                result = await workflow.execute_activity(name, request, **PROVIDER_ACTIVITY)
             except ActivityError:
                 result = {"status": "UNKNOWN", "code": "PROVIDER_ACTIVITY_LOST"}
             refs.update(result.get("resource_refs", {}))

@@ -77,6 +77,7 @@ class FakeProvider:
         @activity.defn(name="execute_aws_workloads")
         async def workloads(request: dict) -> dict:
             self.steps.append("execute_aws_workloads")
+            self.workloads_request = request
             return {"status": "SUCCEEDED", "code": "DEPLOYED", "resource_refs": {"app": "demo"}}
 
         return [infra, workloads]
@@ -247,6 +248,7 @@ async def test_full_scope_runs_infrastructure_then_workloads(temporal, db, execu
     outcome = await result(temporal)
     assert outcome["status"] == "EXECUTED"
     assert executor.steps == ["execute_aws_plan", "execute_aws_workloads"]
+    assert executor.workloads_request["resource_refs"] == {"eks_cluster": "cmp-test"}
 
 
 async def test_provider_failure_is_recorded_and_stops_later_steps(temporal, db, executor):
