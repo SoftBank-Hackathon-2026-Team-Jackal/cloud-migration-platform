@@ -11,6 +11,8 @@ from typing import Annotated, Literal
 from cmp_contracts.artifact import Digest
 from cmp_contracts.plan import Scope
 from cmp_contracts.provisioning import Text
+from cmp_contracts.provisioning_result import Check, Failure, ResultStatus
+from cmp_providers.provisioning_result import public_summary
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -20,6 +22,7 @@ from cmp_api.approvals import (
     ApprovalError,
     Approver,
     PlanApproval,
+    PlanRevision,
     authenticate_approver,
     authorize_view,
     execution_status,
@@ -30,6 +33,7 @@ from cmp_api.approvals import (
 )
 from cmp_api.config import settings
 from cmp_api.db import SessionLocal
+from cmp_api.provisioning_results import load_result
 
 router = APIRouter(prefix="/provisioning", tags=["provisioning approval"])
 
@@ -37,6 +41,7 @@ STATUS = {
     "APPROVER_AUTH_REQUIRED": 401,
     "APPROVER_FORBIDDEN": 403,
     "PLAN_NOT_FOUND": 404,
+    "RESULT_NOT_FOUND": 404,
     "APPROVAL_NOT_FOUND": 404,
     "STALE_REVISION": 409,
     "APPROVAL_TARGET_MISMATCH": 409,
@@ -244,3 +249,50 @@ async def redeliver_plan_approval(
     record = _visible_record(session, approver, plan_id, revision, approval_id)
     await _deliver(session, delivery, record, force=True)  # Explicit, idempotent re-send.
     return await _response(session, delivery, record)
+
+
+class ResultCluster(BaseModel):
+    kind: Literal["EKS", "GKE", "K3s"]
+    name: str | None
+    location: str | None
+
+
+class ResultApplication(BaseModel):
+    external_endpoint: str | None
+    health_path: str | None
+    scheme: Literal["http"]
+
+
+class ProvisioningResultSummary(BaseModel):
+    """Ticket 13 R8: user-facing summary. DB access, internal endpoints and IDs stay internal."""
+
+    plan_id: str
+    revision: int
+    provider: Literal["AWS", "GCP", "ON_PREM"]
+    scope: Scope
+    status: ResultStatus
+    code: str
+    data_state: Literal["NOT_MIGRATED"]
+    cluster: ResultCluster
+    application: ResultApplication | None
+    verification: list[Check]
+    failure: Failure | None
+    warnings: list[str]
+    finished_at: str
+
+
+@router.get(
+    "/plans/{plan_id}/revisions/{revision}/result",
+    response_model=ProvisioningResultSummary,
+)
+def get_provisioning_result(
+    plan_id: str, revision: int, session: SessionDep, approver: ApproverDep
+):
+    row = session.get(PlanRevision, (plan_id, revision))
+    if row is None or row.migration_id not in approver.migration_ids:
+        # Same rule as approval views: no access to another migration's Plans.
+        raise _http_error(ApprovalError("APPROVER_FORBIDDEN" if row else "PLAN_NOT_FOUND"))
+    result = load_result(session, plan_id, revision)
+    if result is None:
+        raise _http_error(ApprovalError("RESULT_NOT_FOUND"))
+    return public_summary(result)

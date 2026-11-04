@@ -492,6 +492,8 @@ class ApprovedWorkloads:
                 db_name=db.database.name,
                 db_user=db.database.username,
                 db_replication_capable="true" if replication == "true" else "false",
+                db_version=db.database.version,  # ticket 13 R4
+                db_storage_size_gib=str(db.storage.size_gib),
             )
 
             name = app["release_name"]
@@ -507,6 +509,11 @@ class ApprovedWorkloads:
             raise WorkloadFailure("HEALTH_CHECK_FAILED")
         refs["app_internal_endpoint"] = (
             f"http://{name}.{namespace}.svc:{app['application']['port']}"
+        )
+        refs.update(  # ticket 13 R4: approved, non-secret values for the Migration handoff
+            app_port=str(app["application"]["port"]),
+            app_health_path=health,
+            app_replicas=str(app["application"]["replicas"]),
         )
         await self.expose(cluster, approved, refs)
 

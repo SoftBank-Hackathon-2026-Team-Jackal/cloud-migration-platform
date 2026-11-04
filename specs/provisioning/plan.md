@@ -220,6 +220,8 @@ ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이
 
 Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참조·DB 준비 상태를, Traffic Migration에는 앱 Endpoint·Ingress/LB 주소·헬스 경로·전환 준비 상태를 넘긴다. 대상 DB가 준비됐다는 사실이 데이터 복사·CDC 완료를 의미하지 않는다. 외부 라우팅 변경·Envoy 가중치·DNS Cutover는 Traffic Migration에서 수행한다. Workflow는 Provisioning 결과를 참조해 다음 단계를 시작하지만 전체 Migration `COMPLETED`로 표시하지 않는다.
 
+**13 구현 (#53):** 위 제안 필드를 `ProvisioningResult` v1로 확정했다. 승인 실행 완료 시 업무 DB `provisioning_results`에 불변 저장하고, Workflow 이력에는 `plan_id`·`revision`·`status`만 남긴다. Data/Traffic Worker는 `get_migration_handoff` Activity로 자기 섹션과 진행 가능 여부를 읽고, 사용자는 읽기 전용 요약 API로 상태·앱 외부 주소·검사 결과만 본다. 검사 목록은 Provider별 고정 검사 순서와 첫 실패 코드에서 추론하며, 데이터 변경 기능 테스트는 항상 `NOT_RUN`(데이터 이전 후 실행)이다. 상세 결정은 [티켓 13](../../tickets/provisioning/13-result-handoff.md)에 있다.
+
 ## 12. Failure, retry, and rollback behavior
 
 | 실패 | 처리·복구 경계 |

@@ -98,3 +98,8 @@ identity = approval_target(manifest, preview)
 ## 온프레미스 Preview 생성 (12A)
 
 `cmp_providers.onprem_preview.onprem_preview(manifest, contents)`는 ON_PREM WORKLOADS/FULL 계획이 고정한 `database_values`·`application_values` 바이트를 `verify_artifact_bytes`로 확인하고 공통 `Preview`를 만든다. 보여 주는 내용은 기존 K3s·Agent·Namespace, DB StatefulSet·PVC, 앱 Deployment·Service, 외부 공개 없음, 적용 기본값(Namespace 생성, DB 비밀번호 Secret 생성)이다. 클러스터를 조회하지 않으므로 경고 `CLUSTER_STATE_NOT_INSPECTED`를 붙인다. 사용자 Secret은 이름·키만 `USER_SECRET_REQUIRED` 경고로 표시하고 환경변수·Secret 값은 넣지 않는다. Values의 대상·이미지가 manifest와 다르면 `errors`에 `VALUES_TARGET_MISMATCH`/`IMAGE_MISMATCH`를 넣어 `approval_issues`가 승인을 거절하게 한다. Digest 불일치·비 ON_PREM은 `ProvisioningInputError`로 Preview를 만들지 않는다. Planning 저장 경계와의 연결은 후속이다. 상세는 [12A 티켓](../../tickets/provisioning/12a-onprem-preview.md)을 따른다.
+
+## Provisioning 결과 인계 (13)
+
+`cmp_contracts.provisioning_result.ProvisioningResult` v1이 Provisioning → Data/Traffic Migration 인계 계약이다. `cmp_providers.provisioning_result`의 `build_provisioning_result`(실행 상태·코드·단계·refs → 결과), `handoff`(소비자별 뷰·`proceed`/`blocked_by`), `public_summary`(사용자 요약)는 순수 함수다. 저장·조회는 `cmp_api.provisioning_results`(`add_result`/`load_result`, 테이블 `provisioning_results`), Worker 진입점은 Activity `get_migration_handoff`, 사용자 조회는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`다. 필드·판정 규칙은 [티켓 13 결정 R1~R10](../../tickets/provisioning/13-result-handoff.md#착수-결정-2026-11-05)을 따른다. Provider 실행 refs의 표준 키(R4)는 이 결과의 입력이며 기존 키는 유지한다.
+

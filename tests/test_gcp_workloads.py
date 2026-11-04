@@ -404,6 +404,13 @@ async def test_ready_path_deploys_on_gke_and_returns_only_refs(
     assert refs["ingress_ip"] == INGRESS_IP
     assert refs["app_external_endpoint"] == f"http://{INGRESS_IP}"
     assert refs["image_pull_secret"] == "cmp-ecr-pull"
+    # Ticket 13 R4: approved, non-secret values for the Migration handoff.
+    assert (refs["db_version"], refs["db_storage_size_gib"]) == ("16", "10")
+    assert (refs["app_port"], refs["app_health_path"], refs["app_replicas"]) == (
+        "8080",
+        "/health",
+        "1",
+    )
     assert all(isinstance(v, str) for v in refs.values())
     assert runtime.urls == [f"http://{INGRESS_IP}/health"]
 

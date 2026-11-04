@@ -292,7 +292,39 @@ def resource_refs(job: ProductionRolloutJob, *, ready: bool) -> dict[str, str]:
             "database_secret": f"{job.database.password_secret.name}/"
             f"{job.database.password_secret.key}",
         }
+        # Ticket 13 R4: standard handoff keys (legacy keys above stay for ticket 12 readers).
+        refs |= {
+            "agent_id": job.agent_id,
+            "cluster_uid": job.cluster_uid,
+            "storage_class": job.storage_class,
+            "db_release": job.database.release,
+            "db_host": f"{job.database.release}.{ns}.svc",
+            "db_port": "5432",
+            "db_secret_ref": refs["database_secret"],
+            "app_release": job.application.release,
+            "app_port": str(job.application.port),
+            "app_health_path": job.application.health_path,
+            "app_internal_endpoint": f"http://{refs['application_endpoint']}",
+        }
     return refs
+
+
+def values_refs(session: Session, store: "ArtifactStore", plan_id: str, revision: int) -> dict:
+    """Ticket 13 R4: non-secret DB identity and replica count from the approved Values bytes."""
+    row = session.get(PlanRevision, (plan_id, revision))
+    if row is None:
+        return {}
+    try:
+        database, application = _values(store, PlanManifest.model_validate(row.manifest))
+    except RolloutError:
+        return {}
+    return {
+        "db_name": database.database.name,
+        "db_user": database.database.username,
+        "db_version": database.database.version,
+        "db_storage_size_gib": str(database.storage.size_gib),
+        "app_replicas": str(application.application.replicas),
+    }
 
 
 def outcome(job: AgentJob) -> dict | None:
