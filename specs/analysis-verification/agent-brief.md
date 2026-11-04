@@ -29,6 +29,7 @@ spec·plan·티켓은 main의 v2 구현(#22, #24, B-01 변경) 기준으로 맞�
 - `catalog/`, `skills/`
 - `apps/worker/src/cmp_worker/activities/analysis.py`, `activities/sandbox.py`, `sandbox/`, `workflows/sandbox.py`, `workers/sandbox.py`
 - `tests/analysis/`, `tests/agents/`, `tests/sandbox/`, `tests/integration/sandbox/`, `tests/fixtures/analysis/`
+- `scripts/`에 새 파일 추가(08B의 검토 Signal CLI 등). 기존 스크립트는 고치지 않는다
 - `specs/analysis-verification/`, `tickets/analysis-verification/`
 
 **건드리지 않는 곳 (민서 담당 Provisioning)**
@@ -39,6 +40,9 @@ spec·plan·티켓은 main의 v2 구현(#22, #24, B-01 변경) 기준으로 맞�
 **공유 파일 (Q-01 티켓에서만, 작게)**
 - `cmp_contracts/queues.py`, `workers/run.py`, `workers/run_all.py`, `workflows/migration.py`
 - 이 파일을 다른 티켓에서 바꿔야 하면 멈추고 사용자에게 알린다
+
+**건드리지 않는 곳 (상헌 담당 API·화면)**
+- `apps/api/`: 승인 경로·화면은 상헌님과 합의한 뒤에 만든다. 그 전까지 검토 Signal은 CLI로만 보낸다
 
 Provisioning 쪽 모델이 부족하거나 바뀌어야 하면 구현하지 말고, 무엇이 왜 필요한지 정리해 보고한다.
 
@@ -73,7 +77,7 @@ Provisioning 쪽 모델이 부족하거나 바뀌어야 하면 구현하지 말�
 
 ## 5. 결정 대기 처리
 
-`tasks.md`의 D-01~D-14 중 열린 항목에 티켓이 걸리면:
+`tasks.md`의 D-01~D-15 중 열린 항목에 티켓이 걸리면:
 
 - 결정과 무관한 부분은 먼저 구현한다.
 - 결정에 따라 달라지는 부분은 **인터페이스 뒤에 숨긴다**. 예: Build 호출은 `request_build` 하나로 감싼다.
