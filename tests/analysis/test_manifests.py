@@ -135,3 +135,14 @@ def test_legacy_alb_class_and_exporter_images(tmp_path):
     assert [d.kind for d in result.cloud_dependencies] == ["ALB_INGRESS"]
     assert "ingress.class" in result.cloud_dependencies[0].evidence
     assert result.postgres_images == []
+
+
+def test_postgres_identity_and_volume_claims_are_extracted_without_secrets():
+    result = scan_manifests(Path(__file__).parent.parent / "fixtures/analysis/assembly/manifests")
+    db = next(w for w in result.workloads if w.name == "shop-db")
+    assert db.containers[0].env_literals == {"POSTGRES_DB": "shopdb", "POSTGRES_USER": "shopuser"}
+    assert [(c.name, c.storage) for c in result.volume_claims] == [("pgdata", "20Gi")]
+    assert ("PVC", "pgdata") in {
+        (r.kind, r.name) for r in result.references if r.source == db.evidence.split("#")[1]
+    }
+    assert "POSTGRES_PASSWORD" not in result.model_dump_json()
