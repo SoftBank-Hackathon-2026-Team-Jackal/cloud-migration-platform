@@ -172,6 +172,8 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 재시도 시 Release 이름·Namespace·Chart/Values Digest와 실제 Helm Release 상태를 조회한다. 성공 응답 유실이면 적용 상태를 결과로 복구하고, 실패/미완료이면 충돌·기존 Revision·Kubernetes 객체를 조사한다. 승인된 Values와 다른 내용으로 임의 업그레이드하지 않는다. Helm 자동 rollback·atomic 사용 여부는 PVC/DB 데이터 보존과 부분 배포 처리 정책이 정해진 뒤 선택한다.
 
+**AWS 구현(09, #37):** `execute_aws_workloads` Activity가 위 순서를 EKS에 적용한다. 실행 전 업무 DB의 승인·최신 Revision·manifest Digest와 `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/<sha256>`의 Chart tgz·Values·bindings 바이트를 재확인하고, 08 인프라 실행의 `resource_refs`(클러스터·VPC·LB Controller IRSA)로 대상을 찾는다. StorageClass(gp3 EBS CSI)·AWS Load Balancer Controller(고정 Chart 버전·SHA-256)를 준비하고 DB Secret은 Worker가 생성해 stdin으로만 전달한다. Helm은 기존 Release 조회 후 install/skip/upgrade하고 `pending-*`는 UNKNOWN, `failed`는 FAILED로 멈추며 atomic·rollback은 쓰지 않는다. Ingress는 앱 Chart 계약을 바꾸지 않고 승인 Values에서 만든 고정 ALB(HTTP:80, 도메인·TLS 없음) 템플릿이다. PVC Bound·인증 DB 접속(PostgreSQL 16)·Pod Ready·내부 헬스·ALB 주소·외부 헬스가 모두 통과해야 `WORKLOADS_READY`다. 결정 상세는 [09 티켓](../../tickets/provisioning/09-aws-workloads.md) W1~W11.
+
 ## 10. Temporal Activity, Preview, 승인 (`PROV-014`~`017`)
 
 상위 Migration Workflow는 계획 → Preview → 특정 Plan ID·Revision 승인 대기 → 실행 → 검증 → 결과 전달을 조정한다. Workflow 코드에는 파일·네트워크·시계 조회, Secret 조회, Terraform·Helm 호출을 넣지 않는다. 다음은 **Activity 경계 후보**이며 이름·Task Queue·Timeout·Retry 수치는 확정하지 않는다.
