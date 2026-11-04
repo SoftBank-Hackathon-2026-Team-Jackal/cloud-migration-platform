@@ -103,7 +103,7 @@ MigrationWorkflow (migration)
 
 ### 2.1 소스 확보 (AV-002)
 
-1. 개발 중: 토큰 클론. 이후: GitHub App(해당 저장소 읽기, 짧은 수명 토큰).
+1. 공개 GitHub 저장소를 고른 데모 경로는 기존 `cmp_scanners.source.fetch_source(..., token=None)`를 재사용한다. 비공개 저장소용 토큰 클론·GitHub App은 후속 범위다. 웹은 소스 파일 대신 저장소 ID·`owner/repo`·요청 SHA를 보내고, API는 공개 여부·ID·커밋을 확인한다. 현재 API와 `fetch_source` Activity 사이의 연결은 [18](../../tickets/analysis-verification/18-public-github-source.md)에서 담당자와 입력 계약을 맞춘 뒤 구현한다.
 2. 운영 커밋: EKS의 실행 이미지 → ECR 이미지 설정의 OCI 라벨에서 커밋. 실패 시 사용자 지정 커밋 + `commit_verified=false`.
 3. 작업 공간: Worker의 격리 디렉터리 `<workdir>/<migration_id>/<commit>`. 원본(빌드용)과 마스킹본(LLM용)을 분리 보관한다.
 4. `.env`는 분석 단계에서 이름만 파싱한다. 값은 Sandbox 워커가 Secret을 만들 때만 읽는다(§2.6).
@@ -519,8 +519,8 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 
 | 요구사항 | 설계 위치 | 티켓 |
 | --- | --- | --- |
-| AV-001 | §1, §3 | 01, 02 |
-| AV-002 | §2.1 | 03 |
+| AV-001 | §1, §3 | 01, 02, 18 |
+| AV-002 | §2.1 | 03, 18 |
 | AV-003 | §2.2, §2.10 | 05, 17 |
 | AV-004 | §2.2 | 04 |
 | AV-005 | §2.2 | 06 |
