@@ -35,7 +35,7 @@
 | 온프레미스 실행 | Agent + K3s | 사용자 환경의 Kubernetes 배포 연계 |
 | 환경 간 연결 | WireGuard | 필요한 사설 마이그레이션 연결의 설계 방향. 적용 범위 미정 |
 | DB 데이터 이전 | PostgreSQL Logical Replication | 초기 복사와 이후 변경 동기화 방향. 세부 절차 미정 |
-| 트래픽 전환 | Route 53 + Envoy **논의 중** | 점진적 전환·롤백을 위한 설계안. 최종 채택 미정 |
+| 트래픽 전환 | Envoy 중계 (Route 53 DNS 최종 전환은 확장) | 점진적 전환·롤백. [ADR-004](../decisions/ADR-004.md) |
 | 진행 상태 전달 | SSE | Frontend에 작업 상태 전달 |
 
 Redis, Celery, Kafka 같은 별도 작업 큐는 현재 확정 스택에 포함하지 않는다. PostgreSQL 업무 DB는 사용자·계획·승인 같은 비즈니스 기록을 보관하고, Temporal은 실행 순서·상태·이력과 Task Queue를 관리한다. S3의 파일 산출물은 Workflow 상태가 아니며, ECR의 이미지는 파일 산출물이나 업무 기록과도 구분한다.
