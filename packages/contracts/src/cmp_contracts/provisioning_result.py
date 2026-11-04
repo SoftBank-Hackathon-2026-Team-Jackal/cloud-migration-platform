@@ -113,4 +113,6 @@ class ProvisioningResult(Contract):
     application: ApplicationHandoff | None = None
     verification: list[Check]
     failure: Failure | None = None
+    # Ticket 14 F5: what a failed/unknown run had already created (refs only, no secrets).
+    partial_resources: dict[str, str] = Field(default_factory=dict)
     warnings: list[Text] = Field(default_factory=list)

@@ -134,10 +134,24 @@ PRECONDITION_CODES = {
     "STATE_ACCOUNT_CHECK_FAILED",
     "ACCOUNT_CHECK_FAILED",
     "JOB_TARGET_MISMATCH",
+    "CANCELLED_BEFORE_EXECUTION",
     "EXPLICIT_TARGET_REQUIRED",
     "UNSUPPORTED_JOB",
 }
 NETWORK_REF_KEYS = ("vpc_id", "vpc_network", "subnetwork")
+# Ticket 14 F5: refs that name something a failed run already created on the target.
+PARTIAL_REF_KEYS = (
+    "state_resource_count",
+    "namespace",
+    "storage_class",
+    "image_pull_secret",
+    "db_secret_ref",
+    "db_release",
+    "db_pvc",
+    "app_release",
+    "ingress",
+    "job_id",
+)
 CLUSTER_KIND = {"AWS": "EKS", "GCP": "GKE", "ON_PREM": "K3s"}
 
 
@@ -347,6 +361,9 @@ def build_provisioning_result(
         application=application,
         verification=checks,
         failure=failure,
+        partial_resources={}
+        if succeeded
+        else {k: refs[k] for k in PARTIAL_REF_KEYS if refs.get(k)},
         warnings=warnings,
     )
 

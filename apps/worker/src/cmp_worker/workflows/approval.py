@@ -4,13 +4,18 @@ The Workflow holds only small identifiers. It never trusts the Signal as approva
 Activity re-reads the business DB approval, latest Revision and Digests and writes a unique
 RUNNING marker. Provider Activities run once (no retry); a lost Activity is recorded UNKNOWN and
 needs state inspection, never automatic re-execution.
+
+Cancellation (ticket 14, F3) never means deletion: before the claim it ends without a marker;
+after it, the claim/complete DB Activities are shielded so a RUNNING marker is always finished,
+and a cancelled provider step is recorded UNKNOWN/EXECUTION_CANCELLED.
 """
 
+import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
+from temporalio.exceptions import ActivityError, is_cancelled_exception
 
 with workflow.unsafe.imports_passed_through():
     from cmp_contracts.execution import execution_steps
@@ -53,20 +58,34 @@ class ProvisioningApprovalWorkflow:
         self.code = outcome["code"]
         return outcome
 
+    async def _shielded(self, name: str, arg) -> tuple[dict, bool]:
+        """Run a DB Activity to completion even if the Workflow is cancelled meanwhile."""
+        task = asyncio.ensure_future(workflow.execute_activity(name, arg, **DB_ACTIVITY))
+        cancelled = False
+        while True:
+            try:
+                return await asyncio.shield(task), cancelled
+            except asyncio.CancelledError:
+                cancelled = True
+
     @workflow.run
     async def run(self, request: dict) -> dict:
-        await workflow.wait_condition(lambda: bool(self.pending))
+        try:
+            await workflow.wait_condition(lambda: bool(self.pending))
+        except asyncio.CancelledError:
+            return self._finish({"status": "CANCELLED", "code": "CANCELLED_BEFORE_EXECUTION"})
         self.approval_id = self.pending.pop(0)
         self.state = "APPROVAL_RECEIVED"
-        claim = await workflow.execute_activity(
-            "claim_approved_execution", self.approval_id, **DB_ACTIVITY
-        )
+        claim, cancelled = await self._shielded("claim_approved_execution", self.approval_id)
         if claim["status"] != "CLAIMED":
             return self._finish(claim)
 
         steps = execution_steps(claim["provider"], claim["scope"])
         status, code, refs, step = "SUCCEEDED", "EXECUTION_SUCCEEDED", {}, None
-        if not steps:
+        if cancelled:
+            # Claimed but no provider step started: nothing changed on the target.
+            steps, status, code = (), "FAILED", "CANCELLED_BEFORE_EXECUTION"
+        elif not steps:
             status, code = "FAILED", "NO_EXECUTION_PATH"
         for name in steps:
             self.state = "EXECUTING"
@@ -75,15 +94,19 @@ class ProvisioningApprovalWorkflow:
                 # Later steps (e.g. FULL workloads) receive refs produced by earlier steps.
                 request = {**claim, "resource_refs": dict(refs)}
                 result = await workflow.execute_activity(name, request, **PROVIDER_ACTIVITY)
-            except ActivityError:
-                result = {"status": "UNKNOWN", "code": "PROVIDER_ACTIVITY_LOST"}
+            except ActivityError as error:
+                lost = "EXECUTION_CANCELLED" if is_cancelled_exception(error) else None
+                result = {"status": "UNKNOWN", "code": lost or "PROVIDER_ACTIVITY_LOST"}
+            except asyncio.CancelledError:
+                # The step may still be changing the target: unknown, never "deleted" (F3).
+                result = {"status": "UNKNOWN", "code": "EXECUTION_CANCELLED"}
             refs.update(result.get("resource_refs", {}))
             if result["status"] != "SUCCEEDED":
                 status, code = result["status"], result["code"]
                 break
             code = result["code"]
 
-        await workflow.execute_activity(
+        await self._shielded(
             "complete_approved_execution",
             {
                 "approval_id": self.approval_id,
@@ -92,7 +115,6 @@ class ProvisioningApprovalWorkflow:
                 "resource_refs": refs,
                 "step": step,
             },
-            **DB_ACTIVITY,
         )
         final = "EXECUTED" if status == "SUCCEEDED" else status
         return self._finish(
