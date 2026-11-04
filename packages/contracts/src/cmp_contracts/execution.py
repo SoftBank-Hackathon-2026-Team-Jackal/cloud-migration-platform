@@ -7,6 +7,9 @@ STEPS = {
     ("AWS", "INFRASTRUCTURE"): ("execute_aws_plan",),
     ("AWS", "WORKLOADS"): ("execute_aws_workloads",),
     ("AWS", "FULL"): ("execute_aws_plan", "execute_aws_workloads"),
+    ("GCP", "INFRASTRUCTURE"): ("execute_gcp_plan",),
+    ("GCP", "WORKLOADS"): ("execute_gcp_workloads",),
+    ("GCP", "FULL"): ("execute_gcp_plan", "execute_gcp_workloads"),
     ("ON_PREM", "WORKLOADS"): ("execute_on_prem_plan",),
     ("ON_PREM", "FULL"): ("execute_on_prem_plan",),
 }

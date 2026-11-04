@@ -6,6 +6,7 @@ from temporalio.worker import Worker
 from cmp_worker.activities.approval import ApprovalActivities
 from cmp_worker.activities.aws_infra import AwsInfraActivities
 from cmp_worker.activities.aws_workloads_cli import build_aws_workloads_activities
+from cmp_worker.activities.gcp_infra import GcpInfraActivities
 from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
 from cmp_worker.activities.provisioning import prepare_plan, provision_target
 from cmp_worker.config import settings
@@ -19,6 +20,14 @@ def create_worker(client: Client) -> Worker:
         aws_profile=settings.provisioning_aws_profile,
         terraform_bin=settings.terraform_bin,
     )
+    gcp_infra = GcpInfraActivities(
+        SessionLocal,
+        artifact_root=settings.provisioning_artifact_root,
+        aws_profile=settings.provisioning_aws_profile,
+        gcloud_configuration=settings.provisioning_gcloud_configuration,
+        adc_email=settings.provisioning_gcp_adc_email,
+        terraform_bin=settings.terraform_bin,
+    )
     return Worker(
         client,
         task_queue=PROVISIONING_QUEUE,
@@ -30,5 +39,6 @@ def create_worker(client: Client) -> Worker:
             aws_infra.execute_aws_plan,
             build_aws_workloads_activities(SessionLocal).execute_aws_workloads,
             execute_on_prem_plan_activity(),  # ticket 12
+            gcp_infra.execute_gcp_plan,  # ticket 10
         ],
     )

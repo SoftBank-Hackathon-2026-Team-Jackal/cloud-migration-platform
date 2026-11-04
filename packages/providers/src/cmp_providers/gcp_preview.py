@@ -89,7 +89,7 @@ def _network(value: str, path: str, *, rfc1918: bool) -> IPv4Network:
 
 def terraform_variables(request: GcpPlanInput) -> dict:
     """Map the reviewed GCP topology to fixed Terraform inputs, without I/O."""
-    if request.plan.template_version != "gcp-gke-v1":
+    if request.plan.template_version != "gcp-gke-v2":
         _reject(
             "UNSUPPORTED_TEMPLATE", "plan.template_version", "Unsupported GCP template version."
         )
