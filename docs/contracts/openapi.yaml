@@ -1264,7 +1264,9 @@ components:
 x-sdd-contract-status:
   scope: Frontend and on-premises Agent to FastAPI REST and SSE
   implementation: Migration paths remain a scaffold; Agent enrollment and polling
-    paths and Plan Revision approval paths are implemented without Production Apply.
+    paths and Plan Revision approval paths are implemented. Approved ON_PREM rollout
+    jobs, Agent artifact download and rollout status are implemented (ticket 12);
+    AWS/GCP Production Apply is not.
   source-of-truth:
   - docs/product/policies.md
   - docs/architecture/domain-boundaries.md
@@ -1323,6 +1325,24 @@ x-sdd-agreed-capabilities:
     '409': STALE_REVISION | APPROVAL_TARGET_MISMATCH | ALREADY_DECIDED | APPROVER_EXISTS
     '422': PLAN_NOT_APPROVABLE with approval_issues codes (LOCAL_STATE_* previews
       map to PENDING_DECISION or VALIDATION_FAILED)
+- capability: approved-onprem-rollout
+  purpose: After an approved ON_PREM Plan Revision is claimed for execution, one PRODUCTION_ROLLOUT
+    job per Revision is queued for the Plan's registered Agent. The Agent claim returns
+    it only while the business-DB approval, latest Revision and manifest Digest still
+    match; otherwise the job is closed without reaching the Agent.
+  paths:
+    claim: POST /agents/{agent_id}/jobs/claim (payload is QueuedWork or ProductionRolloutJob)
+    artifact: GET /agents/{agent_id}/jobs/{job_id}/artifacts/{sha256} returns exact
+      Chart/Values bytes referenced by the caller's own RUNNING rollout job; the Agent
+      verifies size and SHA-256 before use. 403 Agent unauthorized, 404 ARTIFACT_NOT_FOUND,
+      409 ARTIFACT_UNAVAILABLE | ARTIFACT_DIGEST_MISMATCH, 503 store not configured.
+    status: GET /provisioning/plans/{plan_id}/revisions/{revision}/rollout (approver
+      Bearer with migration grant) returns NOT_DISPATCHED | WAITING_AGENT | RUNNING
+      | READY | FAILED | UNKNOWN and a code. 401 APPROVER_AUTH_REQUIRED, 403 APPROVER_FORBIDDEN,
+      404 PLAN_NOT_FOUND. Read-only; never starts or retries work.
+  ready: READY only after Helm Releases, PVC Bound, workload readiness, Service endpoints,
+    pg_isready and the app health path all pass inside the target. External access
+    and data/function tests are not part of READY.
 - capability: plan-rejection-or-revision-request
   purpose: Prevent the rejected plan from being applied. Implemented as decision=REJECT
     on the approval path; replanning and revision-request behavior is undecided.

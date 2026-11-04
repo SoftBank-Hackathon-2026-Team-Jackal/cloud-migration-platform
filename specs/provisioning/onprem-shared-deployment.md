@@ -166,4 +166,15 @@ P0는 공개 회원가입 대신 플랫폼의 최소 소유자 식별자에 Agen
 
 Agent가 접속하는 대상 K3s는 사용자 측에 있고 Sandbox 클러스터는 플랫폼이 미리 준비한 별도 자원이다. 공통 모듈이 플랫폼 서버 내부에 앱/DB를 띄우는 것은 아니다.
 
-04A에서는 플랫폼 운영자 키를 가진 호출만 `POST /agent-enrollments`로 토큰을 발급한다. Agent는 `POST /agents/register`로 토큰을 한 번 사용해 인증 값을 받고, `POST /agents/{agent_id}/jobs/claim`과 결과 보고 API로 자기 작업만 다룬다. DB에는 토큰·인증 값의 SHA-256 Digest만 저장한다. 현재 전송 가능한 작업 본문은 `SANDBOX_TEST`의 버전 참조이며 승인된 운영 Apply 작업은 12에서 추가한다. 원격 Agent CLI의 `poll-once`는 참조 조회만 하고 K3s Apply를 실행하지 않는다.
+04A에서는 플랫폼 운영자 키를 가진 호출만 `POST /agent-enrollments`로 토큰을 발급한다. Agent는 `POST /agents/register`로 토큰을 한 번 사용해 인증 값을 받고, `POST /agents/{agent_id}/jobs/claim`과 결과 보고 API로 자기 작업만 다룬다. DB에는 토큰·인증 값의 SHA-256 Digest만 저장한다. 전송 가능한 작업 본문은 `SANDBOX_TEST`의 버전 참조와 12의 `PRODUCTION_ROLLOUT`(아래)이다. `remote_agent` CLI의 `poll-once`는 참조 조회만 하고, 승인된 운영 배포는 `python -m cmp_providers.onprem_agent`가 실행한다.
+
+## 승인된 운영 배포 (12, #36)
+
+[12 착수 결정 E1~E9](../../tickets/provisioning/12-k3s-approved-rollout.md#착수-결정-2026-11-04)을 구현했다.
+
+- **실행 연결**: 승인 실행 dispatch(claim → provider Activity → complete)는 08 소유다. 12는 `PROVISIONING_QUEUE`의 `execute_on_prem_plan`(`cmp_worker.activities.onprem_execution`)만 제공한다. 입력은 claim 결과(`approval_id`, `plan_id`, `revision`, `provider`, `scope`, `manifest_digest`), 출력은 `{status: SUCCEEDED|FAILED|UNKNOWN, code, resource_refs}`다.
+- **작업 생성** (`cmp_api.onprem_rollout`): 업무 DB에서 APPROVE 기록·최신 Revision·manifest Digest를 다시 확인하고, Plan의 Chart/Values ArtifactRef 바이트를 `ArtifactStore`에서 읽어 Digest를 검증한다. 04B v2 렌더의 `PostgresChartValues`/`ApplicationValuesV2`에서 Release·StorageClass·Port·Health·Secret 이름만 꺼내 `cmp_contracts.onprem_rollout.ProductionRolloutJob`을 만든다. Plan의 `agent_id`·`cluster_ref.id`는 등록 Agent와 그 kube-system UID에 일치해야 한다. `job_id`는 `plan_id:revision`에서 결정되어 재시도해도 작업은 하나다(같은 ID·다른 본문은 `AGENT_JOB_CONFLICT`).
+- **Agent 전달**: claim과 산출물 다운로드 시점에 승인을 다시 확인한다. QUEUED 작업이 승인 불일치면 Agent에 주지 않고 `FAILED`, RUNNING 작업이면 `UNKNOWN`으로 닫는다. Agent는 `GET /agents/{agent_id}/jobs/{job_id}/artifacts/{sha256}`로 자기 작업 참조만 받고 크기·Digest를 검증한다. P0 저장소는 Digest 파일명 로컬 디렉터리(`ARTIFACT_STORE_DIR`)이며 S3 연결은 후속이다.
+- **Agent 실행** (`cmp_providers.onprem_agent`): 전용 kubeconfig·명시 context, kube-system UID 확인 → StorageClass → Namespace 소유(`cmp.dev/environment-id` 주석) → 사용자 Secret 존재 → DB 비밀번호 Secret 생성(클러스터 내부) → DB·App 순서의 `helm upgrade --install --wait`. Release 설명에 `job_id`와 Chart/Values Digest 표식을 남겨, 재수신 시 같은 표식의 `deployed` Release는 재설치하지 않고 검증만 한다. `pending-*`/`failed` Release는 `UNKNOWN INSPECTION_REQUIRED`로 남기고 자동 재적용하지 않는다. 변경 전 클러스터 접속 불가는 보고하지 않고 RUNNING을 유지한다.
+- **오프라인·재연결**: Activity는 heartbeat하며 업무 DB 작업 상태를 조회하고, 대기 한도(기본 30분) 초과 시 작업을 취소하지 않고 `UNKNOWN AGENT_OFFLINE`(QUEUED)/`AGENT_RESULT_PENDING`(RUNNING)을 반환한다. 같은 요청으로 다시 실행하면 기존 작업을 재사용해 Agent 결과를 반영한다. 상태는 승인자 인증 `GET /provisioning/plans/{plan_id}/revisions/{revision}/rollout`으로 조회한다.
+- **READY**: Release `deployed`, PVC `Bound`(지정 StorageClass), StatefulSet/Deployment ready·updated, 두 Service의 Ready Endpoint, DB Pod `pg_isready`, Service 프록시 경유 앱 health_path 2xx가 모두 통과해야 `SUCCEEDED READY`다. 하나라도 실패하면 해당 검사 코드로 `FAILED`다. `resource_refs`는 Namespace·Release·내부 Endpoint·DB Secret 이름/키·job_id이며 Secret 값은 없다. 외부 접근 경로·기능/데이터 검증은 13·Migration 범위다.
