@@ -104,3 +104,30 @@ Agent와 중계 서버가 플랫폼을 통해 서로의 공개키·주소를 얻
 - [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
 - [ ] 구현·계약 정합성 및 최종 리뷰
 - [ ] 미검증 항목과 결과 증거 기록
+
+## 구현 (2026-11-05, 답변 무관 부분)
+
+- 업무 DB `cmp_api.tunnels`(Alembic `20261105_03`): `agent_tunnels`(공개키·터널 IP, 재등록·키 교체에도 같은 IP), `relay_servers`(endpoint·공개키·자격 증명 digest), `tunnel_settings`(설정 버전), `agent_tunnel_status`(최신 터널 상태).
+- API(`cmp_api.routes.tunnels`, Agent는 기존 Bearer 자격 증명·폐기 Agent 거절, 실패는 기존 규칙대로 403):
+  - `PUT /agents/{agent_id}/tunnel/key` — WireGuard 공개키(Base64 32바이트)만 받음, 알 수 없는 필드(예: `private_key`) 거절 → `tunnel_ip`·`config_version`
+  - `GET /agents/{agent_id}/tunnel/config` — 중계 서버 목록 `[{relay_id, endpoint, public_key}]`, 터널 IP, AllowedIPs(터널 대역), MTU 1420, PersistentKeepalive 25, 노출 포트(5432 + READY ON_PREM 앱 포트), 설정 버전. 키 미등록이면 404 `TUNNEL_KEY_NOT_REGISTERED`
+  - `POST /agents/{agent_id}/tunnel/status` — 마지막 handshake 시각, 터널 경유 앱 헬스·DB 접속 결과. 다른 터널 IP는 409 `TUNNEL_IP_MISMATCH`
+  - `PUT /tunnel-admin/relays/{relay_id}` (운영자 키) — 첫 등록 201 + 자격 증명 원문 1회, 재등록 200(자격 증명 미표시), 등록·갱신마다 설정 버전 +1
+- 인계(T2·T6·T7): `get_migration_handoff`가 ON_PREM 결과를 읽을 때 그 Agent의 최신 터널 상태를 합친다. Data는 터널 경유 DB 접속 성공 보고 뒤에만 진행하고 `database.tunnel_endpoint = 터널IP:5432`를 채운다. 그 전에는 `TUNNEL_DB_NOT_VERIFIED`. 저장된 결과는 바꾸지 않는다. Traffic은 P2 답변 전이라 계속 `EXTERNAL_ENDPOINT_UNAVAILABLE`.
+- 13 변경: `DatabaseHandoff.tunnel_endpoint` 추가, ON_PREM Data 인계 조건 강화(13 테스트 기대값을 T2에 맞게 수정).
+
+## 검증 기록 (2026-11-05)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `uv run pytest tests/test_tunnel_exchange.py` | 12개 통과: 터널 IP 배정·중복 없음·키 교체 후 유지, 공개키 형식·`private_key` 거절, 다른 Agent·폐기 Agent 거절, 중계 서버 자격 증명 1회 반환·digest 저장·재등록 시 버전 증가, 운영자 키 필요, 설정 응답(중계 서버·MTU·Keepalive·노출 포트·소유자/자격 증명 비노출), 키 미등록 404, 터널 DB 확인 전후 Data 인계·결과 불변, Traffic 차단 유지(P2), READY 앱 포트 노출, 터널 IP 불일치 409, Alembic 모델 일치 |
+| `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` | Ruff·전체 753개 통과(분석 쪽 로컬 전용 1개 skip) |
+| `make openapi` | 터널 경로 4개와 스키마 7개만 추가, 기존 경로 변경 없음, `private` 필드 없음 |
+
+### 남은 작업 (답변 대기 — 위 "⚠️ 답변 대기" 표)
+
+- **P1** 중계 서버용 Agent 목록 API: 미구현. 중계 서버 인증 함수(`authenticate_relay`)만 준비했다.
+- **P2** ON_PREM `external_endpoint`(포트): 미구현. Traffic 인계 차단 유지.
+- P3·P4·P5: 기본값으로 진행했고 답변에 따라 설정·문서만 바꾼다.
+- 실제 WireGuard 연결과 터널 경유 헬스·DB 확인을 보고하는 Agent 쪽 구현은 17이다.
+

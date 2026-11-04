@@ -404,7 +404,8 @@ async def test_onprem_ready_result_carries_agent_location_and_blocks_traffic(
     assert checks(result)["external_health"] == "NOT_RUN"
 
     data = await handoff(db, "DATA_MIGRATION")
-    assert data["proceed"] is True
+    # Ticket 16 T2: on-prem data moves through the tunnel; blocked until it is verified.
+    assert data["proceed"] is False and data["blocked_by"] == ["TUNNEL_DB_NOT_VERIFIED"]
     assert data["common"]["cluster"]["agent_id"] == "agent-001"
     traffic = await handoff(db, "TRAFFIC_MIGRATION")
     assert traffic["proceed"] is False

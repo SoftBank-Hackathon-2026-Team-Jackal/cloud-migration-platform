@@ -368,8 +368,18 @@ def build_provisioning_result(
     )
 
 
-def handoff(result: ProvisioningResult | None, consumer: str, plan_id: str, revision: int):
-    """R7: the view one downstream Worker needs, with a proceed/blocked decision."""
+def handoff(
+    result: ProvisioningResult | None,
+    consumer: str,
+    plan_id: str,
+    revision: int,
+    tunnel: dict | None = None,
+):
+    """R7: the view one downstream Worker needs, with a proceed/blocked decision.
+
+    `tunnel` is the latest tunnel check of an ON_PREM Agent (ticket 16 T6), merged here at read
+    time so the stored result stays immutable.
+    """
     base = {"plan_id": plan_id, "revision": revision, "consumer": consumer}
     if result is None:
         return {**base, "proceed": False, "blocked_by": ["RESULT_NOT_FOUND"]}
@@ -384,9 +394,17 @@ def handoff(result: ProvisioningResult | None, consumer: str, plan_id: str, revi
     )  # fmt: skip
     view = {**base, "common": common}
     if consumer == "DATA_MIGRATION":
+        database = result.database.model_dump(mode="json") if result.database else None
         if result.status == "READY" and not (result.database and result.database.ready):
             blocked.append("DATABASE_NOT_READY")
-        view["database"] = result.database.model_dump(mode="json") if result.database else None
+        elif result.status == "READY" and result.provider == "ON_PREM":
+            # Ticket 16 T2/T7: on-prem data moves through the tunnel; proceed only once the
+            # Agent reported a successful DB connection over it.
+            if tunnel and tunnel.get("db_connect_ok"):
+                database["tunnel_endpoint"] = f"{tunnel['tunnel_ip']}:5432"
+            else:
+                blocked.append("TUNNEL_DB_NOT_VERIFIED")
+        view["database"] = database
     else:
         app = result.application
         if result.status == "READY":
