@@ -83,8 +83,11 @@ It then applies only the saved Plan with no re-plan, destroy or retry, and recor
 outputs plus `gcloud container clusters/node-pools describe` status.
 
 One-time project prerequisites outside Terraform (ticket 10 G6): enable `container.googleapis.com`
-and create the node service account `cmp-gke-nodes` with only
-`roles/container.defaultNodeServiceAccount`.
+and create the node service account `cmp-gke-nodes`. Granting it
+`roles/container.defaultNodeServiceAccount` (node log/metric writes) is recommended but was
+deferred for the P0 demo project because the operator account has only `roles/editor` and cannot
+change project IAM; nodes run and workloads deploy without it, but Cloud Logging/Monitoring stay
+empty. A project Owner can add it later without touching Terraform State.
 
 Worker settings: `PROVISIONING_ARTIFACT_ROOT`, `PROVISIONING_AWS_PROFILE` (S3 State),
 `PROVISIONING_GCLOUD_CONFIGURATION`, `PROVISIONING_GCP_ADC_EMAIL`, `TERRAFORM_BIN`.
