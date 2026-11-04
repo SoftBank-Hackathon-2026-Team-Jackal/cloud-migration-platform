@@ -1,7 +1,7 @@
 # Ticket 02B — Sandbox 자식 Workflow 골격
 
 ## 상태
-DONE — 사용자 결정으로 완료, PR 병합 시 확정, Issue #45
+DONE — PR #46 병합(Issue #45). 02와 함께 민서님 확인(자식 분리 방향)과 CI 통과 후 병합.
 
 ## 목적
 Sandbox 검증 루프를 자식 Workflow와 mock Activity로 끝까지 연결한다.

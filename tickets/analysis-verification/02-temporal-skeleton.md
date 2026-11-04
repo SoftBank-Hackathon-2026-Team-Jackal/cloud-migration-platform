@@ -1,7 +1,7 @@
 # Ticket 02 — 분석 Activity 골격
 
 ## 상태
-DONE — 사용자 결정에 따라 02B 진행, Issue #44. 민서님 공동 리뷰와 CI 결과 확인은 남음.
+DONE — PR #46 병합(Issue #44). 02B와 함께 민서님 확인(자식 분리 방향)과 CI 통과 후 병합.
 
 ## 목적
 `AnalysisWorkflow` 자식에 분석 Activity 묶음과 병렬 스캔 흐름을 fixture 반환으로 연결한다.

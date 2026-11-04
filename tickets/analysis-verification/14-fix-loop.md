@@ -14,7 +14,7 @@ Blocked by: 08, 08B, 10, 11B, 13
 
 ## 작업 범위
 - 포함: `classify_failure`(SPEC(의도 누락 포함)/CODE/BUILD/RENDER/INFRA), `fix_mapping`(요구사항·intent 패치)·`fix_code`(Fixer, 테스트 읽기 전용), mock을 실제 Activity로 바꾼 루프, 3회 초과 사람 검토, RENDER 중단 보고, `publish_final_report`, 이전용 브랜치 Draft PR과 해시 대조
-- 부모 종료 상태 값 확정: 02B 골격의 임시 값(`needs_review`, `stopped_render`)을 검토 대기(진행 중 플래그)와 종료 상태(완료·실패·취소)로 정리한다. 민서님께 새 값을 공유하고 API의 SSE 종료 조건(`routes/migrations.py`) 반영을 요청한다. 계약상 `phase`는 문자열이라 OpenAPI 변경은 필요 없다.
+- 부모 종료 상태 값 확정: 02B 골격의 임시 값(`needs_review`, `stopped_render`)을 검토 대기(진행 중 플래그)와 종료 상태(완료·실패·취소)로 정리한다. 민서님께 새 값을 공유하고 API의 SSE 종료 조건(`routes/migrations.py`) 반영을 요청한다. 계약상 `phase`는 문자열이라 OpenAPI 변경은 필요 없다. 부모 Workflow 변경은 종료 상태 값 반환에 한정하고 필요하면 버전 분기를 적용한다.
 - 제외: GitHub App 권한 발급
 
 ## 수용 기준
@@ -28,6 +28,8 @@ Blocked by: 08, 08B, 10, 11B, 13
 - [ ] 루프 중 매핑 처리가 바뀐 행이 있으면 발행 전에 그 행만 다시 승인받는다(08B 게이트 재사용). 바뀐 행은 이전 분석 버전과 행 ID로 비교해 찾는다.
 - [ ] 통과한 테스트에 대응하는 매핑 행의 검증 상태가 `SANDBOX_VERIFIED`로 올라간다.
 - [ ] Draft PR 커밋으로 만든 묶음 해시가 통과한 묶음 해시와 같다.
+- [ ] 루프 결과(통과, 사람 검토 대기, RENDER 중단, 실패, 취소)가 정해진 종료 상태로 부모에 반영되고, 검토 대기는 종료 상태가 아니다. 기존 `scaffold_complete`·`cancelled` 동작과 기존 이력 replay는 유지된다.
+- [ ] 새 종료 상태 값과 부모 변경 범위, replay 결과를 PR 설명에 기록해 민서님께 공유하고 SSE 종료 조건 반영을 요청한다.
 
 ## 테스트 전략
 - 제안 Test Seam: k3d Sandbox + 가짜 LLM(정해진 수정 반환)으로 Workflow 이력. 잡는 것: 분류·루프·갱신·발행 경로. 못 잡는 것: 실제 모델의 수정 품질.
