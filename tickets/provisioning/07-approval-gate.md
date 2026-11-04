@@ -1,7 +1,7 @@
 # Ticket 07 — Plan Revision 승인과 Temporal 실행 차단
 
 ## 상태
-IN_PROGRESS — [Issue #34](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/34); 착수 결정 D1~D6과 Test Seam을 아래에 기록
+DONE — [Issue #34](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/34); 테스트 DB/Temporal·안전한 가짜 executor 기준. 실제 AWS/GCP 운영 승인 가능 상태는 아님(아래 미검증 항목)
 
 ## 목적
 승인된 정확한 계획만 실행 경계까지 도달하게 한다.
@@ -17,9 +17,9 @@ Blocked by: 01, CP-01
 - 제외: 실제 Terraform·Helm·Agent Apply
 
 ## 수용 기준
-- [ ] 미승인·오래된 Revision·변경된 Digest·거절 계획은 실행 경계에 도달하지 않는다.
-- [ ] 중복 승인과 DB 기록/Signal 전달 재시도로 동일 계획이 중복 실행되지 않는다.
-- [ ] 승인 요청 접수와 Workflow 재개 상태를 구분한다.
+- [x] 미승인·오래된 Revision·변경된 Digest·거절 계획은 실행 경계에 도달하지 않는다.
+- [x] 중복 승인과 DB 기록/Signal 전달 재시도로 동일 계획이 중복 실행되지 않는다.
+- [x] 승인 요청 접수와 Workflow 재개 상태를 구분한다.
 
 ## 테스트 전략
 - 제안 Test Seam: API 승인 요청과 Temporal Workflow 상태/가짜 executor. 실제 인프라 변경은 확인하지 못한다.
@@ -38,11 +38,11 @@ Preview ID/Revision을 승인할 때만 안전한 executor가 호출되는 흐�
 - 구현 중 변경: 2026-11-04 착수 결정 D1~D6 참조(API·인증·이벤트 ID·Workflow·Plan 저장·실행 경계).
 
 ## 완료 체크리스트
-- [ ] 수용 기준과 Test Seam 확인
-- [ ] 관련 테스트 통과와 회귀 확인
-- [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
-- [ ] 미검증 항목과 결과 증거 기록
+- [x] 수용 기준과 Test Seam 확인
+- [x] 관련 테스트 통과와 회귀 확인
+- [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
+- [x] 구현·계약 정합성 및 최종 리뷰 (자체 리뷰; PR 리뷰 대기)
+- [x] 미검증 항목과 결과 증거 기록
 
 ## 순차 작업 조건 (2026-11-03)
 
@@ -68,3 +68,24 @@ Preview ID/Revision을 승인할 때만 안전한 executor가 호출되는 흐�
 - Seam: (1) FastAPI `TestClient`의 승인 HTTP 요청 + SQLite 업무 DB, (2) `temporalio.testing.WorkflowEnvironment`의 실제 `ProvisioningApprovalWorkflow`와 실제 재검증 Activity + 호출을 기록하는 가짜 executor, (3) Temporal 전달 실패를 일으키는 가짜 delivery 포트(API 의존성 주입).
 - 잡아내는 것: 미승인·거절·오래된 Revision·Digest 변경·`LOCAL_STATE_*` Preview의 실행 차단, 승인자 인증/권한, 재요청·재전달·중복 Signal에서도 executor 1회, DB 기록 후 Signal 실패의 FAILED 노출과 재전달 복구, 접수와 Workflow 상태 분리, 실행 직전 재확인.
 - 놓치는 것: PostgreSQL 고유 동작(Alembic 마이그레이션은 별도로 SQLite/PG에서 upgrade 확인), 실제 Temporal 서버 장애 유형(로컬 `make smoke-temporal`로 일부 보완), 실제 Terraform/Helm/Agent 부수효과, 실제 사용자 인증 체계, 중앙 S3 State·운영 Plan의 실제 승인 가능성.
+
+## 검증 기록 (2026-11-04)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `make check` (ruff + pytest, 로컬 macOS, Python 3.11) | 303 passed |
+| `uv run pytest tests/test_approval_gate.py tests/test_approval_workflow.py` | HTTP 16건 + Workflow 7건 + Alembic/모델 정합 1건 통과 |
+| `make openapi` | 승인자 등록·승인 결정·재조회·재전달 4개 경로 추가, `x-sdd-*`에 오류 코드·상태 분리·미정 사항 반영. 생성 결과 검토 |
+| `make infra-up` → `make smoke-temporal` | 스캐폴드 회귀 통과(`scaffold_complete`). Temporal UI 컨테이너는 로컬 8080 포트 점유로 기동 실패(검증 무관) |
+| 로컬 PostgreSQL `alembic upgrade head` + 실제 Temporal 서버 수동 점검(커밋하지 않은 일회성 스크립트) | 승인 201 `DELIVERED`/`NOT_STARTED`/`APPROVAL_RECEIVED` → 동일 요청 200·같은 ID → Workflow `EXECUTED` → 완료 후 재전달 200·추가 실행 없음, 실행 표식 1건 |
+
+시나리오 대응: 미승인(DB 기록 없는 Signal)·거절·오래된 Revision(API 409, 실행 시 BLOCKED)·Digest 변경(API 409, 저장 Plan 변조 시 실행 BLOCKED)·`LOCAL_STATE_*` Preview(422)·승인자 권한 없음(403)/인증 없음(401)·DB 기록 후 Signal 실패(`FAILED` 노출 → 재요청/재전달 복구)·중복 요청/재전달(executor 1회)·실행 직전 재확인을 테스트로 확인했다.
+
+### 미검증·제한 사항
+
+- 실제 AWS/GCP 운영 승인 가능 상태가 아니다. 중앙 S3 State·잠금으로 만든 최종 저장 Plan과 권한 검증은 08/10의 선행 조건이다(ADR-002 #10).
+- 실제 Terraform·Helm·Agent executor는 연결하지 않았다. 실행 표식이 RUNNING/FAILED로 남으면 executor를 재호출하지 않으며 실제 상태 조회 후 재개는 08/10/12 범위다.
+- 승인자 자격 증명은 실제 사용자 인증 체계가 생길 때까지의 임시 방식이다. 자격 증명 회전·폐기 API는 없다.
+- Planning→`publish_plan_revision` 연결과 상위 `MigrationWorkflow` 연결은 후속 통합 작업이다. 스캐폴드 `/migrations/{id}/approve`는 그대로 남아 있다.
+- 실제 Temporal 서버 장애 시 `delivery_status=FAILED`는 가짜 delivery 포트로 확인했고 실서버 장애 주입은 하지 않았다. API 라우트는 동기 DB 호출을 async 라우트에서 수행한다(스캐폴드 수준).
+- `spec.md`의 요구사항·수용 기준은 바뀌지 않아 수정하지 않았다.

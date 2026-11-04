@@ -86,3 +86,7 @@ identity = approval_target(manifest, preview)
 ## ID 기반 다중 리소스 소비자 (04B)
 
 `cmp_contracts.shared_deployment_v2.SharedDeploymentRequestV2`와 `cmp_providers.shared_deployment_v2.render_shared_deployment_v2`는 여러 DB/App 입력을 고유 ID로 렌더한다. DB별 기존 `PostgresChartValues`와 앱별 `ApplicationValuesV2`를 같은 Chart에 공급해 Values·Manifest·DB 출력·해결된 환경변수 참조를 반환한다. 입력에서 Secret 원문과 미지원 종류/확장을 거절한다. Worker는 환경별 리소스 값·Secret·대상 capabilities를 준비하고 Chart 산출물을 저장·승인 내용과 대조한 뒤 실제 적용한다. v1 조합 호출은 그대로 유지한다.
+
+## 승인 게이트 소비자 (07)
+
+`cmp_api.approvals`가 `approval_issues`·`approval_target`·`verify_approval_target`을 그대로 사용한다. 승인 요청 시 업무 DB의 최신 Revision에서 읽은 manifest/preview로 대상 식별을 계산하고 요청 본문의 scope·Digest와 비교한다. 실행 직전에는 DB 승인 기록의 대상 식별과 저장된 현재 manifest/preview를 `verify_approval_target`으로 다시 비교한다. `LOCAL_STATE_VALIDATION_ONLY`(AWS, pending_decisions)와 `LOCAL_STATE_UNAPPROVABLE`(GCP, errors)은 기존 `PENDING_DECISION`/`VALIDATION_FAILED` 규칙으로 승인 불가다. 공통 모델·함수는 복제하거나 변경하지 않았다. 상세는 [07 티켓](../../tickets/provisioning/07-approval-gate.md)을 따른다.
