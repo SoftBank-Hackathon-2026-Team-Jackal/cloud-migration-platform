@@ -4,7 +4,7 @@
 
 | ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
-| [01 분석·검증 계약 v1](../../tickets/analysis-verification/01-contracts.md) | DRAFT | 없음 | AV-001, AV-017, AV-018, AV-020 | 미생성 | ☐ |
+| [01 분석·검증 계약 모델](../../tickets/analysis-verification/01-contracts.md) | IN_PROGRESS | 없음 | AV-001, AV-017, AV-018, AV-020, AV-022 | #29 | ☐ |
 | [Q-01 `sandbox` Task Queue·Worker 등록](../../tickets/analysis-verification/q-01-sandbox-queue.md) | DRAFT | D-05(Queue 분리 결정) | AV-021 | 미생성 | ☐ |
 | [02 분석 Activity 골격](../../tickets/analysis-verification/02-temporal-skeleton.md) | DRAFT | 01 | AV-001, AV-021 | 미생성 | ☐ |
 | [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | DRAFT | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | 미생성 | ☐ |

@@ -38,7 +38,7 @@ fixture 아카이브로 Digest 고정 이미지 참조가 나오고 실패 코�
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
-- [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
+- [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
 - 2026-11-04: capabilities 기반 플랫폼, 호출 방식 미정(D-12) 반영. v2 동기화로 `resource_id`·`source_version_id`·새 반환 필드 반영.

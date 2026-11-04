@@ -36,7 +36,7 @@ fixture 작업 공간에서 리소스 ID별 `s3://.../<sha256>.tar.gz`와 SHA-25
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
-- [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
+- [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
 - 2026-11-04: 리소스 ID별 source_refs 형식 반영.

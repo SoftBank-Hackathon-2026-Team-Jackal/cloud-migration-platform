@@ -33,7 +33,7 @@ fixture 매니페스트로 클라우드 의존 목록, 실행 요구, 원본 DB 
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
-- [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
+- [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
 - 2026-11-04: 원본 DB 이미지 기록 추가. v2 동기화로 요구사항이 아닌 `AnalysisReport` 정보로 변경(이미지 선택은 D-11).

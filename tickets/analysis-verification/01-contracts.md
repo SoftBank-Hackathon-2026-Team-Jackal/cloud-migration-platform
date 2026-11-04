@@ -1,13 +1,13 @@
-# Ticket 01 — 분석·검증 계약 v1
+# Ticket 01 — 분석·검증 계약 모델
 
 ## 상태
-DRAFT — 사용자 검토 전
+IN_PROGRESS — 사용자 검토 완료, Issue #29
 
 ## 목적
 분석 결과·Sandbox 검증 결과의 계약을 정의하고, 요구사항과 Planning 투영은 main에 구현된 v2 모델(`RequirementsV2`, `PlanningRequestV2`)을 재사용한다.
 
 ## 관련 요구사항
-AV-001, AV-017, AV-018, AV-020
+AV-001, AV-017, AV-018, AV-020, AV-022
 
 ## 선행 작업
 Blocked by: 없음
@@ -21,13 +21,13 @@ Blocked by: 없음
 - [ ] 분석 결과 모델 이름이 `AnalysisReport`이고 Provisioning v1 `AnalysisResult`와 겹치지 않는다.
 - [ ] 요구사항을 새로 정의하지 않고 `RequirementsV2`로 만들며, fixture 요구사항 JSON이 `RequirementsV2` 검증을 통과한다.
 - [ ] 같은 요구사항을 두 번 직렬화하면 같은 바이트·같은 SHA-256이 나온다.
-- [ ] 비밀 항목은 이름만 담고 값 필드가 없다(`EnvExceptions`의 대체 값은 비밀이 아닌 변수만).
+- [ ] 모델 어디에도 비밀 값을 담는 필드가 없다. 비밀은 변수 이름이나 Secret 참조로만 나타낸다. `EnvExceptions.replaced`에 넣을 변수가 비밀이 아닌지 판단하는 것은 분석(05·08)의 몫이고, 01은 형식만 검증한다.
 - [ ] fixture(EKS → K3s)가 검증을 통과하고 JSON 왕복 후 같다.
 - [ ] fixture를 `PlanningRequestV2`로 투영한 결과가 `prepare_plan_v2`(requirements_bytes 포함) 검증을 통과한다.
-- [ ] `AnalysisReport`·`EnvExceptions` 형식과 외부 진입 처리(D-15)를 민서님께 **공유**한다. 회신은 완료 조건이 아니다.
+- [ ] `AnalysisReport`·`EnvExceptions` 형식과 외부 진입 처리(D-15)를 민서님께 공유할 요약을 PR 설명에 정리한다. 전달은 사용자가 한다.
 
 ## 테스트 전략
-- 제안 Test Seam: 공개 모델의 `model_validate`/`model_dump`와 `prepare_plan_v2`를 통한 투영 검증. 잡는 것: 형식·필수값·비밀 필드 유입·v2 대조 규칙. 못 잡는 것: 실제 저장소 조회와 상대 Worker 실행.
+- 합의된 Test Seam: 공개 모델의 `model_validate`/`model_dump`와 `prepare_plan_v2`를 통한 투영 검증. 잡는 것: 형식·필수값·정의되지 않은 비밀 값 필드 유입·v2 대조 규칙. 못 잡는 것: 허용된 문자열의 비밀 여부, 실제 저장소 조회와 상대 Worker 실행.
 - 실행: `uv run pytest tests/analysis/test_contracts.py`, `make check`
 
 ## 완료 시 확인할 동작
@@ -36,12 +36,13 @@ fixture 하나로 분석 결과·요구사항·검증 결과를 만들고, 투�
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
-- [Provision 입력 계약](../../specs/provisioning/input-contract.md) · [ADR-003](../../docs/decisions/ADR-003.md)
+- [Planning 입력 계약 v2](../../specs/provisioning/input-contract-v2.md) · [ADR-003](../../docs/decisions/ADR-003.md)
 
 ## 설계 변경 기록
 - 2026-11-04: 계약 협의안 v2(리소스 목록·validated_workloads) 반영, AnalysisReport로 이름 변경, 완료 조건을 '공유까지'로 축소.
 - 2026-11-04(v2 동기화): main의 v2 구현(#22, #24, B-01 변경) 기준으로 수정.
 - 2026-11-04(목적 점검): 필수 여부 제안·확정 필드와 ReviewRecord 추가(AV-022).
+- 2026-11-04(착수 전 검토): 제목에서 v1 제거, AV-022 연결, 비밀 기준을 형식 검증으로 한정, 공유는 요약 준비까지로 조정, v2 계약 링크로 교체.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
