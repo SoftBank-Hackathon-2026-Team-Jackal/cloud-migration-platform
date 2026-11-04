@@ -58,3 +58,19 @@ Blocked by: 08, 09, 10, 11, 12, 13
 | F7 실제 검증 범위 | **EKS:** 08 입력과 같은 사양으로 새 Plan(`plan-aws-recovery` r1)을 만들어 실제 Workflow로 Apply하는 도중 Worker를 종료해 `UNKNOWN`을 만든다. 이어서 S3 State·실제 자원을 조회하고 새 Revision(r2)으로 Plan→Apply해 중복 VPC·클러스터가 생기지 않는지 확인한다. 이후 워크로드 Revision으로 READY와 13 결과 저장까지 확인한다. **GKE:** 기존 `cmp-target-gke`의 새 Namespace `cmp-recovery-test`에서 Helm 설치 중 Worker를 종료하고 새 Revision으로 재실행해 Release revision이 늘지 않는지 확인한다. **K3s:** 격리 k3d에서 12의 Agent 오프라인·재연결·결과 유실 복구 smoke를 다시 실행하고 13 결과를 확인한다. | 사용자 승인(2026-11-05) |
 | F8 Test Seam | 상위 `MigrationWorkflow`는 아직 스캐폴드이므로 실제 실행 경로인 `ProvisioningApprovalWorkflow`를 Seam으로 쓴다. Temporal 테스트 환경에서 Worker 중지·재시작, 취소, Activity 유실을 주입하고 업무 DB 실행 표식·13 결과·인계 차단을 확인한다. 실제 대상은 F7. | 티켓 Test Seam의 "Migration Workflow"는 현재 승인 Workflow가 담당 |
 
+## 구현 (2026-11-05)
+
+- Workflow 취소(F3): 승인 전 취소 → `CANCELLED`/`CANCELLED_BEFORE_EXECUTION`, 실행 표식 없음. claim·complete DB Activity는 `asyncio.shield`로 보호해 취소 중에도 끝까지 실행하므로 `RUNNING` 표식이 남지 않는다. Provider 단계 중 취소 → `UNKNOWN`/`EXECUTION_CANCELLED`(Activity 취소는 `ActivityError` 안의 취소 예외로 구분). claim 직후 취소면 Provider를 실행하지 않고 `FAILED`/`CANCELLED_BEFORE_EXECUTION`(사전 확인 단계)으로 기록한다.
+- 부분 자원(F5): `ProvisioningResult.partial_resources`에 실패·UNKNOWN 실행이 기록한 refs(State 자원 수, Namespace, StorageClass, Pull Secret, DB Secret 위치, Release, PVC, Ingress, Agent job)만 남긴다. 성공 시 비어 있다. Activity 자체가 유실되면 refs가 보고되지 않으므로 비어 있을 수 있다(실측 GKE r1).
+- 그 외 Retry·Heartbeat 수치, 복구 방식(새 Revision), 자동 정리 없음은 기존 동작을 결정으로 확정했다(F1·F2·F4·F6).
+
+## 검증 기록 (2026-11-05)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `uv run pytest tests/test_recovery_integration.py` | 7개 통과. 승인 전 취소(실행 없음), Provider 단계 중 취소(`UNKNOWN`·`CHECK_STATE_FIRST`·인계 차단, `RUNNING` 잔존 없음), Worker 중지 후 새 Worker 재개(`PROVIDER_ACTIVITY_LOST`, Provider 1회만 실행), 같은 승인 재전달 시 재실행 없음, 인프라·워크로드 실패의 부분 자원 기록, 성공 시 부분 자원 없음. Worker 유실·재전달 2건은 구현 전에도 통과해 기존 동작을 확인했고, 취소·부분 자원 5건은 RED → GREEN |
+| `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` | Ruff·전체 517개 통과 |
+| **GKE** 실제 `cmp-target-gke`, Namespace `cmp-recovery-test`, 실제 승인 Workflow(Temporal 테스트 환경) + 실제 `execute_gcp_workloads` | r1: DB Helm Release가 `deployed`(revision 1)가 된 직후 Worker 중지 → 새 Worker가 Workflow를 이어받아 `UNKNOWN`/`PROVIDER_ACTIVITY_LOST` 기록, 13 결과 `CHECK_STATE_FIRST`. r2(새 Revision, 같은 승인 Values): DB Release를 조회해 재설치하지 않고(revision 1 유지) 앱만 설치 → `WORKLOADS_READY`, 13 결과 READY. 증거: [provisioning-14-gke.json](../../docs/verification/provisioning-14-gke.json) |
+| **K3s** 격리 k3d `k3d-cmp-recovery`(v5.9.0, K3s v1.36.4, ARM64), 전용 kubeconfig | ① 12 smoke 재실행: Agent 오프라인 `UNKNOWN`/`AGENT_OFFLINE` → 재연결 `READY`(Helm revision 1) → 결과 보고 유실 후 재설치 없이 복구(revision 1 유지) → 이미지 불가 Revision `FAILED`/`WORKLOAD_NOT_READY`, R4 표준 키 포함. ② 실제 승인 Workflow 경로: r1 Agent 오프라인 → `UNKNOWN`, 13 결과 저장·인계 차단. r2 새 Revision → `EXECUTED`/`READY`, 결과에 `agent_id`·`cluster_uid`, Data 인계 진행 가능·Traffic은 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단. r2가 최신이 된 뒤 남아 있던 r1 Agent 작업은 `STALE_REVISION`으로 거절돼 배포되지 않았다. 증거: [provisioning-14-k3s.json](../../docs/verification/provisioning-14-k3s.json). 정리: Namespace·k3d 클러스터·Registry 삭제, 기본 kubeconfig 해시 동일 |
+| **EKS** | 진행 중 — 아래 참고 |
+

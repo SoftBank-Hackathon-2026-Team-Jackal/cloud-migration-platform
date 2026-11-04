@@ -1,0 +1,139 @@
+{
+ "ticket": "14",
+ "issue": 56,
+ "date": "2026-11-05",
+ "target": "GKE cmp-target-gke (sbh26-prod, asia-northeast3)",
+ "namespace": "cmp-recovery-test",
+ "harness": "Temporal test env ProvisioningApprovalWorkflow + real execute_gcp_workloads (GcpCliRuntime) + SQLite business DB; Worker shut down while Helm was running, new Worker resumed the Workflow",
+ "r1_worker_killed": {
+  "outcome": {
+   "approval_id": "0ad4e1e2-3250-45b3-94c9-3529bc13beaf",
+   "code": "PROVIDER_ACTIVITY_LOST",
+   "plan_id": "plan-gcp-recovery",
+   "revision": 1,
+   "status": "UNKNOWN"
+  },
+  "helm_when_killed": {
+   "cmp-demo-db": [
+    "deployed",
+    "1"
+   ]
+  },
+  "helm_after": {
+   "cmp-demo-db": [
+    "deployed",
+    "1"
+   ]
+  },
+  "result": {
+   "plan_id": "plan-gcp-recovery",
+   "revision": 1,
+   "provider": "GCP",
+   "scope": "WORKLOADS",
+   "status": "UNKNOWN",
+   "code": "PROVIDER_ACTIVITY_LOST",
+   "data_state": "NOT_MIGRATED",
+   "cluster": {
+    "kind": "GKE",
+    "name": null,
+    "location": "asia-northeast3",
+    "account_id": "sbh26-prod",
+    "agent_id": null,
+    "cluster_uid": null,
+    "network_refs": {}
+   },
+   "namespace": null,
+   "failure": {
+    "stage": "WORKLOAD_DEPLOY",
+    "code": "PROVIDER_ACTIVITY_LOST",
+    "recoverability": "CHECK_STATE_FIRST"
+   },
+   "partial_resources": {},
+   "warnings": [],
+   "checks": {
+    "cluster_access": "UNKNOWN",
+    "storage_class": "UNKNOWN",
+    "image_pull_secret": "UNKNOWN",
+    "secret_refs": "UNKNOWN",
+    "db_release": "UNKNOWN",
+    "pvc_bound": "UNKNOWN",
+    "db_pod_ready": "UNKNOWN",
+    "db_auth_connect": "UNKNOWN",
+    "app_release": "UNKNOWN",
+    "app_pod_ready": "UNKNOWN",
+    "internal_health": "UNKNOWN",
+    "external_address": "UNKNOWN",
+    "external_health": "UNKNOWN",
+    "functional_tests": "NOT_RUN"
+   },
+   "database_ready": false,
+   "app_external_endpoint": null
+  }
+ },
+ "helm_before_r2": {
+  "cmp-demo-db": [
+   "deployed",
+   "1"
+  ]
+ },
+ "r2_new_revision_recovery": {
+  "outcome": {
+   "approval_id": "77dadd67-7571-4a6c-9ae6-63d1dcd4e073",
+   "code": "WORKLOADS_READY",
+   "plan_id": "plan-gcp-recovery",
+   "revision": 2,
+   "status": "EXECUTED"
+  },
+  "helm_after": {
+   "cmp-demo-api": [
+    "deployed",
+    "1"
+   ],
+   "cmp-demo-db": [
+    "deployed",
+    "1"
+   ]
+  },
+  "result": {
+   "plan_id": "plan-gcp-recovery",
+   "revision": 2,
+   "provider": "GCP",
+   "scope": "WORKLOADS",
+   "status": "READY",
+   "code": "WORKLOADS_READY",
+   "data_state": "NOT_MIGRATED",
+   "cluster": {
+    "kind": "GKE",
+    "name": "cmp-target-gke",
+    "location": "asia-northeast3",
+    "account_id": "sbh26-prod",
+    "agent_id": null,
+    "cluster_uid": null,
+    "network_refs": {}
+   },
+   "namespace": "cmp-recovery-test",
+   "failure": null,
+   "partial_resources": {},
+   "warnings": [],
+   "checks": {
+    "cluster_access": "PASSED",
+    "storage_class": "PASSED",
+    "image_pull_secret": "PASSED",
+    "secret_refs": "PASSED",
+    "db_release": "PASSED",
+    "pvc_bound": "PASSED",
+    "db_pod_ready": "PASSED",
+    "db_auth_connect": "PASSED",
+    "app_release": "PASSED",
+    "app_pod_ready": "PASSED",
+    "internal_health": "PASSED",
+    "external_address": "PASSED",
+    "external_health": "PASSED",
+    "functional_tests": "NOT_RUN"
+   },
+   "database_ready": true,
+   "app_external_endpoint": "http://136.68.146.241"
+  }
+ },
+ "not_destroyed": true
+}
