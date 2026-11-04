@@ -204,6 +204,10 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 `execute_gcp_plan`(`cmp_providers.gcp_apply`)은 08 AWS 경로와 같은 보장을 GCP에 적용한다. 추가로 Plan 모드(`S3`만 허용), Google ADC 주체, 중앙 State를 가진 AWS 계정을 확인한다. 분기는 (GCP, INFRASTRUCTURE)→`execute_gcp_plan`, (GCP, WORKLOADS)→`execute_gcp_workloads`(11), FULL→둘 다 순서대로다. 템플릿은 `gcp-gke-v2`(Output, 삭제 보호 변수)다.
 
+### 11 GCP 워크로드 (#43)
+
+`execute_gcp_workloads`(`cmp_worker.activities.gcp_workloads`)는 09의 승인 워크로드 흐름을 공통 기반(`k8s_workloads`·`k8s_workloads_cli`)으로 재사용하고 GCP 고유 부분만 더한다: gcloud 설정 프로젝트·클러스터 `RUNNING` 확인, PD CSI StorageClass(`pd-balanced`·Retain), 승인된 ECR Digest를 위한 단기 Pull Secret(`cmp-ecr-pull`, default ServiceAccount 연결, 토큰은 stdin만), GCE Ingress(외부 HTTP LB, NEG)와 외부 헬스 200. AWS LB Controller는 쓰지 않는다. 대상 클러스터는 10 G4 refs(`gcp_project_id`·`gke_cluster_name`·`gke_location`)로 찾는다. 결정 K1~K12와 실검증은 [티켓 11](../../tickets/provisioning/11-gcp-workloads.md)에 있다.
+
 ### 12A 온프레미스 Preview (#41)
 
 ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.

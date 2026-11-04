@@ -7,6 +7,7 @@ from cmp_worker.activities.approval import ApprovalActivities
 from cmp_worker.activities.aws_infra import AwsInfraActivities
 from cmp_worker.activities.aws_workloads_cli import build_aws_workloads_activities
 from cmp_worker.activities.gcp_infra import GcpInfraActivities
+from cmp_worker.activities.gcp_workloads_cli import build_gcp_workloads_activities
 from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
 from cmp_worker.activities.provisioning import prepare_plan, provision_target
 from cmp_worker.config import settings
@@ -38,6 +39,7 @@ def create_worker(client: Client) -> Worker:
             approval.complete_approved_execution,
             aws_infra.execute_aws_plan,
             build_aws_workloads_activities(SessionLocal).execute_aws_workloads,
+            build_gcp_workloads_activities(SessionLocal).execute_gcp_workloads,  # ticket 11
             execute_on_prem_plan_activity(),  # ticket 12
             gcp_infra.execute_gcp_plan,  # ticket 10
         ],
