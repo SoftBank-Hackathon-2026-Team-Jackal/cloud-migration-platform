@@ -56,7 +56,8 @@ def evaluate_step(
     if observed.failed > policy.max_failed_requests:
         reason = f"실패 요청 {observed.failed}건 (허용 {policy.max_failed_requests}건)"
         return StepOutcome(**base, decision="rollback", reason=reason)
-    if baseline.p99_ms > 0 and observed.p99_ms > baseline.p99_ms * policy.max_p99_ratio:
+    limit = max(baseline.p99_ms * policy.max_p99_ratio, policy.p99_floor_ms)
+    if observed.p99_ms > limit and baseline.p99_ms > 0:
         reason = (
             f"p99 {observed.p99_ms:.0f}ms > 원본 {baseline.p99_ms:.0f}ms x {policy.max_p99_ratio}"
         )

@@ -34,23 +34,24 @@ def inject(path):
 
 
 class LabProxy(EnvoyProxy):
-    def __init__(self, *a, fault_at=None, **k):
+    def __init__(self, *a, fault_at=None, fault_path="/inject/fail", **k):
         super().__init__(*a, **k)
         self.fault_at = fault_at
+        self.fault_path = fault_path
 
     def apply(self, weights):
         super().apply(weights)
         print("  applied", weights, "version", self.version, flush=True)
         if self.fault_at is not None and weights["target"] == self.fault_at:
-            inject("/inject/fail")
+            inject(self.fault_path)
             print("  >> fault injected on target", flush=True)
 
 
-def scenario(name, fault_at):
+def scenario(name, fault_at, fault_path="/inject/fail"):
     inject("/inject/ok")
     counts.clear()
     print("==", name, flush=True)
-    proxy = LabProxy(RDS, ADMIN, fault_at=fault_at, confirm_timeout=5)
+    proxy = LabProxy(RDS, ADMIN, fault_at=fault_at, fault_path=fault_path, confirm_timeout=5)
     proxy.version = int(time.time()) % 100000  # 시나리오 간 버전 충돌 방지
     proxy.apply({"origin": 100, "target": 0})
     shifter = TrafficShifter(proxy, EnvoyObserver(ADMIN))
@@ -80,11 +81,14 @@ threading.Thread(target=load, daemon=True).start()
 time.sleep(3)
 a = scenario("healthy rollout", None)
 b = scenario("fault at 50%", 50)
+c = scenario("slow target at 50% (p99 gate)", 50, "/inject/delay/1.0")
 stop.set()
 ok = (
     a.status == "DONE"
     and b.status == "ROLLED_BACK"
     and b.final_weights == {"origin": 100, "target": 0}
+    and c.status == "ROLLED_BACK"
+    and "p99" in c.events[-1].reason
 )
 print("RESULT:", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)
