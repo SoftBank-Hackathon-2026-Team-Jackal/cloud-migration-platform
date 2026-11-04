@@ -18,7 +18,7 @@
 | [06 GCP GKE Terraform Plan과 Preview](../../tickets/provisioning/06-gcp-preview.md) | DONE | 01A, CP-01 | PROV-002, 003, 008, 014, 021 | [#2](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/2) | ☑ |
 | [07 Plan Revision 승인과 Temporal 실행 차단](../../tickets/provisioning/07-approval-gate.md) | DONE | 01A, CP-01 | PROV-014, 015, 016, 021 | [#34](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/34) | ☑ |
 | [08 승인된 Plan으로 AWS EKS 기반 준비](../../tickets/provisioning/08-aws-infra-apply.md) | DRAFT | 05, 07 | PROV-007, 015, 016, 017 | 미생성 | ☐ |
-| [09 AWS EKS에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/09-aws-workloads.md) | DRAFT | 02, 03, 08 | PROV-010, 011, 012, 013, 018 | 미생성 | ☐ |
+| [09 AWS EKS에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/09-aws-workloads.md) | IN_PROGRESS | 02, 03, 08 | PROV-010, 011, 012, 013, 018 | [#37](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/37) | ☐ |
 | [10 승인된 Plan으로 GCP GKE 기반 준비](../../tickets/provisioning/10-gcp-infra-apply.md) | DRAFT | 06, 07 | PROV-008, 015, 016, 017 | 미생성 | ☐ |
 | [11 GCP GKE에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/11-gcp-workloads.md) | DRAFT | 02, 03, 10 | PROV-010, 011, 012, 013, 018 | 미생성 | ☐ |
 | [12 승인된 K3s Agent 운영 배포](../../tickets/provisioning/12-k3s-approved-rollout.md) | DRAFT | 04A, 07 | PROV-009, 015, 016, 017, 018 | 미생성 | ☐ |
