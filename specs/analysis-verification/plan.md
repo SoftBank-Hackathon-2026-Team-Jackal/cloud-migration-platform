@@ -417,6 +417,8 @@ class AnalysisReport(Contract):  # Provisioning v1 AnalysisResult와 별개
 class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvidenceV2로 투영
     migration_id: str
     ref: VersionRef
+    analysis_ref: VersionRef  # 검증한 분석 결과 버전
+    target_selection_ref: VersionRef  # 검증한 대상 선택 버전
     status: Literal["PASSED", "FAILED", "NEEDS_REVIEW", "STOPPED_RENDER"]
     validated_workloads: list[ValidatedWorkloadV2]  # provisioning_v2 모델 재사용
     requirements_ref: ContentRef
@@ -424,10 +426,14 @@ class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvi
     test_suite_ref: S3ArchiveRef  # provisioning_v2 모델 재사용
     attempts: list[SandboxAttemptSummary]
     cleanup_status: Literal["CLEANED", "FAILED", "PENDING"]
+    config_artifact_ref: ContentRef | None  # 검증한 별도 설정 산출물
 ```
 
 - `ResourceId`, `S3ArchiveRef`, `ValidatedWorkloadV2`, `RequirementsV2`는 `cmp_contracts.provisioning_v2`에서 import한다.
 - Planning 입력 v2(`PlanningRequestV2`)로의 투영: `analysis.result_ref` ← `AnalysisReport.ref`, `analysis.requirements_ref` ← 요구사항 JSON 바이트 참조(SHA-256), `analysis.source_refs` ← APPLICATION ID별 최종 소스 아카이브, `builds[]` ← 저장된 Build 결과(`platforms[]`로 정규화), `sandbox` ← `SandboxVerification`(`PASSED`일 때만, 내부 상태 `NEEDS_REVIEW`·`STOPPED_RENDER`는 넘기지 않음), `environment.mapping_ref` ← `EnvExceptions` 참조. 대조는 `prepare_plan_v2`(민서)가 한다.
+- 내부 Sandbox 기록에 검증한 분석·대상 선택 버전을 보관하고 투영 시 현재 분석·대상 선택과 대조한다(AV-018). 요구사항·설정 참조는 분석 입력과 Sandbox 기록을 각각 전달해 Planning에서 대조하며 한쪽 값으로 다른 증거를 채우지 않는다.
+- `BuildAttempt`는 Build 결과의 migration·resource·attempt ID, 불변 결과 참조, 소스·플랫폼·이미지·로그 참조와 오류 코드를 기록한다. 투영 시 migration ID를 대조하고 단일 `platform`을 Planning의 `platforms` 목록으로 바꾼다. 실제 결과 저장 위치는 D-02로 남긴다.
+- 01의 초기 `UsageProfile.usages`와 `PrecheckReport.findings`는 문자열 목록이다. `AnalysisRequest`는 저장소·애플리케이션 식별자, `.env`·원본 접근 참조와 v2 대상 선택을 받는다. `SourceArchive`는 기존 `S3ArchiveRef`를 재사용한다. 요구사항 JSON은 UTF-8, 정렬된 객체 키, 공백 없는 구분자로 직렬화하며 배열 순서는 유지한다. 상세 스캔 결과의 구조화는 후속 티켓에서 다룬다.
 
 ## 4. Activity 경계와 실행 설정
 
