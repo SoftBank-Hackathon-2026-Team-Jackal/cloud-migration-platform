@@ -90,3 +90,7 @@ identity = approval_target(manifest, preview)
 ## 승인 게이트 소비자 (07)
 
 `cmp_api.approvals`가 `approval_issues`·`approval_target`·`verify_approval_target`을 그대로 사용한다. 승인 요청 시 업무 DB의 최신 Revision에서 읽은 manifest/preview로 대상 식별을 계산하고 요청 본문의 scope·Digest와 비교한다. 실행 직전에는 DB 승인 기록의 대상 식별과 저장된 현재 manifest/preview를 `verify_approval_target`으로 다시 비교한다. `LOCAL_STATE_VALIDATION_ONLY`(AWS, pending_decisions)와 `LOCAL_STATE_UNAPPROVABLE`(GCP, errors)은 기존 `PENDING_DECISION`/`VALIDATION_FAILED` 규칙으로 승인 불가다. 공통 모델·함수는 복제하거나 변경하지 않았다. 상세는 [07 티켓](../../tickets/provisioning/07-approval-gate.md)을 따른다.
+
+## 승인된 ON_PREM 배포 소비자 (12)
+
+`cmp_api.onprem_rollout`이 07의 승인 기록·`latest_revision`·`manifest_digest`와 `verify_artifact_bytes`를 재사용해 Agent 작업을 만들고, 04A의 `agent_jobs`·인증·결과 보고와 04B의 Values 모델을 그대로 쓴다. 새 공통 모델은 Agent 작업 본문 `cmp_contracts.onprem_rollout.ProductionRolloutJob`뿐이다. 실행 dispatch는 08 소유 계약을 따른다. 상세는 [공통 배포 계약](onprem-shared-deployment.md#승인된-운영-배포-12-36)을 따른다.

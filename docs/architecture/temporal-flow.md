@@ -179,7 +179,7 @@ Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning
 
 온프레미스 K3s 대상은 사용자 PC의 Agent를 통해 클러스터 접근·Helm 실행을 연계한다. PC가 NAT 뒤에 있을 수 있으므로 플랫폼의 직접 인바운드 연결을 전제하지 않는다. Agent가 작업을 수신하고 결과를 보고할 수 있어야 한다.
 
-Temporal 측에서는 요청·Agent 작업 ID의 상관관계, 완료·실패 보고, 연결 단절과 재연결, 중복 전달 방지, 재연결 후 실제 작업 상태 조회를 다뤄야 한다. 장시간 결과 대기를 일반적인 동기 API 호출로 고정하지 않는다. Activity 결과 대기, 비동기 완료 또는 Workflow 메시지 전달 중 어떤 방식을 쓸지는 후속 설계에서 결정한다.
+Temporal 측에서는 요청·Agent 작업 ID의 상관관계, 완료·실패 보고, 연결 단절과 재연결, 중복 전달 방지, 재연결 후 실제 작업 상태 조회를 다뤄야 한다. 장시간 결과 대기를 일반적인 동기 API 호출로 고정하지 않는다. 12(#36)는 Provisioning Activity(`execute_on_prem_plan`)가 heartbeat하며 업무 DB의 Agent 작업 상태를 조회하는 방식을 택했다. 대기 한도를 넘으면 작업을 보존한 채 `UNKNOWN`을 반환하며 같은 작업을 재발행하지 않는다. Workflow 측 claim/complete 연결은 08 소유다.
 
 ## 15. 실제 배포 후 검증
 

@@ -150,7 +150,7 @@ Sandbox는 동일한 `build_bindings`·`render_helm_values`·`render_manifests`�
 
 Terraform 모듈 경계 **제안**은 AWS의 `network`, `eks`, `access`, `addons-prerequisites`와 GCP의 `network`, `gke`, `access`, `storage-prerequisites`다. 정확한 디렉터리 분할·기존 VPC 참조·애드온의 Terraform/Helm 소유권은 후속 선택이다. 공통 실행 순서는 네트워크·권한 → 클러스터/Node → Kubernetes API 접근 → Controller/CSI·StorageClass 준비 → Helm DB·앱 → 외부 주소 검증이다. ALB 자체는 Ingress Controller의 비동기 조정 결과일 수 있으므로 Terraform Output만으로 생성 완료를 판단하지 않고 Ingress 상태·주소·실제 응답을 확인한다. GKE도 Ingress/LB의 실제 상태를 별도로 조회한다. EKS IAM(클라우드 API 권한), Kubernetes RBAC(클러스터 리소스 권한), Pod의 AWS API 권한은 각각 별도 주체·정책으로 설계한다. GKE의 클라우드 권한과 Kubernetes 권한도 분리한다.
 
-ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Manifest/Values 참조와 허용된 배포 동작만 전달한다. Agent가 플랫폼에 먼저 연결/폴링하는 방식을 **권장**한다. 플랫폼의 PC 직접 인바운드는 전제하지 않는다. 요청은 Agent ID·대상 클러스터·Namespace에 묶고 중복 작업 ID에 대해 기존 상태를 반환하도록 한다. 연결이 끊기면 실행 상태를 `UNKNOWN/WAITING_AGENT`로 보존하고 재연결 뒤 조회한다. Agent가 작업 완료를 폴링·콜백·비동기 완료 중 어떻게 알릴지는 미정이다. K3s를 위한 macOS Linux VM 도구, 외부 Envoy·WireGuard는 이 설계에서 확정하지 않는다.
+ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Manifest/Values 참조와 허용된 배포 동작만 전달한다. Agent가 플랫폼에 먼저 연결/폴링하는 방식을 **권장**한다. 플랫폼의 PC 직접 인바운드는 전제하지 않는다. 요청은 Agent ID·대상 클러스터·Namespace에 묶고 중복 작업 ID에 대해 기존 상태를 반환하도록 한다. 연결이 끊기면 실행 상태를 `UNKNOWN/WAITING_AGENT`로 보존하고 재연결 뒤 조회한다. 12(#36)에서 Agent는 폴링으로 작업을 받고 결과 보고 API로 완료를 알리며, Worker Activity가 heartbeat하며 업무 DB 작업 상태를 조회하는 방식으로 확정했다([공통 배포 계약 §승인된 운영 배포](onprem-shared-deployment.md#승인된-운영-배포-12-36)). K3s를 위한 macOS Linux VM 도구, 외부 Envoy·WireGuard는 이 설계에서 확정하지 않는다.
 
 ## 8. Terraform Plan·Apply·State (`PROV-014`~`017`, `021`)
 
@@ -254,7 +254,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 | Terraform Backend/Lock | 중앙 S3와 잠금 채택. 버전·권한·key·잠금 설정을 공통 실행 구성으로 확정 |
 | Secret 저장·회전, Registry Pull | 대상별 접근 권한과 ECR 접근성, K3s NAT 환경까지 검토 |
 | 도메인·TLS 발급 | 승인 Preview와 Ingress 외부 검증의 필수 여부 결정 |
-| Agent 완료 통지·작업 인증 | 폴링/콜백/비동기 완료, 재연결과 중복 작업 처리 결정 |
+| Agent 완료 통지·작업 인증 | 12에서 폴링+결과 보고+Activity 상태 조회로 확정. 콜백/비동기 완료와 장기 lease는 미채택 |
 | Temporal 분할·Task Queue·Timeout/Retry | 실제 외부 작업 시간과 재시도 안전성 측정 후 결정 |
 | Apply 실패·취소 후 자동 정리 | 공유 자원·PVC 데이터 보존과 비용 사이 정책 결정 |
 | Sandbox 검증 이미지 | 동일 Digest 재사용은 ADR-003으로 결정. B-01은 공통 빌더, 계약 버전 전환·플랫폼별 검증 증거는 후속 통합 작업 |

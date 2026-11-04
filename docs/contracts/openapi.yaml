@@ -321,6 +321,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/jobs/{job_id}/artifacts/{sha256}:
+    get:
+      tags:
+      - on-premises agents
+      summary: Job Artifact Bytes
+      description: Exact approved Chart/Values bytes for the caller's own RUNNING
+        rollout job (ticket 12).
+      operationId: job_artifact_bytes_agents__agent_id__jobs__job_id__artifacts__sha256__get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: sha256
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          title: Sha256
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/approvers:
     post:
       tags:
@@ -493,6 +540,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/plans/{plan_id}/revisions/{revision}/rollout:
+    get:
+      tags:
+      - provisioning on-premises rollout
+      summary: Get Rollout
+      operationId: get_rollout_provisioning_plans__plan_id__revisions__revision__rollout_get
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plan Id
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Revision
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -656,6 +743,45 @@ components:
       - approver_id
       - migration_ids
       title: ApproverRegistration
+    ArtifactRef:
+      properties:
+        id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Id
+        version:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Version
+        kind:
+          type: string
+          enum:
+          - SPEC
+          - TERRAFORM_PLAN
+          - CHART
+          - VALUES
+          - BINDINGS
+          - MANIFEST
+          title: Kind
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          title: Sha256
+        size_bytes:
+          type: integer
+          minimum: 0.0
+          title: Size Bytes
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - version
+      - kind
+      - sha256
+      - size_bytes
+      title: ArtifactRef
     ClaimResponse:
       properties:
         job:
@@ -673,7 +799,10 @@ components:
           type: string
           title: Job Id
         payload:
-          $ref: '#/components/schemas/QueuedWork'
+          anyOf:
+          - $ref: '#/components/schemas/QueuedWork'
+          - $ref: '#/components/schemas/ProductionRolloutJob'
+          title: Payload
         status:
           type: string
           const: RUNNING
@@ -822,6 +951,85 @@ components:
       - approval_pending
       - cancel_requested
       title: MigrationStatus
+    ProductionRolloutJob:
+      properties:
+        mode:
+          type: string
+          const: PRODUCTION_ROLLOUT
+          title: Mode
+        job_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Job Id
+        approval_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Approval Id
+        plan_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Plan Id
+        revision:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Revision
+        manifest_digest:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          title: Manifest Digest
+        environment_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Environment Id
+        agent_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+        namespace:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Namespace
+        storage_class:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Storage Class
+        database:
+          $ref: '#/components/schemas/RolloutDatabase'
+        application:
+          $ref: '#/components/schemas/RolloutApplication'
+      additionalProperties: false
+      type: object
+      required:
+      - mode
+      - job_id
+      - approval_id
+      - plan_id
+      - revision
+      - manifest_digest
+      - environment_id
+      - agent_id
+      - cluster_uid
+      - namespace
+      - storage_class
+      - database
+      - application
+      title: ProductionRolloutJob
     QueuedWork:
       properties:
         kind:
@@ -888,6 +1096,126 @@ components:
       - job_id
       - accepted
       title: ReportAck
+    RolloutApplication:
+      properties:
+        release:
+          type: string
+          maxLength: 53
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Release
+        chart:
+          $ref: '#/components/schemas/ArtifactRef'
+        values:
+          $ref: '#/components/schemas/ArtifactRef'
+        port:
+          type: integer
+          maximum: 65535.0
+          minimum: 1.0
+          title: Port
+        health_path:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          title: Health Path
+        secret_refs:
+          items:
+            $ref: '#/components/schemas/SecretRefV2'
+          type: array
+          title: Secret Refs
+      additionalProperties: false
+      type: object
+      required:
+      - release
+      - chart
+      - values
+      - port
+      - health_path
+      title: RolloutApplication
+    RolloutDatabase:
+      properties:
+        release:
+          type: string
+          maxLength: 53
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Release
+        chart:
+          $ref: '#/components/schemas/ArtifactRef'
+        values:
+          $ref: '#/components/schemas/ArtifactRef'
+        password_secret:
+          $ref: '#/components/schemas/SecretRefV2'
+      additionalProperties: false
+      type: object
+      required:
+      - release
+      - chart
+      - values
+      - password_secret
+      title: RolloutDatabase
+    RolloutStatusResponse:
+      properties:
+        plan_id:
+          type: string
+          title: Plan Id
+        revision:
+          type: integer
+          title: Revision
+        state:
+          type: string
+          enum:
+          - NOT_DISPATCHED
+          - WAITING_AGENT
+          - RUNNING
+          - READY
+          - FAILED
+          - UNKNOWN
+          title: State
+        code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+        job_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Job Id
+        agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+      additionalProperties: false
+      type: object
+      required:
+      - plan_id
+      - revision
+      - state
+      - code
+      - job_id
+      - agent_id
+      title: RolloutStatusResponse
+    SecretRefV2:
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Name
+        key:
+          type: string
+          maxLength: 253
+          minLength: 1
+          pattern: ^[a-zA-Z0-9._-]+$
+          title: Key
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - key
+      title: SecretRefV2
     ValidationError:
       properties:
         loc:
@@ -937,7 +1265,9 @@ components:
 x-sdd-contract-status:
   scope: Frontend and on-premises Agent to FastAPI REST and SSE
   implementation: Migration paths remain a scaffold; Agent enrollment and polling
-    paths and Plan Revision approval paths are implemented without Production Apply.
+    paths and Plan Revision approval paths are implemented. Approved ON_PREM rollout
+    jobs, Agent artifact download and rollout status are implemented (ticket 12);
+    AWS/GCP Production Apply is not.
   source-of-truth:
   - docs/product/policies.md
   - docs/architecture/domain-boundaries.md
@@ -996,6 +1326,24 @@ x-sdd-agreed-capabilities:
     '409': STALE_REVISION | APPROVAL_TARGET_MISMATCH | ALREADY_DECIDED | APPROVER_EXISTS
     '422': PLAN_NOT_APPROVABLE with approval_issues codes (LOCAL_STATE_* previews
       map to PENDING_DECISION or VALIDATION_FAILED)
+- capability: approved-onprem-rollout
+  purpose: After an approved ON_PREM Plan Revision is claimed for execution, one PRODUCTION_ROLLOUT
+    job per Revision is queued for the Plan's registered Agent. The Agent claim returns
+    it only while the business-DB approval, latest Revision and manifest Digest still
+    match; otherwise the job is closed without reaching the Agent.
+  paths:
+    claim: POST /agents/{agent_id}/jobs/claim (payload is QueuedWork or ProductionRolloutJob)
+    artifact: GET /agents/{agent_id}/jobs/{job_id}/artifacts/{sha256} returns exact
+      Chart/Values bytes referenced by the caller's own RUNNING rollout job; the Agent
+      verifies size and SHA-256 before use. 403 Agent unauthorized, 404 ARTIFACT_NOT_FOUND,
+      409 ARTIFACT_UNAVAILABLE | ARTIFACT_DIGEST_MISMATCH, 503 store not configured.
+    status: GET /provisioning/plans/{plan_id}/revisions/{revision}/rollout (approver
+      Bearer with migration grant) returns NOT_DISPATCHED | WAITING_AGENT | RUNNING
+      | READY | FAILED | UNKNOWN and a code. 401 APPROVER_AUTH_REQUIRED, 403 APPROVER_FORBIDDEN,
+      404 PLAN_NOT_FOUND. Read-only; never starts or retries work.
+  ready: READY only after Helm Releases, PVC Bound, workload readiness, Service endpoints,
+    pg_isready and the app health path all pass inside the target. External access
+    and data/function tests are not part of READY.
 - capability: plan-rejection-or-revision-request
   purpose: Prevent the rejected plan from being applied. Implemented as decision=REJECT
     on the approval path; replanning and revision-request behavior is undecided.

@@ -1,4 +1,4 @@
-"""Outbound on-premises Agent control client; production Apply is a later boundary."""
+"""Outbound on-premises Agent control client; approved rollout runs in `onprem_agent`."""
 
 import argparse
 import json
@@ -43,18 +43,21 @@ class AgentControlClient:
             raise AgentTransportError("INVALID_AGENT_OR_JOB_ID")
         return value
 
-    def _request(self, path: str, payload: dict | None, credential: str | None = None) -> dict:
-        headers = {"Accept": "application/json"}
+    def _request(
+        self, path: str, payload: dict | None, credential: str | None = None, *, raw=False
+    ):
+        headers = {"Accept": "application/octet-stream" if raw else "application/json"}
         body = None
         if payload is not None:
             headers["Content-Type"] = "application/json"
             body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         if credential:
             headers["Authorization"] = f"Bearer {credential}"
-        request = Request(self.base_url + path, data=body, headers=headers, method="POST")
+        method = "GET" if raw else "POST"
+        request = Request(self.base_url + path, data=body, headers=headers, method=method)
         try:
             with self.opener.open(request, timeout=30) as response:
-                return json.load(response)
+                return response.read() if raw else json.load(response)
         except AgentTransportError:
             raise
         except (HTTPError, URLError, OSError, ValueError):
@@ -93,6 +96,18 @@ class AgentControlClient:
         )
         if response.get("job_id") != job_id or response.get("accepted") is not True:
             raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
+
+    def download_artifact(
+        self, *, agent_id: str, credential: str, job_id: str, sha256: str
+    ) -> bytes:
+        """Exact bytes for one artifact of the caller's own job; the caller verifies the digest."""
+        self._id(agent_id)
+        self._id(job_id)
+        if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise AgentTransportError("INVALID_ARTIFACT_DIGEST")
+        return self._request(
+            f"/agents/{agent_id}/jobs/{job_id}/artifacts/{sha256}", None, credential, raw=True
+        )
 
 
 def _secret_file(path: Path) -> str:

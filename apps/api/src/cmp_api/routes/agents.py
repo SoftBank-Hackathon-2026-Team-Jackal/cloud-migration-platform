@@ -5,12 +5,14 @@ from datetime import timedelta
 from typing import Annotated, Literal
 
 from cmp_contracts.chart import KubernetesName
+from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from cmp_contracts.provisioning import Text
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from cmp_api.agent_registry import (
+    AgentJob,
     AgentRegistrationError,
     QueuedWork,
     authenticate_agent,
@@ -21,6 +23,7 @@ from cmp_api.agent_registry import (
 )
 from cmp_api.config import settings
 from cmp_api.db import SessionLocal
+from cmp_api.onprem_rollout import ArtifactStore, LocalArtifactStore, RolloutError, job_artifact
 
 router = APIRouter(tags=["on-premises agents"])
 
@@ -59,7 +62,7 @@ class JobReport(Request):
 
 class ClaimedJob(Request):
     job_id: str
-    payload: QueuedWork
+    payload: QueuedWork | ProductionRolloutJob
     status: Literal["RUNNING"]
 
 
@@ -100,6 +103,12 @@ def bearer(authorization: str | None = Header(default=None)) -> str:
     if not credential:
         raise HTTPException(status_code=401, detail="Agent authentication required")
     return credential
+
+
+def get_artifact_store() -> ArtifactStore:
+    if not settings.artifact_store_dir:
+        raise HTTPException(status_code=503, detail="Artifact store unavailable")
+    return LocalArtifactStore(settings.artifact_store_dir)
 
 
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -183,3 +192,32 @@ def agent_status(
     except AgentRegistrationError:
         raise HTTPException(status_code=403, detail="Agent unauthorized") from None
     return {"agent_id": agent.id, "owner_id": agent.owner_id, "cluster_uid": agent.cluster_uid}
+
+
+@router.get(
+    "/agents/{agent_id}/jobs/{job_id}/artifacts/{sha256}",
+    response_class=Response,
+    responses={200: {"content": {"application/octet-stream": {}}}},
+)
+def job_artifact_bytes(
+    agent_id: str,
+    job_id: str,
+    session: SessionDep,
+    credential: CredentialDep,
+    store: Annotated[ArtifactStore, Depends(get_artifact_store)],
+    sha256: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+):
+    """Exact approved Chart/Values bytes for the caller's own RUNNING rollout job (ticket 12)."""
+    try:
+        agent = authenticate_agent(session, agent_id=agent_id, credential=credential)
+    except AgentRegistrationError:
+        raise HTTPException(status_code=403, detail="Agent unauthorized") from None
+    job = session.get(AgentJob, job_id)
+    if job is None or job.agent_id != agent.id or job.owner_id != agent.owner_id:
+        raise HTTPException(status_code=404, detail="ARTIFACT_NOT_FOUND")
+    try:
+        content = job_artifact(session, job, sha256, store)
+    except RolloutError as exc:
+        status = 404 if exc.code == "ARTIFACT_NOT_FOUND" else 409
+        raise HTTPException(status_code=status, detail=exc.code) from None
+    return Response(content=content, media_type="application/octet-stream")

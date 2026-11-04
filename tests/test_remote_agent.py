@@ -49,3 +49,28 @@ def test_nonloopback_http_and_path_injection_are_rejected():
     client = AgentControlClient("http://127.0.0.1:8000")
     with pytest.raises(AgentTransportError, match="INVALID_AGENT_OR_JOB_ID"):
         client.poll_once(agent_id="../other", credential="private")
+
+
+def test_artifact_download_is_authenticated_get_of_own_job_digest():
+    client = AgentControlClient("https://platform.example.com")
+    requests = []
+
+    class BytesOpener:
+        def open(self, request, timeout):
+            requests.append(request)
+            return io.BytesIO(b"chart-bytes")
+
+    client.opener = BytesOpener()
+    digest = "a" * 64
+    content = client.download_artifact(
+        agent_id="agent-a", credential="cmp_agent_private", job_id="job-a", sha256=digest
+    )
+    assert content == b"chart-bytes"
+    [request] = requests
+    assert request.get_method() == "GET"
+    assert request.full_url.endswith(f"/agents/agent-a/jobs/job-a/artifacts/{digest}")
+    assert "cmp_agent_private" not in request.full_url
+    with pytest.raises(AgentTransportError, match="INVALID_ARTIFACT_DIGEST"):
+        client.download_artifact(
+            agent_id="agent-a", credential="x", job_id="job-a", sha256="../etc/passwd"
+        )
