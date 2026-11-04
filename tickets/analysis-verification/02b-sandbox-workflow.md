@@ -1,7 +1,7 @@
 # Ticket 02B — Sandbox 자식 Workflow 골격
 
 ## 상태
-IN_PROGRESS — 사용자 착수 및 Test Seam 승인, Issue #45
+DONE — 사용자 결정으로 완료, PR 병합 시 확정, Issue #45
 
 ## 목적
 Sandbox 검증 루프를 자식 Workflow와 mock Activity로 끝까지 연결한다.
@@ -24,7 +24,7 @@ Blocked by: 02, Q-01
 - [x] Workflow 취소 시에도 정리 Activity가 실행된다.
 - [x] 진행 Query가 현재 단계·시도 번호·판정을 돌려준다.
 - [x] 기존 Workflow 이력과의 replay 호환성을 검토·검증하고 필요하면 안전한 버전 분기를 적용한다.
-- [ ] 부모의 자식 호출 변경 범위와 replay 결과를 PR 설명에 기록해 민서님께 공유한다.
+- [x] 부모의 자식 호출 변경 범위와 replay 결과를 PR 설명에 기록해 민서님께 공유한다.
 
 ## 테스트 전략
 - 합의된 Test Seam: Temporal 테스트 환경(time skipping)의 결과·이력과 변경 전 부모 Workflow 이력 replay. 분기·검토 대기·취소·정리·Query 및 기존 이력 호환성을 확인한다. 실제 빌드·Helm·클러스터 동작과 외부 작업 시간·실패 형태는 검증하지 않는다.
@@ -40,6 +40,7 @@ Blocked by: 02, Q-01
 - macOS ARM64, Python 3.11, 임시 Helm 3.16.4, Temporal 테스트 서버: `make check` 418 통과(경고 3건). `make smoke-temporal`은 Sandbox Worker를 별도 실행한 상태에서 `scaffold_complete`를 반환했다. 기존 smoke 스크립트는 Sandbox Worker를 직접 띄우지 않으므로 별도 Worker 없이 실행하면 새 Workflow가 기다린다.
 - 테스트 서버는 실제 Docker Compose Temporal 서버와 다르며, 강제 종료·Worker 장애 후 TTL 정리, 혼합 버전 Worker 배포는 확인하지 않았다. 실제 빌드·Helm·클러스터·데이터·LLM은 수행하지 않는다. mock의 `PASSED`는 실제 Sandbox 검증 증거가 아니다.
 - 리뷰 반영: 알 수 없는 실패 분류는 `ApplicationError`(비재시도)로 Workflow를 실패시키고 정리는 실행된다. Sandbox Activity에 `schedule_to_start_timeout`(5분)을 둬서 Sandbox Worker가 없을 때 무한 대기하지 않게 했다. 테스트 서버가 schedule-to-start 타이머를 건너뛰지 않아 실제 만료는 검증하지 못하고, 이력에 제한값이 설정된 것만 확인한다. 추가 리뷰 반영: Sandbox 준비 전에 실패하면 정리를 실행하지 않고(없는 Sandbox를 위해 한 번 더 대기하지 않음), 정리 Activity가 실패해도 진행 중이던 최초 오류를 가리지 않으며 Query의 `cleanup_failed`로 표시한다. 실제 5분 제한으로 Worker 없이 장시간 실행한 검증은 하지 않았다.
+- 팀 확인: 자식 분리 방향은 민서님이 확인했다. 부모의 `needs_review`·`stopped_render` 종료 값은 골격의 임시 동작이며, 검토 대기(진행 중 플래그)와 종료 상태(완료·실패·취소)를 구분하는 정리는 API 담당과 후속으로 진행한다.
 - 부모는 비통과 결과에서 후속 scaffold 단계를 중단한다. 부모의 종료 상태 `needs_review`·`stopped_render`는 기존 API 스트림의 종료 상태 목록에 포함되지 않으며, API 변경은 담당자 협의 범위로 남는다.
 
 ## 관련 문서
@@ -57,5 +58,5 @@ Blocked by: 02, Q-01
 - [x] 수용 기준과 Test Seam 확인
 - [x] 관련 테스트 통과와 회귀 확인
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
+- [x] 구현·계약 정합성 및 최종 리뷰
 - [x] 미검증 항목과 결과 증거 기록
