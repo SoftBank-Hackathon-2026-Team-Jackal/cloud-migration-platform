@@ -8,10 +8,14 @@ from cmp_worker.activities.provisioning import prepare_plan, provision_target
 
 
 def create_worker(client: Client) -> Worker:
-    # The approval executor is the safe record-only default; no Terraform/Helm/Agent is wired.
     approval = ApprovalActivities(SessionLocal)
     return Worker(
         client,
         task_queue=PROVISIONING_QUEUE,
-        activities=[prepare_plan, provision_target, approval.execute_approved_plan],
+        activities=[
+            prepare_plan,
+            provision_target,
+            approval.claim_approved_execution,
+            approval.complete_approved_execution,
+        ],
     )
