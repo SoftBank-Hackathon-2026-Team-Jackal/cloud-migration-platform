@@ -1,7 +1,7 @@
 # Ticket 12A — 온프레미스 K3s Plan Preview 생성
 
 ## 상태
-IN_PROGRESS — [Issue #41](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/41)
+DONE — [Issue #41](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/41)
 
 ## 목적
 ON_PREM 계획도 AWS/GCP처럼 사용자가 승인 전에 볼 수 있는 Preview를 자동으로 만든다. 지금은 공통 `Preview` 형식만 있고 ON_PREM 생성기가 없어 Planning이 직접 채워야 했다(12 검증 중 확인된 빈 부분).
@@ -17,10 +17,10 @@ Blocked by: 04B, 07, 12 (모두 DONE)
 - 제외: 클러스터 조회(기존 Release·PVC 존재 여부), Planning 저장 경계 연결, 프론트 화면, Chart 템플릿 변경.
 
 ## 수용 기준
-- [ ] 정상 ON_PREM 계획의 Preview가 대상 클러스터·Agent·Namespace, DB(사양·PVC 크기·StorageClass), 앱(이미지·Replica·자원·포트·헬스 경로·환경변수 개수), 외부 노출 없음, 적용 기본값을 보여 주고 공통 승인 계약을 통과한다.
-- [ ] 대상(Namespace·Provider·환경)이나 이미지가 manifest와 다르면 Preview `errors`로 표시되어 승인이 거절된다.
-- [ ] Values 바이트가 manifest의 Digest와 다르거나 ON_PREM이 아니면 Preview를 만들지 않는다.
-- [ ] Preview에 환경변수 값·Secret 값이 들어가지 않는다(키 이름·Secret 이름만).
+- [x] 정상 ON_PREM 계획의 Preview가 대상 클러스터·Agent·Namespace, DB(사양·PVC 크기·StorageClass), 앱(이미지·Replica·자원·포트·헬스 경로·환경변수 개수), 외부 노출 없음, 적용 기본값을 보여 주고 공통 승인 계약을 통과한다.
+- [x] 대상(Namespace·Provider·환경)이나 이미지가 manifest와 다르면 Preview `errors`로 표시되어 승인이 거절된다.
+- [x] Values 바이트가 manifest의 Digest와 다르거나 ON_PREM이 아니면 Preview를 만들지 않는다.
+- [x] Preview에 환경변수 값·Secret 값이 들어가지 않는다(키 이름·Secret 이름만).
 
 ## 착수 결정 (2026-11-04)
 
@@ -41,11 +41,20 @@ Blocked by: 04B, 07, 12 (모두 DONE)
 - [공유 계약](../../specs/provisioning/shared-contracts.md) · [12 티켓](12-k3s-approved-rollout.md) · [07 티켓](07-approval-gate.md)
 
 ## 설계 변경 기록
-- 구현 중 변경: 아직 없음
+- 구현 중 변경: 없음. 착수 결정 F1~F5대로 구현했다.
 
 ## 완료 체크리스트
-- [ ] 수용 기준과 Test Seam 확인
-- [ ] 관련 테스트 통과와 회귀 확인
-- [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
-- [ ] 미검증 항목과 결과 증거 기록
+- [x] 수용 기준과 Test Seam 확인
+- [x] 관련 테스트 통과와 회귀 확인
+- [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
+- [x] 구현·계약 정합성 및 최종 리뷰
+- [x] 미검증 항목과 결과 증거 기록
+
+## 검증 기록 (2026-11-04)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `uv run pytest tests/test_onprem_preview.py` (04B 실제 Helm 렌더 Values + 12 테스트 지원 코드) | 8 passed |
+| `make check` | 392 passed |
+
+미검증·제한: 실제 클러스터의 기존 Release·PVC 상태는 반영하지 않는다(실행 시 12 Agent가 확인). Planning이 이 함수를 호출해 `publish_plan_revision`에 넣는 연결과 프론트 표시는 후속이다. HTTP 계약과 OpenAPI는 바뀌지 않았다.
