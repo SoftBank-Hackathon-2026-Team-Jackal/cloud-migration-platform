@@ -1,7 +1,7 @@
 # Ticket 10 — 승인된 Plan으로 GCP GKE 기반 준비
 
 ## 상태
-IN_PROGRESS — [Issue #2](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/2) 재사용; 착수 결정 G1~G6
+BLOCKED — [Issue #2](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/2) 재사용. 승인된 실제 Apply와 GKE 기동은 확인했으나 G6 노드 서비스 계정 IAM 바인딩이 없어 완료 보류.
 
 ## 목적
 승인된 저장 Plan을 적용하고 GKE 접속·Node Pool·영속 스토리지 선행 조건을 확인한다.
@@ -64,3 +64,21 @@ GKE 기반 준비와 재시도 가능한 상태를 조회할 수 있다.
 
 - Seam: 승인된 GCP 실행 요청(claim) → `execute_gcp_plan` Activity → 인프라 상태/`resource_refs`. Terraform·gcloud·AWS STS·ADC 확인은 가짜 명령 러너로 바꿔 불일치·stale·실패·성공을 확인한다. 분기는 Temporal 테스트 환경에서 확인한다.
 - 놓치는 것: 실제 GCP 권한·할당량·생성 시간, 실제 State 잠금 경합(승인된 실제 실행에서만 확인), 워크로드(11).
+
+## 검증 기록 (2026-11-04)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` | Ruff 검사·포맷과 전체 408개 테스트 통과. 일반 샌드박스에서는 Temporal 테스트 서버 시작이 제한되어 허용된 실행 환경에서 재검사했다. |
+| Terraform 1.17.0 `fmt -check` / 오프라인 Provider 7.46.2 `init -backend=false -lockfile=readonly` / `validate` | 통과. Provider 실행은 일반 샌드박스에서 제한되어 허용된 실행 환경에서 `validate`를 마쳤다. |
+| `cmp-gcp-prod` / `cmp-aws-prod` 식별 | GCP 프로젝트 `sbh26-prod`, ADC `kms.dev.data@gmail.com`, 중앙 State AWS 계정 `714066696240` 확인. |
+| 로컬 업무 DB·Temporal 승인 경로 조회 | `plan-gcp-target` r1: `APPROVE`·`DELIVERED`, 실행 표식 `SUCCEEDED`/`TERRAFORM_APPLIED`, Workflow 결과 `EXECUTED`. 중복 Apply는 실행하지 않았다. |
+| 중앙 S3 State 읽기 전용 조회 | `cmp/gcp/target-gcp-demo/terraform.tfstate` 존재, State serial 3. 신규 Network·Subnet·Router·NAT·Firewall·GKE Cluster·Node Pool 각 1개 기록. |
+| GCP·Kubernetes 읽기 전용 조회 | `cmp-target-gke`(`asia-northeast3`)와 `cmp-target-gke-primary`가 `RUNNING`, Kubernetes 노드 3개 `Ready`. `pd.csi.storage.gke.io`와 기본 `standard-rwo` StorageClass 확인. 노드 서비스 계정은 `cmp-gke-nodes@sbh26-prod.iam.gserviceaccount.com`, GKE API 활성화 확인. |
+
+### 완료 전 확인 사항
+
+- G6에서 결정한 노드 서비스 계정의 `roles/container.defaultNodeServiceAccount` 프로젝트 IAM 바인딩이 현재 프로젝트 정책에서 조회되지 않는다. 기존 노드가 Ready여도 필수 권한을 충족했다고 간주하지 않는다. 정확한 바인딩 추가와 재조회가 필요하다.
+- 실제 부분 실패·Worker 종료·State 잠금 경합은 장애 주입하지 않았다. 가짜 러너에서 실패·stale·재실행 금지를 검증했다. `UNKNOWN` 이후 자동 복구·자동 destroy는 없다.
+- Plan 바이너리·State·인증 원문은 커밋하지 않는다. 현재 GKE는 11의 워크로드 검증을 위해 유지하고 있으며 비용이 발생한다.
+- 구현·계약 변경은 `plan.md` §10과 이 티켓에 반영됐다. 제품 정책·외부 HTTP 계약 변경은 없다. IAM 확인을 마친 뒤 수용 기준·체크리스트를 최종 검토하고 PR을 연다.
