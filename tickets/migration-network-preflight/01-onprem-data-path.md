@@ -2,7 +2,7 @@
 
 ## 상태
 
-TODO — [Issue #51](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/51); 설계·이슈 발행 완료, 구현 전
+IN_PROGRESS — [Issue #51](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/51); 착수 결정 N1~N8
 
 ## 목적
 
@@ -40,3 +40,19 @@ WireGuard 구축, CIDR/NAT/라우트/방화벽/MTU 자동 수정, CDC/slot/publi
 
 - [기능 명세](../../specs/migration-network-preflight/spec.md) · [구현 계획](../../specs/migration-network-preflight/plan.md) · [작업 목록](../../specs/migration-network-preflight/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md)
+
+## 착수 결정 (2026-11-05)
+
+사용자 지시: 기획 문서의 최신 결정을 우선 적용하고 없는 항목은 구현자가 최선안을 정해 기록한다. 다른 세션이 Provisioning 15(Agent 상시 실행, `onprem_agent`·`remote_agent`)를 작업 중이므로 같은 파일은 건드리지 않는다.
+
+| ID | 결정 | 근거·대안 |
+| --- | --- | --- |
+| N1 배치 | 계약 `cmp_contracts.network_preflight`(`NetworkPreflightRequest`·`NetworkPreflightResult`·`PreflightCheck`). 순수 판정·조립 `cmp_providers.network_preflight`(`check_cidr_overlap`, `input_fingerprint`, `run_network_preflight(request, executor)`, 시작 판정 `may_start_data_migration(result, request)`). 현장 실행기 `cmp_providers.network_preflight_k8s.KubernetesProbeExecutor`(명시적 kubeconfig/context). Worker Activity `run_network_preflight`(`migration-activities` queue). | plan "공개 진입점 한 번 호출". 기존 Provider 패키지 구성과 같다. |
+| N2 실행 위치·허용 목록 | 검사는 복제 작업이 실행될 Namespace의 일반 Pod 네트워크에서 고정 스크립트 하나로만 실행한다(요청 값은 검증 후 환경변수로만 전달, 임의 명령 없음). 이미지는 Digest 고정이며 Worker/Agent 설정의 허용 목록에 있어야 한다. 노드 라우팅(터널 경유)은 같은 노드에 고정한 읽기 전용 `hostNetwork` Pod의 `ip route get`으로 확인한다. `hostNetwork` Pod를 만들 수 없으면 라우트는 `UNKNOWN`. | MNP-003 "실행 위치와 터널 게이트웨이에서 선택되는 경로". Pod 안 첫 홉은 항상 CNI라 터널 확인 근거가 못 된다. |
+| N3 Agent 경로 | 실행기는 Agent가 가진 kubeconfig로 동작하도록 만들고, Agent 작업 유형 연결(작업 큐·재조회)은 15 병합 후 별도 작은 변경으로 한다. 그 전에는 실행기를 직접 호출해 검증한다. Kubernetes 접근 불가는 `UNKNOWN`/`PROBE_LOCATION_UNAVAILABLE`. | 15와 같은 파일 충돌 방지. 미연결은 완료 조건의 미검증으로 기록 |
+| N4 재사용 금지 | 결과에 요청 Fingerprint(경로·Endpoint·TLS·CIDR·실행 위치·전송량, 인증 참조 이름 포함 canonical JSON의 SHA-256)를 둔다. 시작 판정은 전체 `PASS`이면서 현재 요청 Fingerprint와 같을 때만 허용한다. | MNP-006 "변경 후 이전 PASS 재사용 금지" |
+| N5 판정 코드 | CIDR: `CIDR_OVERLAP`(FAIL), `CIDR_INPUT_MISSING`(UNKNOWN). 라우트: `NO_ROUTE`·`DESTINATION_NOT_ALLOWED`·`UNEXPECTED_PATH`(FAIL), `ROUTE_UNVERIFIED`(UNKNOWN). DB: `DNS_FAILED`·`TCP_UNREACHABLE`·`TLS_FAILED`·`AUTH_FAILED`·`QUERY_FAILED`(FAIL). 전송: `TRANSFER_INTERRUPTED`(수신량·64 KiB 초과 여부 기록)·`TRANSFER_TIMEOUT`·`TRANSFER_SHORT`(FAIL). 실행 위치 접근 불가 `PROBE_LOCATION_UNAVAILABLE`(UNKNOWN). MTU는 보조 증거로만 남기며 판정에 쓰지 않는다. | MNP-002~006, 방화벽 규칙 이름은 만들지 않음 |
+| N6 상한 | 전송량 기본 4 MiB·최대 64 MiB, 제한 시간 기본 60초·최대 600초, 검사 내부 재시도 없음. 같은 요청의 재실행은 안전(읽기 전용, 검사 Pod는 실행마다 새 이름으로 만들고 끝나면 삭제). | MNP-005 "유한한 상한" |
+| N7 비밀 | DB 인증은 대상 Namespace Secret의 이름·키 참조만 받는다. Pod에 `secretKeyRef`로만 주입하고 결과·로그·History에는 남기지 않는다. 결과 증거는 코드·IP·인터페이스·바이트 수·시간만. | MNP-001·수용 기준 3 |
+| N8 Test Seam | `run_network_preflight(request, executor)` + 가짜 실행기(관측값 주입)로 판정·차단·재사용 금지를 확인한다. K8s 실행기는 기록용 kubectl 러너로 매니페스트(Secret 참조·허용 이미지·명령 고정)를 검사한다. 통합: 격리 k3d에 원본 역할 PostgreSQL을 두고 정상·인증 실패·NetworkPolicy 차단(TCP)·대량 전송을 실제로 실행한다. 64 KiB 이후 끊김·비대칭 경로는 가짜 실행기로만 확인한다. Data Migration Workflow 연결은 Data Migration 담당 범위이므로 Activity와 시작 판정 함수까지 제공한다. | tasks.md "Data Migration 담당자가 시작 전 호출·차단 연결" |
+
