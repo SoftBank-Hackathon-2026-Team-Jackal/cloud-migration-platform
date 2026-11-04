@@ -1,0 +1,17 @@
+# 중계 서버(Envoy) 배포 예시(#63). 비밀값은 이 파일에 없다.
+# 1) 설정 만들기: python -c "from cmp_traffic.relay import render_bootstrap; print(render_bootstrap(('원본주소', 80), ('대상주소', 80)))" > bootstrap.yaml
+# 2) WireGuard가 필요하면 render_wireguard()로 wg0.conf 템플릿을 만들고 키는 배포 때 주입한다(MTU 1420 고정).
+# 3) 라우트 파일(rds.json)은 워커의 traffic Activity가 같은 볼륨에 쓴다(TRAFFIC_RDS_PATH).
+# Envoy 관리 포트(9901)는 이 호스트 안에서만 쓴다(공개하지 않는다).
+name: cmp-relay
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.32-latest
+    restart: on-failure  # 라우트 파일이 생기기 전에 뜨면 종료되므로 다시 시도한다
+    command: ["-c", "/etc/envoy/bootstrap.yaml", "--log-level", "warn"]
+    network_mode: host
+    volumes:
+      - ./bootstrap.yaml:/etc/envoy/bootstrap.yaml:ro
+      - rds:/etc/envoy/rds
+volumes:
+  rds: {}
