@@ -1,0 +1,42 @@
+capability: postgres
+title: PostgreSQL(클러스터 안 Pod)
+usage_vocabulary: [영속 데이터 저장, 세션 저장, 작업 큐, advisory lock, LISTEN/NOTIFY, 확장 사용]
+detect_rules:
+  - {source: MANIFEST, pattern: "postgres(ql)?:|postgres@sha256|postgresql"}
+  - {source: CODE, pattern: "DB_DRIVER|pgx|lib/pq|psycopg|sqlalchemy"}
+  - {source: SQL, pattern: "CREATE EXTENSION"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: 확장 없이 PostgreSQL 16 Pod를 쓴다}
+  - {target: GCP, grade: DIRECT, when: 확장 없이 PostgreSQL 16 Pod를 쓴다}
+  - {target: ON_PREM, grade: DIRECT, when: 확장 없이 PostgreSQL 16 Pod를 쓴다}
+  - target: AWS
+    grade: NONE
+    when: 앱이 PostgreSQL 확장을 요구한다(현재 Planning이 확장 요구를 거절한다, D-14)
+    loses: [확장 기능]
+  - target: GCP
+    grade: NONE
+    when: 앱이 PostgreSQL 확장을 요구한다(현재 Planning이 확장 요구를 거절한다, D-14)
+    loses: [확장 기능]
+  - target: ON_PREM
+    grade: NONE
+    when: 앱이 PostgreSQL 확장을 요구한다(현재 Planning이 확장 요구를 거절한다, D-14)
+    loses: [확장 기능]
+  - target: AWS
+    grade: PARTIAL
+    when: 원본이 관리형 DB(RDS)이고 대상은 Pod로 옮긴다
+    loses: [자동 백업, 다중 AZ 장애 조치, 파라미터 그룹]
+  - target: GCP
+    grade: PARTIAL
+    when: 원본이 관리형 DB(RDS)이고 대상은 Pod로 옮긴다
+    loses: [자동 백업, 다중 AZ 장애 조치, 파라미터 그룹]
+  - target: ON_PREM
+    grade: PARTIAL
+    when: 원본이 관리형 DB(RDS)이고 대상은 Pod로 옮긴다
+    loses: [자동 백업, 다중 AZ 장애 조치, 파라미터 그룹]
+known_differences:
+  - DB 이미지는 요구사항이 아니라 대상 구성 단계에서 정한다(D-11). 원본 이미지 Digest는 참고 정보다.
+  - 연결이 단일 URL 변수(DATABASE_URL)이면 현재 계약의 env_bindings로 표현할 수 없다.
+standard_tests:
+  - 쓰기 후 읽기가 일치한다.
+  - DB Pod 재시작 후 데이터가 유지된다.
+skill: db-postgres

@@ -1,0 +1,19 @@
+capability: ingress
+title: Ingress(외부 진입)
+usage_vocabulary: [HTTPS 진입, 경로 기반 라우팅, 인증서 종료]
+detect_rules:
+  - {source: MANIFEST, pattern: "kind: Ingress|Ingress/|alb\\.ingress\\.kubernetes\\.io"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: AWS Load Balancer Controller의 ALB 어노테이션을 그대로 쓴다}
+  - target: GCP
+    grade: API_DIFF
+    when: GKE Ingress 클래스와 어노테이션으로 바꿔야 한다
+  - target: ON_PREM
+    grade: API_DIFF
+    when: K3s 기본 Ingress 컨트롤러(Traefik)의 방식으로 바꿔야 한다
+    loses: [ALB 전용 기능(WAF 연동 등)]
+known_differences:
+  - ALB 어노테이션(alb.ingress.kubernetes.io/*)은 AWS 전용이다.
+standard_tests:
+  - 외부 진입 경로로 헬스 체크가 응답한다.
+skill: network

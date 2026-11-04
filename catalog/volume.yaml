@@ -1,0 +1,19 @@
+capability: volume
+title: 볼륨(PVC·StorageClass)
+usage_vocabulary: [영속 볼륨, 임시 저장]
+detect_rules:
+  - {source: MANIFEST, pattern: "PersistentVolumeClaim|StorageClass|volumeClaimTemplates|ebs\\.csi\\.aws\\.com"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: EBS 기반 StorageClass를 그대로 쓴다}
+  - target: GCP
+    grade: API_DIFF
+    when: 대상 StorageClass(Persistent Disk)로 바꿔야 한다
+  - target: ON_PREM
+    grade: PARTIAL
+    when: 대상 StorageClass가 로컬 저장소 수준이다
+    loses: [노드 장애 시 볼륨 이동, 스냅샷]
+known_differences:
+  - StorageClass 이름은 대상 capabilities에서 정한다.
+standard_tests:
+  - 재시작 후 볼륨 데이터가 유지된다.
+skill: k8s-workload
