@@ -43,8 +43,11 @@ _BINDING_PATTERNS = {
     "name": re.compile(rf"^(?:{_DB_PREFIX}(?:NAME|DB|DATABASE)|PGDATABASE)$", re.IGNORECASE),
     "username": re.compile(rf"^{_DB_PREFIX}(?:USER|USERNAME)$", re.IGNORECASE),
     "password_secret_ref": re.compile(rf"^{_DB_PREFIX}PASSWORD$", re.IGNORECASE),
+    # Single-variable apps (D-16): the platform builds the URL into a Secret and injects a reference.
+    "connection_url_secret_ref": re.compile(rf"^{_DB_PREFIX}(?:URL|URI)$", re.IGNORECASE),
 }
-_URL_VARIABLE = re.compile(rf"^{_DB_PREFIX}(?:URL|URI|DSN)$", re.IGNORECASE)
+# key=value DSNs are a different format; the contract cannot express them.
+_DSN_VARIABLE = re.compile(rf"^{_DB_PREFIX}DSN$", re.IGNORECASE)
 _CLOUD_ADDRESS = re.compile(r"\b[A-Za-z0-9][A-Za-z0-9.-]*\.amazonaws\.com\b")
 _SESSION_LIBRARIES = re.compile(
     r"gorilla/sessions|alexedwards/scs|express-session|cookie-session|flask_session|"
@@ -205,10 +208,10 @@ def _bindings(names: set[str], db_id: str | None, unmapped: list[str]):
                 bindings[name] = ResourceOutputBinding(resource_id=db_id, output=output)
                 break
         else:
-            if _URL_VARIABLE.match(name):
+            if _DSN_VARIABLE.match(name):
                 unmapped.append(
-                    f"DB_CONNECTION_URL_VARIABLE: {name} is a single connection URL; "
-                    "RequirementsV2 env_bindings can only bind host/port/name/username/password"
+                    f"DB_CONNECTION_DSN_VARIABLE: {name} is a key=value DSN; "
+                    "RequirementsV2 env_bindings cannot express it"
                 )
     return bindings
 
