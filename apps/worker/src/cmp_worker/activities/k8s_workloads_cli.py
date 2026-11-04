@@ -35,14 +35,21 @@ class CommandRunner:
         self._env = os.environ.copy()
         self._env.update(env or {})
 
-    def run(self, args: list[str], *, stdin: bytes | None = None, timeout: int = 300) -> bytes:
+    def run(
+        self,
+        args: list[str],
+        *,
+        stdin: bytes | None = None,
+        timeout: int = 300,
+        env: dict | None = None,
+    ) -> bytes:
         try:
             done = subprocess.run(
                 args,
                 input=stdin,
                 capture_output=True,
                 timeout=timeout,
-                env=self._env,
+                env={**self._env, **env} if env else self._env,
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired):
