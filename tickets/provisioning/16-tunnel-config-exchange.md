@@ -1,7 +1,7 @@
 # Ticket 16 — 터널 설정 교환 API와 결과 계약
 
 ## 상태
-TODO — [Issue #70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70). 플랫폼 쪽 계약은 이 티켓에서 확정한다. 중계 서버가 읽어 가는 형식은 Traffic 담당(상헌님)과 확인한 뒤 구현한다(아래 결정 대기).
+IN_PROGRESS — [Issue #70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70). 2026-11-05 사용자 지시로 **Traffic 담당(이상헌님) 답변과 무관한 부분부터 착수**했다. 답변이 필요한 부분은 아래 "⚠️ 답변 대기 — 답변 받은 뒤 진행" 표에 남겼고, 그 항목은 답변 전에는 구현하지 않는다.
 
 ## 목적
 노트북의 Agent와 AWS 중계 서버가 WireGuard로 연결되려면 서로의 공개키·주소를 알아야 한다. 둘은 서로를 직접 모르므로 플랫폼이 이 값을 전달한다. 연결 결과는 `ProvisioningResult`로 Data/Traffic Migration에 넘긴다.
@@ -53,6 +53,33 @@ Blocked by: 13 (DONE), 15 (Agent 장기 실행 기반; API 자체는 병행 가�
 | T3 중계 서버 인증 | 운영자가 등록할 때 발급하는 중계 서버 전용 자격 증명(Agent 자격 증명과 같은 방식, 원문 1회 반환) | 04A 방식 재사용 |
 | T4 터널 CIDR | 설정값(기본 후보 `10.200.0.0/24`, 중계 서버 `.1`). AWS VPC·온프레미스 CIDR과 겹치는지는 #51 Preflight가 검사 | 실측 구성과 같은 단일 /24로 충분 |
 | T5 노출 포트 | 앱 포트와 PostgreSQL 5432. 원천은 승인 Plan의 앱 포트 | 데이터 이전도 터널로 원본 DB → 온프레미스 DB 복제를 한다 |
+
+## 착수 결정 (2026-11-05, 답변 무관 부분)
+
+T1은 사용자 결정으로 확정됐다. T2·T3·T5는 아래처럼 확정하고, T4는 P3 답변 전 기본값, 새 결정 T6·T7을 더한다.
+
+| ID | 결정 |
+| --- | --- |
+| T2 확정 | ON_PREM Data 인계는 `READY` + `database.ready` + **터널 경유 DB 접속 확인**일 때만 진행한다(아니면 `TUNNEL_DB_NOT_VERIFIED`). Traffic 인계 조건은 13 R7 그대로이며, ON_PREM `external_endpoint`를 채우는 일은 P2 답변 후 한다. AWS/GCP 조건은 바뀌지 않는다. |
+| T3 확정 | 중계 서버는 운영자(관리자 키)가 `relay_id`·WireGuard 공개 endpoint·공개키로 등록하고, 플랫폼이 중계 서버 전용 자격 증명을 한 번만 원문으로 돌려준다(DB에는 digest만). 같은 `relay_id`를 다시 등록하면 endpoint·공개키를 갱신하고 자격 증명은 유지한다. |
+| T4 기본값 | 설정 `TUNNEL_CIDR`(기본 `10.200.0.0/24`), 중계 서버 주소 `.1` 예약, Agent는 `.2`부터 빈 /32를 배정하고 재등록·키 교체에도 유지한다(P3 답변으로 바뀌면 설정만 변경). |
+| T5 확정 | 터널에 노출할 포트 = 그 Agent의 READY ON_PREM 결과에 있는 앱 포트들 + PostgreSQL 5432. |
+| T6 결과 불변 유지 | 13 R3의 결과 불변을 지킨다. 터널 확인은 결과 저장 뒤에 오므로, `get_migration_handoff`가 **읽는 시점에** 그 결과의 `cluster.agent_id`에 대한 최신 터널 상태를 합쳐 ON_PREM 인계 뷰를 만든다. 저장된 결과는 바꾸지 않는다. |
+| T7 DB 터널 목적지 | `DatabaseHandoff.tunnel_endpoint`(기본 `null`)를 추가한다. ON_PREM이고 터널 상태가 DB 접속 성공을 보고했을 때만 인계 뷰에 `터널IP:5432`로 채운다. |
+| T8 설정 버전 | 중계 서버 등록·갱신마다 1씩 오르는 정수 `config_version`. Agent 설정 응답과 키 등록 응답에 담아 Agent가 변경을 알 수 있게 한다. |
+| T9 공개키만 | WireGuard 공개키(Base64 32바이트) 형식만 받는다. 비밀키는 어떤 API에도 없다. 폐기된 Agent(15)는 인증 단계에서 거절된다. |
+
+## ⚠️ 답변 대기 — 답변 받은 뒤 진행 (2026-11-05 기록)
+
+상헌님께 확인 메시지를 보냈다(사용자 전달). **아래 항목은 답변을 받은 뒤에만 진행한다.** 답변을 받으면 이 표의 "답변"을 채우고 해당 작업을 끝낸 뒤 DONE을 검토한다.
+
+| # | 확인할 것 | 현재 가정 | 답변 전 처리 | 답변 후 할 일 | 답변 |
+| --- | --- | --- | --- | --- | --- |
+| P1 | 중계 서버가 Agent 목록을 받는 방식(주기 폴링 / push / 파일)과 응답 필드 | 플랫폼 조회 API 주기 폴링, 필드 `agent_id`·공개키·터널 IP(/32)·허용 포트·설정 버전, 폐기 Agent 제외 | **미구현.** 중계 서버 등록·인증(T3)까지만 구현 | 확정된 방식·필드로 중계 서버용 목록 API 구현·테스트, OpenAPI 갱신 | (대기) |
+| P2 | 온프레미스 `external_endpoint` 포트: 적힌 포트 그대로 사용인지, 80 고정인지(#63 수용 기준 "포트 80") | `http://터널IP:앱포트`(예: `:8080`) | **미구현.** ON_PREM Traffic 인계는 계속 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단 | 앱 포트면 터널 경유 앱 헬스 확인 후 `external_endpoint` 채우기. 80 고정이면 Agent 쪽 80→앱포트 포워딩(17)도 함께 결정 | (대기) |
+| P3 | 터널 대역과 중계 서버 주소 배정 주체 | `10.200.0.0/24`, 중계 서버 `.1`, Agent별 /32 플랫폼 배정 | 기본값으로 구현(설정값) | 다르면 설정값만 변경 | (대기) |
+| P4 | 중계 서버 EC2(인스턴스·EIP·보안 그룹) 생성 주체 | Traffic 담당이 만들고 운영자가 플랫폼에 endpoint·공개키 등록 | 코드 영향 없음 | Provisioning이 만들어야 하면 별도 티켓으로 분리 | (대기) |
+| P5 | `external_endpoint` = "중계 서버가 전달할 목적지"(T1) 공유 확인 | #61·#63이 같은 의미로 읽음 | T1대로 진행 | 다르게 읽고 있으면 T1 재검토 | (대기) |
 
 ## 결정 대기 (Traffic 담당과 확인)
 1. 중계 서버가 Agent 목록을 읽는 방식: 위 조회 API를 주기 폴링할지, 다른 형식이 필요한지.
