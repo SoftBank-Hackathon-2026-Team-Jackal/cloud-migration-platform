@@ -14,6 +14,7 @@ Blocked by: 08, 08B, 10, 11B, 13
 
 ## 작업 범위
 - 포함: `classify_failure`(SPEC(의도 누락 포함)/CODE/BUILD/RENDER/INFRA), `fix_mapping`(요구사항·intent 패치)·`fix_code`(Fixer, 테스트 읽기 전용), mock을 실제 Activity로 바꾼 루프, 3회 초과 사람 검토, RENDER 중단 보고, `publish_final_report`, 이전용 브랜치 Draft PR과 해시 대조
+- 부모 종료 상태 값 확정: 02B 골격의 임시 값(`needs_review`, `stopped_render`)을 검토 대기(진행 중 플래그)와 종료 상태(완료·실패·취소)로 정리한다. 민서님께 새 값을 공유하고 API의 SSE 종료 조건(`routes/migrations.py`) 반영을 요청한다. 계약상 `phase`는 문자열이라 OpenAPI 변경은 필요 없다.
 - 제외: GitHub App 권한 발급
 
 ## 수용 기준
