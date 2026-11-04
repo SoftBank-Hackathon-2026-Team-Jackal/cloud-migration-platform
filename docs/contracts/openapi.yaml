@@ -540,6 +540,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/plans/{plan_id}/revisions/{revision}/result:
+    get:
+      tags:
+      - provisioning approval
+      summary: Get Provisioning Result
+      operationId: get_provisioning_result_provisioning_plans__plan_id__revisions__revision__result_get
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plan Id
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Revision
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisioningResultSummary'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/plans/{plan_id}/revisions/{revision}/rollout:
     get:
       tags:
@@ -782,6 +822,49 @@ components:
       - sha256
       - size_bytes
       title: ArtifactRef
+    Check:
+      properties:
+        layer:
+          type: string
+          enum:
+          - INFRASTRUCTURE
+          - WORKLOAD
+          - APPLICATION
+          title: Layer
+        name:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Name
+        status:
+          type: string
+          enum:
+          - PASSED
+          - FAILED
+          - NOT_RUN
+          - UNKNOWN
+          title: Status
+        code:
+          anyOf:
+          - type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          - type: 'null'
+          title: Code
+        reason:
+          anyOf:
+          - type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - layer
+      - name
+      - status
+      title: Check
     ClaimResponse:
       properties:
         job:
@@ -859,6 +942,35 @@ components:
       - enrollment_token
       - expires_in_seconds
       title: EnrollmentResponse
+    Failure:
+      properties:
+        stage:
+          type: string
+          enum:
+          - PRECONDITION
+          - INFRASTRUCTURE
+          - WORKLOAD_DEPLOY
+          - POST_DEPLOY_VERIFICATION
+          title: Stage
+        code:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Code
+        recoverability:
+          type: string
+          enum:
+          - RETRY_AFTER_FIX
+          - CHECK_STATE_FIRST
+          - NOT_RECOVERABLE
+          title: Recoverability
+      additionalProperties: false
+      type: object
+      required:
+      - stage
+      - code
+      - recoverability
+      title: Failure
     HTTPValidationError:
       properties:
         detail:
@@ -1030,6 +1142,84 @@ components:
       - database
       - application
       title: ProductionRolloutJob
+    ProvisioningResultSummary:
+      properties:
+        plan_id:
+          type: string
+          title: Plan Id
+        revision:
+          type: integer
+          title: Revision
+        provider:
+          type: string
+          enum:
+          - AWS
+          - GCP
+          - ON_PREM
+          title: Provider
+        scope:
+          type: string
+          enum:
+          - INFRASTRUCTURE
+          - WORKLOADS
+          - FULL
+          title: Scope
+        status:
+          type: string
+          enum:
+          - READY
+          - INFRASTRUCTURE_READY
+          - FAILED
+          - UNKNOWN
+          title: Status
+        code:
+          type: string
+          title: Code
+        data_state:
+          type: string
+          const: NOT_MIGRATED
+          title: Data State
+        cluster:
+          $ref: '#/components/schemas/ResultCluster'
+        application:
+          anyOf:
+          - $ref: '#/components/schemas/ResultApplication'
+          - type: 'null'
+        verification:
+          items:
+            $ref: '#/components/schemas/Check'
+          type: array
+          title: Verification
+        failure:
+          anyOf:
+          - $ref: '#/components/schemas/Failure'
+          - type: 'null'
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+        finished_at:
+          type: string
+          title: Finished At
+      type: object
+      required:
+      - plan_id
+      - revision
+      - provider
+      - scope
+      - status
+      - code
+      - data_state
+      - cluster
+      - application
+      - verification
+      - failure
+      - warnings
+      - finished_at
+      title: ProvisioningResultSummary
+      description: 'Ticket 13 R8: user-facing summary. DB access, internal endpoints
+        and IDs stay internal.'
     QueuedWork:
       properties:
         kind:
@@ -1096,6 +1286,53 @@ components:
       - job_id
       - accepted
       title: ReportAck
+    ResultApplication:
+      properties:
+        external_endpoint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Endpoint
+        health_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Health Path
+        scheme:
+          type: string
+          const: http
+          title: Scheme
+      type: object
+      required:
+      - external_endpoint
+      - health_path
+      - scheme
+      title: ResultApplication
+    ResultCluster:
+      properties:
+        kind:
+          type: string
+          enum:
+          - EKS
+          - GKE
+          - K3s
+          title: Kind
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+      type: object
+      required:
+      - kind
+      - name
+      - location
+      title: ResultCluster
     RolloutApplication:
       properties:
         release:

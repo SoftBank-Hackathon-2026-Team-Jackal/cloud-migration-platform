@@ -151,6 +151,15 @@ async def test_offline_agent_keeps_job_then_reconnect_reports_ready(db, store, s
     assert second["status"] == "SUCCEEDED" and second["code"] == "READY"
     assert second["resource_refs"]["database_endpoint"] == "demo-db.cmp-prod-demo.svc:5432"
     assert second["resource_refs"]["application_endpoint"] == "demo-app.cmp-prod-demo.svc:8080"
+    # Ticket 13 R4: standard handoff keys from the job and the approved Values bytes.
+    refs = second["resource_refs"]
+    assert (refs["agent_id"], refs["cluster_uid"]) == ("agent-a", "cluster-a")
+    assert refs["db_host"] == "demo-db.cmp-prod-demo.svc" and refs["db_port"] == "5432"
+    assert refs["db_secret_ref"] == "demo-db-auth/" + payload.database.password_secret.key
+    assert refs["app_internal_endpoint"] == "http://demo-app.cmp-prod-demo.svc:8080"
+    assert refs["app_health_path"] == payload.application.health_path
+    assert {"db_name", "db_user", "db_version", "db_storage_size_gib", "app_replicas"} <= set(refs)
+    assert all(isinstance(v, str) for v in refs.values())
     assert len(jobs(db)) == 1  # retry reused the same Revision job
     with db() as session:
         assert rollout_status(session, "plan-k3s", 1)["state"] == "READY"

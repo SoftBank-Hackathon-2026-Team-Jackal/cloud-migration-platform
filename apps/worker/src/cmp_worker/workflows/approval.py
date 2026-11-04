@@ -65,11 +65,12 @@ class ProvisioningApprovalWorkflow:
             return self._finish(claim)
 
         steps = execution_steps(claim["provider"], claim["scope"])
-        status, code, refs = "SUCCEEDED", "EXECUTION_SUCCEEDED", {}
+        status, code, refs, step = "SUCCEEDED", "EXECUTION_SUCCEEDED", {}, None
         if not steps:
             status, code = "FAILED", "NO_EXECUTION_PATH"
         for name in steps:
             self.state = "EXECUTING"
+            step = name  # recorded so the result can tell infrastructure from workload failures
             try:
                 # Later steps (e.g. FULL workloads) receive refs produced by earlier steps.
                 request = {**claim, "resource_refs": dict(refs)}
@@ -89,6 +90,7 @@ class ProvisioningApprovalWorkflow:
                 "status": status,
                 "code": code,
                 "resource_refs": refs,
+                "step": step,
             },
             **DB_ACTIVITY,
         )

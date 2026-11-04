@@ -36,6 +36,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from cmp_api.db import Base
+from cmp_api.provisioning_results import add_result
 
 Decision = Literal["APPROVE", "REJECT"]
 EXECUTION_STEP = "PROVISION"
@@ -362,9 +363,14 @@ def complete_execution(
     status: ExecutionStatus,
     code: str,
     resource_refs: dict[str, str],
+    step: str | None = None,
     now: datetime | None = None,
 ) -> dict:
-    """Record the provider result on a RUNNING marker. A finished marker is never rewritten."""
+    """Record the provider result on a RUNNING marker. A finished marker is never rewritten.
+
+    The same transaction stores the ProvisioningResult (ticket 13, R3). `step` is the provider
+    Activity that ended the run (the failed one, or the last one on success).
+    """
     record = session.get(PlanApproval, approval_id)
     marker = (
         session.get(PlanExecution, (record.plan_id, record.revision, EXECUTION_STEP))
@@ -378,5 +384,16 @@ def complete_execution(
         marker.code = code
         marker.resource_refs = {str(k): str(v) for k, v in resource_refs.items()}
         marker.finished_at = _now(now)
+        row = session.get(PlanRevision, (record.plan_id, record.revision))
+        add_result(
+            session,
+            row.manifest,
+            approval_id=record.id,
+            status=status,
+            code=code,
+            step=step,
+            refs=marker.resource_refs,
+            finished_at=marker.finished_at,
+        )
         session.commit()
     return {"status": marker.status, "code": marker.code or code}

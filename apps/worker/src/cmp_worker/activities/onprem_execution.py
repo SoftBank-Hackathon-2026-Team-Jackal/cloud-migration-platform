@@ -17,6 +17,7 @@ from cmp_api.onprem_rollout import (
     build_rollout_job,
     dispatch,
     outcome,
+    values_refs,
 )
 from cmp_contracts.onprem_rollout import rollout_job_id
 from sqlalchemy.orm import Session, sessionmaker
@@ -46,7 +47,12 @@ class OnPremExecutionActivities:
     def _observe(self, job_id: str) -> tuple[str, dict | None]:
         with self._session_factory() as session:
             job = session.get(AgentJob, job_id)
-            return job.status, outcome(job)
+            result = outcome(job)
+            if result is not None and result["status"] == "SUCCEEDED":
+                payload = job.payload
+                extra = values_refs(session, self._store, payload["plan_id"], payload["revision"])
+                result["resource_refs"] = {**result["resource_refs"], **extra}
+            return job.status, result
 
     @activity.defn(name="execute_on_prem_plan")
     async def execute_on_prem_plan(self, request: dict) -> dict:

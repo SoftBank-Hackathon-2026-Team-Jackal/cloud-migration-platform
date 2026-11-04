@@ -1,7 +1,7 @@
 # Ticket 13 — 실제 검증 결과와 Migration 인계
 
 ## 상태
-IN_PROGRESS — [Issue #53](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/53); 착수 결정 R1~R10
+DONE — [Issue #53](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/53); 착수 결정 R1~R10. 실제 클라우드 재실행 연결은 14에서 확인한다.
 
 ## 목적
 배포 결과를 구조화해 Data/Traffic Migration이 필요한 연결 참조와 준비 상태를 소비하게 한다.
@@ -17,9 +17,9 @@ Blocked by: 12
 - 제외: 데이터 복사·CDC 실행과 트래픽 실제 전환
 
 ## 수용 기준
-- [ ] DB Endpoint·인증 Secret 참조·앱 Endpoint·헬스 정보를 후속 단계에 전달한다.
-- [ ] 필수 검사 실패면 결과에 실패 단계·원인을 남기고 다음 단계 진행을 막는다.
-- [ ] 결과에 비밀번호 원문이 없고 Provisioning 완료를 데이터 이전 완료로 표시하지 않는다.
+- [x] DB Endpoint·인증 Secret 참조·앱 Endpoint·헬스 정보를 후속 단계에 전달한다.
+- [x] 필수 검사 실패면 결과에 실패 단계·원인을 남기고 다음 단계 진행을 막는다.
+- [x] 결과에 비밀번호 원문이 없고 Provisioning 완료를 데이터 이전 완료로 표시하지 않는다.
 
 ## 테스트 전략
 - 제안 Test Seam: Provisioning Workflow 결과 → 후속 Worker 입력. 후속 Migration 자체의 성공은 확인하지 못한다.
@@ -37,11 +37,11 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
 - 구현 중 변경: 2026-11-05 착수 결정 R1~R10 참조.
 
 ## 완료 체크리스트
-- [ ] 수용 기준과 Test Seam 확인
-- [ ] 관련 테스트 통과와 회귀 확인
-- [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
-- [ ] 미검증 항목과 결과 증거 기록
+- [x] 수용 기준과 Test Seam 확인
+- [x] 관련 테스트 통과와 회귀 확인
+- [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
+- [x] 구현·계약 정합성 및 최종 리뷰
+- [x] 미검증 항목과 결과 증거 기록
 
 ## 착수 결정 (2026-11-05)
 
@@ -127,4 +127,31 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
 - Seam: 승인 Workflow 완료(`complete_approved_execution`에 상태·코드·실패 단계·refs 전달) → 업무 DB `ProvisioningResult` → `get_migration_handoff` Activity와 결과 조회 API. SQLite 업무 DB(07 모델로 게시·승인), 09·11·12의 실제 refs 형식 fixture, Temporal 테스트 환경의 실제 `ProvisioningApprovalWorkflow`(가짜 Provider Activity)를 쓴다.
 - 잡아내는 것: Provider별 정규화, READY/INFRASTRUCTURE_READY/FAILED/UNKNOWN 상태와 진행 차단, 실패 단계·검사 목록 추론, 결과·API·인계에 비밀번호 원문 없음, 마이그레이션 완료 미표시, 결과 불변(중복 complete), API 노출 범위·인증·404.
 - 놓치는 것: 실제 클러스터 재실행(14), 상위 MigrationWorkflow 연결, Data/Traffic Worker 실제 소비.
+
+## 구현 (2026-11-05)
+
+- 계약: `cmp_contracts.provisioning_result`(R1). 변환·인계·요약: `cmp_providers.provisioning_result`의 순수 함수 `build_provisioning_result`·`handoff`·`public_summary`(R2·R5·R6·R7·R8).
+- 저장: `cmp_api.provisioning_results`, 테이블 `provisioning_results`(Alembic `20261105_01`). `complete_execution`이 실행 표식과 같은 트랜잭션에서 한 번만 저장하고 이후 보고로 덮어쓰지 않는다(R3). 결과 생성이 실패해도 실행 표식 기록은 막지 않으며, 그때 인계는 `RESULT_NOT_FOUND`로 닫힌다.
+- Workflow: `complete_approved_execution` 입력에 마지막으로 실행한 Provider Activity 이름(`step`)을 추가했다. 그 외 흐름·재시도·이력 내용은 바꾸지 않았다.
+- Worker: Activity `get_migration_handoff`(`provisioning` queue) 등록.
+- Provider refs(R4): AWS/GCP 공통 기반(`k8s_workloads`)과 ON_PREM(`onprem_rollout.resource_refs`·`values_refs`)에 표준 키를 추가했다. 기존 키는 유지한다.
+- API(R8): `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`, `make openapi`로 계약을 갱신했다.
+- Network Preflight(#51) 연결: Preflight의 `probe_target.agent_id`·`cluster_uid`·`namespace`는 ON_PREM 결과의 `cluster.agent_id`·`cluster.cluster_uid`·`namespace`에서 읽는다. 원본 DB Endpoint와 라우팅 CIDR은 Provisioning이 알지 못하므로 결과에 없다(`network_refs`는 알려진 네트워크 이름만).
+
+## 검증 기록 (2026-11-05)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `uv run pytest tests/test_provisioning_result.py` | 14개 통과. 실제 `ProvisioningApprovalWorkflow`(Temporal 테스트 환경) → claim → 가짜 Provider(09·11·12 실제 refs 형식) → complete → DB 결과 → `get_migration_handoff`·API. GCP/AWS FULL/ON_PREM READY 정규화, 배포 후 검사 실패(PVC)·인프라 단계 유실(UNKNOWN)·사전 확인 실패·INFRASTRUCTURE scope의 단계·검사 목록과 진행 차단, 결과 없음, 알 수 없는 키·비밀값 제거, 결과 불변, 비정상 ref 값이 완료를 막지 않음, API 노출 범위·401/403/404 |
+| `tests/test_gcp_workloads.py`·`tests/test_onprem_rollout.py` | R4 표준 키 생산 확인을 추가했고 통과 |
+| `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` | Ruff 검사·포맷과 전체 510개 통과(Alembic 모델 일치 테스트 포함) |
+| `make openapi` | 결과 조회 경로와 `ProvisioningResultSummary`·`Check`·`Failure` 스키마만 추가됐다. 기존 경로 변경 없음 |
+
+### 미검증·제한
+
+- `make smoke-temporal`은 로컬 Docker(Temporal)가 꺼져 있어 실행하지 못했다. Workflow 변경(complete 입력에 `step` 추가)은 Temporal 테스트 환경의 실제 Workflow 테스트로 확인했다.
+- 실제 EKS/GKE/K3s 재실행으로 저장된 결과는 아직 없다. 09·11·12의 실측 refs 형식 fixture로만 정규화를 확인했고, 실제 연결은 14에서 확인한다.
+- 검사 목록은 Provider의 고정 검사 순서와 첫 실패 코드에서 추론한 값이다. 실행이 개별 검사 결과를 직접 보고하지는 않는다. GCP `image_pull_secret`은 ECR 이미지가 없으면 실행하지 않는데도 READY에서는 `PASSED`로 표시된다.
+- ON_PREM은 외부 Ingress가 없어 `external_endpoint`가 없다. 그래서 Traffic 인계는 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단된다. 복제 권한도 확인하지 않아 `replication_capable=null`과 `REPLICATION_NOT_VERIFIED` 경고가 붙는다.
+- 상위 `MigrationWorkflow`와 실제 Data/Traffic Worker의 소비는 범위 밖이다.
 
