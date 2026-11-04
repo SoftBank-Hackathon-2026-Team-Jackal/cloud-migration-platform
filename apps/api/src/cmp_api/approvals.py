@@ -185,6 +185,19 @@ def _stored_identity(manifest: PlanManifest, preview: Preview) -> ApprovalTarget
     )
 
 
+def _existing_decision(
+    session: Session, plan_id: str, revision: int, decision: Decision
+) -> PlanApproval | None:
+    existing = session.scalar(
+        select(PlanApproval).where(
+            PlanApproval.plan_id == plan_id, PlanApproval.revision == revision
+        )
+    )
+    if existing is not None and existing.decision != decision:
+        raise ApprovalError("ALREADY_DECIDED")
+    return existing
+
+
 def record_decision(
     session: Session,
     *,
@@ -222,14 +235,8 @@ def record_decision(
     if requested != stored:
         raise ApprovalError("APPROVAL_TARGET_MISMATCH")
 
-    existing = session.scalar(
-        select(PlanApproval).where(
-            PlanApproval.plan_id == plan_id, PlanApproval.revision == revision
-        )
-    )
+    existing = _existing_decision(session, plan_id, revision, decision)
     if existing is not None:
-        if existing.decision != decision:
-            raise ApprovalError("ALREADY_DECIDED")
         return existing, False
     record = PlanApproval(
         id=str(uuid.uuid4()),
@@ -248,17 +255,12 @@ def record_decision(
     try:
         session.commit()
     except IntegrityError:
+        # A concurrent request recorded this Revision first; report that record once.
         session.rollback()
-        return record_decision(
-            session,
-            approver=approver,
-            plan_id=plan_id,
-            revision=revision,
-            decision=decision,
-            scope=scope,
-            manifest_digest=manifest_digest,
-            preview_digest=preview_digest,
-        )
+        existing = _existing_decision(session, plan_id, revision, decision)
+        if existing is None:
+            raise
+        return existing, False
     return record, True
 
 
