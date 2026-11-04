@@ -16,7 +16,8 @@ Blocked by: 07, 08A, D-01(실제 LLM 연결 시)
 - 포함: `catalog/` 첫 버전(컨테이너 실행·Postgres·환경변수·네트워크·Ingress·볼륨·Pod 신원·객체 저장, 각 항목의 Skill 이름), Skill 4종의 `SKILL.md`·`examples/` 내용, `cmp_agents.mapper`(08A 실행 기반 사용)와 `prompts/mapper.md`, `map_usage`·`check_evidence` Activity, 필수 여부 제안(`required_proposed`·근거), 처리 표 함수, `MIGRATE`/`KEEP` 구분
 - 제외: Tester·Fixer, S3 코드 수정
 
-## 수용 기준
+## 수용 기준
+- [ ] 매핑 행마다 분석 버전 안에서 고유한 `id`가 있고, 다시 매핑해도 같은 사용 방식의 행은 이전 ID를 유지한다.
 - [ ] Mapper 출력이 스키마 검증을 통과하지 못하면 재시도 후 사람 검토로 넘긴다.
 - [ ] 카탈로그에 없는 기능은 "검증 안 된 제안"으로만 나온다.
 - [ ] 모든 매핑 행에 필수 여부 제안과 근거가 있다.
@@ -43,6 +44,7 @@ Blocked by: 07, 08A, D-01(실제 LLM 연결 시)
 ## 설계 변경 기록
 - 2026-11-04: 출구 규칙에 쓰는 MIGRATE/KEEP 구분과 대문자 Enum 반영.
 - 2026-11-04(목적 점검): 실행 기반을 08A로 분리, 필수 여부 제안 추가. 처리 확정은 08B 게이트 뒤로.
+- 2026-11-04(01 리뷰 반영): 매핑 행 ID 부여·유지를 수용 기준에 추가.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

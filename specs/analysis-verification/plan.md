@@ -149,7 +149,7 @@ network_intent:
 ### 2.3 매핑 (AV-007, AV-008)
 
 - 카탈로그 항목: `capability`, `usage_vocabulary`, `detect_rules`, `grade_rules`, `known_differences`, `standard_tests`.
-- Mapper 입력: 마스킹된 증거 요약 + 해당 Skill 지침 + 카탈로그 후보. 출력: `MappingRow[]`(JSON 스키마 강제).
+- Mapper 입력: 마스킹된 증거 요약 + 해당 Skill 지침 + 카탈로그 후보. 출력: `MappingRow[]`(JSON 스키마 강제). 행마다 분석 버전 안에서 고유한 `id`를 부여한다. 같은 capability에도 여러 행이 있을 수 있다. 같은 사용 방식의 행은 분석 버전이 바뀌어도 같은 `id`를 유지한다(이전 버전의 행 ID를 Mapper 입력으로 넘기고, 새 사용 방식에만 새 ID). 그래야 루프 중 바뀐 행을 ID로 비교해 그 행만 다시 승인받을 수 있다.
 - 처리 표(기계적): `DIRECT`·`API_DIFF` → `PROCEED`. `PARTIAL` → 필수면 대체 방법 증명 시 진행 아니면 `BLOCK`, 선택이면 `APPROVAL`. `NONE` → 필수면 `BLOCK`, 선택이면 `APPROVAL`.
 - 각 의존 서비스에 `MIGRATE` / `KEEP`(원본 유지)을 남긴다. 첫 사이클의 S3는 `KEEP`.
 - `check_evidence`: 근거의 파일·줄 존재, 매니페스트 경로, 리소스 ID 조회. 실패한 행은 `UNVERIFIED`로 둔다.
@@ -159,18 +159,18 @@ network_intent:
 ```text
 map_usage ──> MappingRow[required_proposed, required_reason]
    │
-   ▼  Signal: confirm_requirements {migration_id, analysis_ref, required: {capability: bool}, operational: [...], actor}
+   ▼  Signal: confirm_requirements {migration_id, analysis_ref, required: {row_id: bool}, operational: [...], actor}
 compute_treatment ──> treatment 확정 (등급 × 확정된 필수 여부)
    │  BLOCK 있음 → 중단·보고
    │  APPROVAL 있음 ↓
-   ▼  Signal: approve_losses {analysis_ref, approvals: {capability: APPROVED | REJECTED}, actor}
+   ▼  Signal: approve_losses {analysis_ref, approvals: {row_id: APPROVED | REJECTED}, actor}
    │  REJECTED → 해당 기능을 필수로 바꿔 compute_treatment 재실행
 record_review ──> ReviewRecord(불변 저장, analysis_ref 버전에 묶음) → Sandbox 진행
 ```
 
 - 두 Signal은 FastAPI가 권한을 확인하고 업무 DB에 기록한 뒤 보낸다. 승인 경로·화면은 상헌님과 정한다(현재 OpenAPI에는 없음, 추가 시 `make openapi`).
 - Workflow는 Signal을 기다리며 Query로 "검토 대기 중"과 검토할 항목을 보여 준다. 자동 승인은 없다.
-- Signal이 다른 분석 버전(`analysis_ref`)을 가리키면 거절한다. Sandbox 루프에서 매핑이 바뀌면 바뀐 행만 다시 승인받는다(`publish_final_report` 전에 확인).
+- Signal이 다른 분석 버전(`analysis_ref`)을 가리키면 거절한다. 확정·승인 키는 해당 버전의 행 ID이며, Sandbox 루프에서 매핑이 바뀌면 바뀐 행만 다시 승인받는다(`publish_final_report` 전에 확인).
 - 데모 시간을 위해 화면 없이도 진행할 수 있게, 같은 Signal을 CLI 스크립트로 보낼 수 있게 한다.
 
 ### 2.4 소스 묶음 (AV-009)
@@ -363,6 +363,7 @@ class Evidence(Contract):
 
 
 class MappingRow(Contract):
+    id: str  # 분석 버전 안에서 고유한 행 ID
     capability: str
     usage: str
     grade: Literal["DIRECT", "API_DIFF", "PARTIAL", "NONE"]
@@ -378,9 +379,9 @@ class MappingRow(Contract):
 
 class ReviewRecord(Contract):  # AV-022 확정·승인 기록
     analysis_ref: VersionRef
-    required: dict[str, bool]  # capability → 확정된 필수 여부
+    required: dict[str, bool]  # 행 ID → 확정된 필수 여부
     operational: list[str]  # 확정된 운영 요구사항(HA·백업 등)
-    approvals: dict[str, Literal["APPROVED", "REJECTED"]]  # APPROVAL 항목별 결정
+    approvals: dict[str, Literal["APPROVED", "REJECTED"]]  # 행 ID → 승인 결정
     actor: str
     decided_at: datetime
 
@@ -430,8 +431,11 @@ class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvi
 ```
 
 - `ResourceId`, `S3ArchiveRef`, `ValidatedWorkloadV2`, `RequirementsV2`는 `cmp_contracts.provisioning_v2`에서 import한다.
+- `AnalysisReport.mapping`의 행 ID는 해당 분석 버전 안에서 중복될 수 없다. `ReviewRecord`의 행 ID와 `analysis_ref`가 함께 검토 대상을 식별한다.
+- `ReviewRecord` 단독 검증은 참조된 분석 결과의 행 존재 여부를 확인하지 않는다. 08B 검토 게이트가 분석 버전을 읽어 행 ID와 승인 대상을 대조한다.
 - Planning 입력 v2(`PlanningRequestV2`)로의 투영: `analysis.result_ref` ← `AnalysisReport.ref`, `analysis.requirements_ref` ← 요구사항 JSON 바이트 참조(SHA-256), `analysis.source_refs` ← APPLICATION ID별 최종 소스 아카이브, `builds[]` ← 저장된 Build 결과(`platforms[]`로 정규화), `sandbox` ← `SandboxVerification`(`PASSED`일 때만, 내부 상태 `NEEDS_REVIEW`·`STOPPED_RENDER`는 넘기지 않음), `environment.mapping_ref` ← `EnvExceptions` 참조. 대조는 `prepare_plan_v2`(민서)가 한다.
 - 내부 Sandbox 기록에 검증한 분석·대상 선택 버전을 보관하고 투영 시 현재 분석·대상 선택과 대조한다(AV-018). 요구사항·설정 참조는 분석 입력과 Sandbox 기록을 각각 전달해 Planning에서 대조하며 한쪽 값으로 다른 증거를 채우지 않는다.
+- `project_planning`은 요구사항 참조·S3 아카이브·대상 선택·환경·정책에 기존 v2 및 공통 참조 모델을, Build에는 `BuildAttempt` 모델을 입력받는다. 소스는 리소스 ID별 S3 아카이브 모델의 매핑이다.
 - `BuildAttempt`는 Build 결과의 migration·resource·attempt ID, 불변 결과 참조, 소스·플랫폼·이미지·로그 참조와 오류 코드를 기록한다. 투영 시 migration ID를 대조하고 단일 `platform`을 Planning의 `platforms` 목록으로 바꾼다. 실제 결과 저장 위치는 D-02로 남긴다.
 - 01의 초기 `UsageProfile.usages`와 `PrecheckReport.findings`는 문자열 목록이다. `AnalysisRequest`는 저장소·애플리케이션 식별자, `.env`·원본 접근 참조와 v2 대상 선택을 받는다. `SourceArchive`는 기존 `S3ArchiveRef`를 재사용한다. 요구사항 JSON은 UTF-8, 정렬된 객체 키, 공백 없는 구분자로 직렬화하며 배열 순서는 유지한다. 상세 스캔 결과의 구조화는 후속 티켓에서 다룬다.
 

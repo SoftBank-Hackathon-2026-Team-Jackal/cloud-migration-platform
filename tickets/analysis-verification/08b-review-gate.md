@@ -13,7 +13,7 @@ AV-022, AV-008
 Blocked by: 02, 08
 
 ## 작업 범위
-- 포함: Mapper의 필수 여부 제안(`required_proposed`·근거), Signal `confirm_requirements`·`approve_losses`, `compute_treatment`(확정 필수 여부로 처리 재계산, 거절 시 필수로 바꿔 재계산), `record_review`(불변 기록, 분석 버전에 묶음), 검토 대기 Query, BLOCK 시 중단·보고, 분석 버전 불일치 Signal 거절, CLI로 Signal 보내는 스크립트
+- 포함: Signal `confirm_requirements`·`approve_losses`, `compute_treatment`(확정 필수 여부로 처리 재계산, 거절 시 필수로 바꿔 재계산), `record_review`(불변 기록, 분석 버전에 묶음), 검토 대기 Query, BLOCK 시 중단·보고, 분석 버전 불일치 Signal 거절, CLI로 Signal 보내는 스크립트
 - 제외: 승인 화면(상헌), FastAPI 승인 경로 구현은 상헌님과 합의 후(현재 OpenAPI 없음)
 
 ## 수용 기준
@@ -22,6 +22,7 @@ Blocked by: 02, 08
 - [ ] `APPROVAL` 항목을 모두 승인하면 Sandbox로 진행하고, 하나를 거절하면 그 기능이 필수로 바뀌어 다시 계산된다.
 - [ ] `BLOCK`이 있으면 Sandbox로 가지 않고 사유와 대안이 보고된다.
 - [ ] 다른 분석 버전을 가리키는 Signal은 거절된다.
+- [ ] Signal의 확정·승인 키는 매핑 행 ID다. 해당 분석 버전에 없는 행 ID, 확정이 빠진 행, `APPROVAL`이 아닌 행에 대한 승인은 거절된다.
 - [ ] 승인 기록(행위자, 시각, 분석 버전, 항목별 결정)이 남고, 자동 승인 경로가 없다.
 
 ## 테스트 전략
@@ -41,6 +42,8 @@ PARTIAL 선택 기능이 있는 fixture가 승인 전에는 멈춰 있고, CLI�
 
 ## 설계 변경 기록
 - 2026-11-04: 원래 목적(필수 기능 보존을 사용자가 확인) 점검에서 빠진 단계를 보완하려고 신설(spec AV-022).
+- 2026-11-04(01 리뷰 반영): 확정·승인 키를 매핑 행 ID로 바꾸고(01), 행 ID 대조를 수용 기준에 추가.
+- 2026-11-04(전체 재검토): 필수 여부 제안은 08 범위라 포함 목록에서 제거(중복).
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

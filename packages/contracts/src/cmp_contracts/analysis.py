@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from cmp_contracts.provisioning import ContentRef, Contract, Text, VersionRef
 from cmp_contracts.provisioning_v2 import ResourceId, TargetSelectionV2
@@ -33,6 +33,7 @@ class Evidence(Contract):
 
 
 class MappingRow(Contract):
+    id: Text
     capability: str
     usage: str
     grade: Literal["DIRECT", "API_DIFF", "PARTIAL", "NONE"]
@@ -48,9 +49,9 @@ class MappingRow(Contract):
 
 class ReviewRecord(Contract):
     analysis_ref: VersionRef
-    required: dict[str, bool]
+    required: dict[Text, bool]
     operational: list[str]
-    approvals: dict[str, Literal["APPROVED", "REJECTED"]]
+    approvals: dict[Text, Literal["APPROVED", "REJECTED"]]
     actor: str
     decided_at: datetime
 
@@ -82,3 +83,10 @@ class AnalysisReport(Contract):
     source_db_images: dict[ResourceId, str]
     unmapped_items: list[str]
     unverified_risks: list[str]
+
+    @model_validator(mode="after")
+    def unique_mapping_ids(self):
+        ids = [row.id for row in self.mapping]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Mapping row IDs must be unique within an analysis version")
+        return self

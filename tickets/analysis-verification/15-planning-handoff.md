@@ -13,7 +13,7 @@ AV-018
 Blocked by: 14, D-02(저장 경계)
 
 ## 작업 범위
-- 포함: `AnalysisReport`·`RequirementsV2` 바이트·저장된 Build 결과·`SandboxVerification` → `PlanningRequestV2` 투영(`analysis`, `builds[]`, `sandbox`, `environment.mapping_ref`), 검증 후 대상·요구사항 변경 시 무효 처리, `run_suite` 사용 예시 문서
+- 포함: 저장된 `AnalysisReport`·`RequirementsV2` 바이트·Build 결과·`SandboxVerification`을 읽어 01의 `project_planning`으로 `PlanningRequestV2`를 만드는 Activity(투영 로직은 01 재사용, 새로 만들지 않음), `environment.mapping_ref`에 `EnvExceptions` 참조 연결, 검증 후 대상·요구사항 변경 시 무효 처리, `run_suite` 사용 예시 문서
 - 제외: Planning·Preview 구현과 대조 규칙(민서님), Production 테스트 실행 시점(D-10)
 
 ## 수용 기준
@@ -40,6 +40,7 @@ Blocked by: 14, D-02(저장 경계)
 
 ## 설계 변경 기록
 - 2026-11-04: 계약 협의안 v2 형식과 배포 후 테스트 시점 반영. v2 동기화로 투영 대상을 `PlanningRequestV2`·`prepare_plan_v2`로 확정.
+- 2026-11-04(전체 재검토): 투영 함수는 01에서 구현됨. 15는 저장소 연결과 무효 처리만 담당하도록 범위 조정.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

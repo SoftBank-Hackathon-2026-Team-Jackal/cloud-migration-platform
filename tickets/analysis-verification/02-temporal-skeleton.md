@@ -18,7 +18,7 @@ Blocked by: 01
 
 ## 수용 기준
 - [ ] 스캔 4종이 병렬로 실행되는 것이 이력에서 보인다.
-- [ ] 분석 결과로 01의 `AnalysisReport`·`Requirements` fixture가 반환된다.
+- [ ] 분석 결과로 01의 `AnalysisReport`·`RequirementsV2` fixture가 반환된다.
 - [ ] Workflow 코드에 외부 I/O·시각·난수가 없다(Temporal 샌드박스 통과).
 - [ ] 기존 승인 대기 스캐폴드 흐름이 깨지지 않는다.
 
@@ -36,6 +36,7 @@ Blocked by: 01
 
 ## 설계 변경 기록
 - 2026-11-04: 리뷰 피드백으로 기존 02를 분석 골격(02)과 Sandbox 자식 Workflow(02B)로 분할.
+- 2026-11-04(전체 재검토): 모델 이름을 `RequirementsV2`로 정정.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

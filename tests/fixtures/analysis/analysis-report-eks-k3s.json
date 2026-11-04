@@ -1,0 +1,50 @@
+{
+  "report": {
+    "migration_id": "migration-1",
+    "ref": {"id": "analysis", "version": "1"},
+    "base_commit": "abc123",
+    "commit_verified": true,
+    "usage_profile": {"usages": ["postgres advisory locks", "S3 object access"]},
+    "mapping": [
+      {
+        "id": "postgres-advisory-lock",
+        "capability": "postgres",
+        "usage": "advisory locks",
+        "grade": "PARTIAL",
+        "required_proposed": false,
+        "required_reason": "Optional scheduled task",
+        "required": false,
+        "disposition": "MIGRATE",
+        "loses": ["Scheduled task locking requires confirmation"],
+        "treatment": "APPROVAL",
+        "status": "EVIDENCE_CHECKED",
+        "evidence": [{"kind": "CODE", "locator": "app/tasks.py:12", "verified": true}]
+      },
+      {
+        "id": "s3-object-read",
+        "capability": "s3",
+        "usage": "read objects",
+        "grade": "DIRECT",
+        "required_proposed": true,
+        "required_reason": "Application reads existing objects",
+        "required": true,
+        "disposition": "KEEP",
+        "loses": [],
+        "treatment": "PROCEED",
+        "status": "UNVERIFIED",
+        "evidence": [{"kind": "CODE", "locator": "app/storage.py:20", "verified": false}]
+      }
+    ],
+    "precheck": {"findings": ["PostgreSQL 16 detected"]},
+    "external_entries": [{"protocol": "HTTPS", "port": 443, "target_resource_id": "app", "target_port": 8080, "source_service": "ALB"}],
+    "source_cidrs": ["10.0.0.0/16"],
+    "source_db_images": {},
+    "unmapped_items": [],
+    "unverified_risks": ["S3 access requires target credentials"]
+  },
+  "env_exceptions": {
+    "excluded": ["AWS_REGION"],
+    "replaced": {"PUBLIC_URL": "https://example.test"},
+    "missing": ["OPTIONAL_FEATURE"]
+  }
+}

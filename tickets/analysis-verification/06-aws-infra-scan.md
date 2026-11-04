@@ -17,12 +17,12 @@ Blocked by: 01, AWS 테스트 계정(외부)
 - 제외: 비밀 값 조회, S3 데이터 이벤트
 
 ## 수용 기준
-- [ ] api-main → postgres-main:5432가 `network_intent` 항목으로 나오고 `RequirementsV2` 검증을 통과한다.
-- [ ] 외부 진입(443 → api-main:8080, ALB·CloudFront 등 진입 서비스)과 원본 VPC CIDR이 `AnalysisReport`에 기록된다.
+- [ ] fixture의 앱 → DB 5432 통신이 `network_intent` 항목으로 나오고 `RequirementsV2` 검증을 통과한다.
+- [ ] 외부 진입(443 → 앱 8080, ALB·CloudFront 등 진입 서비스)과 원본 VPC CIDR이 `AnalysisReport`에 기록된다.
 - [ ] 대상 CIDR·Security Group ID 같은 환경 값이 intent에 들어가지 않는다.
 - [ ] 권한 거부는 재시도 없이 필요한 권한 이름과 함께 실패한다. 스로틀링만 재시도한다.
 - [ ] 비밀 값 조회 API를 호출하지 않는다(정책·코드 검사).
-- [ ] 실제 계정에서 스캔 소요 시간을 기록하고, 권한 목록을 민서님께 전달한다.
+- [ ] 실제 계정에서 스캔 소요 시간을 기록하고, 민서님께 넘길 권한 목록을 정리한다. 전달은 사용자가 한다.
 
 ## 테스트 전략
 - 제안 Test Seam: `botocore.stub.Stubber`로 고정 응답을 준 스캐너 결과 + 실제 계정 1회 실행 기록. 잡는 것: 변환 규칙·오류 분류. 못 잡는 것: 다른 계정 구성.
@@ -42,6 +42,7 @@ Blocked by: 01, AWS 테스트 계정(외부)
 
 ## 설계 변경 기록
 - 2026-11-04: v2 동기화로 intent 형식을 `RequirementsV2.network_intent`로 변경. 외부 진입 표현은 D-15.
+- 2026-11-04(전체 재검토): 특정 앱 이름을 일반 표현으로 바꾸고, 공유는 정리까지로 조정.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인
