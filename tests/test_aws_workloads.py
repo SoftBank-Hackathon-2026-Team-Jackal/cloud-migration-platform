@@ -785,3 +785,69 @@ def test_cli_release_lookup_uses_flags_valid_on_helm_3_and_4(tmp_path):
     assert "-a" not in listing  # removed in Helm 4
     assert {"--deployed", "--failed", "--pending"} <= set(listing)
     assert found == {"status": "pending-install", "chart": "postgres-0.1.0", "values": {}}
+
+
+async def _through_workflow(db, plan, activities):
+    import asyncio
+
+    from cmp_api.approval_delivery import TemporalApprovalDelivery
+    from cmp_contracts.queues import PROVISIONING_QUEUE, WORKFLOW_QUEUE, approval_workflow_id
+    from cmp_worker.activities.approval import ApprovalActivities
+    from cmp_worker.workflows.approval import ProvisioningApprovalWorkflow
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    approval = ApprovalActivities(db)
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(env.client, task_queue=WORKFLOW_QUEUE, workflows=[ProvisioningApprovalWorkflow]),
+        Worker(
+            env.client,
+            task_queue=PROVISIONING_QUEUE,
+            activities=[
+                approval.claim_approved_execution,
+                approval.complete_approved_execution,
+                activities.execute_aws_workloads,
+            ],
+        ),
+    ):
+        await TemporalApprovalDelivery(env.client).deliver(
+            approval_id=plan.approval_id, plan_id="plan-009", revision=1
+        )
+        handle = env.client.get_workflow_handle(approval_workflow_id("plan-009", 1))
+        return await asyncio.wait_for(handle.result(), timeout=30)
+
+
+def _marker(db, plan):
+    from cmp_api.approvals import PlanApproval, execution_refs, execution_status
+
+    with db() as session:
+        record = session.get(PlanApproval, plan.approval_id)
+        return execution_status(session, record), execution_refs(session, record)
+
+
+async def test_approval_workflow_dispatches_aws_workloads_and_records_refs(
+    tmp_path, db, cluster, runtime
+):
+    plan = Plan(tmp_path / "artifacts", db)
+    outcome = await _through_workflow(db, plan, activity_for(db, tmp_path / "artifacts", runtime))
+
+    assert (outcome["status"], outcome["code"]) == ("EXECUTED", "WORKLOADS_READY")
+    status, refs = _marker(db, plan)
+    assert status == "SUCCEEDED"
+    assert refs["app_external_endpoint"] == f"http://{ALB}"
+    password = cluster.secrets[(NAMESPACE, "cmp-demo-db-auth")]["password"]
+    assert password not in json.dumps(refs)
+
+
+async def test_approval_workflow_records_failed_readiness_without_ready(
+    tmp_path, db, cluster, runtime
+):
+    plan = Plan(tmp_path / "artifacts", db)
+    cluster.pvc_phase = "Pending"
+    outcome = await _through_workflow(db, plan, activity_for(db, tmp_path / "artifacts", runtime))
+
+    assert (outcome["status"], outcome["code"]) == ("FAILED", "PVC_NOT_BOUND")
+    status, refs = _marker(db, plan)
+    assert status == "FAILED"
+    assert "app_external_endpoint" not in refs

@@ -1,7 +1,7 @@
 # Ticket 09 — AWS EKS에 DB·앱 배포 및 연결 확인
 
 ## 상태
-DONE — [Issue #37](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/37); 08이 만든 실제 EKS `cmp-target-aws`에서 Activity 실검증 완료. 08 병합 후 승인 Workflow 연결 확인은 아래 미검증 항목
+DONE — [Issue #37](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/37); 08이 만든 실제 EKS `cmp-target-aws`에서 Activity 실검증, main(08 병합) 기준 승인 Workflow 연결 테스트 완료
 
 ## 목적
 준비된 EKS에 PostgreSQL과 앱을 배포하고 데이터 이전 전 준비 상태를 검증한다.
@@ -88,21 +88,21 @@ Worker 환경변수는 08과 같은 `PROVISIONING_ARTIFACT_ROOT`, `PROVISIONING_
 
 | 명령·환경 | 결과 |
 | --- | --- |
-| `uv run pytest tests/test_aws_workloads.py` (macOS, Python 3.11) | 37 passed, 1 skipped(08 스키마 필요한 DB resolver 테스트) |
-| `make check` | 340 passed, 1 skipped |
+| `uv run pytest tests/test_aws_workloads.py` (macOS, Python 3.11, main 08 병합 후) | 40 passed. 실제 `ProvisioningApprovalWorkflow` → claim → `execute_aws_workloads` → complete 경로 2건(READY 시 `EXECUTED/WORKLOADS_READY`·marker refs 기록, PVC Pending 시 `FAILED/PVC_NOT_BOUND`) 포함 |
+| `make check` (origin/main 병합 후) | 362 passed |
+| `make smoke-temporal` (로컬 compose Temporal) | `scaffold_complete` |
 | 임시 worktree에서 `feat/aws-infra-apply`(08) 병합 후 전체 `pytest` | 359 passed, skip 없음(DB resolver 테스트 통과). 충돌은 `tasks.md`와 Worker 등록 한 줄뿐 |
 | 실제 EKS `cmp-target-aws`(08, ap-northeast-2, 714066696240, Node 2 Ready), Namespace `cmp-demo-target`, 실제 `CliRuntime` | 1차: `FAILED/LB_CONTROLLER_NOT_READY`(Helm v4에 `helm list -a` 없음 → 상태 필터 플래그로 수정·회귀 테스트). 2차: `SUCCEEDED/WORKLOADS_READY`, 재실행도 `WORKLOADS_READY` |
 | 독립 확인(kubectl/helm/curl) | Helm Release 3개 모두 revision 1(재실행 시 재설치·업그레이드 없음), PVC `cmp-demo-db` Bound 10Gi `cmp-gp3`(ebs.csi.aws.com, gp3, Retain), DB·앱 Pod 1/1 Running, DB 인증 접속 PostgreSQL 16·복제 권한 true, 외부 `http://<ALB>/health` 200, LB Controller SA에 08 IRSA ARN, DB Secret은 키 이름만 확인·last-applied 주석 없음. 증거: [provisioning-09-eks.json](../../docs/verification/provisioning-09-eks.json) |
 | 소스 EKS `cmp-demo-source` 읽기 전용 조회 | 데모 env 이름·이미지 Digest·ALB 주석·LB Controller 3.6.2 확인. 변경 없음, Secret 값 미조회(키 이름만) |
 
-Chart 변경은 없어 `helm lint`/`helm template` 대상이 아니다(기존 렌더 테스트는 `make check`에 포함). HTTP 라우트 변경이 없어 `make openapi`는 해당 없음. Workflow 코드는 수정하지 않았고 승인 Workflow 연결 테스트는 08 병합 후 실행한다.
+Chart 변경은 없어 `helm lint`/`helm template` 대상이 아니다(기존 렌더 테스트는 `make check`에 포함). HTTP 라우트 변경이 없어 `make openapi`는 해당 없음. Workflow 코드는 수정하지 않았다. Worker 등록은 08의 claim/complete/`execute_aws_plan` 등록을 유지하고 한 줄을 추가했다.
 
 ### 미검증·차단
 
 - 승인 Workflow를 거친 실행이 아니다. 실검증은 임시 SQLite 업무 DB에 WORKLOADS Revision을 게시·승인하고 `ActivityEnvironment`로 실제 Activity를 호출했다. 클러스터 대상은 08 실행 refs를 같은 키로 전달했다.
 - 실제 실패 주입(이미지 Pull·PVC Pending·Secret 참조 오류)은 가짜 런타임 테스트로만 확인했다. 실제 클러스터에서는 첫 시도의 LB Controller 실패가 코드로만 보고되고 이후 단계가 실행되지 않은 것만 관찰했다.
 - 저장소 기준 Helm 3.17.3이 아니라 로컬 Helm v4.3.1로 검증했다. 상태 필터 플래그는 두 버전 모두 지원한다.
-- 08 병합 후 `ProvisioningApprovalWorkflow` → `execute_aws_workloads` Temporal 테스트·`make smoke-temporal`.
 - 사용자 `USER_SECRET`·`CONFIG_MAP`의 실제 생성 경로(업로드 `.env` 해석)는 Planning/업로드 통합 범위다. 09는 존재와 키만 확인한다.
 
 실검증 자원(클러스터·LB Controller·`cmp-gp3`·`cmp-demo-target`의 DB/앱/ALB)은 지시에 따라 삭제하지 않았다. 사용자 Secret `cmp-demo-secrets`는 검증용으로 새로 만든 무작위 토큰이며 원본 데모 토큰을 복사하지 않았다. ALB는 인터넷 공개 HTTP라 비용·노출이 남으므로 정리 시점은 사용자가 결정한다.
