@@ -2,7 +2,7 @@
 
 ## 상태
 
-IN_PROGRESS — [Issue #51](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/51); 착수 결정 N1~N8
+IN_REVIEW — [Issue #51](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/51); 착수 결정 N1~N8. 공통 모듈·K8s 실행기·Activity·시작 판정 구현과 격리 k3d 실검증 완료. Agent 작업 경로 연결(Provisioning 15 이후)과 실제 AWS↔온프레미스 경로 검증이 남아 DONE이 아니다.
 
 ## 목적
 
@@ -55,4 +55,28 @@ WireGuard 구축, CIDR/NAT/라우트/방화벽/MTU 자동 수정, CDC/slot/publi
 | N6 상한 | 전송량 기본 4 MiB·최대 64 MiB, 제한 시간 기본 60초·최대 600초, 검사 내부 재시도 없음. 같은 요청의 재실행은 안전(읽기 전용, 검사 Pod는 실행마다 새 이름으로 만들고 끝나면 삭제). | MNP-005 "유한한 상한" |
 | N7 비밀 | DB 인증은 대상 Namespace Secret의 이름·키 참조만 받는다. Pod에 `secretKeyRef`로만 주입하고 결과·로그·History에는 남기지 않는다. 결과 증거는 코드·IP·인터페이스·바이트 수·시간만. | MNP-001·수용 기준 3 |
 | N8 Test Seam | `run_network_preflight(request, executor)` + 가짜 실행기(관측값 주입)로 판정·차단·재사용 금지를 확인한다. K8s 실행기는 기록용 kubectl 러너로 매니페스트(Secret 참조·허용 이미지·명령 고정)를 검사한다. 통합: 격리 k3d에 원본 역할 PostgreSQL을 두고 정상·인증 실패·NetworkPolicy 차단(TCP)·대량 전송을 실제로 실행한다. 64 KiB 이후 끊김·비대칭 경로는 가짜 실행기로만 확인한다. Data Migration Workflow 연결은 Data Migration 담당 범위이므로 Activity와 시작 판정 함수까지 제공한다. | tasks.md "Data Migration 담당자가 시작 전 호출·차단 연결" |
+
+## 구현 (2026-11-05)
+
+- 계약 `cmp_contracts.network_preflight`: 요청(경로·Endpoint·TLS·Secret 참조·CIDR·기대 터널·실행 위치·상한), 실행기 관측값 `ProbeObservation`, 결과(검사별 상태·코드·작은 증거, 검사 시각·Endpoint·실행 위치·입력 Fingerprint). IPv4 CIDR은 정규화해 받는다.
+- 판정 `cmp_providers.network_preflight`: `check_cidr_overlap`(AWS↔온프레미스·터널 사이만 비교, 같은 역할 안의 포함 관계는 정상), `run_network_preflight`(CIDR 실패 시 현장 검사 생략, 실행 위치 접근 불가는 `UNKNOWN`, 필수 4개 검사가 모두 PASS일 때만 PASS), `may_start_data_migration`(PASS이면서 현재 요청 Fingerprint와 같을 때만 허용).
+- 실행기 `cmp_providers.network_preflight_k8s.KubernetesProbeExecutor`: 허용 목록·Digest 고정 이미지의 고정 스크립트 Pod 한 개(일반 Pod 네트워크, 비루트·읽기 전용 루트·권한 제거, 인증은 `secretKeyRef`) → DNS·TCP·TLS·인증·`SELECT 1`·`repeat()` 읽기 전송(제한 시간 내 수신 바이트 계산). 같은 노드에 고정한 읽기 전용 `hostNetwork` Pod가 `ip route get`으로 노드 경로(장치·게이트웨이·출발지)를 확인한다. 생성이 거부되면 라우트는 `UNKNOWN`. Pod는 실행마다 새 이름이며 끝나면 삭제한다.
+- Worker: Activity `run_network_preflight`(`migration-activities` queue, Heartbeat). 설정(`PREFLIGHT_KUBECONFIG`·`PREFLIGHT_CONTEXT`·`PREFLIGHT_PROBE_IMAGE`·`PREFLIGHT_ALLOWED_IMAGES`)이 없으면 `UNKNOWN`/`PROBE_LOCATION_UNAVAILABLE`로 끝나 PASS가 되지 않는다.
+- MTU/DF 보조 진단은 기본 이미지(busybox `ping`에 DF 옵션 없음)에서 실행하지 않고 `NOT_ATTEMPTED`로 남긴다. 판정에는 쓰지 않는다(수용 기준 3과 일치).
+
+## 검증 기록 (2026-11-05)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `uv run pytest tests/test_network_preflight.py tests/test_network_preflight_k8s.py` | 39개 통과. CIDR 충돌·입력 누락, 라우트 4종(미확인·없음·예상 밖 경로·허용 밖 목적지), 공개 인터넷 우회 FAIL, DB 단계 5종 구분, 64 KiB 이후 끊김·짧은 수신·시간 초과, ICMP만 막힘은 통과, 실행 위치 불가, CIDR 실패 시 현장 검사 생략, 경로·Endpoint·TLS·터널·위치 변경 시 이전 PASS 재사용 거절, 결과에 비밀값 없음, 상한, K8s 매니페스트(고정 스크립트·`secretKeyRef`·허용 이미지·`hostNetwork` 라우트 Pod·정리), Activity·미설정 Worker |
+| `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` | Ruff·전체 634개 통과 |
+| 격리 k3d `cmp-preflight`(K3s v1.36.4, ARM64) + 원본 역할 PostgreSQL 16, 실제 `KubernetesProbeExecutor` | 정상 4 MiB PASS(0.08초)·32 MiB PASS(0.92초), 시작 판정 허용 → 포트 변경 시 `PREFLIGHT_INPUT_CHANGED`로 거절. 잘못된 비밀번호 `AUTH_FAILED`, TLS 필수인데 서버 미지원 `TLS_FAILED`, 없는 이름 `DNS_FAILED`(라우트 `ROUTE_UNVERIFIED`), NetworkPolicy 수신 차단 `TCP_UNREACHABLE`, 기대 터널 `wg0`인데 실제 `eth0` → `UNEXPECTED_PATH`, CIDR 중복 → 현장 검사 생략. 검사 Pod 잔존 0, 결과에 비밀번호 없음. 증거: [mnp-01-k3d.json](../../docs/verification/mnp-01-k3d.json). 정리: k3d 클러스터 삭제, 기본 kubeconfig 해시 동일 |
+
+### 미검증·남은 작업
+
+- **Agent 작업 경로(N3):** 실행기를 온프레미스 Agent의 허용 작업 유형으로 연결하고(작업 ID를 `migration_id`·입력 Fingerprint에 묶어 중복 실행·응답 유실 뒤 재조회) Agent가 실행하도록 하는 부분은 Provisioning 15(같은 Agent 파일 작업 중)가 병합된 뒤 진행한다. 현재는 Worker가 명시적 kubeconfig로 실행기를 직접 호출한다.
+- **실제 AWS↔온프레미스 경로:** WireGuard·원본 DB 사설 Endpoint가 아직 없어 실제 경로에서 검사하지 않았다. k3d에서는 Service CIDR을 원본 쪽으로 대신 썼고 터널 인터페이스 확인은 "예상 밖 경로" 실패만 확인했다.
+- 64 KiB 이후 끊김·비대칭 경로는 가짜 실행기로만 확인했다. `verify-full` TLS(`sslrootcert=system`)는 실제 인증서 서버에서 확인하지 않았다.
+- Data Migration Workflow에서 시작 전에 Activity를 호출하고 `may_start_data_migration`으로 막는 연결은 Data Migration 담당 범위다(tasks.md). 공통 모듈은 Activity와 판정 함수까지 제공한다.
+- 검사 성공은 복제 권한·publication/subscription/slot·CDC 중 WAL 안정성을 보증하지 않는다.
 

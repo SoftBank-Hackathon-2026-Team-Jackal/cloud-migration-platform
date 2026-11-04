@@ -1,0 +1,302 @@
+{
+ "ticket": "MNP-01",
+ "issue": 51,
+ "date": "2026-11-05",
+ "environment": {
+  "cluster": "isolated k3d cmp-preflight (K3s v1.36.4, ARM64), dedicated kubeconfig",
+  "source_db": "PostgreSQL 16 (postgres:16-alpine digest) in namespace source-db, ClusterIP Service",
+  "probe_namespace": "cmp-migration",
+  "probe_image": "postgres@sha256:0cefaabd...31ab (allowlisted)",
+  "note": "Service CIDR 10.43.0.0/16 stands in for the AWS side; no WireGuard in k3d"
+ },
+ "scenarios": {
+  "pass_4mib": {
+   "status": "PASS",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "PASS",
+     null
+    ],
+    "probe_large_transfer": [
+     "PASS",
+     null
+    ]
+   },
+   "evidence": {
+    "check_route": {
+     "resolved_ip": "10.43.173.102",
+     "dev": "eth0",
+     "via": "172.26.0.1",
+     "src": "172.26.0.3"
+    },
+    "probe_db_path": {
+     "resolved_ip": "10.43.173.102"
+    },
+    "probe_large_transfer": {
+     "bytes_expected": 4194304,
+     "bytes_received": 4194304,
+     "seconds": 0.08,
+     "stopped_after_64kib": false,
+     "mtu": "NOT_ATTEMPTED"
+    }
+   },
+   "gate": [
+    true,
+    []
+   ]
+  },
+  "gate_after_host_change": [
+   false,
+   [
+    "PREFLIGHT_INPUT_CHANGED"
+   ]
+  ],
+  "auth_failed": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "FAIL",
+     "AUTH_FAILED"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NOT_RUN"
+    ]
+   },
+   "evidence": {
+    "check_route": {
+     "resolved_ip": "10.43.173.102",
+     "dev": "eth0",
+     "via": "172.26.0.1",
+     "src": "172.26.0.3"
+    },
+    "probe_large_transfer": {
+     "mtu": "NOT_ATTEMPTED"
+    }
+   }
+  },
+  "tls_required_on_plain_server": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "FAIL",
+     "TLS_FAILED"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NOT_RUN"
+    ]
+   },
+   "evidence": {
+    "check_route": {
+     "resolved_ip": "10.43.173.102",
+     "dev": "eth0",
+     "via": "172.26.0.1",
+     "src": "172.26.0.3"
+    },
+    "probe_large_transfer": {
+     "mtu": "NOT_ATTEMPTED"
+    }
+   }
+  },
+  "dns_failed": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "UNKNOWN",
+     "ROUTE_UNVERIFIED"
+    ],
+    "probe_db_path": [
+     "FAIL",
+     "DNS_FAILED"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NOT_RUN"
+    ]
+   },
+   "evidence": {
+    "check_route": {
+     "resolved_ip": null
+    },
+    "probe_large_transfer": {
+     "mtu": "NOT_ATTEMPTED"
+    }
+   }
+  },
+  "unexpected_path_expected_wg0": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "FAIL",
+     "UNEXPECTED_PATH"
+    ],
+    "probe_db_path": [
+     "PASS",
+     null
+    ],
+    "probe_large_transfer": [
+     "PASS",
+     null
+    ]
+   },
+   "evidence": {
+    "check_route": {
+     "resolved_ip": "10.43.173.102",
+     "dev": "eth0",
+     "via": "172.26.0.1",
+     "src": "172.26.0.3"
+    },
+    "probe_db_path": {
+     "resolved_ip": "10.43.173.102"
+    },
+    "probe_large_transfer": {
+     "bytes_expected": 4194304,
+     "bytes_received": 4194304,
+     "seconds": 0.05,
+     "stopped_after_64kib": false,
+     "mtu": "NOT_ATTEMPTED"
+    }
+   }
+  },
+  "cidr_overlap_static": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "FAIL",
+     "CIDR_OVERLAP"
+    ],
+    "check_route": [
+     "UNKNOWN",
+     "NOT_RUN_AFTER_STATIC_FAILURE"
+    ],
+    "probe_db_path": [
+     "UNKNOWN",
+     "NOT_RUN_AFTER_STATIC_FAILURE"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NOT_RUN_AFTER_STATIC_FAILURE"
+    ]
+   },
+   "evidence": {
+    "check_cidr_overlap": {
+     "conflicts": [
+      {
+       "a": "10.42.0.0/16",
+       "a_role": "onprem_routed",
+       "b": "10.42.5.0/24",
+       "b_role": "tunnel"
+      }
+     ]
+    }
+   }
+  },
+  "tcp_blocked_by_networkpolicy": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "FAIL",
+     "TCP_UNREACHABLE"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NOT_RUN"
+    ]
+   },
+   "evidence": {
+    "check_route": {
+     "resolved_ip": "10.43.173.102",
+     "dev": "eth0",
+     "via": "172.26.0.1",
+     "src": "172.26.0.3"
+    },
+    "probe_large_transfer": {
+     "mtu": "NOT_ATTEMPTED"
+    }
+   }
+  },
+  "pass_32mib_after_policy_removed": {
+   "status": "PASS",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "PASS",
+     null
+    ],
+    "probe_large_transfer": [
+     "PASS",
+     null
+    ]
+   },
+   "evidence": {
+    "check_route": {
+     "resolved_ip": "10.43.173.102",
+     "dev": "eth0",
+     "via": "172.26.0.1",
+     "src": "172.26.0.3"
+    },
+    "probe_db_path": {
+     "resolved_ip": "10.43.173.102"
+    },
+    "probe_large_transfer": {
+     "bytes_expected": 33554432,
+     "bytes_received": 33554432,
+     "seconds": 0.92,
+     "stopped_after_64kib": false,
+     "mtu": "NOT_ATTEMPTED"
+    }
+   }
+  },
+  "leftover_probe_pods": [],
+  "secret_value_absent_from_results": true
+ },
+ "node": "k3d-cmp-preflight-server-0"
+}
