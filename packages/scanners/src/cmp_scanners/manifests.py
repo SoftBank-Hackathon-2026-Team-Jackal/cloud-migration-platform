@@ -28,6 +28,8 @@ _KNOWN_ANNOTATION_PREFIXES = (
     "volume.beta.kubernetes.io/",
 )
 _EBS_PROVISIONERS = {"ebs.csi.aws.com", "kubernetes.io/aws-ebs"}
+# Non-secret literals worth keeping: they identify the database; everything else is dropped.
+_ENV_LITERAL_KEYS = {"POSTGRES_DB", "POSTGRES_USER", "PGDATABASE", "PGUSER"}
 
 
 class ManifestScanError(Exception):
@@ -53,6 +55,7 @@ class ContainerInfo(_Model):
     readiness_probe: str | None
     liveness_probe: str | None
     evidence: str
+    env_literals: dict[str, str] = {}
 
 
 class Workload(_Model):
@@ -92,6 +95,13 @@ class SecretInfo(_Model):
     evidence: str
 
 
+class VolumeClaim(_Model):
+    name: str
+    storage: str | None
+    storage_class: str | None
+    evidence: str
+
+
 class Reference(_Model):
     source: str
     kind: Literal["ConfigMap", "Secret", "PVC"]
@@ -110,6 +120,7 @@ class ManifestScan(_Model):
     unconvertible: list[Unconvertible]
     secrets: list[SecretInfo]
     references: list[Reference]
+    volume_claims: list[VolumeClaim]
     unparsed: list[Unparsed]
 
 
@@ -174,6 +185,11 @@ def _scan_workload(doc, rel, resource, evidence, out) -> None:
             readiness_probe=_probe(c.get("readinessProbe")),
             liveness_probe=_probe(c.get("livenessProbe")),
             evidence=f"{pod_evidence}/containers/{index}",
+            env_literals={
+                e["name"]: str(e["value"])
+                for e in c.get("env") or []
+                if e.get("name") in _ENV_LITERAL_KEYS and "value" in e
+            },
         )
         containers.append(info)
         if index > 0:
@@ -203,6 +219,10 @@ def _scan_workload(doc, rel, resource, evidence, out) -> None:
             )
         )
     _references(resource, pod, out)
+    for index, template in enumerate((doc.get("spec") or {}).get("volumeClaimTemplates") or []):
+        claim_name = (template.get("metadata") or {}).get("name", "")
+        _add_claim(template, claim_name, f"{evidence}/spec/volumeClaimTemplates/{index}", out)
+        out["references"].append(Reference(source=resource, kind="PVC", name=claim_name))
     meta = doc.get("metadata") or {}
     replicas = _dig(doc, ("spec",)).get("replicas")
     out["workloads"].append(
@@ -212,6 +232,19 @@ def _scan_workload(doc, rel, resource, evidence, out) -> None:
             namespace=meta.get("namespace"),
             replicas=replicas if isinstance(replicas, int) else None,
             containers=containers,
+            evidence=evidence,
+        )
+    )
+
+
+def _add_claim(doc: dict[str, Any], name: str, evidence: str, out) -> None:
+    spec = doc.get("spec") or {}
+    storage = ((spec.get("resources") or {}).get("requests") or {}).get("storage")
+    out["volume_claims"].append(
+        VolumeClaim(
+            name=name,
+            storage=str(storage) if storage is not None else None,
+            storage_class=spec.get("storageClassName"),
             evidence=evidence,
         )
     )
@@ -309,6 +342,8 @@ def _scan_document(doc: dict[str, Any], rel: str, out) -> None:
                 kind="EBS_STORAGE_CLASS", resource=resource, evidence=f"{evidence}/provisioner"
             )
         )
+    if kind == "PersistentVolumeClaim":
+        _add_claim(doc, meta.get("name", ""), evidence, out)
     if kind == "Secret":
         keys = sorted({*(doc.get("data") or {}), *(doc.get("stringData") or {})})
         out["secrets"].append(
@@ -328,7 +363,7 @@ def scan_manifests(path: Path | str) -> ManifestScan:
         k: []
         for k in (
             "workloads", "cloud_dependencies", "postgres_images",
-            "unconvertible", "secrets", "references", "unparsed",
+            "unconvertible", "secrets", "references", "volume_claims", "unparsed",
         )
     }  # fmt: skip
     for file, rel in _files(Path(path)):

@@ -9,8 +9,8 @@
 | [02 분석 Activity 골격](../../tickets/analysis-verification/02-temporal-skeleton.md) | DONE (PR #46 병합) | 01 | AV-001, AV-021 | #44 | ☑ |
 | [02B Sandbox 자식 Workflow 골격](../../tickets/analysis-verification/02b-sandbox-workflow.md) | DONE (PR #46 병합) | 02, Q-01 | AV-014, AV-015, AV-016, AV-021 | #45 | ☑ |
 | [03 소스 확보·운영 커밋 고정·마스킹](../../tickets/analysis-verification/03-source-fetch.md) | DONE (main 반영) | 01 | AV-002, AV-020 | #48 | ☑ |
-| [04 매니페스트·클러스터 리소스 스캔](../../tickets/analysis-verification/04-manifest-scan.md) | IN_PROGRESS | 01 | AV-004 | #50 | ☐ |
-| [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | IN_PROGRESS | 03, D-07(언어별 어댑터만) | AV-003 | #57 | ☐ |
+| [04 매니페스트·클러스터 리소스 스캔](../../tickets/analysis-verification/04-manifest-scan.md) | DONE (PR #54 병합) | 01 | AV-004 | #50 | ☑ |
+| [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DONE (PR #58 병합) | 03, D-07(언어별 어댑터만) | AV-003 | #57 | ☑ |
 | [06 AWS 인프라·네트워크 스캔과 통신 의도](../../tickets/analysis-verification/06-aws-infra-scan.md) | DRAFT | 01, AWS 테스트 계정(외부) | AV-005, AV-020 | 미생성 | ☐ |
 | [07 요구사항·사용 프로필·사전 점검 조립](../../tickets/analysis-verification/07-profile-precheck.md) | DRAFT | 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시) | AV-006, AV-017 | 미생성 | ☐ |
 | [08A 에이전트 실행 기반과 Skill 형식](../../tickets/analysis-verification/08a-agent-runtime.md) | DRAFT | 01 | AV-007, AV-020 | 미생성 | ☐ |
@@ -72,6 +72,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: 04(PR #54, Issue #50)와 05(PR #58, Issue #57, Go 어댑터 포함) 완료. 둘 다 fixture 기준 검증이며 실제 EKS 매니페스트·실제 Helm 렌더는 검증하지 못함.
 - 2026-11-05: 공개 GitHub 소스 선택을 기존 분석 입력에 연결하는 Ticket 18/Issue #60 등록. 구현 방식은 분석 담당자와 조율 후 확정한다.
 - 2026-11-05: D-07 결정: 첫 사이클 지원 언어는 Go. 05의 언어 어댑터를 Go로 구현한다(데모 앱 저장소 `demo-app`은 Go 1.24, 의존성은 pgx).
 - 2026-11-05: 03 완료(Issue #48). 브랜치 upstream 설정 때문에 PR 없이 main에 직접 반영됐으며 push CI는 통과.
