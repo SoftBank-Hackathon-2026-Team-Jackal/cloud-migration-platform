@@ -22,7 +22,7 @@ SECRET_LOOKING_STDERR = b"Error: something failed token=abc123SECRET"
 def spec(**override):
     data = {
         "migration_id": "migration-001",
-        "plan": {"plan_id": "plan-aws", "revision": 1, "template_version": "v1"},
+        "plan": {"plan_id": "plan-aws", "revision": 1, "template_version": "aws-eks-v2"},
         "environment_id": "target-aws",
         "account_id": ACCOUNT,
         "region": "ap-northeast-2",
@@ -65,7 +65,7 @@ def artifacts(tmp_path, request=None, *, state_ref=None, plan_bytes=PLAN_BYTES):
         contract_version="1",
         digest_format="cmp-json-v1",
         migration_id=request.migration_id,
-        plan=PlanRef(plan_id="plan-aws", revision=1, template_version="v1"),
+        plan=PlanRef(plan_id="plan-aws", revision=1, template_version="aws-eks-v2"),
         target=CloudIdentity(
             provider="AWS",
             environment_id=request.environment_id,

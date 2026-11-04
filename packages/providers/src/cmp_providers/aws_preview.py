@@ -108,7 +108,7 @@ def validate_aws_input(request: AwsPlanInput) -> None:
     vpc = _network(request.vpc_cidr, "vpc_cidr")
     if not 16 <= vpc.prefixlen <= 24:
         _reject("INVALID_TOPOLOGY", "vpc_cidr", "VPC CIDR는 /16에서 /24 사이여야 합니다.")
-    if request.plan.template_version != "aws-eks-v1":
+    if request.plan.template_version != "aws-eks-v2":
         _reject(
             "UNSUPPORTED_TEMPLATE", "plan.template_version", "지원하지 않는 AWS 템플릿 버전입니다."
         )
