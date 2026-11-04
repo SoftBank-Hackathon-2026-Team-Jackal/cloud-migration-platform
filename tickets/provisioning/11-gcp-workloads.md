@@ -89,3 +89,5 @@ Chart 변경은 없다. 원본 Chart의 `helm lint`는 스키마가 승인 Value
 - 사용자 `CONFIG_MAP`(`cmp-demo-config`: 소스 `demo-api-config`의 비밀이 아닌 `APP_PORT`·`S3_ENABLED` 값)과 `USER_SECRET`(`cmp-demo-secrets`: 새 무작위 `DEMO_WRITE_TOKEN`)은 검증용으로 미리 만들었다. 실제 생성 경로는 Planning/업로드 통합 범위다.
 
 실검증 자원(`cmp-pd-balanced`, PD 10Gi, `cmp-demo-target`의 DB/앱, GCE 외부 HTTP LB `34.102.136.6`)은 삭제하지 않았다. 인터넷 공개 HTTP라 비용·노출이 남으므로 정리 시점은 사용자가 결정한다.
+
+> 2026-11-05 정리: 이 티켓에서 만든 검증 자원은 사용자 결정으로 삭제했다. 상세는 [티켓 14 검증 자원 정리](14-recovery-integration.md#검증-자원-정리-2026-11-05-사용자-결정).

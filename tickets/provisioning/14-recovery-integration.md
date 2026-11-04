@@ -83,5 +83,18 @@ Blocked by: 08, 09, 10, 11, 12, 13
 - GKE r1은 Activity가 유실돼 refs가 보고되지 않아 `partial_resources`가 비어 있다. 실제 생성 자원(DB Release)은 다음 Revision의 Release 조회로 확인됐다.
 - `make smoke-temporal`(로컬 Docker Temporal 서버)은 이번에도 실행하지 않았다. Workflow 변경은 Temporal 테스트 환경에서 확인했다.
 - 상위 `MigrationWorkflow`, 실제 데이터·트래픽 롤백은 범위 밖이다.
-- 검증 자원은 F6에 따라 삭제하지 않았다: EKS `cmp-target-aws`(VPC·NAT·노드 2개·ALB), GKE `cmp-recovery-test` Namespace(DB·앱·외부 LB). 비용이 발생하므로 정리 시점은 사용자가 결정한다. 로컬 k3d 클러스터·Registry는 삭제했다.
+- 검증 자원은 F6에 따라 자동 삭제하지 않았고, 아래 "검증 자원 정리"처럼 사용자 결정으로 정리했다. 로컬 k3d 클러스터·Registry는 검증 직후 삭제했다.
+
+## 검증 자원 정리 (2026-11-05, 사용자 결정)
+
+사용자 지시: "원본 소스는 지우지 말고, 지난 티켓 검증을 위해 만든 자원은 모두 삭제". 원본 `cmp-demo-source`(EKS·ALB·EIP·ECR 이미지), 중앙 S3 State 버킷, 다른 팀 자원(`sbh26-cdc-poc*`), AWS 기본 VPC는 유지했다.
+
+| 대상 | 방법 | 결과 |
+| --- | --- | --- |
+| EKS `cmp-demo-target` 워크로드 | Ingress 삭제(LB Controller가 ALB·Target Group 제거) → Helm uninstall → Namespace·PV 삭제 → Retain EBS `vol-08c9…` 삭제 | ALB·Target Group·EBS 0 |
+| EKS 인프라(10.40.0.0/16) | 08 템플릿·같은 변수·S3 State로 `terraform plan -destroy`(33개 삭제만, 대상 `cmp-target-aws`·`vpc-0320…` 확인) → Apply | `33 destroyed`, State 자원 0, EKS는 `cmp-demo-source`만, IAM `cmp-target*` 역할·클러스터 OIDC 제거 |
+| GKE `cmp-demo-target`·`cmp-recovery-test` | Ingress 삭제(GCE LB·NEG·방화벽 제거) → Helm uninstall → Namespace·PV 삭제 → Retain PD 2개 삭제 | forwarding rule·proxy·URL map·backend·NEG·`pvc-*` 디스크 0 |
+| GKE 인프라 | 검토된 Plan으로 `deletion_protection` true→false만 변경(1 change) → `plan -destroy`(7개 삭제만, 전부 `cmp-target-gke-*`) → Apply | `7 destroyed`, State 자원 0, 클러스터·VPC·Router·NAT·NAT IP 없음 |
+| 이전 티켓 잔존물 점검 | 미부착 EBS, ELB·Target Group, EIP, 스냅샷, IAM, GCP 디스크·주소·방화벽 조회 | 잔존물 없음. 남은 ALB·EIP 2개는 원본 `demo-source` ALB 소유 |
+| GKE 노드 SA `cmp-gke-nodes` | 삭제 시도 | 자동 승인 검토에서 비가역 삭제로 거부돼 **미삭제**. 사용자가 직접 삭제 필요 |
 
