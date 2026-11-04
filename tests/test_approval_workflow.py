@@ -1,4 +1,4 @@
-"""Ticket 07 seam: real ProvisioningApprovalWorkflow + DB re-check Activity + fake executor."""
+"""Ticket 07/08 seam: real ProvisioningApprovalWorkflow + DB claim/complete + fake provider Activities."""
 
 import asyncio
 from pathlib import Path
@@ -8,6 +8,7 @@ from cmp_api.approval_delivery import TemporalApprovalDelivery
 from cmp_api.approvals import (
     PlanRevision,
     authenticate_approver,
+    execution_refs,
     execution_status,
     publish_plan_revision,
     record_decision,
@@ -27,17 +28,19 @@ from cmp_worker.activities.approval import ApprovalActivities
 from cmp_worker.workflows.approval import ProvisioningApprovalWorkflow
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 FIXTURES = Path(__file__).parent / "fixtures/contracts"
 
 
-def manifest(revision=1):
+def manifest(revision=1, scope="INFRASTRUCTURE"):
     data = PlanManifest.model_validate_json((FIXTURES / "aws-plan.json").read_text()).model_dump(
         mode="json"
     )
     data["plan"]["revision"] = revision
+    data["scope"] = scope
     return PlanManifest.model_validate(data)
 
 
@@ -49,12 +52,35 @@ def preview(plan):
     )
 
 
-class FakeExecutor:
-    def __init__(self):
-        self.calls = []
+class FakeProvider:
+    """Stands in for the real provider Activities; records what reached the execution boundary."""
 
-    def __call__(self, request):
-        self.calls.append(request)
+    def __init__(self):
+        self.calls = []  # requests that reached execute_aws_plan
+        self.steps = []
+        self.outcome = {
+            "status": "SUCCEEDED",
+            "code": "APPLIED",
+            "resource_refs": {"eks_cluster": "cmp-test"},
+        }
+        self.raise_error = False
+
+    def activities(self):
+        @activity.defn(name="execute_aws_plan")
+        async def infra(request: dict) -> dict:
+            self.calls.append(request)
+            self.steps.append("execute_aws_plan")
+            if self.raise_error:
+                raise RuntimeError("worker lost during apply")
+            return self.outcome
+
+        @activity.defn(name="execute_aws_workloads")
+        async def workloads(request: dict) -> dict:
+            self.steps.append("execute_aws_workloads")
+            self.workloads_request = request
+            return {"status": "SUCCEEDED", "code": "DEPLOYED", "resource_refs": {"app": "demo"}}
+
+        return [infra, workloads]
 
 
 @pytest.fixture
@@ -67,26 +93,30 @@ def db(tmp_path):
 
 @pytest.fixture
 def executor():
-    return FakeExecutor()
+    return FakeProvider()
 
 
 @pytest.fixture
 async def temporal(db, executor):
-    activities = ApprovalActivities(db, executor)
+    activities = ApprovalActivities(db)
     async with (
         await WorkflowEnvironment.start_time_skipping() as env,
         Worker(env.client, task_queue=WORKFLOW_QUEUE, workflows=[ProvisioningApprovalWorkflow]),
         Worker(
             env.client,
             task_queue=PROVISIONING_QUEUE,
-            activities=[activities.execute_approved_plan],
+            activities=[
+                activities.claim_approved_execution,
+                activities.complete_approved_execution,
+                *executor.activities(),
+            ],
         ),
     ):
         yield env.client
 
 
-def decide(db, decision="APPROVE", revision=1):
-    plan = manifest(revision)
+def decide(db, decision="APPROVE", revision=1, scope="INFRASTRUCTURE"):
+    plan = manifest(revision, scope)
     display = preview(plan)
     with db() as s:
         publish_plan_revision(s, plan, display)
@@ -140,7 +170,9 @@ async def test_duplicate_and_late_deliveries_execute_exactly_once(temporal, db, 
     with db() as s:
         from cmp_api.approvals import PlanApproval
 
-        assert execution_status(s, s.get(PlanApproval, approval_id)) == "SUCCEEDED"
+        record = s.get(PlanApproval, approval_id)
+        assert execution_status(s, record) == "SUCCEEDED"
+        assert execution_refs(s, record) == {"eks_cluster": "cmp-test"}
     assert await delivery.workflow_state(plan_id="plan-001", revision=1) == "EXECUTED"
 
 
@@ -206,6 +238,48 @@ async def test_recorded_but_undelivered_approval_does_not_execute_until_redelive
     await delivery.deliver(approval_id=approval_id, plan_id="plan-001", revision=1)
     assert (await result(temporal))["status"] == "EXECUTED"
     assert len(executor.calls) == 1
+
+
+async def test_full_scope_runs_infrastructure_then_workloads(temporal, db, executor):
+    approval_id = decide(db, scope="FULL")
+    await TemporalApprovalDelivery(temporal).deliver(
+        approval_id=approval_id, plan_id="plan-001", revision=1
+    )
+    outcome = await result(temporal)
+    assert outcome["status"] == "EXECUTED"
+    assert executor.steps == ["execute_aws_plan", "execute_aws_workloads"]
+    assert executor.workloads_request["resource_refs"] == {"eks_cluster": "cmp-test"}
+
+
+async def test_provider_failure_is_recorded_and_stops_later_steps(temporal, db, executor):
+    executor.outcome = {"status": "FAILED", "code": "TERRAFORM_APPLY_FAILED", "resource_refs": {}}
+    approval_id = decide(db, scope="FULL")
+    await TemporalApprovalDelivery(temporal).deliver(
+        approval_id=approval_id, plan_id="plan-001", revision=1
+    )
+    outcome = await result(temporal)
+    assert (outcome["status"], outcome["code"]) == ("FAILED", "TERRAFORM_APPLY_FAILED")
+    assert executor.steps == ["execute_aws_plan"]
+    with db() as s:
+        from cmp_api.approvals import PlanApproval
+
+        assert execution_status(s, s.get(PlanApproval, approval_id)) == "FAILED"
+
+
+async def test_lost_provider_activity_is_unknown_and_never_retried(temporal, db, executor):
+    executor.raise_error = True
+    approval_id = decide(db)
+    delivery = TemporalApprovalDelivery(temporal)
+    await delivery.deliver(approval_id=approval_id, plan_id="plan-001", revision=1)
+    outcome = await result(temporal)
+    assert (outcome["status"], outcome["code"]) == ("UNKNOWN", "PROVIDER_ACTIVITY_LOST")
+    assert len(executor.calls) == 1
+    await delivery.deliver(approval_id=approval_id, plan_id="plan-001", revision=1)
+    assert len(executor.calls) == 1
+    with db() as s:
+        from cmp_api.approvals import PlanApproval
+
+        assert execution_status(s, s.get(PlanApproval, approval_id)) == "UNKNOWN"
 
 
 def test_alembic_migration_matches_approval_models(tmp_path, monkeypatch):

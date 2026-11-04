@@ -76,7 +76,7 @@ class ApprovalResponse(Request):
     scope: Scope
     delivery_status: Literal["PENDING", "DELIVERED", "FAILED"]
     delivery_attempts: int
-    execution_status: Literal["NOT_STARTED", "RUNNING", "SUCCEEDED", "FAILED"]
+    execution_status: Literal["NOT_STARTED", "RUNNING", "SUCCEEDED", "FAILED", "UNKNOWN"]
     workflow_state: str
 
 

@@ -28,3 +28,19 @@ cd infra/terraform/aws
 terraform init -backend=false -input=false -lockfile=readonly
 terraform validate -no-color
 ```
+
+## 승인된 Plan Apply (티켓 08)
+
+`aws-eks-v2`부터 템플릿에 IAM OIDC Provider, EBS CSI 관리형 Add-on과 IRSA 역할, AWS Load Balancer Controller IRSA 역할·정책(공식 v3.6.2 `iam_policy.json`을 `controllers.tf`에 포함)과 비밀이 아닌 Output을 둔다. Controller Helm 설치, StorageClass, Ingress는 티켓 09에서 한다.
+
+Apply는 07 승인 게이트를 통과한 Plan만 대상으로 한다. `claim_approved_execution` 이후 `execute_aws_plan` Activity(`cmp_providers.aws_apply.apply_aws_infrastructure`)가 다음을 처리한다.
+
+- `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/`의 `spec.json`·`saved.tfplan`을 manifest의 ArtifactRef(SHA-256·크기)와 대조한다.
+- Spec의 계정·리전·State 식별·key(`cmp/<environment_id>/terraform.tfstate`)를 manifest와 비교한다.
+- 로컬 검증 Plan(`state_bucket` 없음)은 거절한다.
+- `evidence.json`의 템플릿·lockfile 지문을 현재 템플릿과 비교한다.
+- STS 계정을 확인한다.
+
+모두 통과하면 보호된 임시 작업 공간에서 S3 Backend로 `init`하고 **저장된 Plan만** `apply`한다. 재Plan·destroy·자동 재시도는 없다. 실패하면 State 자원 수만 기록한다. Plan이 stale이거나 실행이 중단되면 `UNKNOWN`으로 남기고 실제 상태 확인을 요구한다. 결과에는 비밀이 아닌 Output과 EKS 클러스터·Node Group 상태만 남기며 Terraform 출력 원문은 남기지 않는다.
+
+Worker 설정은 `PROVISIONING_ARTIFACT_ROOT`, `PROVISIONING_AWS_PROFILE`(예: `cmp-aws-prod`), `TERRAFORM_BIN`이다. EKS는 Terraform 실행 주체에게 기본으로 클러스터 관리자 권한을 부여한다. 09는 같은 프로필로 클러스터에 접근한다.

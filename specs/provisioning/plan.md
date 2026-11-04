@@ -196,6 +196,10 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 [07 착수 결정 D1~D6](../../tickets/provisioning/07-approval-gate.md#착수-결정-2026-11-04)을 구현했다. 업무 DB `provisioning_plan_revisions`(불변·증가 Revision, 최대값이 활성), `provisioning_approvers`(자격 증명 digest·허용 migration), `provisioning_approvals`(Revision당 결정 1건·전달 상태), `provisioning_executions`(`plan_id`·`revision`·`step` 고유 실행 표식)를 Alembic `20261104_01`로 만든다. API는 `cmp_api.routes.approvals`, 저장·재검증은 `cmp_api.approvals`, 전달은 Signal-With-Start(`cmp_api.approval_delivery`)다. `ProvisioningApprovalWorkflow`(`migration` queue)는 `approval_id`만 받고 `execute_approved_plan` Activity(`provisioning` queue)가 실행 직전 DB 승인·최신 Revision·`verify_approval_target`을 다시 확인한다. 기본 executor는 표식만 남기는 no-op이며 Terraform·Helm·Agent는 08/10/12에서 연결한다. 실행 표식이 이미 있으면(RUNNING/FAILED 포함) executor를 재호출하지 않으며, 실제 상태 조회 후 재개는 후속 실행 티켓 범위다.
 
+### 08 실행 분기 (#2)
+
+07의 단일 실행 Activity를 `claim_approved_execution`(DB 재검증·RUNNING 표식) → Provider Activity(장시간·Heartbeat·재시도 없음) → `complete_approved_execution`(SUCCEEDED/FAILED/UNKNOWN·참조 기록)으로 나눴다. 분기는 `cmp_contracts.execution.execution_steps`가 정한다: (AWS, INFRASTRUCTURE)→`execute_aws_plan`, (AWS, WORKLOADS)→`execute_aws_workloads`(09), (AWS, FULL)→둘 다 순서대로, ON_PREM→`execute_on_prem_plan`(12). Provider Activity가 사라지면(Worker 종료·Heartbeat 만료) Workflow는 `UNKNOWN`/`PROVIDER_ACTIVITY_LOST`를 기록하고 재실행하지 않는다. 상세는 [08 티켓](../../tickets/provisioning/08-aws-infra-apply.md)과 [AWS Terraform 안내](../../infra/terraform/aws/README.md)를 따른다.
+
 ## 11. ProvisioningResult와 후속 단계 (`PROV-018`~`020`)
 
 `ProvisioningResult` 제안 필드는 `plan_id`, `revision`, `provider`, `status`, `region/namespace`, `cluster_ref`, `network_resource_refs`, `app_internal_endpoint`, `app_external_endpoint`, `app_port`, `health_path`, `db_host`, `db_port`, `db_name`, `db_user`, `db_secret_ref`, `helm_release_refs`, `plan/state/manifest/values_refs`, `verification`, `failure_stage`, `error_code`, `recoverability`다. 성공·부분 실패 모두 구조화된 결과를 저장하되 필수 항목이 빠진 부분 실패를 `READY`로 간주하지 않는다. 실패 시 아직 생성되지 않은 Endpoint는 비워 두고 완료된 자원만 기록한다. 비밀번호·`.env` 원문은 결과에 넣지 않는다.
