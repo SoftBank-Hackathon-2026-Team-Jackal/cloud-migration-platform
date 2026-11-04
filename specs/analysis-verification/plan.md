@@ -91,9 +91,11 @@ MigrationWorkflow (migration)
 ```
 
 - 자식 Workflow로 분리하는 이유: 독립 취소·정리(finally teardown), 시도별 이력 구분, 사람 검토 대기. temporal-flow.md §7의 분리 근거(별도 취소·정리)에 해당한다.
-- 분석 스캔·매핑과 08B 검토 Signal·Query는 `workflows/analysis.py`의 `AnalysisWorkflow` 자식에 둔다. 자식 ID는 `analysis-<migration_id>`로 고정하고 재분석은 `analysis_ref` 버전으로 구분한다. 다른 버전에 대한 검토 Signal은 거절한다.
+- 분석 스캔·매핑과 08B 검토 Signal·Query는 `workflows/analysis.py`의 `AnalysisWorkflow` 자식에 둔다. 현재 API에서 `migration_id`는 부모 Workflow ID이며 요청의 `project_id`와 구분한다. 자식 ID는 `analysis-<migration_id>`로 고정하고 재분석은 `analysis_ref` 버전으로 구분한다. 다른 버전에 대한 검토 Signal은 거절한다.
 - 02는 `workflows/migration.py`의 분석 자식 호출·결과·실패·취소 처리와 Workflow Worker의 자식 등록, `workers/analysis.py`의 분석 Activity 등록을 변경한다. 02B는 `workflows/migration.py`의 Sandbox 자식 호출과 Workflow Worker의 자식 등록, `workers/sandbox.py`의 Sandbox Activity 등록을 변경한다. 08B는 분석 자식 내부만 수정한다. 부모 변경은 해당 연결에 한정하고 PR 설명에 변경 범위와 replay 결과를 기록해 민서님께 공유한다.
 - 부모·자식 Workflow는 기존 `WORKFLOW_QUEUE`(`migration`), 분석 Activity는 `ANALYSIS_QUEUE`, Sandbox Activity는 `SANDBOX_QUEUE`를 사용한다. 기존 승인·취소 동작과 기존 Workflow 이력 replay를 확인하고 필요하면 Temporal의 결정적 버전 분기를 적용한다.
+- 02 골격은 `analysis-child-v1` 패치로 기존 이력을 구분한다. 자식 실패는 부모에 전파하고, 부모의 `request_cancel` Signal은 자식 취소 완료를 기다린 후 `cancelled`를 반환한다. 부모의 외부 취소 시에도 자식에 취소를 요청한다. 부모가 종료될 때 미완료 자식의 ParentClosePolicy는 `TERMINATE`다. 스캔 결과와 최종 보고서는 실제 분석 증거가 아닌 작은 fixture다.
+- 02B 골격은 별도 `sandbox-child-v1` 패치로 기존 부모 이력을 보존하며 `sandbox-<migration_id>` 자식을 호출한다. 자식과 부모의 취소는 정리 Activity를 실행한다. 검토가 필요한 경우 정리를 완료한 뒤 `NEEDS_REVIEW`에서 Signal을 기다린다. 골격의 검토 Signal은 검토 종료만 나타내며 통과나 운영 승인으로 취급하지 않는다. `PASSED` 이외에는 부모가 다음 scaffold 단계로 진행하지 않는다. 빌드·판정·수정·정리는 무해한 mock이며 실제 Sandbox 증거가 아니다.
 - 02의 Temporal 경계는 기존 기본 Data Converter를 유지하고 Activity의 JSON 호환 `dict`·참조를 주고받는다. Pydantic 모델은 Activity 등 경계에서 `model_validate`로 검사하고 `model_dump(mode="json")`으로 직렬화한다. Workflow에는 대용량 결과나 비밀값을 넣지 않고 참조·작은 메타데이터만 전달한다. 02의 테스트는 실제 기본 Converter와 Workflow·Activity 경계에서 fixture 왕복 및 잘못된 입력 거절을 확인한다. 공유 API Client의 Converter는 변경하지 않는다.
 - Workflow에는 참조와 작은 메타데이터만 둔다. 스캔 원본·렌더 결과·테스트 보고서·테스트 묶음은 S3에 `<sha256>` 이름으로 저장하고 참조로 넘긴다.
 - Planning은 앞 단계를 다시 실행하지 않는다. 최상위 Workflow가 결과 참조를 모아 한 번에 넘기고, Planning이 저장소에서 내용을 읽어 대조한다.
@@ -541,7 +543,7 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 
 | ID | 항목 | 현재 방향 | 담당 |
 | --- | --- | --- | --- |
-| D-01 | LLM 공급자·모델·전송 범위 | ADR-004로 기록. 근거 주변 코드 조각만 전송 | 승철·팀 |
+| D-01 | LLM 공급자·모델·전송 범위 | ADR-004(작성 예정)로 기록. 근거 주변 코드 조각만 전송 | 승철·팀 |
 | D-02 | `*_ref` 저장 위치, Build 결과 저장·정규화 Activity 담당 | Planning 입력 v2는 #22로 확정. 저장 경계만 남음 | 민서·승철 |
 | D-04 | Build 실패 상세 | 급하지 않음 | 민서 |
 | D-06 | 소스·테스트 묶음 버킷 소유·정리 규칙 | 플랫폼 소유 버킷, 실행 종료 후 N일 | 민서·승철 |

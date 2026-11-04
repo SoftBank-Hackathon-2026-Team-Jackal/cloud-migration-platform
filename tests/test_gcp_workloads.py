@@ -774,11 +774,6 @@ def test_cli_ingress_address_reads_gke_ip(tmp_path):
     assert session.ingress_address(NAMESPACE, "cmp-demo-api") == INGRESS_IP
 
 
-@pytest.mark.skipif(
-    __import__("cmp_contracts.execution").execution.execution_steps("GCP", "WORKLOADS")
-    != ("execute_gcp_workloads",),
-    reason="ticket 10 GCP execution dispatch is not merged yet",
-)
 async def test_approval_workflow_dispatches_gcp_workloads(tmp_path, db, cluster, runtime):
     import asyncio
 

@@ -115,7 +115,7 @@ def build_gcp_workloads_activities(session_factory):
         helm=os.environ.get("HELM_BIN", "helm"),
         gcloud=os.environ.get("GCLOUD_BIN", "gcloud"),
         aws=os.environ.get("AWS_BIN", "aws"),
-        gcloud_configuration=os.environ.get("PROVISIONING_GCP_CONFIGURATION"),
+        gcloud_configuration=os.environ.get("PROVISIONING_GCLOUD_CONFIGURATION"),
         aws_profile=os.environ.get("PROVISIONING_AWS_PROFILE"),
     )
     return GcpWorkloadsActivities(

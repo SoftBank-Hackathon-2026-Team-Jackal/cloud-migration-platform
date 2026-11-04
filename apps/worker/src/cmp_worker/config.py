@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     provisioning_artifact_root: str | None = None
     provisioning_aws_profile: str | None = None
     terraform_bin: str = "terraform"
+    # Ticket 10: gcloud configuration and the expected Google ADC principal for GCP Apply.
+    provisioning_gcloud_configuration: str | None = None
+    provisioning_gcp_adc_email: str | None = None
 
 
 settings = Settings()

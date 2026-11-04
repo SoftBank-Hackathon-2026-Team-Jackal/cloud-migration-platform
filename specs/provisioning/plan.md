@@ -200,6 +200,10 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 07의 단일 실행 Activity를 `claim_approved_execution`(DB 재검증·RUNNING 표식) → Provider Activity(장시간·Heartbeat·재시도 없음) → `complete_approved_execution`(SUCCEEDED/FAILED/UNKNOWN·참조 기록)으로 나눴다. 분기는 `cmp_contracts.execution.execution_steps`가 정한다: (AWS, INFRASTRUCTURE)→`execute_aws_plan`, (AWS, WORKLOADS)→`execute_aws_workloads`(09), (AWS, FULL)→둘 다 순서대로, ON_PREM→`execute_on_prem_plan`(12). Provider Activity가 사라지면(Worker 종료·Heartbeat 만료) Workflow는 `UNKNOWN`/`PROVIDER_ACTIVITY_LOST`를 기록하고 재실행하지 않는다. 상세는 [08 티켓](../../tickets/provisioning/08-aws-infra-apply.md)과 [AWS Terraform 안내](../../infra/terraform/aws/README.md)를 따른다.
 
+### 10 GCP Apply (#2)
+
+`execute_gcp_plan`(`cmp_providers.gcp_apply`)은 08 AWS 경로와 같은 보장을 GCP에 적용한다. 추가로 Plan 모드(`S3`만 허용), Google ADC 주체, 중앙 State를 가진 AWS 계정을 확인한다. 분기는 (GCP, INFRASTRUCTURE)→`execute_gcp_plan`, (GCP, WORKLOADS)→`execute_gcp_workloads`(11), FULL→둘 다 순서대로다. 템플릿은 `gcp-gke-v2`(Output, 삭제 보호 변수)다.
+
 ### 12A 온프레미스 Preview (#41)
 
 ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.
