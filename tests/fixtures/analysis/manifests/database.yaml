@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: shop-db
+  namespace: shop
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: postgres
+          image: postgres@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          ports:
+            - containerPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-db
+  namespace: shop
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: pg
+          image: bitnami/postgresql:16.2.0

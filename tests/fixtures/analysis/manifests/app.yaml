@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shop-api
+  namespace: shop
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/shop-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-api
+  namespace: shop
+  annotations:
+    example.com/owner: platform-team
+spec:
+  replicas: 3
+  template:
+    spec:
+      serviceAccountName: shop-api
+      initContainers:
+        - name: wait-db
+          image: busybox:1.36
+      containers:
+        - name: api
+          image: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/shop-api:1.4.0
+          ports:
+            - containerPort: 8080
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+          livenessProbe:
+            tcpSocket: {port: 8080}
+          envFrom:
+            - secretRef: {name: shop-secrets}
+            - configMapRef: {name: shop-config}
+        - name: log-shipper
+          image: fluent/fluent-bit:2.2
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: shop-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-api
+  namespace: shop
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop-api
+  namespace: shop
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: shop-api, port: {number: 80}}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shop-config
+  namespace: shop
+data:
+  LOG_LEVEL: info
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shop-secrets
+  namespace: shop
+type: Opaque
+data:
+  DB_PASSWORD: c3VwZXItc2VjcmV0LXBhc3N3b3Jk
+stringData:
+  API_TOKEN: plain-token-value-12345
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shop-data
+  namespace: shop
+spec:
+  storageClassName: gp3
+  resources:
+    requests: {storage: 20Gi}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+provisioner: ebs.csi.aws.com
