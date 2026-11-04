@@ -21,7 +21,10 @@ def render_application(payload: dict, *, chart_dir: Path, helm_bin: str = "helm"
     values = validate_application(payload)
     for item in values.env:
         if item.source.kind == "DATABASE":
-            field = "secret_name" if item.source.field == "secret_ref" else item.source.field
+            field = {
+                "secret_ref": "secret_name",
+                "connection_url_secret_ref": "url_secret_name",
+            }.get(item.source.field, item.source.field)
             if getattr(values.database, field) is None:
                 raise ApplicationRenderError("Application bindings are unresolved")
     try:

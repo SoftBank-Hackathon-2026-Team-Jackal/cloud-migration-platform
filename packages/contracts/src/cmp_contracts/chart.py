@@ -45,5 +45,5 @@ class PostgresChartValues(Contract):
 class DynamicBinding(Contract):
     """Only these database connection slots may change after approval."""
 
-    target: Literal["database.host", "database.secret_name"]
-    source: Literal["DATABASE_HOST", "DATABASE_SECRET_NAME"]
+    target: Literal["database.host", "database.secret_name", "database.url_secret_name"]
+    source: Literal["DATABASE_HOST", "DATABASE_SECRET_NAME", "DATABASE_URL_SECRET_NAME"]

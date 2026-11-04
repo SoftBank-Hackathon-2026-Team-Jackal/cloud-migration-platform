@@ -27,6 +27,7 @@ from cmp_contracts.chart import DynamicBinding, PostgresChartValues
 from cmp_contracts.plan import PlanManifest
 from cmp_providers.application import prepare_application, resolve_application, verify_application
 from cmp_providers.artifacts import canonical_json_bytes, verify_artifact_bytes
+from cmp_providers.database_url import URL_SECRET_KEY, connection_url, connection_url_secret_name
 from cmp_providers.plans import manifest_digest
 from pydantic import TypeAdapter
 from sqlalchemy import select
@@ -60,6 +61,10 @@ class ClusterSession(Protocol):
     def apply(self, manifest: dict) -> None: ...
     def secret_keys(self, namespace: str, name: str) -> set[str] | None: ...
     def create_secret(self, namespace: str, name: str, data: dict[str, str]) -> None: ...
+    # Ticket 19 (URL Secret). None when absent; values stay in memory and are never returned.
+    def secret_managed(self, namespace: str, name: str) -> bool | None: ...
+    def secret_value(self, namespace: str, name: str, key: str) -> str | None: ...
+    def apply_secret(self, namespace: str, name: str, data: dict[str, str]) -> None: ...
     def configmap_keys(self, namespace: str, name: str) -> set[str] | None: ...
     def release(self, namespace: str, name: str) -> dict | None: ...
     def helm_upgrade_install(self, namespace: str, name: str, chart: Path, values: dict): ...
@@ -320,6 +325,7 @@ class ApprovedWorkloads:
         resolved = {
             "DATABASE_HOST": f"{db.release_name}.{db.namespace}.svc",
             "DATABASE_SECRET_NAME": db.database.secret_name,
+            "DATABASE_URL_SECRET_NAME": connection_url_secret_name(db.release_name),
         }
         resolved = {r.source: resolved[r.source] for r in plan.bindings}
         try:
@@ -442,16 +448,47 @@ class ApprovedWorkloads:
                 if keys is None or source.key not in keys:
                     raise WorkloadFailure("CONFIG_MAP_MISSING")
 
+        url_secret = None
+        if any(
+            item.source.kind == "DATABASE" and item.source.field == "connection_url_secret_ref"
+            for item in ApplicationValues.model_validate(app).env
+        ):
+            url_secret = connection_url_secret_name(db.release_name)
+            # Never overwrite a Secret the platform did not create (ticket 19, U2).
+            if await self._call(cluster.secret_managed, namespace, url_secret) is False:
+                raise WorkloadFailure("SECRET_NAME_CONFLICT")
+
         secret_name, secret_key = db.database.secret_name, db.database.secret_key
         keys = await self._call(cluster.secret_keys, namespace, secret_name)
+        password = None
         if keys is None:
             # Generated here, sent only via stdin by the real runtime, never returned.
-            data = {secret_key: secrets.token_urlsafe(32)}
-            await self._call(cluster.create_secret, namespace, secret_name, data)
-            del data
+            password = secrets.token_urlsafe(32)
+            await self._call(cluster.create_secret, namespace, secret_name, {secret_key: password})
         elif secret_key not in keys:
             raise WorkloadFailure("DB_SECRET_INVALID")
         refs["db_secret_ref"] = f"{secret_name}/{secret_key}"
+        if url_secret is not None:
+            # Rebuilt from the current password on every run (U4/U6); value stays in memory.
+            if password is None:
+                password = await self._call(
+                    cluster.secret_value, namespace, secret_name, secret_key
+                )
+            if not password:
+                raise WorkloadFailure("DB_SECRET_INVALID")
+            data = {
+                URL_SECRET_KEY: connection_url(
+                    username=db.database.username,
+                    password=password,
+                    host=f"{db.release_name}.{namespace}.svc",
+                    port=5432,
+                    database=db.database.name,
+                )
+            }
+            await self._call(cluster.apply_secret, namespace, url_secret, data)
+            del data
+            refs["db_url_secret_ref"] = f"{url_secret}/{URL_SECRET_KEY}"
+        del password
 
         with TemporaryDirectory(prefix="cmp-workloads-") as tmp:
             workdir = Path(tmp)

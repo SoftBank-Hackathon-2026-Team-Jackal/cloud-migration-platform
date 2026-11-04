@@ -114,7 +114,8 @@
             "port",
             "name",
             "username",
-            "secret_ref"
+            "secret_ref",
+            "connection_url_secret_ref"
           ],
           "title": "Field",
           "type": "string"
@@ -180,6 +181,21 @@
           "pattern": "^[a-zA-Z0-9._-]+$",
           "title": "Secret Key",
           "type": "string"
+        },
+        "url_secret_name": {
+          "anyOf": [
+            {
+              "maxLength": 63,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url Secret Name"
         }
       },
       "required": [

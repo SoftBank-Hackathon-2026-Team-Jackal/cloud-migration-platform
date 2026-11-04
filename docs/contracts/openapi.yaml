@@ -1467,6 +1467,31 @@ components:
       - port
       - health_path
       title: RolloutApplication
+    RolloutConnectionUrl:
+      properties:
+        secret:
+          $ref: '#/components/schemas/SecretRefV2'
+        database:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Database
+        username:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Username
+      additionalProperties: false
+      type: object
+      required:
+      - secret
+      - database
+      - username
+      title: RolloutConnectionUrl
+      description: 'Ticket 19: the Agent builds the URL in the cluster from the password
+        Secret; only the
+
+        target Secret reference and non-secret parts cross this boundary.'
     RolloutDatabase:
       properties:
         release:
@@ -1481,6 +1506,10 @@ components:
           $ref: '#/components/schemas/ArtifactRef'
         password_secret:
           $ref: '#/components/schemas/SecretRefV2'
+        connection_url:
+          anyOf:
+          - $ref: '#/components/schemas/RolloutConnectionUrl'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:

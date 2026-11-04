@@ -29,6 +29,7 @@
 | [16 터널 설정 교환 API와 결과 계약](../../tickets/provisioning/16-tunnel-config-exchange.md) | TODO | 13, 15 (중계 서버 조회 형식은 Traffic 확인) | PROV-009, 019, 020, 021 | [#70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70) | ☐ |
 | [17 Agent WireGuard 연결과 터널 노출 검증](../../tickets/provisioning/17-agent-wireguard-tunnel.md) | TODO | 15, 16 | PROV-009, 013, 017, 018, 021 | [#71](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/71) | ☐ |
 | [18 ON_PREM Plan 게시 연결](../../tickets/provisioning/18-onprem-plan-publish.md) | DRAFT | 04B, 07, 12, 12A, 15 | PROV-004, 005, 009, 014, 015, 021 | 미생성 | ☐ |
+| [19 DB 연결 URL Secret 출력 (D-16)](../../tickets/provisioning/19-db-connection-url.md) | DONE | 01A, 04B, 09, 11, 12 | PROV-004, 005, 010, 012, 021 | [#79](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/79) | ☑ |
 
 ## 선행 관계
 

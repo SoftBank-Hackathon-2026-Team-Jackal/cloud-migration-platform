@@ -136,10 +136,13 @@ def bindings_bytes(template: dict) -> bytes:
 class Plan:
     """Writes the approved artifacts and publishes + approves one Revision."""
 
-    def __init__(self, root: Path, db, *, app=None, image_uri=APP_IMAGE, scope="WORKLOADS"):
+    def __init__(
+        self, root: Path, db, *, app=None, image_uri=APP_IMAGE, scope="WORKLOADS", rules_from=None
+    ):
         self.root = root
         app = app or app_template()
-        rules = bindings_bytes(app_template())
+        # Binding rules are approved from a clean template; pass `rules_from` for custom apps.
+        rules = bindings_bytes(rules_from or app_template())
         self.contents = {
             "spec": canonical_json_bytes({"spec": "demo"}),
             "database_chart": chart_tgz("postgres"),

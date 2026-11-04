@@ -15,7 +15,7 @@ Issue #13은 검증된 앱 이미지와 명시적인 환경변수 메타데이�
 | DATABASE host/port/name/username | 대상 DB 연결값을 env.value로 전달 |
 | DATABASE secret_ref | 생성된 DB Secret의 이름/키를 env.valueFrom.secretKeyRef로 전달 |
 
-DB port/name/username/secret_key는 계획 시 고정한다. `database.host`와 `database.secret_name`은 계획 시 null이며, 사용하는 변수에 한해서 기존 `DynamicBinding` 규칙으로 실행 결과를 주입한다. DB 비밀번호 원문은 받지 않는다. 사용자 Secret과 생성 DB Secret은 별도 출처로 유지한다. DB 변수를 안 쓰는 앱은 동적 바인딩 없이 렌더할 수 있다.
+DB port/name/username/secret_key는 계획 시 고정한다. `database.host`와 `database.secret_name`은 계획 시 null이며, 사용하는 변수에 한해서 기존 `DynamicBinding` 규칙으로 실행 결과를 주입한다. `DATABASE` 필드 `connection_url_secret_ref`(19)를 쓰면 `database.url_secret_name`(계획 시 비움) 자리에 `<DB release>-url`이 들어가고, Chart는 그 Secret의 `url` 키를 `secretKeyRef`로 주입한다. URL Secret은 AWS/GCP 배포 Activity가 비밀번호로 만들거나 갱신한다. DB 비밀번호 원문은 받지 않는다. 사용자 Secret과 생성 DB Secret은 별도 출처로 유지한다. DB 변수를 안 쓰는 앱은 동적 바인딩 없이 렌더할 수 있다.
 
 ## 공개 함수와 승인 경계
 

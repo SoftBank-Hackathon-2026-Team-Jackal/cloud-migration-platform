@@ -15,6 +15,7 @@ from cmp_contracts.shared_deployment_v2 import ApplicationValuesV2
 from pydantic import ValidationError
 
 from cmp_providers.artifacts import verify_artifact_bytes
+from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
 from cmp_providers.plans import manifest_digest
 
 VALUE_ROLES = ("database_values", "application_values")
@@ -81,11 +82,14 @@ def onprem_preview(manifest: PlanManifest, contents: Mapping[str, bytes]) -> Pre
     app = application.application
     secret_sources = [item.source for item in application.env if item.source.kind == "SECRET"]
     db_secret = (database.database.secret_name, database.database.secret_key)
+    url_secret = (connection_url_secret_name(database.release_name), URL_SECRET_KEY)
+    uses_url = any((source.name, source.key) == url_secret for source in secret_sources)
     user_secrets = sorted(
         {
             f"{source.name}/{source.key}"
             for source in secret_sources
-            if (source.name, source.key) != db_secret
+            # DB password and URL Secrets are prepared by the Agent, not the user (ticket 19).
+            if (source.name, source.key) not in {db_secret, url_secret}
         }
     )
     changes = [
@@ -154,6 +158,17 @@ def onprem_preview(manifest: PlanManifest, contents: Mapping[str, bytes]) -> Pre
             ),
         ),
     ]
+    if uses_url:
+        defaults.append(
+            ResourceChange(
+                resource_type="DATABASE",
+                action="CREATE",
+                name=(
+                    f"DB 연결 URL Secret {url_secret[0]}/{url_secret[1]}를 비밀번호로 "
+                    "클러스터 안에서 생성·갱신(값은 외부로 나가지 않음)"
+                ),
+            )
+        )
     warnings = [
         ValidationIssue(
             code="CLUSTER_STATE_NOT_INSPECTED",

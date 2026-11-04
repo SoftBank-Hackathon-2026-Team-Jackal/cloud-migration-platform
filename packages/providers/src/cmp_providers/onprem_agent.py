@@ -22,6 +22,7 @@ from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from pydantic import ValidationError
 
 from cmp_providers.artifacts import verify_artifact_bytes
+from cmp_providers.database_url import connection_url
 from cmp_providers.remote_agent import AgentControlClient, AgentTransportError, _secret_file
 
 MANAGED = "cmp.dev/managed"
@@ -177,6 +178,12 @@ class RolloutRunner:
             "data", {}
         ):
             raise RolloutAgentError("SECRET_REFERENCE_MISSING")
+        url = job.database.connection_url
+        if url is not None:
+            existing = self.target.get("secret", url.secret.name, job.namespace)
+            labels = ((existing or {}).get("metadata") or {}).get("labels") or {}
+            if existing is not None and labels.get(MANAGED) != "true":
+                raise RolloutAgentError("SECRET_NAME_CONFLICT")  # never overwrite a user Secret
 
     def _download(self, job: ProductionRolloutJob, workdir: Path) -> dict[str, Path]:
         paths = {}
@@ -222,6 +229,38 @@ class RolloutRunner:
                     "data": {ref.key: password},
                 }
             )
+        if job.database.connection_url is not None:
+            self._write_connection_url(job)
+
+    def _write_connection_url(self, job: ProductionRolloutJob) -> None:
+        """Ticket 19 (U2–U5): rebuilt from the current password on every rollout so it never
+        drifts; the URL and password stay inside the user's cluster."""
+        url, ref = job.database.connection_url, job.database.password_secret
+        encoded = (
+            (self.target.get("secret", ref.name, job.namespace) or {}).get("data") or {}
+        ).get(ref.key)
+        if not encoded:
+            raise RolloutAgentError("SECRET_REFERENCE_MISSING")
+        value = connection_url(
+            username=url.username,
+            password=base64.b64decode(encoded).decode("utf-8"),
+            host=f"{job.database.release}.{job.namespace}.svc",
+            port=5432,
+            database=url.database,
+        )
+        self.target.apply(
+            {
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "type": "Opaque",
+                "metadata": {
+                    "name": url.secret.name,
+                    "namespace": job.namespace,
+                    "labels": {MANAGED: "true"},
+                },
+                "data": {url.secret.key: base64.b64encode(value.encode()).decode()},
+            }
+        )
 
     def _install(self, job, release, chart, values, paths) -> None:
         marker = _marker(job, chart, values)
@@ -287,6 +326,10 @@ class RolloutRunner:
         self._workload_ready("deployment", app.release, ns)
         self._endpoints_ready(db.release, ns)
         self._endpoints_ready(app.release, ns)
+        if db.connection_url is not None:
+            secret = self.target.get("secret", db.connection_url.secret.name, ns) or {}
+            if db.connection_url.secret.key not in (secret.get("data") or {}):
+                raise RolloutAgentError("SECRET_REFERENCE_MISSING")
         probe = self.target.kubectl(
             "exec",
             "-n",

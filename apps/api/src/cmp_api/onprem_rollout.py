@@ -16,12 +16,14 @@ from cmp_contracts.onprem_rollout import (
     ROLLOUT_MODE,
     ProductionRolloutJob,
     RolloutApplication,
+    RolloutConnectionUrl,
     RolloutDatabase,
     rollout_job_id,
 )
 from cmp_contracts.plan import PlanManifest
 from cmp_contracts.shared_deployment_v2 import ApplicationValuesV2, SecretRefV2
 from cmp_providers.artifacts import sha256_bytes, verify_artifact_bytes
+from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
 from cmp_providers.plans import manifest_digest
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -163,12 +165,25 @@ def build_rollout_job(
     agent = session.get(RegisteredAgent, target.agent_id)
     if agent is None or agent.cluster_uid != target.cluster_ref.id:
         raise RolloutError("AGENT_TARGET_MISMATCH")
-    secret_refs = {
-        (env.source.name, env.source.key)
-        for env in application.env
-        if env.source.kind == "SECRET"
-        and env.source.name != database.database.secret_name  # DB Secret is prepared by Agent
+    url_secret = (connection_url_secret_name(database.release_name), URL_SECRET_KEY)
+    secret_sources = {
+        (env.source.name, env.source.key) for env in application.env if env.source.kind == "SECRET"
     }
+    secret_refs = {
+        ref
+        for ref in secret_sources
+        # DB password and URL Secrets are prepared by the Agent; the rest must already exist.
+        if ref[0] != database.database.secret_name and ref != url_secret
+    }
+    connection_url = (
+        RolloutConnectionUrl(
+            secret=SecretRefV2(name=url_secret[0], key=url_secret[1]),
+            database=database.database.name,
+            username=database.database.username,
+        )
+        if url_secret in secret_sources
+        else None
+    )
     job = ProductionRolloutJob(
         mode=ROLLOUT_MODE,
         job_id=rollout_job_id(manifest.plan.plan_id, manifest.plan.revision),
@@ -188,6 +203,7 @@ def build_rollout_job(
             password_secret=SecretRefV2(
                 name=database.database.secret_name, key=database.database.secret_key
             ),
+            connection_url=connection_url,
         ),
         application=RolloutApplication(
             release=application.release_name,

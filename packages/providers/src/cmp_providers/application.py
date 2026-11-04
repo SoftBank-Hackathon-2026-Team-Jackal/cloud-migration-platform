@@ -30,7 +30,10 @@ def validate_application(payload: dict) -> ApplicationValues:
 
 def prepare_application(payload: dict) -> ApplicationPlan:
     values = validate_application(payload)
-    if values.database.host is not None or values.database.secret_name is not None:
+    database = values.database
+    if any(
+        slot is not None for slot in (database.host, database.secret_name, database.url_secret_name)
+    ):
         raise _invalid()
     fields = {item.source.field for item in values.env if item.source.kind == "DATABASE"}
     rules = []
@@ -38,6 +41,10 @@ def prepare_application(payload: dict) -> ApplicationPlan:
         rules.append(DynamicBinding(target="database.host", source="DATABASE_HOST"))
     if "secret_ref" in fields:
         rules.append(DynamicBinding(target="database.secret_name", source="DATABASE_SECRET_NAME"))
+    if "connection_url_secret_ref" in fields:
+        rules.append(
+            DynamicBinding(target="database.url_secret_name", source="DATABASE_URL_SECRET_NAME")
+        )
     return ApplicationPlan(values=values, bindings=rules)
 
 
