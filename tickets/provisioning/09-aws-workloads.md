@@ -70,3 +70,34 @@ EKS에서 실제 DB·앱 준비와 Endpoint를 조회할 수 있다.
 - Seam: `temporalio.testing.ActivityEnvironment`로 실제 `execute_aws_workloads`를 호출한다. 업무 DB는 SQLite(07 모델로 게시·승인 기록), 산출물은 임시 `PROVISIONING_ARTIFACT_ROOT`의 실제 Chart tgz·Values·bindings 바이트, 클러스터·Helm·AWS·HTTP는 상태를 가진 가짜 런타임 포트로 바꾼다.
 - 잡아내는 것: 승인/Revision/Digest/Provider/scope 불일치 시 클러스터 무변경, 산출물 바이트 변조·누락, 승인 슬롯 외 Values 변경·이미지 불일치, 기존 Release 재조회에 따른 install/skip/upgrade/pending/failed 분기, Secret 원문이 결과·로그·런타임 인자에 없음, 기존 DB Secret 미회전, 사용자 Secret/ConfigMap 누락, PVC Pending·이미지 Pull·Secret 참조 오류·DB 접속·헬스·ALB 실패 시 READY 금지, 성공 시 참조만 반환.
 - 놓치는 것: 실제 EKS IAM/IRSA·EBS CSI·ALB 조정 시간, 실제 kubectl/Helm CLI 인자 호환성, 승인 Workflow 연결(08 반영 후). 이는 아래 실제 EKS 검증과 08 병합 후 Temporal 테스트로 보완한다.
+
+## 구현 (2026-11-04)
+
+| 경계 | 위치 |
+| --- | --- |
+| Activity 오케스트레이션·승인/산출물 재확인·READY 판정·`ExecutionRefsResolver` | `apps/worker/src/cmp_worker/activities/aws_workloads.py` |
+| kubectl/Helm/AWS CLI 어댑터(kubeconfig 0700 임시 디렉터리, Secret stdin `create`, LB Controller Chart 3.6.2 SHA-256 고정), Worker 조립 | `apps/worker/src/cmp_worker/activities/aws_workloads_cli.py` |
+| 등록 | `apps/worker/src/cmp_worker/workers/provisioning.py` 한 줄 |
+| 테스트 | `tests/test_aws_workloads.py` |
+
+Worker 환경변수는 08과 같은 `PROVISIONING_ARTIFACT_ROOT`, `PROVISIONING_AWS_PROFILE`에 더해 선택적으로 `HELM_BIN`, `KUBECTL_BIN`, `AWS_BIN`을 읽는다. 08의 `config.py`·`.env.example` 변경과 충돌하지 않도록 이 티켓은 그 파일을 수정하지 않았다.
+
+08 조율 결과(08 세션, 2026-11-04): FULL은 Workflow가 이전 단계 refs를 `{**claim, "resource_refs": refs}`로 넘기고(08 커밋 73f81b5), WORKLOADS 단독은 같은 대상(environment·계정·리전·State)의 최신 SUCCEEDED INFRASTRUCTURE/FULL 실행 refs를 쓴다. ref 키는 `eks_cluster_name`·`vpc_id`·`lb_controller_role_arn`. EBS CSI Add-on·IRSA는 08 Terraform, LB Controller IRSA는 `kube-system/aws-load-balancer-controller` SA 주석으로 연결한다. Node 역할은 `AmazonEC2ContainerRegistryPullOnly`, private subnet은 NAT 경유.
+
+## 검증 기록 (2026-11-04)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `uv run pytest tests/test_aws_workloads.py` (macOS, Python 3.11) | 36 passed, 1 skipped(08 스키마 필요한 DB resolver 테스트) |
+| `make check` | 339 passed, 1 skipped |
+| 임시 worktree에서 `feat/aws-infra-apply`(08) 병합 후 전체 `pytest` | 359 passed, skip 없음(DB resolver 테스트 통과). 충돌은 `tasks.md`와 Worker 등록 한 줄뿐 |
+| 소스 EKS `cmp-demo-source` 읽기 전용 조회 | 데모 env 이름·이미지 Digest·ALB 주석·LB Controller 3.6.2 확인. 변경 없음, Secret 값 미조회(키 이름만) |
+
+Chart 변경은 없어 `helm lint`/`helm template` 대상이 아니다(기존 렌더 테스트는 `make check`에 포함). HTTP 라우트 변경이 없어 `make openapi`는 해당 없음. Workflow 코드는 수정하지 않았고 승인 Workflow 연결 테스트는 08 병합 후 실행한다.
+
+### 미검증·차단
+
+- **BLOCKED — 실제 EKS 검증:** 08의 신규 클러스터(`cmp-target-aws` 예정) Apply가 사용자 승인 대기 중이다. 클러스터가 준비되면 전용 Namespace `cmp-demo-target`에 데모 동등 DB·앱을 배포하고 PVC Bound·DB 접속·Pod Ready·헬스·ALB 주소와 재실행 멱등성을 기록한다. 클러스터는 삭제하지 않는다.
+- 실제 kubectl/Helm(로컬 Helm v4.3.1, 저장소 기준 3.17.3) 인자·`helm list` JSON 필드 호환성, IRSA·EBS CSI·ALB 조정 시간은 위 실검증 전까지 미확인이다.
+- 08 병합 후 `ProvisioningApprovalWorkflow` → `execute_aws_workloads` Temporal 테스트·`make smoke-temporal`.
+- 사용자 `USER_SECRET`·`CONFIG_MAP`의 실제 생성 경로(업로드 `.env` 해석)는 Planning/업로드 통합 범위다. 09는 존재와 키만 확인한다.
