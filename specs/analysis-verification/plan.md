@@ -44,6 +44,7 @@ apps/worker/src/cmp_worker/
   activities/analysis.py      # 스캔·매핑 Activity (얇게 감싸기)
   activities/sandbox.py       # 새로: 묶음·빌드 호출·구성·적용·테스트·판정·수정·정리 Activity
   sandbox/                    # 새로: 구체 값 결정, Secret·NetworkPolicy 생성, Helm 적용·정리, 출구 기록
+  workflows/analysis.py       # 새로: AnalysisWorkflow (자식)
   workflows/sandbox.py        # 새로: SandboxVerificationWorkflow (자식)
   workers/analysis.py, workers/sandbox.py
 tests/analysis/, tests/sandbox/, tests/fixtures/analysis/
@@ -54,13 +55,14 @@ tests/analysis/, tests/sandbox/, tests/fixtures/analysis/
 - Enum 값은 대문자로 통일한다(`DIRECT`, `PROCEED`, `SANDBOX_VERIFIED`, `PASSED`, `CLEANED`).
 - 새 Python 패키지는 `pyproject.toml`의 `packages`·`package-dir`에 등록한다.
 - Provisioning 모델(`provisioning`, `provisioning_v2`, `shared_deployment*`)은 **수정하지 않는다**. 부족한 점은 민서에게 요청한다.
-- Queue: 기존 `analysis`를 쓰고, Sandbox는 새 `sandbox` Queue를 제안한다. `queues.py`·`run.py`·`run_all.py`·Workflow는 공유 파일이라 **Q-01 작은 PR로 먼저** 올린다(D-05).
+- Queue: 기존 `analysis`를 쓰고 Sandbox Activity는 별도 `sandbox` Queue를 쓴다(D-05 결정). Q-01은 Queue 상수·Worker 실행기 등록만, 02는 분석 Workflow 연결만, 02B는 자식 Workflow 등록·호출만 공유 파일에서 변경한다. 기존 Queue 이름과 다른 도메인의 동작은 유지한다.
+- Q-01의 기동 전용 scaffold Activity는 외부 I/O나 실제 Sandbox 작업을 수행하지 않는다. 별도 Queue에서 완료되는지 확인하며 기존 smoke 성공만을 Sandbox Worker 기동의 증거로 삼지 않는다.
 
 ## 2. Design and data flow
 
 ```text
 MigrationWorkflow (migration)
- ├─ analysis
+ ├─ AnalysisWorkflow (자식, ID: analysis-<migration_id>, migration queue)
  │   fetch_source ──┬─ scan_code ───────┐
  │                  ├─ scan_manifests ──┤ 병렬 (asyncio.gather)
  │                  ├─ scan_aws_infra ──┤
@@ -89,6 +91,10 @@ MigrationWorkflow (migration)
 ```
 
 - 자식 Workflow로 분리하는 이유: 독립 취소·정리(finally teardown), 시도별 이력 구분, 사람 검토 대기. temporal-flow.md §7의 분리 근거(별도 취소·정리)에 해당한다.
+- 분석 스캔·매핑과 08B 검토 Signal·Query는 `workflows/analysis.py`의 `AnalysisWorkflow` 자식에 둔다. 자식 ID는 `analysis-<migration_id>`로 고정하고 재분석은 `analysis_ref` 버전으로 구분한다. 다른 버전에 대한 검토 Signal은 거절한다.
+- 02는 `workflows/migration.py`의 분석 자식 호출·결과·실패·취소 처리와 Workflow Worker의 자식 등록, `workers/analysis.py`의 분석 Activity 등록을 변경한다. 02B는 `workflows/migration.py`의 Sandbox 자식 호출과 Workflow Worker의 자식 등록, `workers/sandbox.py`의 Sandbox Activity 등록을 변경한다. 08B는 분석 자식 내부만 수정한다. 부모 변경은 해당 연결에 한정하고 PR 설명에 변경 범위와 replay 결과를 기록해 민서님께 공유한다.
+- 부모·자식 Workflow는 기존 `WORKFLOW_QUEUE`(`migration`), 분석 Activity는 `ANALYSIS_QUEUE`, Sandbox Activity는 `SANDBOX_QUEUE`를 사용한다. 기존 승인·취소 동작과 기존 Workflow 이력 replay를 확인하고 필요하면 Temporal의 결정적 버전 분기를 적용한다.
+- 02의 Temporal 경계는 기존 기본 Data Converter를 유지하고 Activity의 JSON 호환 `dict`·참조를 주고받는다. Pydantic 모델은 Activity 등 경계에서 `model_validate`로 검사하고 `model_dump(mode="json")`으로 직렬화한다. Workflow에는 대용량 결과나 비밀값을 넣지 않고 참조·작은 메타데이터만 전달한다. 02의 테스트는 실제 기본 Converter와 Workflow·Activity 경계에서 fixture 왕복 및 잘못된 입력 거절을 확인한다. 공유 API Client의 Converter는 변경하지 않는다.
 - Workflow에는 참조와 작은 메타데이터만 둔다. 스캔 원본·렌더 결과·테스트 보고서·테스트 묶음은 S3에 `<sha256>` 이름으로 저장하고 참조로 넘긴다.
 - Planning은 앞 단계를 다시 실행하지 않는다. 최상위 Workflow가 결과 참조를 모아 한 번에 넘기고, Planning이 저장소에서 내용을 읽어 대조한다.
 
@@ -169,7 +175,7 @@ compute_treatment ──> treatment 확정 (등급 × 확정된 필수 여부)
 record_review ──> ReviewRecord(불변 저장, analysis_ref 버전에 묶음) → Sandbox 진행
 ```
 
-- 두 Signal은 FastAPI가 권한을 확인하고 업무 DB에 기록한 뒤 보낸다. 승인 경로·화면은 상헌님과 정한다(현재 OpenAPI에는 없음, 추가 시 `make openapi`).
+- FastAPI는 분석 자식(`analysis-<migration_id>`)의 검토 상태를 먼저 Query하고, 자식이 없거나 검토 대기가 아니면 Signal 없이 오류를 반환한다. 검토 대기일 때 권한 확인·업무 DB 기록을 거쳐 자식에 Signal을 직접 보낸다. 구체적인 API 경로·오류 응답·화면은 상헌님과 합의한다(현재 OpenAPI에는 없음, 추가 시 `make openapi`). Query 후 상태가 바뀔 수 있으므로 자식도 Signal의 상태·분석 버전을 검증한다.
 - Workflow는 Signal을 기다리며 Query로 "검토 대기 중"과 검토할 항목을 보여 준다. 자동 승인은 없다.
 - Signal이 다른 분석 버전(`analysis_ref`)을 가리키면 거절한다. 확정·승인 키는 해당 버전의 행 ID이며, Sandbox 루프에서 매핑이 바뀌면 바뀐 행만 다시 승인받는다(`publish_final_report` 전에 확인).
 - 데모 시간을 위해 화면 없이도 진행할 수 있게, 같은 Signal을 CLI 스크립트로 보낼 수 있게 한다.
@@ -538,7 +544,6 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 | D-01 | LLM 공급자·모델·전송 범위 | ADR-004로 기록. 근거 주변 코드 조각만 전송 | 승철·팀 |
 | D-02 | `*_ref` 저장 위치, Build 결과 저장·정규화 Activity 담당 | Planning 입력 v2는 #22로 확정. 저장 경계만 남음 | 민서·승철 |
 | D-04 | Build 실패 상세 | 급하지 않음 | 민서 |
-| D-05 | `sandbox` Queue 추가 | Q-01 작은 PR로 먼저 | 승철(민서 공유) |
 | D-06 | 소스·테스트 묶음 버킷 소유·정리 규칙 | 플랫폼 소유 버킷, 실행 종료 후 N일 | 민서·승철 |
 | D-07 | 첫 사이클 지원 언어 | 승철이 결정(데모 앱은 그 언어에 맞춤) | 승철 |
 | D-08 | Sandbox 기반 클러스터 준비 주체·시점 | | 민서·승철 |
