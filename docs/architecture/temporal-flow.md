@@ -43,7 +43,9 @@ flowchart TD
     G -->|승인된 계획 확인| H[Production Provisioning]
     G -->|수정 요청·거절| X[계획 재작성 또는 종료: 정책 미정]
     H --> I[대상 인프라·앱·DB 준비 상태 확인]
-    I --> J[Data Migration: 초기 복사·CDC·정합성]
+    I --> P{ON_PREM 이전 경로 Preflight}
+    P -->|통과| J[Data Migration: 초기 복사·CDC·정합성]
+    P -->|실패·확인 불가| Q[데이터 이전 시작 차단·원인 기록]
     J --> T[데이터 이전 후 테스트 묶음·정합성 확인]
     T --> K{전환 조건 확인}
     K -->|충족| L[Traffic Migration: 점진적 전환]
@@ -62,6 +64,8 @@ flowchart TD
 
 Production Provisioning 직후의 **Ready**는 인프라·워크로드의 준비 상태이며 데이터 이전 완료 상태가 아니다. 대상 PostgreSQL의 스키마·데이터가 아직 준비되지 않은 시점에는 가능한 준비 검사와 데이터 이전 후의 전체 기능 검증을 구분한다. 필요한 검증이 끝나기 전에 트래픽 전환으로 진행하지 않는다.
 
+AWS→온프레미스 K3s 데이터 이전에서는 Data Migration이 초기 복사·CDC 시작 직전에 [Migration Network Preflight](../../specs/migration-network-preflight/spec.md)를 호출한다. 검사는 실제 복제 작업과 같은 네트워크 경로에서 수행하고 `PASS` 외 결과는 시작을 막는다. 터널·라우트·원본 DB Endpoint가 바뀐 뒤 다시 시작할 때는 재검사한다. 복제 시작 후의 연결·지연·WAL 감시는 Data Migration의 지속 책임이다.
+
 ## 5. Workflow·Activity·Worker별 실행 책임
 
 상위 Workflow가 단계·승인·실패 분기를 조정한다. Activity는 외부 작업을 실행하고 결과 또는 오류를 반환한다. Worker는 해당 Task Queue를 폴링해 코드를 실행한다. Worker별 Queue 분리는 가능하지만 Queue 이름·개수 및 배포 단위는 후속 설계 대상이다.
@@ -72,7 +76,7 @@ Production Provisioning 직후의 **Ready**는 인프라·워크로드의 준비
 | Sandbox | 임시 K8s 리소스 배포, 앱·DB 연결과 기능 테스트, 성공·실패 후 정리 | 검증 결과·오류·로그 참조, 정리 결과 |
 | Build | 준비된 소스·Dockerfile로 이미지 생성·Registry Push, 플랫폼 정보 반환 | Build 참조·이미지 URI·Digest·소스/빌드 설정 출처 |
 | Provisioning | 공통 명세·Provider 설정 검증, Preview, 승인 후 Terraform·Helm·Agent 실행, 배포 확인 | 실제 리소스 ID, 앱·DB Endpoint, 연결·Secret 참조 |
-| Data Migration | 필요한 사설 연결, PostgreSQL 초기 복사·변경 동기화·정합성 확인 | 복제 상태·지연, 정합성·DB 전환 가능 여부 |
+| Data Migration | 필요한 사설 연결, ON_PREM 이전 경로 Preflight 호출·차단, PostgreSQL 초기 복사·변경 동기화·정합성 확인 | Preflight 판정·증거, 복제 상태·지연, 정합성·DB 전환 가능 여부 |
 | Traffic Migration | 양쪽 서비스 접근·준비 상태 확인, 단계별 트래픽 이전과 가능한 범위의 복귀 | 가중치·헬스·전환 결과 |
 
 Data Migration과 Traffic Migration의 내부 분할은 미정이다. WireGuard는 필요한 사설 연결의 설계 방향이고, Route 53·Envoy는 **논의 중인 트래픽 전환안**이다. 이 표가 해당 방식의 최종 채택을 뜻하지 않는다.
