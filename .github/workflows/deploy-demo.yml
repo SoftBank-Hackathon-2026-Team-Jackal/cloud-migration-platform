@@ -1,0 +1,35 @@
+name: Deploy demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'main commit SHA to deploy; leave empty for current main'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: cmp-demo-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::714066696240:role/cmp-demo-github-deploy
+          aws-region: ap-northeast-2
+          allowed-account-ids: '714066696240'
+      - name: Deploy selected main revision
+        env:
+          CMP_REQUESTED_REVISION: ${{ inputs.revision }}
+        run: bash infra/demo/release.sh "${CMP_REQUESTED_REVISION:-HEAD}"
