@@ -1,0 +1,276 @@
+"""Ticket 16 (#70) seam, reply-independent part: FastAPI TestClient + SQLite business DB.
+
+Covers Agent public key registration, tunnel IP allocation, Agent tunnel config, relay
+registration, tunnel status and the ON_PREM Data handoff (T2~T9). The relay-side Agent list (P1)
+and the ON_PREM external_endpoint (P2) wait for the Traffic owner's reply and are not tested here.
+"""
+
+import asyncio
+import base64
+import os
+
+import pytest
+from cmp_api.agent_registry import revoke_agent
+from cmp_api.approvals import claim_execution, complete_execution
+from cmp_api.config import settings
+from cmp_api.db import Base
+from cmp_api.main import app
+from cmp_api.provisioning_results import load_result
+from cmp_api.routes.agents import get_session
+from cmp_api.tunnels import RelayServer
+from cmp_worker.activities.approval import ApprovalActivities
+from fastapi.testclient import TestClient
+from onprem_rollout_support import register_agent
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+from temporalio.testing import ActivityEnvironment
+from test_provisioning_result import ONPREM_REFS, Approved
+
+ADMIN = {"X-Enrollment-Admin-Key": "operator-only-test-key"}
+
+
+def wg_key() -> str:
+    return base64.b64encode(os.urandom(32)).decode()
+
+
+@pytest.fixture
+def engine():
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def db(engine):
+    return sessionmaker(bind=engine)
+
+
+@pytest.fixture
+def client(engine, monkeypatch):
+    monkeypatch.setattr(settings, "agent_enrollment_admin_key", "operator-only-test-key")
+    session = Session(engine)
+    app.dependency_overrides[get_session] = lambda: session
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
+        session.close()
+
+
+def agent(db, agent_id="agent-001", cluster_uid="k3s-uid-001") -> dict:
+    with db() as s:
+        credential = register_agent(s, agent_id=agent_id, cluster_uid=cluster_uid, owner="owner-a")
+    return {"Authorization": f"Bearer {credential}"}
+
+
+def put_key(client, agent_id, headers, key=None):
+    return client.put(
+        f"/agents/{agent_id}/tunnel/key", json={"public_key": key or wg_key()}, headers=headers
+    )
+
+
+def put_relay(
+    client, relay_id="relay-seoul", endpoint="13.124.10.10:51820", key=None, headers=ADMIN
+):
+    return client.put(
+        f"/tunnel-admin/relays/{relay_id}",
+        json={"endpoint": endpoint, "public_key": key or wg_key()},
+        headers=headers,
+    )
+
+
+# --- T4/T9: key registration and stable tunnel IPs -------------------------------------------
+
+
+def test_each_agent_gets_a_stable_unique_tunnel_ip(client, db):
+    a, b = agent(db), agent(db, "agent-002", "k3s-uid-002")
+    first = put_key(client, "agent-001", a)
+    assert first.status_code == 200
+    assert first.json()["tunnel_ip"] == "10.200.0.2"
+    assert put_key(client, "agent-002", b).json()["tunnel_ip"] == "10.200.0.3"
+    # Re-registration and key rotation keep the same address.
+    rotated = put_key(client, "agent-001", a)
+    assert rotated.json()["tunnel_ip"] == "10.200.0.2"
+
+
+def test_only_public_keys_are_accepted(client, db):
+    headers = agent(db)
+    assert put_key(client, "agent-001", headers, key="not-a-key").status_code == 422
+    leaked = client.put(
+        "/agents/agent-001/tunnel/key",
+        json={"public_key": wg_key(), "private_key": wg_key()},
+        headers=headers,
+    )
+    assert leaked.status_code == 422
+
+
+def test_agent_can_only_touch_its_own_tunnel_and_revoked_agents_are_refused(client, db):
+    a, b = agent(db), agent(db, "agent-002", "k3s-uid-002")
+    put_key(client, "agent-001", a)
+    assert put_key(client, "agent-001", b).status_code == 403
+    assert client.get("/agents/agent-001/tunnel/config", headers=b).status_code == 403
+    with db() as s:
+        revoke_agent(s, agent_id="agent-001")
+    assert put_key(client, "agent-001", a).status_code == 403
+    assert client.get("/agents/agent-001/tunnel/config", headers=a).status_code == 403
+
+
+# --- T3/T8: relay registration and config version --------------------------------------------
+
+
+def test_relay_registration_returns_credential_once_and_bumps_the_version(client, db):
+    created = put_relay(client)
+    assert created.status_code == 201
+    body = created.json()
+    assert body["credential"].startswith("cmp_relay_") and body["config_version"] == 1
+    with db() as s:
+        row = s.get(RelayServer, "relay-seoul")
+        assert body["credential"] not in (row.credential_digest, row.endpoint, row.public_key)
+    updated = put_relay(client, endpoint="13.124.10.11:51820")
+    assert updated.status_code == 200
+    assert updated.json()["credential"] is None  # never shown again
+    assert updated.json()["config_version"] == 2
+
+
+def test_relay_registration_requires_the_operator_key(client):
+    assert put_relay(client, headers={}).status_code in (401, 403)
+    assert put_relay(client, headers={"X-Enrollment-Admin-Key": "wrong"}).status_code in (401, 403)
+
+
+def test_agent_config_lists_relays_tunnel_settings_and_exposed_ports(client, db):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    relay_key = wg_key()
+    put_relay(client, key=relay_key)
+
+    config = client.get("/agents/agent-001/tunnel/config", headers=headers)
+    assert config.status_code == 200
+    body = config.json()
+    assert body["tunnel_ip"] == "10.200.0.2"
+    assert body["relays"] == [
+        {"relay_id": "relay-seoul", "endpoint": "13.124.10.10:51820", "public_key": relay_key}
+    ]
+    assert body["allowed_ips"] == ["10.200.0.0/24"]
+    assert (body["mtu"], body["persistent_keepalive"]) == (1420, 25)
+    assert body["exposed_ports"] == [5432]  # no READY ON_PREM app yet
+    assert body["config_version"] == 1
+    assert "owner" not in config.text and "credential" not in config.text
+
+
+def test_config_without_a_registered_key_is_not_found(client, db):
+    headers = agent(db)
+    response = client.get("/agents/agent-001/tunnel/config", headers=headers)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "TUNNEL_KEY_NOT_REGISTERED"
+
+
+# --- T2/T5/T6/T7: tunnel status and the ON_PREM Data handoff ---------------------------------
+
+
+def onprem_ready(db):
+    approved = Approved(db, "ON_PREM", "FULL")
+    with db() as s:
+        claim_execution(s, approved.approval_id)
+        complete_execution(
+            s,
+            approved.approval_id,
+            status="SUCCEEDED",
+            code="READY",
+            step="execute_on_prem_plan",
+            resource_refs=ONPREM_REFS,
+        )
+    return approved
+
+
+def handoff(db, consumer):
+    return asyncio.run(
+        ActivityEnvironment().run(
+            ApprovalActivities(db).get_migration_handoff,
+            {"plan_id": "plan-001", "revision": 1, "consumer": consumer},
+        )
+    )
+
+
+def report(client, headers, **body):
+    payload = {
+        "tunnel_ip": "10.200.0.2",
+        "last_handshake_at": 1793836800,
+        "app_health_ok": True,
+        "db_connect_ok": True,
+    } | body
+    return client.post("/agents/agent-001/tunnel/status", json=payload, headers=headers)
+
+
+def test_onprem_data_handoff_waits_for_a_tunnel_db_check(client, db):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    onprem_ready(db)
+
+    before = handoff(db, "DATA_MIGRATION")
+    assert before["proceed"] is False
+    assert before["blocked_by"] == ["TUNNEL_DB_NOT_VERIFIED"]
+    assert before["database"]["tunnel_endpoint"] is None
+
+    assert report(client, headers, db_connect_ok=False).status_code == 202
+    assert handoff(db, "DATA_MIGRATION")["blocked_by"] == ["TUNNEL_DB_NOT_VERIFIED"]
+
+    assert report(client, headers).status_code == 202
+    after = handoff(db, "DATA_MIGRATION")
+    assert after["proceed"] is True and after["blocked_by"] == []
+    assert after["database"]["tunnel_endpoint"] == "10.200.0.2:5432"
+
+    # T6: the stored result itself is never rewritten.
+    with db() as s:
+        assert load_result(s, "plan-001", 1).database.tunnel_endpoint is None
+
+
+def test_onprem_traffic_handoff_stays_blocked_until_the_port_question_is_answered(client, db):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    onprem_ready(db)
+    report(client, headers)
+    traffic = handoff(db, "TRAFFIC_MIGRATION")
+    assert traffic["proceed"] is False
+    assert traffic["blocked_by"] == ["EXTERNAL_ENDPOINT_UNAVAILABLE"]  # P2 pending
+    assert traffic["application"]["external_endpoint"] is None
+
+
+def test_exposed_ports_include_ready_onprem_app_ports(client, db):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    onprem_ready(db)
+    body = client.get("/agents/agent-001/tunnel/config", headers=headers).json()
+    assert body["exposed_ports"] == [5432, 8080]
+
+
+def test_status_for_another_tunnel_ip_is_rejected(client, db):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    response = report(client, headers, tunnel_ip="10.200.0.9")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "TUNNEL_IP_MISMATCH"
+
+
+def test_alembic_migration_matches_tunnel_models(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.autogenerate import compare_metadata
+    from alembic.config import Config
+    from alembic.migration import MigrationContext
+
+    url = f"sqlite+pysqlite:///{tmp_path / 'migrated.db'}"
+    monkeypatch.setattr(settings, "database_url", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    migrated = create_engine(url)
+    with migrated.connect() as connection:
+        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    migrated.dispose()
+    tables = ("agent_tunnels", "relay_servers", "tunnel_settings", "agent_tunnel_status")
+    assert [d for d in diff if any(t in str(d) for t in tables)] == []
+    command.downgrade(Config("alembic.ini"), "20261105_02")

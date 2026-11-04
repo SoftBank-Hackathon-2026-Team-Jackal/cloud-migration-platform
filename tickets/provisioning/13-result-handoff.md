@@ -155,3 +155,4 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
 - ON_PREM은 외부 Ingress가 없어 `external_endpoint`가 없다. 그래서 Traffic 인계는 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단된다. 복제 권한도 확인하지 않아 `replication_capable=null`과 `REPLICATION_NOT_VERIFIED` 경고가 붙는다.
 - 상위 `MigrationWorkflow`와 실제 Data/Traffic Worker의 소비는 범위 밖이다.
 
+> 2026-11-05 티켓 16 변경: ON_PREM Data 인계는 터널 경유 DB 접속이 확인된 뒤에만 진행하고 `database.tunnel_endpoint`를 인계 뷰에 채운다(16 T2·T7). 저장된 결과는 바꾸지 않는다(T6).

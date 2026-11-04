@@ -690,6 +690,160 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/tunnel/key:
+    put:
+      tags:
+      - tunnels
+      summary: Put Tunnel Key
+      operationId: put_tunnel_key_agents__agent_id__tunnel_key_put
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TunnelKeyRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TunnelKeyResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/tunnel/config:
+    get:
+      tags:
+      - tunnels
+      summary: Get Tunnel Config
+      operationId: get_tunnel_config_agents__agent_id__tunnel_config_get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TunnelConfigResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/tunnel/status:
+    post:
+      tags:
+      - tunnels
+      summary: Post Tunnel Status
+      operationId: post_tunnel_status_agents__agent_id__tunnel_status_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TunnelStatusReport'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /tunnel-admin/relays/{relay_id}:
+    put:
+      tags:
+      - tunnels
+      summary: Put Relay
+      operationId: put_relay_tunnel_admin_relays__relay_id__put
+      parameters:
+      - name: relay_id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9]{0,118}[a-z0-9])?$
+          title: Relay Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelayRegistration'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayRegistered'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -1370,6 +1524,57 @@ components:
       - agent_id
       - credential
       title: RegistrationResponse
+    RelayPeer:
+      properties:
+        relay_id:
+          type: string
+          title: Relay Id
+        endpoint:
+          type: string
+          title: Endpoint
+        public_key:
+          type: string
+          title: Public Key
+      type: object
+      required:
+      - relay_id
+      - endpoint
+      - public_key
+      title: RelayPeer
+    RelayRegistered:
+      properties:
+        relay_id:
+          type: string
+          title: Relay Id
+        credential:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Credential
+        config_version:
+          type: integer
+          title: Config Version
+      type: object
+      required:
+      - relay_id
+      - credential
+      - config_version
+      title: RelayRegistered
+    RelayRegistration:
+      properties:
+        endpoint:
+          type: string
+          pattern: ^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$
+          title: Endpoint
+        public_key:
+          type: string
+          title: Public Key
+      additionalProperties: false
+      type: object
+      required:
+      - endpoint
+      - public_key
+      title: RelayRegistration
     ReportAck:
       properties:
         job_id:
@@ -1581,6 +1786,91 @@ components:
       - name
       - key
       title: SecretRefV2
+    TunnelConfigResponse:
+      properties:
+        tunnel_ip:
+          type: string
+          title: Tunnel Ip
+        relays:
+          items:
+            $ref: '#/components/schemas/RelayPeer'
+          type: array
+          title: Relays
+        allowed_ips:
+          items:
+            type: string
+          type: array
+          title: Allowed Ips
+        mtu:
+          type: integer
+          title: Mtu
+        persistent_keepalive:
+          type: integer
+          title: Persistent Keepalive
+        exposed_ports:
+          items:
+            type: integer
+          type: array
+          title: Exposed Ports
+        config_version:
+          type: integer
+          title: Config Version
+      type: object
+      required:
+      - tunnel_ip
+      - relays
+      - allowed_ips
+      - mtu
+      - persistent_keepalive
+      - exposed_ports
+      - config_version
+      title: TunnelConfigResponse
+    TunnelKeyRequest:
+      properties:
+        public_key:
+          type: string
+          title: Public Key
+      additionalProperties: false
+      type: object
+      required:
+      - public_key
+      title: TunnelKeyRequest
+    TunnelKeyResponse:
+      properties:
+        tunnel_ip:
+          type: string
+          title: Tunnel Ip
+        config_version:
+          type: integer
+          title: Config Version
+      type: object
+      required:
+      - tunnel_ip
+      - config_version
+      title: TunnelKeyResponse
+    TunnelStatusReport:
+      properties:
+        tunnel_ip:
+          type: string
+          title: Tunnel Ip
+        last_handshake_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Handshake At
+        app_health_ok:
+          type: boolean
+          title: App Health Ok
+        db_connect_ok:
+          type: boolean
+          title: Db Connect Ok
+      additionalProperties: false
+      type: object
+      required:
+      - tunnel_ip
+      - app_health_ok
+      - db_connect_ok
+      title: TunnelStatusReport
     ValidationError:
       properties:
         loc:

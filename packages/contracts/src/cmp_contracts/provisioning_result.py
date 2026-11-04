@@ -58,6 +58,8 @@ class DatabaseHandoff(Contract):
     exposure: Literal["CLUSTER_INTERNAL"] = "CLUSTER_INTERNAL"
     storage: DatabaseStorage = Field(default_factory=DatabaseStorage)
     release: Text | None = None
+    # Ticket 16 T7: ON_PREM only, filled in the handoff view after a tunnel DB check.
+    tunnel_endpoint: Text | None = None
     ready: bool = False
 
 
