@@ -1,0 +1,17 @@
+capability: container-runtime
+title: 컨테이너 실행(Deployment·StatefulSet)
+usage_vocabulary: [웹 서버 프로세스, 백그라운드 작업자, 배치 작업]
+detect_rules:
+  - {source: MANIFEST, pattern: "kind: (Deployment|StatefulSet)|Deployment/|StatefulSet/"}
+  - {source: MANIFEST, pattern: "resources|replicas|readinessProbe|livenessProbe"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: 컨테이너 이미지·포트·자원 요구를 그대로 쓴다}
+  - {target: GCP, grade: DIRECT, when: 컨테이너 이미지·포트·자원 요구를 그대로 쓴다}
+  - {target: ON_PREM, grade: DIRECT, when: 컨테이너 이미지·포트·자원 요구를 그대로 쓴다}
+known_differences:
+  - 이미지 아키텍처(amd64/arm64)는 대상 capabilities에서 정한다. 빌드는 Sandbox 밖에서 한다.
+  - 사이드카·initContainer는 변환하지 못한 항목으로 보고한다.
+standard_tests:
+  - 배포 직후 헬스 체크 경로가 응답한다.
+  - 재시작 후에도 앱이 같은 응답을 한다.
+skill: k8s-workload

@@ -1,0 +1,25 @@
+capability: environment-config
+title: 환경 변수와 설정
+usage_vocabulary: [연결 설정, 기능 플래그, 비밀 값 주입, 원본 환경 식별]
+detect_rules:
+  - {source: ENV, pattern: "ENV_READ|\\.env|Secret|ConfigMap"}
+  - {source: CODE, pattern: "os\\.Getenv|process\\.env|os\\.environ|getenv"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: 일반 설정 변수는 .env 참조로 그대로 주입한다}
+  - {target: GCP, grade: DIRECT, when: 일반 설정 변수는 .env 참조로 그대로 주입한다}
+  - {target: ON_PREM, grade: DIRECT, when: 일반 설정 변수는 .env 참조로 그대로 주입한다}
+  - target: AWS
+    grade: API_DIFF
+    when: 원본 환경에 묶인 변수(AWS_ 자격 증명·리전 등)가 있어 제외하거나 대체해야 한다
+  - target: GCP
+    grade: API_DIFF
+    when: 원본 환경에 묶인 변수(AWS_ 자격 증명·리전 등)가 있어 제외하거나 대체해야 한다
+  - target: ON_PREM
+    grade: API_DIFF
+    when: 원본 환경에 묶인 변수(AWS_ 자격 증명·리전 등)가 있어 제외하거나 대체해야 한다
+known_differences:
+  - .env 실제 값은 분석 단계에서 읽지 않는다. 이름만 다룬다.
+  - DB 연결 변수는 요구사항의 env_bindings로 대체하고 나머지는 예외 목록으로 처리한다.
+standard_tests:
+  - 필수 변수가 모두 주입된 상태로 앱이 시작한다.
+skill: config-env
