@@ -348,7 +348,7 @@ class FixedResolver:
     def __init__(self, target=TARGET):
         self.target = target
 
-    def resolve(self, session, manifest):
+    def resolve(self, session, manifest, request):
         return self.target
 
 
@@ -652,3 +652,116 @@ async def test_unreachable_alb_prevents_ready(tmp_path, db, cluster, runtime):
     assert (result["status"], result["code"]) == ("FAILED", "ALB_UNREACHABLE")
     assert result["resource_refs"]["alb_hostname"] == ALB
     assert "app_external_endpoint" not in result["resource_refs"]
+
+
+async def test_lb_controller_failure_stops_before_workloads(tmp_path, db, cluster, runtime):
+    plan = Plan(tmp_path / "artifacts", db)
+
+    def broken(target):
+        raise RuntimeError("helm failed")
+
+    cluster.ensure_lb_controller = broken
+    result = await run(activity_for(db, tmp_path / "artifacts", runtime), plan.request())
+    assert (result["status"], result["code"]) == ("FAILED", "LB_CONTROLLER_NOT_READY")
+    assert cluster.helm_calls == []
+
+
+async def test_cluster_access_failure_is_reported(tmp_path, db, cluster, runtime):
+    plan = Plan(tmp_path / "artifacts", db)
+
+    @contextmanager
+    def refused(target):
+        raise RuntimeError("aws eks update-kubeconfig failed")
+        yield
+
+    runtime.connect = refused
+    result = await run(activity_for(db, tmp_path / "artifacts", runtime), plan.request())
+    assert (result["status"], result["code"]) == ("FAILED", "CLUSTER_ACCESS_FAILED")
+
+
+def test_resolver_prefers_infrastructure_refs_passed_by_the_workflow(tmp_path, db):
+    from cmp_worker.activities.aws_workloads import ExecutionRefsResolver
+
+    plan = Plan(tmp_path / "artifacts", db)
+    refs = {
+        "eks_cluster_name": "cmp-target",
+        "vpc_id": "vpc-0123456789abcdef0",
+        "lb_controller_role_arn": "arn:aws:iam::714066696240:role/cmp-target-lbc",
+        "node_group_name": "ignored",
+    }
+    with db() as session:
+        found = ExecutionRefsResolver().resolve(
+            session, plan.manifest, plan.request(resource_refs=refs)
+        )
+        missing = ExecutionRefsResolver().resolve(
+            session, plan.manifest, plan.request(resource_refs={"vpc_id": "vpc-1"})
+        )
+    assert found == TARGET
+    assert missing is None
+
+
+@pytest.mark.skipif(
+    not hasattr(__import__("cmp_api.approvals").approvals.PlanExecution, "resource_refs"),
+    reason="ticket 08 execution refs schema is not merged yet",
+)
+def test_resolver_reads_latest_succeeded_infrastructure_execution(tmp_path, db):
+    from cmp_api.approvals import PlanExecution
+    from cmp_worker.activities.aws_workloads import ExecutionRefsResolver
+
+    plan = Plan(tmp_path / "artifacts", db)
+    infra = plan.manifest.model_dump(mode="json")
+    infra["plan"]["plan_id"] = "plan-008"
+    infra["scope"] = "INFRASTRUCTURE"
+    infra = PlanManifest.model_validate(infra)
+    refs = {
+        "eks_cluster_name": "cmp-target",
+        "vpc_id": "vpc-0123456789abcdef0",
+        "lb_controller_role_arn": "arn:aws:iam::714066696240:role/cmp-target-lbc",
+    }
+    with db() as session:
+        publish_plan_revision(
+            session,
+            infra,
+            Preview(
+                contract_version="1",
+                manifest_digest=manifest_digest(infra),
+                changes=[{"resource_type": "CLUSTER", "action": "CREATE", "name": "c"}],
+            ),
+        )
+        session.add(
+            PlanExecution(
+                plan_id="plan-008",
+                revision=1,
+                step="PROVISION",
+                approval_id=plan.approval_id,
+                status="SUCCEEDED",
+                started_at=1,
+                finished_at=2,
+                resource_refs=refs,
+            )
+        )
+        session.commit()
+        found = ExecutionRefsResolver().resolve(session, plan.manifest, plan.request())
+    assert found == TARGET
+
+
+def test_cli_sends_secret_only_through_stdin_create(tmp_path):
+    from cmp_worker.activities.aws_workloads_cli import CliRuntime, KubectlSession
+
+    calls = []
+
+    class Recording(CliRuntime):
+        def run(self, args, *, stdin=None, timeout=300):
+            calls.append((args, stdin))
+            return b""
+
+    session = KubectlSession(Recording(), tmp_path / "kubeconfig", tmp_path)
+    session.create_secret(NAMESPACE, "cmp-demo-db-auth", {"password": "s3cret-value-xyz"})
+    keys = session.secret_keys(NAMESPACE, "cmp-demo-db-auth")
+
+    create_args, create_stdin = calls[0]
+    assert "create" in create_args and "apply" not in create_args
+    assert all("s3cret-value-xyz" not in arg for args, _ in calls for arg in args)
+    assert b"s3cret-value-xyz" in create_stdin
+    assert keys is None  # not found
+    assert all("json" not in arg for arg in calls[1][0])  # key names only, never values
