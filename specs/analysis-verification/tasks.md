@@ -73,6 +73,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: 09 구현: `package_source`로 원본 작업 공간에서 재현 가능한 소스 아카이브를 만들어 `sources/<sha256>.tar.gz`로 올린다(같은 키는 업로드 생략). B-01 아카이브 검사를 통과한다.
 - 2026-11-05: 08B 구현: `AnalysisWorkflow`에 확정·승인 Signal과 검토 Query를 두고 `ReviewGate`로 처리 표를 적용. 차단은 자식 실패(`ANALYSIS_BLOCKED`)로 멈춘다.
 - 2026-11-05: D-16 결정: 단일 URL 연결 변수는 `connection_url_secret_ref` 출력으로 바인딩한다(민서님이 V2·공통 렌더러·Secret 주입을 구현한 뒤 07이 바인딩을 만들고 11이 같은 방식으로 검증). 그 전까지 07은 `DB_CONNECTION_URL_VARIABLE`로 표현 불가 보고만 한다. DSN(key=value) 형식은 이번에 지원하지 않는다.
 - 2026-11-05: 04·07 보강(Issue #75): 실제 원본 매니페스트로 NetworkPolicy 통신 의도, ConfigMap·secretKeyRef 변수 이름 수집, 클러스터 밖 DB 보고를 추가. 첫 사이클의 원본 PostgreSQL은 RDS가 아니라 클러스터 안 Pod로 결정.
