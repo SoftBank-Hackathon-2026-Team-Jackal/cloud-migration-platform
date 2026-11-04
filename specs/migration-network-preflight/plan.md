@@ -22,3 +22,7 @@
 ## 후속 연결
 
 Provisioning 결과의 네트워크·Endpoint 참조 연결은 [Provisioning 13](../../tickets/provisioning/13-result-handoff.md)과 맞춘다. Traffic Migration은 결과의 경로·시각을 읽을 수 있지만 사용자→앱 네트워크 검사는 별도다. WireGuard 구축/운영 주체, 원본 DB의 실제 사설 Endpoint와 인증 방식은 구현 시 Data Migration 담당자와 입력으로 맞춘다.
+
+## 구현 현황 (2026-11-05)
+
+구현 단위 1~5 중 1(계약)·2(CIDR 순수 함수)·3(현장 실행기, Kubernetes Pod 방식)·4(MTU는 미시도로 기록)·5의 시작 판정 함수와 Activity를 구현했다. 3의 Agent 작업 ID 연결과 5의 Data Migration Workflow 연결은 남아 있다. 결정과 증거는 [티켓 01](../../tickets/migration-network-preflight/01-onprem-data-path.md)에 있다.
