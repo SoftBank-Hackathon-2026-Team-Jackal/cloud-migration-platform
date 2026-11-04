@@ -91,3 +91,7 @@ empty. A project Owner can add it later without touching Terraform State.
 
 Worker settings: `PROVISIONING_ARTIFACT_ROOT`, `PROVISIONING_AWS_PROFILE` (S3 State),
 `PROVISIONING_GCLOUD_CONFIGURATION`, `PROVISIONING_GCP_ADC_EMAIL`, `TERRAFORM_BIN`.
+
+Recovery Revision (ticket 14 F9): when this environment's State already holds resources from an
+earlier Apply, a Plan that keeps them as `no-op` and creates only the missing ones is accepted with
+the Preview warning `RECOVERY_CONTINUATION`. Plans with `update` or `delete` stay rejected.
