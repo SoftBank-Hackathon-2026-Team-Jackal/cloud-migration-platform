@@ -22,7 +22,7 @@ def request() -> AwsPlanInput:
     return AwsPlanInput.model_validate(
         {
             "migration_id": "migration-001",
-            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "aws-eks-v1"},
+            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "aws-eks-v2"},
             "environment_id": "demo-001",
             "account_id": "123456789012",
             "region": "ap-northeast-2",
@@ -109,7 +109,7 @@ def test_saved_plan_and_redacted_preview_agree(tmp_path, monkeypatch):
     assert preview.manifest_digest == manifest_digest(manifest)
     assert not approval_issues(manifest, preview)
     assert manifest.scope == "INFRASTRUCTURE"
-    assert manifest.plan.template_version == "aws-eks-v1"
+    assert manifest.plan.template_version == "aws-eks-v2"
     assert {change.resource_type for change in preview.changes} == {"NETWORK", "CLUSTER", "NODE"}
     shown = " ".join(change.size or "" for change in preview.changes)
     assert "10.20.1.0/24" in shown and "t3.large" in shown
@@ -228,3 +228,16 @@ def test_sanitized_provider_plan_fixture_covers_full_aws_topology():
     assert counts["EKS 클러스터"] == 1
     assert counts["관리형 노드 그룹"] == 1
     assert "DO_NOT_LEAK_CANARY" not in preview.model_dump_json()
+
+
+def test_controller_and_csi_prerequisites_are_reviewed_resources():
+    """Ticket 08 (E6): OIDC, EBS CSI add-on and LB Controller IAM are allowed and summarized."""
+    payload = json.loads(AWS_PLAN_ACTIONS.read_text())
+    for kind in ("aws_iam_openid_connect_provider", "aws_eks_addon", "aws_iam_policy"):
+        payload["resource_changes"].append(
+            {"mode": "managed", "type": kind, "change": {"actions": ["create"]}}
+        )
+    preview = preview_from_plan(payload, request(), "a" * 64)
+    names = {change.name for change in preview.changes}
+    assert {"IAM OIDC 공급자", "EKS EBS CSI 애드온", "Load Balancer Controller IAM 정책"} <= names
+    assert "ALB_NOT_DEPLOYED" in {issue.code for issue in preview.warnings}

@@ -1,0 +1,86 @@
+{
+  "ticket": "09",
+  "issue": 37,
+  "date": "2026-11-04",
+  "cluster": {
+    "name": "cmp-target-aws",
+    "account": "714066696240",
+    "region": "ap-northeast-2",
+    "eks_version": "1.36",
+    "nodes_ready": 2,
+    "created_by": "ticket 08 plan-aws-target r1"
+  },
+  "namespace": "cmp-demo-target",
+  "activity": "execute_aws_workloads (real CliRuntime, local helm v4.3.1, kubectl v1.37.1)",
+  "first_attempt": {
+    "status": "FAILED",
+    "code": "LB_CONTROLLER_NOT_READY",
+    "cause": "helm 4 removed `helm list -a`; fixed with explicit --deployed --failed --pending + regression test"
+  },
+  "first_run": {
+    "status": "SUCCEEDED",
+    "code": "WORKLOADS_READY",
+    "resource_refs": {
+      "cluster_name": "cmp-target-aws",
+      "lb_controller": "kube-system/aws-load-balancer-controller",
+      "storage_class": "cmp-gp3",
+      "namespace": "cmp-demo-target",
+      "db_secret_ref": "cmp-demo-db-auth/DB_PASSWORD",
+      "db_release": "cmp-demo-db",
+      "db_pvc": "cmp-demo-db",
+      "db_host": "cmp-demo-db.cmp-demo-target.svc",
+      "db_port": "5432",
+      "db_name": "demoapp",
+      "db_user": "demoapp",
+      "db_replication_capable": "true",
+      "app_release": "cmp-demo-api",
+      "app_image": "714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-demo-api@sha256:b4e569f873f9e4c10e321a817dddef01c92d6076d412471cb288f604cf84eef2",
+      "app_internal_endpoint": "http://cmp-demo-api.cmp-demo-target.svc:8080",
+      "ingress": "cmp-demo-target/cmp-demo-api",
+      "alb_hostname": "k8s-cmpdemot-cmpdemoa-ecc950e231-494914021.ap-northeast-2.elb.amazonaws.com",
+      "app_external_endpoint": "http://k8s-cmpdemot-cmpdemoa-ecc950e231-494914021.ap-northeast-2.elb.amazonaws.com"
+    }
+  },
+  "rerun": {
+    "status": "SUCCEEDED",
+    "code": "WORKLOADS_READY",
+    "resource_refs": {
+      "cluster_name": "cmp-target-aws",
+      "lb_controller": "kube-system/aws-load-balancer-controller",
+      "storage_class": "cmp-gp3",
+      "namespace": "cmp-demo-target",
+      "db_secret_ref": "cmp-demo-db-auth/DB_PASSWORD",
+      "db_release": "cmp-demo-db",
+      "db_pvc": "cmp-demo-db",
+      "db_host": "cmp-demo-db.cmp-demo-target.svc",
+      "db_port": "5432",
+      "db_name": "demoapp",
+      "db_user": "demoapp",
+      "db_replication_capable": "true",
+      "app_release": "cmp-demo-api",
+      "app_image": "714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-demo-api@sha256:b4e569f873f9e4c10e321a817dddef01c92d6076d412471cb288f604cf84eef2",
+      "app_internal_endpoint": "http://cmp-demo-api.cmp-demo-target.svc:8080",
+      "ingress": "cmp-demo-target/cmp-demo-api",
+      "alb_hostname": "k8s-cmpdemot-cmpdemoa-ecc950e231-494914021.ap-northeast-2.elb.amazonaws.com",
+      "app_external_endpoint": "http://k8s-cmpdemot-cmpdemoa-ecc950e231-494914021.ap-northeast-2.elb.amazonaws.com"
+    }
+  },
+  "independent_checks": {
+    "helm_releases_after_rerun": {
+      "kube-system/aws-load-balancer-controller": "rev 1 deployed aws-load-balancer-controller-3.6.2",
+      "cmp-demo-target/cmp-demo-db": "rev 1 deployed postgres-0.1.0",
+      "cmp-demo-target/cmp-demo-api": "rev 1 deployed application-0.1.0"
+    },
+    "pvc": "cmp-demo-db Bound 10Gi RWO cmp-gp3",
+    "storage_class": "cmp-gp3 ebs.csi.aws.com gp3 Retain WaitForFirstConsumer",
+    "pods": {
+      "cmp-demo-db-0": "1/1 Running",
+      "cmp-demo-api": "1/1 Running"
+    },
+    "external_health": "GET http://<alb_hostname>/health -> 200",
+    "lb_controller_sa_role": "arn:aws:iam::714066696240:role/cmp-target-aws-lb-controller",
+    "db_secret": "cmp-demo-db-auth keys=[DB_PASSWORD], no last-applied annotation; value never read or printed",
+    "source_cluster": "cmp-demo-source untouched; both clusters still listed"
+  },
+  "not_destroyed": true
+}

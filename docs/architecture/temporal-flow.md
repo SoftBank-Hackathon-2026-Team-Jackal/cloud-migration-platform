@@ -111,6 +111,8 @@ Provisioning Preview 생성 → 계획 메타데이터를 업무 DB에 기록
 
 현재 논의된 전달 수단은 **Temporal Signal**이다. Signal은 비동기 메시지이므로 API가 승인 요청을 수락한 시점과 Workflow가 승인 상태를 처리·재개한 시점을 동일하게 취급하지 않는다. P0에서는 업무 DB 승인 기록을 유지하되 범용 Outbox는 보류한다. 승인 이벤트 ID 기반 재전달·상태 재조회로 기록 성공/Signal 실패를 복구하고, 같은 승인과 실행을 중복 적용하지 않는다. 미전달 상태를 사용자에게 완료로 표시하지 않는다. [ADR-002](../decisions/ADR-002.md)를 따른다. Temporal Update는 대안으로 검토할 수 있지만 이번 단계에서 인터페이스를 바꾸거나 채택하지 않는다.
 
+07(#34)은 이 흐름을 Plan Revision별 `ProvisioningApprovalWorkflow`로 구현했다. API가 DB에 결정을 기록한 뒤 Signal-With-Start로 `approval_id`만 전달하고, 응답에서 기록·전달(`delivery_status`)·Workflow 상태·실행 상태를 분리한다. 실행 직전 Activity가 DB를 재검증하며 고유 실행 표식으로 executor를 한 번만 호출한다. 기존 스캐폴드 `MigrationWorkflow`의 boolean 승인 Signal은 학습용으로 남아 있고, 상위 Migration Workflow와의 연결은 후속 통합 작업이다. 08(#2)부터 실행은 claim → Provider별 장시간 Activity(Heartbeat, 재시도 없음) → complete 순서이며, 결과가 불명확하면 `UNKNOWN`으로 기록하고 실제 상태 확인 전에는 다시 실행하지 않는다.
+
 ## 9. 재시도·Timeout·Heartbeat
 
 | 실패 유형 | 대응 방향 |
@@ -177,7 +179,7 @@ Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning
 
 온프레미스 K3s 대상은 사용자 PC의 Agent를 통해 클러스터 접근·Helm 실행을 연계한다. PC가 NAT 뒤에 있을 수 있으므로 플랫폼의 직접 인바운드 연결을 전제하지 않는다. Agent가 작업을 수신하고 결과를 보고할 수 있어야 한다.
 
-Temporal 측에서는 요청·Agent 작업 ID의 상관관계, 완료·실패 보고, 연결 단절과 재연결, 중복 전달 방지, 재연결 후 실제 작업 상태 조회를 다뤄야 한다. 장시간 결과 대기를 일반적인 동기 API 호출로 고정하지 않는다. Activity 결과 대기, 비동기 완료 또는 Workflow 메시지 전달 중 어떤 방식을 쓸지는 후속 설계에서 결정한다.
+Temporal 측에서는 요청·Agent 작업 ID의 상관관계, 완료·실패 보고, 연결 단절과 재연결, 중복 전달 방지, 재연결 후 실제 작업 상태 조회를 다뤄야 한다. 장시간 결과 대기를 일반적인 동기 API 호출로 고정하지 않는다. 12(#36)는 Provisioning Activity(`execute_on_prem_plan`)가 heartbeat하며 업무 DB의 Agent 작업 상태를 조회하는 방식을 택했다. 대기 한도를 넘으면 작업을 보존한 채 `UNKNOWN`을 반환하며 같은 작업을 재발행하지 않는다. Workflow 측 claim/complete 연결은 08 소유다.
 
 ## 15. 실제 배포 후 검증
 

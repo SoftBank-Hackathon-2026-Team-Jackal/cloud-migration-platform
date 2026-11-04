@@ -157,3 +157,7 @@ Provisioning Planning이 소비할 정보는 [Provision 입력 계약](../../spe
 ### 격리 Agent 구현 경계 (#15)
 
 04의 검증 Agent는 로컬 SQLite spool 폴링과 명시적 kubeconfig로 실제 격리 K3s를 호출한다. 현재 FastAPI/Temporal 스캐폴드 또는 운영 원격 Agent 전송 경로와 연결하지 않는다. [구현·검증 범위](../../specs/provisioning/k3s-agent.md)를 따른다.
+
+### 승인된 운영 Agent 배포 (#36)
+
+12는 승인 판단(업무 DB·Temporal), 작업 전달·산출물 바이트 제공(플랫폼 API), 대상 K3s 변경·READY 판정(Agent)을 분리한다. Agent는 자기 작업의 Digest 검증 산출물만 적용하며 플랫폼은 사용자 클러스터에 직접 인바운드 연결하지 않는다. [구현 범위](../../specs/provisioning/onprem-shared-deployment.md#승인된-운영-배포-12-36)를 따른다.

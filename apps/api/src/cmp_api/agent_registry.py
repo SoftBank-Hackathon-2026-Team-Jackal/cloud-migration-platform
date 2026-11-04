@@ -166,26 +166,46 @@ def enqueue_job(
     session.commit()
 
 
+def _dispatch_block(session: Session, job: AgentJob) -> str | None:
+    """Approved ON_PREM rollout jobs are re-checked against the business DB on every claim."""
+    from cmp_api.onprem_rollout import check_dispatchable, is_rollout  # avoid import cycle
+
+    return check_dispatchable(session, job.payload) if is_rollout(job.payload) else None
+
+
 def poll_job(session: Session, *, agent_id: str, credential: str) -> dict | None:
     agent = authenticate_agent(session, agent_id=agent_id, credential=credential)
-    job = session.scalar(
-        select(AgentJob)
-        .where(AgentJob.agent_id == agent.id, AgentJob.status == "QUEUED")
-        .order_by(AgentJob.id)
-        .with_for_update(skip_locked=True)
-    )
-    if job is None:
+    while True:
         job = session.scalar(
             select(AgentJob)
-            .where(AgentJob.agent_id == agent.id, AgentJob.status == "RUNNING")
+            .where(AgentJob.agent_id == agent.id, AgentJob.status == "QUEUED")
             .order_by(AgentJob.id)
+            .with_for_update(skip_locked=True)
         )
         if job is None:
-            return None
+            break
+        blocked = _dispatch_block(session, job)
+        if blocked:
+            # Never hand an unapproved/superseded Plan to the Agent; nothing has run yet.
+            job.status, job.result = "FAILED", {"code": blocked}
+            session.commit()
+            continue
+        job.status = "RUNNING"
+        session.commit()
         return {"job_id": job.id, "payload": job.payload, "status": job.status}
-    job.status = "RUNNING"
-    session.commit()
-    return {"job_id": job.id, "payload": job.payload, "status": job.status}
+    for job in session.scalars(
+        select(AgentJob)
+        .where(AgentJob.agent_id == agent.id, AgentJob.status == "RUNNING")
+        .order_by(AgentJob.id)
+    ):
+        blocked = _dispatch_block(session, job)
+        if blocked:
+            # It may have partially applied; require inspection instead of a silent re-run.
+            job.status, job.result = "UNKNOWN", {"code": blocked}
+            session.commit()
+            continue
+        return {"job_id": job.id, "payload": job.payload, "status": job.status}
+    return None
 
 
 def report_job(

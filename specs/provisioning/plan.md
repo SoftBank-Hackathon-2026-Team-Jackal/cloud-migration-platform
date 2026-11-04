@@ -150,7 +150,7 @@ Sandbox는 동일한 `build_bindings`·`render_helm_values`·`render_manifests`�
 
 Terraform 모듈 경계 **제안**은 AWS의 `network`, `eks`, `access`, `addons-prerequisites`와 GCP의 `network`, `gke`, `access`, `storage-prerequisites`다. 정확한 디렉터리 분할·기존 VPC 참조·애드온의 Terraform/Helm 소유권은 후속 선택이다. 공통 실행 순서는 네트워크·권한 → 클러스터/Node → Kubernetes API 접근 → Controller/CSI·StorageClass 준비 → Helm DB·앱 → 외부 주소 검증이다. ALB 자체는 Ingress Controller의 비동기 조정 결과일 수 있으므로 Terraform Output만으로 생성 완료를 판단하지 않고 Ingress 상태·주소·실제 응답을 확인한다. GKE도 Ingress/LB의 실제 상태를 별도로 조회한다. EKS IAM(클라우드 API 권한), Kubernetes RBAC(클러스터 리소스 권한), Pod의 AWS API 권한은 각각 별도 주체·정책으로 설계한다. GKE의 클라우드 권한과 Kubernetes 권한도 분리한다.
 
-ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Manifest/Values 참조와 허용된 배포 동작만 전달한다. Agent가 플랫폼에 먼저 연결/폴링하는 방식을 **권장**한다. 플랫폼의 PC 직접 인바운드는 전제하지 않는다. 요청은 Agent ID·대상 클러스터·Namespace에 묶고 중복 작업 ID에 대해 기존 상태를 반환하도록 한다. 연결이 끊기면 실행 상태를 `UNKNOWN/WAITING_AGENT`로 보존하고 재연결 뒤 조회한다. Agent가 작업 완료를 폴링·콜백·비동기 완료 중 어떻게 알릴지는 미정이다. K3s를 위한 macOS Linux VM 도구, 외부 Envoy·WireGuard는 이 설계에서 확정하지 않는다.
+ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Manifest/Values 참조와 허용된 배포 동작만 전달한다. Agent가 플랫폼에 먼저 연결/폴링하는 방식을 **권장**한다. 플랫폼의 PC 직접 인바운드는 전제하지 않는다. 요청은 Agent ID·대상 클러스터·Namespace에 묶고 중복 작업 ID에 대해 기존 상태를 반환하도록 한다. 연결이 끊기면 실행 상태를 `UNKNOWN/WAITING_AGENT`로 보존하고 재연결 뒤 조회한다. 12(#36)에서 Agent는 폴링으로 작업을 받고 결과 보고 API로 완료를 알리며, Worker Activity가 heartbeat하며 업무 DB 작업 상태를 조회하는 방식으로 확정했다([공통 배포 계약 §승인된 운영 배포](onprem-shared-deployment.md#승인된-운영-배포-12-36)). K3s를 위한 macOS Linux VM 도구, 외부 Envoy·WireGuard는 이 설계에서 확정하지 않는다.
 
 ## 8. Terraform Plan·Apply·State (`PROV-014`~`017`, `021`)
 
@@ -172,6 +172,8 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 재시도 시 Release 이름·Namespace·Chart/Values Digest와 실제 Helm Release 상태를 조회한다. 성공 응답 유실이면 적용 상태를 결과로 복구하고, 실패/미완료이면 충돌·기존 Revision·Kubernetes 객체를 조사한다. 승인된 Values와 다른 내용으로 임의 업그레이드하지 않는다. Helm 자동 rollback·atomic 사용 여부는 PVC/DB 데이터 보존과 부분 배포 처리 정책이 정해진 뒤 선택한다.
 
+**AWS 구현(09, #37):** `execute_aws_workloads` Activity가 위 순서를 EKS에 적용한다. 실행 전 업무 DB의 승인·최신 Revision·manifest Digest와 `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/<sha256>`의 Chart tgz·Values·bindings 바이트를 재확인하고, 08 인프라 실행의 `resource_refs`(클러스터·VPC·LB Controller IRSA)로 대상을 찾는다. StorageClass(gp3 EBS CSI)·AWS Load Balancer Controller(고정 Chart 버전·SHA-256)를 준비하고 DB Secret은 Worker가 생성해 stdin으로만 전달한다. Helm은 기존 Release 조회 후 install/skip/upgrade하고 `pending-*`는 UNKNOWN, `failed`는 FAILED로 멈추며 atomic·rollback은 쓰지 않는다. Ingress는 앱 Chart 계약을 바꾸지 않고 승인 Values에서 만든 고정 ALB(HTTP:80, 도메인·TLS 없음) 템플릿이다. PVC Bound·인증 DB 접속(PostgreSQL 16)·Pod Ready·내부 헬스·ALB 주소·외부 헬스가 모두 통과해야 `WORKLOADS_READY`다. 결정 상세는 [09 티켓](../../tickets/provisioning/09-aws-workloads.md) W1~W11.
+
 ## 10. Temporal Activity, Preview, 승인 (`PROV-014`~`017`)
 
 상위 Migration Workflow는 계획 → Preview → 특정 Plan ID·Revision 승인 대기 → 실행 → 검증 → 결과 전달을 조정한다. Workflow 코드에는 파일·네트워크·시계 조회, Secret 조회, Terraform·Helm 호출을 넣지 않는다. 다음은 **Activity 경계 후보**이며 이름·Task Queue·Timeout·Retry 수치는 확정하지 않는다.
@@ -189,6 +191,18 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 승인 요청은 FastAPI가 권한과 Plan ID·Revision을 확인해 업무 DB에 기록하고 Temporal에 전달한다. Signal을 쓰는 경우 Signal 수락과 Workflow 재개를 구분한다. Workflow는 승인 이벤트만 믿지 않고 실행 직전 Activity로 DB 승인 기록과 잠긴 Plan Digest를 재검증한다. 거절·수정·오래된 Revision은 Apply로 가지 않는다. DB 기록 성공·Signal 실패와 반대 순서/중복에 대비해 승인 이벤트 ID와 재전달·조회 조정을 권장한다. P0에서는 범용 Outbox를 도입하지 않고 승인 이벤트 ID 기반 재요청/재전달과 상태 재조회로 전달 실패를 드러내고 복구한다. DB 승인 기록은 유지한다. 정확한 API URL·인증 연동·응답 계약은 07 착수 전에 확정한다.
 
 장시간 Apply와 Agent 실행은 Heartbeat 또는 주기적 상태 조회를 두어 Worker 종료를 감지한다. 외부 프로세스가 계속 실행 중일 수 있으므로 Heartbeat timeout만 보고 같은 Apply/Agent 명령을 즉시 재발행하지 않는다. 실행 표식(`plan_id`, `revision`, `step`, 외부 작업 ID)과 State/Release/Agent 실제 상태를 먼저 조회한다. Activity Retry는 일시 오류에 한정하고 권한·검증·승인 불일치는 사용자/운영자 조치 상태로 보낸다. 취소 요청은 실행 중 외부 작업의 안전한 중단 가능성을 조회한 뒤 상태를 기록하며 인프라 자동 삭제로 해석하지 않는다. 이력에는 참조·상태·작은 오류만 남기고 Plan/Secret 원문을 싣지 않는다.
+
+### 07 구현 (#34)
+
+[07 착수 결정 D1~D6](../../tickets/provisioning/07-approval-gate.md#착수-결정-2026-11-04)을 구현했다. 업무 DB `provisioning_plan_revisions`(불변·증가 Revision, 최대값이 활성), `provisioning_approvers`(자격 증명 digest·허용 migration), `provisioning_approvals`(Revision당 결정 1건·전달 상태), `provisioning_executions`(`plan_id`·`revision`·`step` 고유 실행 표식)를 Alembic `20261104_01`로 만든다. API는 `cmp_api.routes.approvals`, 저장·재검증은 `cmp_api.approvals`, 전달은 Signal-With-Start(`cmp_api.approval_delivery`)다. `ProvisioningApprovalWorkflow`(`migration` queue)는 `approval_id`만 받고 `execute_approved_plan` Activity(`provisioning` queue)가 실행 직전 DB 승인·최신 Revision·`verify_approval_target`을 다시 확인한다. 기본 executor는 표식만 남기는 no-op이며 Terraform·Helm·Agent는 08/10/12에서 연결한다. 실행 표식이 이미 있으면(RUNNING/FAILED 포함) executor를 재호출하지 않으며, 실제 상태 조회 후 재개는 후속 실행 티켓 범위다.
+
+### 08 실행 분기 (#2)
+
+07의 단일 실행 Activity를 `claim_approved_execution`(DB 재검증·RUNNING 표식) → Provider Activity(장시간·Heartbeat·재시도 없음) → `complete_approved_execution`(SUCCEEDED/FAILED/UNKNOWN·참조 기록)으로 나눴다. 분기는 `cmp_contracts.execution.execution_steps`가 정한다: (AWS, INFRASTRUCTURE)→`execute_aws_plan`, (AWS, WORKLOADS)→`execute_aws_workloads`(09), (AWS, FULL)→둘 다 순서대로, ON_PREM→`execute_on_prem_plan`(12). Provider Activity가 사라지면(Worker 종료·Heartbeat 만료) Workflow는 `UNKNOWN`/`PROVIDER_ACTIVITY_LOST`를 기록하고 재실행하지 않는다. 상세는 [08 티켓](../../tickets/provisioning/08-aws-infra-apply.md)과 [AWS Terraform 안내](../../infra/terraform/aws/README.md)를 따른다.
+
+### 12A 온프레미스 Preview (#41)
+
+ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.
 
 ## 11. ProvisioningResult와 후속 단계 (`PROV-018`~`020`)
 
@@ -244,7 +258,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 | Terraform Backend/Lock | 중앙 S3와 잠금 채택. 버전·권한·key·잠금 설정을 공통 실행 구성으로 확정 |
 | Secret 저장·회전, Registry Pull | 대상별 접근 권한과 ECR 접근성, K3s NAT 환경까지 검토 |
 | 도메인·TLS 발급 | 승인 Preview와 Ingress 외부 검증의 필수 여부 결정 |
-| Agent 완료 통지·작업 인증 | 폴링/콜백/비동기 완료, 재연결과 중복 작업 처리 결정 |
+| Agent 완료 통지·작업 인증 | 12에서 폴링+결과 보고+Activity 상태 조회로 확정. 콜백/비동기 완료와 장기 lease는 미채택 |
 | Temporal 분할·Task Queue·Timeout/Retry | 실제 외부 작업 시간과 재시도 안전성 측정 후 결정 |
 | Apply 실패·취소 후 자동 정리 | 공유 자원·PVC 데이터 보존과 비용 사이 정책 결정 |
 | Sandbox 검증 이미지 | 동일 Digest 재사용은 ADR-003으로 결정. B-01은 공통 빌더, 계약 버전 전환·플랫폼별 검증 증거는 후속 통합 작업 |

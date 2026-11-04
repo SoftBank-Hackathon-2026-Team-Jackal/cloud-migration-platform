@@ -1,0 +1,94 @@
+{
+  "cluster": {
+    "context": "k3d-cmp-prov-rollout"
+  },
+  "steps": {
+    "offline": {
+      "activity": {
+        "status": "UNKNOWN",
+        "code": "AGENT_OFFLINE",
+        "resource_refs": {
+          "job_id": "rollout-23d0a1fc6da16776771b2107"
+        }
+      },
+      "rollout": {
+        "state": "WAITING_AGENT",
+        "code": null,
+        "job_id": "rollout-23d0a1fc6da16776771b2107",
+        "agent_id": "agent-smoke"
+      }
+    },
+    "reconnect_ready": {
+      "agent": {
+        "job_id": "rollout-23d0a1fc6da16776771b2107",
+        "status": "SUCCEEDED",
+        "code": "READY"
+      },
+      "activity": {
+        "status": "SUCCEEDED",
+        "code": "READY",
+        "resource_refs": {
+          "job_id": "rollout-23d0a1fc6da16776771b2107",
+          "namespace": "cmp-prod-demo",
+          "database_release": "demo-db",
+          "application_release": "demo-app",
+          "database_endpoint": "demo-db.cmp-prod-demo.svc:5432",
+          "application_endpoint": "demo-app.cmp-prod-demo.svc:8080",
+          "database_secret": "demo-db-auth/password"
+        }
+      },
+      "helm_revisions": {
+        "demo-db": 1,
+        "demo-app": 1
+      }
+    },
+    "lost_report_recovery": {
+      "agent": {
+        "job_id": "rollout-23d0a1fc6da16776771b2107",
+        "status": "SUCCEEDED",
+        "code": "READY"
+      },
+      "helm_revisions": {
+        "demo-db": 1,
+        "demo-app": 1
+      },
+      "activity": {
+        "status": "SUCCEEDED",
+        "code": "READY",
+        "resource_refs": {
+          "job_id": "rollout-23d0a1fc6da16776771b2107",
+          "namespace": "cmp-prod-demo",
+          "database_release": "demo-db",
+          "application_release": "demo-app",
+          "database_endpoint": "demo-db.cmp-prod-demo.svc:5432",
+          "application_endpoint": "demo-app.cmp-prod-demo.svc:8080",
+          "database_secret": "demo-db-auth/password"
+        }
+      }
+    },
+    "not_ready_revision": {
+      "agent": {
+        "job_id": "rollout-82ff68560cc40028295cbbab",
+        "status": "FAILED",
+        "code": "WORKLOAD_NOT_READY"
+      },
+      "activity": {
+        "status": "FAILED",
+        "code": "WORKLOAD_NOT_READY",
+        "resource_refs": {
+          "job_id": "rollout-82ff68560cc40028295cbbab"
+        }
+      },
+      "rollout": {
+        "state": "FAILED",
+        "code": "WORKLOAD_NOT_READY",
+        "job_id": "rollout-82ff68560cc40028295cbbab",
+        "agent_id": "agent-smoke"
+      }
+    }
+  },
+  "cleanup": {
+    "namespace_deleted": true
+  },
+  "default_kubeconfig_unchanged": true
+}
