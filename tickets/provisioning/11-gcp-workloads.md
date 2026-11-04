@@ -1,7 +1,7 @@
 # Ticket 11 — GCP GKE에 DB·앱 배포 및 연결 확인
 
 ## 상태
-IN_PROGRESS — [Issue #43](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/43); 착수 결정 K1~K12
+DONE — [Issue #43](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/43); 착수 결정 K1~K12. 10이 만든 GKE `cmp-target-gke`에서 실제 `WORKLOADS_READY`와 재실행 멱등성을 확인했다.
 
 ## 목적
 준비된 GKE에 PostgreSQL과 앱을 배포하고 실제 GCP Ingress/LB 경로를 검증한다.
@@ -17,9 +17,9 @@ Blocked by: 02, 03, 10
 - 제외: 데이터 이전과 트래픽 가중치 변경
 
 ## 수용 기준
-- [ ] PVC Bound·DB 접속, 앱 Ready·헬스 및 GCP 외부 주소를 확인한다.
-- [ ] AWS ALB Controller를 GKE 경로에 요구하지 않는다.
-- [ ] 스토리지·이미지 Pull·Ingress 실패 때 `READY`를 반환하지 않는다.
+- [x] PVC Bound·DB 접속, 앱 Ready·헬스 및 GCP 외부 주소를 확인한다.
+- [x] AWS ALB Controller를 GKE 경로에 요구하지 않는다.
+- [x] 스토리지·이미지 Pull·Ingress 실패 때 `READY`를 반환하지 않는다.
 
 ## 테스트 전략
 - 제안 Test Seam: GKE 배포 요청 → 클러스터/Ingress/앱 준비 결과. 데이터 이전 성공은 확인하지 못한다.
@@ -37,11 +37,11 @@ GKE의 실제 DB·앱 준비와 Endpoint를 조회할 수 있다.
 - 구현 중 변경: 2026-11-04 착수 결정 K1~K12 참조.
 
 ## 완료 체크리스트
-- [ ] 수용 기준과 Test Seam 확인
-- [ ] 관련 테스트 통과와 회귀 확인
-- [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
-- [ ] 미검증 항목과 결과 증거 기록
+- [x] 수용 기준과 Test Seam 확인
+- [x] 관련 테스트 통과와 회귀 확인
+- [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
+- [x] 구현·계약 정합성 및 최종 리뷰
+- [x] 미검증 항목과 결과 증거 기록
 
 ## 착수 결정 (2026-11-04)
 
@@ -67,3 +67,25 @@ GKE의 실제 DB·앱 준비와 Endpoint를 조회할 수 있다.
 - Seam: `temporalio.testing.ActivityEnvironment`로 실제 `execute_gcp_workloads`를 호출한다. 업무 DB는 SQLite(07 모델로 게시·승인), 산출물은 임시 `PROVISIONING_ARTIFACT_ROOT`의 실제 Chart tgz·Values·bindings 바이트, 클러스터·Helm·gcloud·AWS(ECR)·HTTP는 상태를 가진 가짜 런타임 포트로 바꾼다. CLI 어댑터는 기록용 러너로 인자·stdin을 검사한다.
 - 잡아내는 것: 승인/Revision/Digest/Provider/scope·프로젝트·리전 불일치 시 클러스터 무변경, 클러스터 비RUNNING, 산출물 변조·누락, 승인 슬롯 외 Values 변경, Release install/skip/upgrade/pending/failed 분기, PD StorageClass 생성·불일치, ECR Pull Secret 생성·default SA 연결과 토큰 미노출(결과·로그·명령 인자), ECR 계정 불일치, Pull/PVC/Secret 참조/DB 접속/헬스/Ingress 주소·외부 접근 실패 시 READY 금지, AWS LB Controller 미호출, 성공 시 참조만 반환. 09 회귀(기존 테스트 무수정 통과).
 - 놓치는 것: 실제 PD CSI 프로비저닝·GCE LB/NEG 조정 시간과 방화벽, 실제 ECR 토큰 Pull, gcloud/kubectl/Helm CLI 호환성, 승인 Workflow 연결(10 병합 후). 10이 만든 GKE의 `cmp-demo-target` 실검증과 10 병합 후 Temporal 테스트로 보완한다.
+
+## 검증 기록 (2026-11-05)
+
+작업 이어받기: 이전 세션의 미커밋 구현(`gcp_workloads`·`gcp_workloads_cli`·테스트)을 그대로 커밋하고 origin/main(10, PR #47)을 병합했다. 병합 시 Worker 등록·인덱스 충돌만 해결했고, gcloud 설정 변수 이름을 10과 같은 `PROVISIONING_GCLOUD_CONFIGURATION`으로 맞췄다(K12 문구 포함). 10 병합 전 skip 처리했던 승인 Workflow 분기 테스트는 skip을 제거해 실제로 실행한다.
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` (origin/main 병합 후) | Ruff 검사·포맷, 전체 469개 통과(skip 없음). 실제 `ProvisioningApprovalWorkflow` → claim → `execute_gcp_workloads` → complete 분기 포함 |
+| 실제 GKE `cmp-target-gke`(10, `sbh26-prod`, `asia-northeast3`, 노드 3 Ready), Namespace `cmp-demo-target`, 실제 `GcpCliRuntime` | 1차: `SUCCEEDED/WORKLOADS_READY`(약 14분, 대부분 GCE LB 전파 대기). 재실행: `WORKLOADS_READY` |
+| 독립 확인(kubectl/helm/curl) | Helm Release 2개 모두 revision 1(재실행 시 재설치·업그레이드 없음), PVC `cmp-demo-db` Bound 10Gi `cmp-pd-balanced`(pd.csi, pd-balanced, Retain), DB·앱 Pod 1/1 Running, ECR Digest 이미지 Pull 성공(`cmp-ecr-pull`→default SA), 클러스터 내부·외부 `http://34.102.136.6/health` 200, NEG 백엔드 HEALTHY, AWS LB Controller 미설치. DB Secret은 키 이름만 확인·last-applied 주석 없음. 증거: [provisioning-11-gke.json](../../docs/verification/provisioning-11-gke.json) |
+
+Chart 변경은 없다. 원본 Chart의 `helm lint`는 스키마가 승인 Values를 필수로 요구해 기본 values로는 실패하는 것이 정상이며, Values 렌더 검사는 기존 `make check`에 포함된다. HTTP 라우트 변경이 없어 `make openapi`는 해당 없음. Workflow 코드는 수정하지 않았다.
+
+### 미검증·제한
+
+- 09와 같이 승인 Workflow를 거친 실제 실행이 아니다. 임시 SQLite 업무 DB에 WORKLOADS Revision을 게시·승인하고 `ActivityEnvironment`로 실제 Activity를 호출했으며, 클러스터 대상은 10 G4 refs 키로 전달했다. 승인 Workflow 분기는 Temporal 테스트 환경에서 확인했다.
+- GCE LB는 생성 직후 전 세계 프런트엔드 전파 중 일부 요청에 Google 기본 404를 돌려준다. 실검증에서 Activity가 200을 확인한 직후에도 외부 요청이 약 1분간 404였다가 이후 계속 200이 되었다. 현재 판정은 200 한 번이면 통과하므로, 연속 성공 횟수 요구는 14(통합 검증)에서 검토할 후속 항목이다.
+- 실제 실패 주입(Pull·PVC·Ingress 실패)은 가짜 런타임 테스트로만 확인했다.
+- 노드 서비스 계정의 로그·지표 IAM 바인딩은 10 G6 변경에 따라 아직 없다. 워크로드 동작에는 영향이 없었다.
+- 사용자 `CONFIG_MAP`(`cmp-demo-config`: 소스 `demo-api-config`의 비밀이 아닌 `APP_PORT`·`S3_ENABLED` 값)과 `USER_SECRET`(`cmp-demo-secrets`: 새 무작위 `DEMO_WRITE_TOKEN`)은 검증용으로 미리 만들었다. 실제 생성 경로는 Planning/업로드 통합 범위다.
+
+실검증 자원(`cmp-pd-balanced`, PD 10Gi, `cmp-demo-target`의 DB/앱, GCE 외부 HTTP LB `34.102.136.6`)은 삭제하지 않았다. 인터넷 공개 HTTP라 비용·노출이 남으므로 정리 시점은 사용자가 결정한다.

@@ -1,0 +1,90 @@
+{
+ "ticket": "11",
+ "issue": 43,
+ "date": "2026-11-05",
+ "cluster": {
+  "name": "cmp-target-gke",
+  "project": "sbh26-prod",
+  "location": "asia-northeast3",
+  "nodes_ready": 3,
+  "created_by": "ticket 10 plan-gcp-target r1"
+ },
+ "namespace": "cmp-demo-target",
+ "activity": "execute_gcp_workloads (real GcpCliRuntime, gcloud configuration cmp-gcp-prod, AWS profile cmp-aws-prod, local helm v4.3.1)",
+ "harness": "temporary SQLite business DB with an approved WORKLOADS revision (plan-011 r1), real packaged infra/helm charts, ActivityEnvironment; resource_refs from ticket 10 G4 keys",
+ "prerequisites": {
+  "configmap": "cmp-demo-config keys=[APP_PORT,S3_ENABLED] (values copied from source demo-api-config, non-secret)",
+  "user_secret": "cmp-demo-secrets key=[DEMO_WRITE_TOKEN], new random value, not copied from source"
+ },
+ "first_run": {
+  "status": "SUCCEEDED",
+  "code": "WORKLOADS_READY",
+  "resource_refs": {
+   "gcp_project_id": "sbh26-prod",
+   "gke_cluster_name": "cmp-target-gke",
+   "gke_location": "asia-northeast3",
+   "storage_class": "cmp-pd-balanced",
+   "namespace": "cmp-demo-target",
+   "image_pull_secret": "cmp-ecr-pull",
+   "db_secret_ref": "cmp-demo-db-auth/password",
+   "db_release": "cmp-demo-db",
+   "db_pvc": "cmp-demo-db",
+   "db_host": "cmp-demo-db.cmp-demo-target.svc",
+   "db_port": "5432",
+   "db_name": "demoapp",
+   "db_user": "demoapp",
+   "db_replication_capable": "true",
+   "app_release": "cmp-demo-api",
+   "app_image": "714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-demo-api@sha256:b4e569f873f9e4c10e321a817dddef01c92d6076d412471cb288f604cf84eef2",
+   "app_internal_endpoint": "http://cmp-demo-api.cmp-demo-target.svc:8080",
+   "ingress": "cmp-demo-target/cmp-demo-api",
+   "ingress_ip": "34.102.136.6",
+   "app_external_endpoint": "http://34.102.136.6"
+  }
+ },
+ "rerun": {
+  "status": "SUCCEEDED",
+  "code": "WORKLOADS_READY",
+  "resource_refs": {
+   "gcp_project_id": "sbh26-prod",
+   "gke_cluster_name": "cmp-target-gke",
+   "gke_location": "asia-northeast3",
+   "storage_class": "cmp-pd-balanced",
+   "namespace": "cmp-demo-target",
+   "image_pull_secret": "cmp-ecr-pull",
+   "db_secret_ref": "cmp-demo-db-auth/password",
+   "db_release": "cmp-demo-db",
+   "db_pvc": "cmp-demo-db",
+   "db_host": "cmp-demo-db.cmp-demo-target.svc",
+   "db_port": "5432",
+   "db_name": "demoapp",
+   "db_user": "demoapp",
+   "db_replication_capable": "true",
+   "app_release": "cmp-demo-api",
+   "app_image": "714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-demo-api@sha256:b4e569f873f9e4c10e321a817dddef01c92d6076d412471cb288f604cf84eef2",
+   "app_internal_endpoint": "http://cmp-demo-api.cmp-demo-target.svc:8080",
+   "ingress": "cmp-demo-target/cmp-demo-api",
+   "ingress_ip": "34.102.136.6",
+   "app_external_endpoint": "http://34.102.136.6"
+  }
+ },
+ "independent_checks": {
+  "helm_releases_after_rerun": {
+   "cmp-demo-target/cmp-demo-db": "rev 1 deployed postgres-0.1.0",
+   "cmp-demo-target/cmp-demo-api": "rev 1 deployed application-0.1.0"
+  },
+  "pvc": "cmp-demo-db Bound 10Gi RWO cmp-pd-balanced",
+  "storage_class": "cmp-pd-balanced pd.csi.storage.gke.io pd-balanced Retain WaitForFirstConsumer",
+  "pods": {
+   "cmp-demo-db-0": "1/1 Running",
+   "cmp-demo-api": "1/1 Running"
+  },
+  "image_pull": "ECR digest pulled in ~8s via cmp-ecr-pull linked to default ServiceAccount",
+  "ingress": "GCE Ingress, NEG annotation {\"ingress\": true}, backends HEALTHY, LB health check /health on 8080, auto firewall 130.211.0.0/22,35.191.0.0/16 tcp:8080",
+  "internal_health": "in-cluster GET http://cmp-demo-api.cmp-demo-target.svc:8080/health -> 200",
+  "external_health": "GET http://34.102.136.6/health -> 200 (steady after ~14 min from Ingress creation; earlier intermittent Google front-end 404 during global propagation)",
+  "aws_lb_controller": "not installed on GKE",
+  "db_secret": "cmp-demo-db-auth keys=[password], no last-applied annotation; value never read or printed"
+ },
+ "not_destroyed": true
+}
