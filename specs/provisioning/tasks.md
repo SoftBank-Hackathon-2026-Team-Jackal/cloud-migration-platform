@@ -40,6 +40,7 @@
 | [27 대상 DB 논리 복제 준비와 복제 가능 판정 보정](../../tickets/provisioning/27-target-db-replication.md) | DONE (로컬 범위, 리뷰·push 대기, 새 Agent 릴리스 필요) | 02, 04B, 09, 11, 12, 13 | PROV-005, 011, 018, 020 | [#151](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/151) | ☑ |
 | [29 대상별 ECR 이미지 pull 전략 (GKE 갱신·K3s pull Secret)](../../tickets/provisioning/29-image-pull-strategy.md) | IN_PROGRESS (로컬 완료, 리뷰·Agent 릴리스 승인 대기) | 11, 12, 15, ENV-04 | PROV-009, 010, 013, 018, 021 | [#153](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/153) | ☐ |
 | [28 빌드·이미지 레지스트리 실행 환경 (버킷 권한·ECR·worker 빌드)](../../tickets/provisioning/28-build-registry-runtime.md) | IN_PROGRESS (로컬 완료, 새 스택·릴리스 반영 승인 대기) | B-01, 21 | PROV-001, 004, 010, 021 | [#152](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/152) | ☐ |
+| [49 실패 이벤트·실패 사유 보존과 running 고착 해소](../../tickets/provisioning/49-failure-visibility.md) | IN_PROGRESS (로컬 완료, 리뷰 대기) | 07, 18, 22, 24 | PROV-014, 015, 016, 018, 021 | [#184](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/184) | ☐ |
 
 ## 선행 관계
 

@@ -50,6 +50,10 @@ paths:
       tags:
       - migration scaffold
       summary: Get Migration
+      description: 'Ticket 49: a closed Workflow reports its Temporal outcome (never
+        `running`), with the
+
+        failure code, web phase and detailed codes (`failure_issues`).'
       operationId: get_migration_migrations__workflow_id__get
       parameters:
       - name: workflow_id
@@ -2894,6 +2898,40 @@ components:
           const: scaffold
           title: Mode
           default: scaffold
+        plan:
+          anyOf:
+          - additionalProperties:
+              anyOf:
+              - type: string
+              - type: integer
+            type: object
+          - type: 'null'
+          title: Plan
+        plan_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Plan Code
+        failure_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Failure Code
+        failure_phase:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Failure Phase
+        failure_issues:
+          items:
+            type: string
+          type: array
+          title: Failure Issues
+        execution_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Execution Status
       type: object
       required:
       - workflow_id

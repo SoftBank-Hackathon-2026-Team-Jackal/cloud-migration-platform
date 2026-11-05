@@ -102,3 +102,6 @@ Blocked by: 01A, 04B, 05, 06, 07, 12, 12A, 15 (DONE)
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영 (ADR 변경 없음)
 - [x] 구현·계약 정합성 및 최종 리뷰 (자체 리뷰. 조율 세션 리뷰 대기)
 - [x] 미검증 항목과 결과 증거 기록
+
+## 후속
+- [49](49-failure-visibility.md)(#184): Plan 게시 실패의 `issues`가 `failure_issues`·운영 로그 `MIGRATION_FAILED`로 보존되고, 실패 종료에 웹 `error` 이벤트가 나간다.

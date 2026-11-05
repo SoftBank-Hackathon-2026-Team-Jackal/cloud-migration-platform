@@ -32,6 +32,10 @@ def create_activity_worker(client: Client) -> Worker:
 
 
 def create_workflow_worker(client: Client) -> Worker:
+    # Imported here: test modules defining Workflows import this factory, and the Workflow sandbox
+    # must not re-import the API settings (`.env` read) that the event store pulls in.
+    from cmp_worker.events import emit_migration_event
+
     return Worker(
         client,
         task_queue=WORKFLOW_QUEUE,
@@ -43,4 +47,7 @@ def create_workflow_worker(client: Client) -> Worker:
             TrafficShiftWorkflow,
             GcpPullSecretRefreshWorkflow,  # ticket 29
         ],
+        # Ticket 49 F7: the MigrationWorkflow failure report runs where the Workflow runs, so it
+        # never waits for another worker. DB writes only; no provider I/O on this queue.
+        activities=[emit_migration_event],
     )

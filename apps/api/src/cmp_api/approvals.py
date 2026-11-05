@@ -128,6 +128,8 @@ class PlanExecution(Base):
     finished_at: Mapped[int | None] = mapped_column(Integer)
     code: Mapped[str | None] = mapped_column(String(64))
     resource_refs: Mapped[dict | None] = mapped_column(JSON)
+    # Ticket 49 F10: the approval Workflow run (`workflow_id/run_id`) that wrote the marker.
+    claimed_by: Mapped[str | None] = mapped_column(String(255))
 
 
 def _now(now: datetime | None = None) -> int:
@@ -330,12 +332,20 @@ def execution_refs(session: Session, record: PlanApproval) -> dict[str, str]:
     return dict(marker.resource_refs or {}) if marker else {}
 
 
-def claim_execution(session: Session, approval_id: str, *, now: datetime | None = None) -> dict:
+def claim_execution(
+    session: Session,
+    approval_id: str,
+    *,
+    claimant: str | None = None,
+    now: datetime | None = None,
+) -> dict:
     """Re-check the DB approval, latest Revision and Digests, then claim execution once.
 
     A claim writes the RUNNING marker before any provider Activity runs, so a re-delivered or
     restarted Workflow can never start provider execution twice. Returns small codes only;
-    BLOCKED/REJECTED outcomes create no marker.
+    BLOCKED/REJECTED outcomes create no marker. Ticket 49 F10: a retry of the claim by the same
+    `claimant` (approval Workflow run) whose response was lost gets CLAIMED again; that run has not
+    started a provider step yet.
     """
     record = session.get(PlanApproval, approval_id)
     if record is None:
@@ -345,6 +355,9 @@ def claim_execution(session: Session, approval_id: str, *, now: datetime | None 
         return {**outcome, "status": "REJECTED", "code": "PLAN_REJECTED"}
     marker = session.get(PlanExecution, (record.plan_id, record.revision, EXECUTION_STEP))
     if marker is not None:
+        if claimant and marker.status == "RUNNING" and marker.claimed_by == claimant:
+            row = session.get(PlanRevision, (record.plan_id, record.revision))
+            return _claimed(outcome, record, _models(row)[0])
         return {**outcome, "status": "ALREADY_EXECUTED", "code": f"EXECUTION_{marker.status}"}
     if record.revision != latest_revision(session, record.plan_id):
         return {**outcome, "status": "BLOCKED", "code": "STALE_REVISION"}
@@ -370,6 +383,7 @@ def claim_execution(session: Session, approval_id: str, *, now: datetime | None 
             approval_id=record.id,
             status="RUNNING",
             started_at=_now(now),
+            claimed_by=claimant,
         )
     )
     try:
@@ -377,6 +391,10 @@ def claim_execution(session: Session, approval_id: str, *, now: datetime | None 
     except IntegrityError:
         session.rollback()
         return {**outcome, "status": "ALREADY_EXECUTED", "code": "EXECUTION_RUNNING"}
+    return _claimed(outcome, record, manifest)
+
+
+def _claimed(outcome: dict, record: PlanApproval, manifest: PlanManifest) -> dict:
     return {
         **outcome,
         "status": "CLAIMED",
