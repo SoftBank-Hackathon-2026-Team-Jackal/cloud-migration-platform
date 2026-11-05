@@ -37,7 +37,21 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from cmp_worker.activities.k8s_workloads_cli import CommandError, CommandRunner, KubectlSession
-from cmp_worker.events import emit_event_async, log_event
+
+
+# cmp_worker.events는 cmp_api 설정을 읽으므로 import 시점이 아니라 호출할 때 불러온다
+# (이 모듈은 Worker 등록 때 Workflow 샌드박스 검사 경로에서도 import된다).
+async def emit_event_async(*args, **kwargs):
+    from cmp_worker.events import emit_event_async as emit
+
+    return await emit(*args, **kwargs)
+
+
+def log_event(*args, **kwargs):
+    from cmp_worker.events import log_event as log
+
+    return log(*args, **kwargs)
+
 
 PHASE = "data_copy"
 SECRET_KEY = "password"

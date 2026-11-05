@@ -2,7 +2,7 @@
 
 ## 상태
 
-IN PROGRESS — `dm_sample`·`dm_readiness` Activity와 이벤트 발행은 구현·k3d 검증. 남은 일: 반복 호출(Workflow 타이머, ticket 05), 같은 값 연속 시 이벤트 줄이기, 웹 화면 확인(Q4)
+DONE(로컬) — `dm_sample`·`dm_readiness`를 `DataMigrationWorkflow`가 타이머 간격으로 반복한다(ticket 05). 남은 일: 같은 값 연속 시 이벤트 줄이기, 웹 화면 확인(Q4: 웹 저장소 main에 data.phase 등이 아직 없음)
 
 ## 목적
 

@@ -24,8 +24,22 @@ from temporalio.exceptions import ApplicationError
 
 from cmp_worker.activities import data_migration as dm
 from cmp_worker.activities.k8s_workloads_cli import CommandError, KubectlSession
-from cmp_worker.events import emit_event_async, log_event
 from cmp_worker.poc_bridge import switchover_events
+
+
+# cmp_worker.events는 cmp_api 설정을 읽으므로 import 시점이 아니라 호출할 때 불러온다
+# (이 모듈은 Worker 등록 때 Workflow 샌드박스 검사 경로에서도 import된다).
+async def emit_event_async(*args, **kwargs):
+    from cmp_worker.events import emit_event_async as emit
+
+    return await emit(*args, **kwargs)
+
+
+def log_event(*args, **kwargs):
+    from cmp_worker.events import log_event as log
+
+    return log(*args, **kwargs)
+
 
 PHASE = "verification"  # 웹은 DB 전환(cutover.*)을 verification 단계에 둔다(poc_bridge와 같음)
 RC_MARK = "__cmp_rc="
