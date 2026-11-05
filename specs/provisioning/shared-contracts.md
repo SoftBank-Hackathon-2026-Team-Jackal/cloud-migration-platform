@@ -152,3 +152,7 @@ API 설정(`cmp_api.config`):
 - `connection_template_base_url`: S3 템플릿 접두어
 - `connection_aws_config_file`, `connection_aws_base_config_file`
 - `connection_gcp_project_id`
+
+## 이전 이벤트 저장소·SSE (24)
+
+`cmp_contracts.events`가 이벤트 봉투 `MigrationEvent`와 웹 계약(`cloud-migration-web` `contract/events.schema.json`, 사본 `docs/contracts/events.schema.json`)과 같은 타입별 `*Data` 모델, 백엔드→웹 이름 변환 `to_web`, 웹 형식 스키마 `event_json_schema()`를 제공한다. 저장은 `cmp_api.migration_events`(`migration_events`·`migration_logs`, `append_event`·`list_events`·`list_logs`, `EventEmitter`·`InMemoryEmitter`·`DbEventEmitter`), Activity 발행은 `cmp_worker.events`(`emit_event`·`emit_event_async`·`log_event`, Workflow용 `emit_migration_event` Activity)다. 읽기는 `GET /migrations/{id}/events`(SSE·JSON)와 `GET /migrations/{id}/logs`. 기존 모델·Activity 반환값은 바꾸지 않는다. Terraform Apply는 `-json`으로 바뀌었고 결과 계약(`status`·`code`·refs)은 같다. 결정은 [migration-events.md E1~E17](migration-events.md), 담당자 사용법은 [이벤트 발행 안내서](../../docs/engineering/events-guide.md).

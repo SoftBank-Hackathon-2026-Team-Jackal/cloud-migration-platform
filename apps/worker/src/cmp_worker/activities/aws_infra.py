@@ -15,6 +15,8 @@ from cmp_providers.plans import manifest_digest
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio import activity
 
+from cmp_worker.provisioning_events import log_result, terraform_progress
+
 HEARTBEAT_SECONDS = 30
 
 
@@ -46,14 +48,16 @@ class AwsInfraActivities:
         if manifest_digest(manifest) != request["manifest_digest"]:
             return {"status": "FAILED", "code": "MANIFEST_DIGEST_MISMATCH", "resource_refs": {}}
         directory = self._artifact_root / f"{request['plan_id']}-r{request['revision']}"
-        return apply_aws_infrastructure(
+        result = apply_aws_infrastructure(
             manifest,
             preview,
             directory,
             aws_profile=self._aws_profile or "",
             terraform_bin=self._terraform_bin,
             runner=self._runner,
+            progress=terraform_progress(manifest.migration_id, preview),  # ticket 24
         )
+        return log_result(manifest.migration_id, "execute_aws_plan", result)
 
     @activity.defn(name="execute_aws_plan")
     async def execute_aws_plan(self, request: dict) -> dict:

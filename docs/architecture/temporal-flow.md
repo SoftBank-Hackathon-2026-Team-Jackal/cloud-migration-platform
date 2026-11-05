@@ -162,6 +162,8 @@ CREATED → ANALYZING → BUILDING → SANDBOX_VERIFYING → PLANNING
 
 Temporal Query 또는 업무 DB의 상태 Projection을 조회 원천으로 검토할 수 있다. **SSE는 FastAPI가 Frontend에 제공**하며 Temporal Server가 직접 SSE를 방송한다고 가정하지 않는다. 동일 상태를 Temporal과 업무 DB에 함께 저장한다면 갱신 순서·지연·장애 후 재조정 규칙이 필요하다. 로그와 큰 산출물은 Workflow History 대신 별도 저장소의 참조로 전달한다.
 
+세부 진행은 업무 DB의 append-only `migration_events`(이전별 `seq`)에 Activity가 기록하고, FastAPI SSE가 snapshot·`Last-Event-ID`로 전달한다. Workflow 코드는 이벤트를 직접 쓰지 않는다(결정성). 전체 상태(진행·대기·종료)는 계속 Workflow Query로 판단한다. 상세는 [이전 이벤트 명세](../../specs/provisioning/migration-events.md)를 따른다.
+
 ## 13. 단계 사이 데이터 계약
 
 Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning/input-contract.md)을 따른다. Workflow는 결과 참조·작은 메타데이터를 다음 Activity에 전달하고, Planning Activity가 산출물 조회·권한·Digest와 Sandbox/Build 출처 일치를 검증한다. S3·업무 DB 조회는 Workflow 내부에서 수행하지 않는다. 초기 Planning 입력과 승인 후 실행 입력을 구분하며, 최초 요청에 아직 생성되지 않은 Preview/승인 기록을 요구하지 않는다. Sandbox가 실행·검증한 이미지 Digest와 Planning/실행 이미지가 같아야 한다. 구체 필드·버전 전환은 후속 통합 작업에서 구현한다.

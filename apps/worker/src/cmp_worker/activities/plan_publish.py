@@ -57,14 +57,18 @@ def build_plan_publish_activities(session_factory) -> PlanPublishActivities:
     if not api_settings.artifact_store_dir:
         return PlanPublishActivities(None)
     root = settings.provisioning_artifact_root
+    from cmp_worker.provisioning_events import PlanReadyEvents
+
     return PlanPublishActivities(
-        PlanPublisher(
-            session_factory,
-            LocalArtifactStore(Path(api_settings.artifact_store_dir)),
-            cloud_artifact_root=Path(root) if root else None,
-            aws_profile=settings.provisioning_aws_profile,
-            gcloud_configuration=settings.provisioning_gcloud_configuration,
-            gcp_adc_email=settings.provisioning_gcp_adc_email,
-            terraform_bin=settings.terraform_bin,
+        PlanReadyEvents(  # ticket 24: `plan.ready` after each successful publication
+            PlanPublisher(
+                session_factory,
+                LocalArtifactStore(Path(api_settings.artifact_store_dir)),
+                cloud_artifact_root=Path(root) if root else None,
+                aws_profile=settings.provisioning_aws_profile,
+                gcloud_configuration=settings.provisioning_gcloud_configuration,
+                gcp_adc_email=settings.provisioning_gcp_adc_email,
+                terraform_bin=settings.terraform_bin,
+            )
         )
     )

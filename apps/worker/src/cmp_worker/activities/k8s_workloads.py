@@ -34,6 +34,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio import activity
 
+from cmp_worker.provisioning_events import (
+    checked,
+    log_workload_result,
+    resource_step,
+    start_workload_run,
+)
+
 HEARTBEAT_SECONDS = 30
 WORKLOAD_ROLES = (
     "database_chart",
@@ -356,7 +363,11 @@ class ApprovedWorkloads:
                 return False
             await asyncio.sleep(self._timeouts.interval_seconds)
 
-    async def _release(self, cluster, workdir: Path, namespace, name, chart: bytes, values):
+    async def _release(self, cluster, workdir: Path, namespace, name, chart: bytes, values, key):
+        with resource_step(f"helm:{namespace}/{name}", key, name):  # ticket 24 (E16)
+            await self._install(cluster, workdir, namespace, name, chart, values)
+
+    async def _install(self, cluster, workdir: Path, namespace, name, chart: bytes, values):
         identity = chart_identity(chart, workdir)
         current = await self._call(cluster.release, namespace, name)
         if current is not None:
@@ -378,6 +389,10 @@ class ApprovedWorkloads:
             raise WorkloadFailure("HELM_RESULT_UNKNOWN", "UNKNOWN") from None
 
     async def _pods_ready(self, cluster, namespace, kind, name) -> None:
+        with checked("pods_ready", name):
+            await self._wait_pods(cluster, namespace, kind, name)
+
+    async def _wait_pods(self, cluster, namespace, kind, name) -> None:
         def check():
             reasons = cluster.waiting_reasons(namespace, name)
             if reasons & PULL_FAILURES:
@@ -410,15 +425,16 @@ class ApprovedWorkloads:
                 found.append(value)
             return bool(value)
 
-        if not await self._wait(assigned, seconds, "lb-address"):
-            raise WorkloadFailure(pending)
-        refs[ref_key] = found[-1]
-        endpoint = f"http://{found[-1]}"
-        if not await self._wait(
-            lambda: self._runtime.http_get_ok(endpoint + health), seconds, "lb-health"
-        ):
-            raise WorkloadFailure(unreachable)
-        refs["app_external_endpoint"] = endpoint
+        with resource_step(f"lb:{namespace}/{name}", "lb", name):  # ticket 24
+            if not await self._wait(assigned, seconds, "lb-address"):
+                raise WorkloadFailure(pending)
+            refs[ref_key] = found[-1]
+            endpoint = f"http://{found[-1]}"
+            if not await self._wait(
+                lambda: self._runtime.http_get_ok(endpoint + health), seconds, "lb-health"
+            ):
+                raise WorkloadFailure(unreachable)
+            refs["app_external_endpoint"] = endpoint
 
     async def _deploy(self, cluster, approved: Approved, refs: dict[str, str]) -> None:
         db, app = approved.db_values, approved.app_values
@@ -500,6 +516,7 @@ class ApprovedWorkloads:
                 db.release_name,
                 approved.files["database_chart"],
                 db_payload,
+                "db",
             )
             refs["db_release"] = db.release_name
 
@@ -514,15 +531,16 @@ class ApprovedWorkloads:
             await self._pods_ready(cluster, namespace, "statefulset", db.release_name)
 
             host = f"{db.release_name}.{namespace}.svc"
-            try:
-                probe = await self._call(
-                    cluster.database_probe, namespace, f"{db.release_name}-0", host
-                )
-            except Exception:  # noqa: BLE001 - psql output is never surfaced
-                raise WorkloadFailure("DB_CONNECT_FAILED") from None
-            version, _, replication = probe.strip().partition("|")
-            if not version.startswith("16") or len(version) != 6:
-                raise WorkloadFailure("DB_VERSION_MISMATCH")
+            with checked("db_connect", db.release_name):
+                try:
+                    probe = await self._call(
+                        cluster.database_probe, namespace, f"{db.release_name}-0", host
+                    )
+                except Exception:  # noqa: BLE001 - psql output is never surfaced
+                    raise WorkloadFailure("DB_CONNECT_FAILED") from None
+                version, _, replication = probe.strip().partition("|")
+                if not version.startswith("16") or len(version) != 6:
+                    raise WorkloadFailure("DB_VERSION_MISMATCH")
             refs.update(
                 db_host=host,
                 db_port="5432",
@@ -535,15 +553,16 @@ class ApprovedWorkloads:
 
             name = app["release_name"]
             await self._release(
-                cluster, workdir, namespace, name, approved.files["application_chart"], app
+                cluster, workdir, namespace, name, approved.files["application_chart"], app, "app"
             )
             refs["app_release"] = name
             refs["app_image"] = app["image"]["uri"]
         await self._pods_ready(cluster, namespace, "deployment", name)
 
         health = app["application"]["health_path"]
-        if not await self._call(cluster.service_health, namespace, name, health):
-            raise WorkloadFailure("HEALTH_CHECK_FAILED")
+        with checked("app_health", name):
+            if not await self._call(cluster.service_health, namespace, name, health):
+                raise WorkloadFailure("HEALTH_CHECK_FAILED")
         refs["app_internal_endpoint"] = (
             f"http://{name}.{namespace}.svc:{app['application']['port']}"
         )
@@ -555,9 +574,15 @@ class ApprovedWorkloads:
         await self.expose(cluster, approved, refs)
 
     async def _execute(self, request: dict) -> dict:
+        result = await self._run(request)
+        log_workload_result(self.activity_name, result)  # ticket 24: operational log
+        return result
+
+    async def _run(self, request: dict) -> dict:
         refs: dict[str, str] = {}
         try:
             approved = await self._call(self._load, request)
+            start_workload_run(approved.manifest.migration_id)  # ticket 24: event context
             await self.check_identity(approved)
             refs.update(self.target_refs(approved.target))
             activity.heartbeat("connect")
