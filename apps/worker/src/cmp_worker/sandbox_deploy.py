@@ -28,6 +28,15 @@ from cmp_providers.shared_deployment_v2 import render_shared_deployment_v2
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from cmp_worker.activities.k8s_workloads_cli import CommandError
+from cmp_worker.sandbox_network import (
+    PROXY_NAME,
+    EgressRecord,
+    allowlist,
+    build_manifests,
+    parse_records,
+    proxy_env,
+    proxy_script_text,
+)
 
 SANDBOX_CONTEXT = "k3d-cmp-sandbox"
 NAMESPACE_PREFIX = "cmp-sbx-"
@@ -95,6 +104,7 @@ class SandboxPlan(BaseModel):
     secrets: list[str]
     request: dict[str, Any]
     env_updated: list[str] = []  # app env Secrets whose content changed in this prepare
+    network_intent: list[dict[str, Any]] = []
 
 
 class ResourceRecord(BaseModel):
@@ -307,6 +317,7 @@ class SandboxService:
         now: datetime | None = None,
         ttl: timedelta = DEFAULT_TTL,
         update_env: bool = False,
+        network: bool = False,
     ) -> SandboxPlan:
         started = now or datetime.now(UTC)
         expires_at = int((started + ttl).timestamp())
@@ -349,8 +360,13 @@ class SandboxService:
                 needs_url = needs_url or binding.output == "connection_url_secret_ref"
             wanted = [n for n in env_names if n not in bindings]
             env_secret = f"{releases[app.id]}-env"
+            extra = proxy_env(list(releases.values())) if network else {}
+            wanted = [*wanted, *[n for n in extra if n not in bindings and n not in wanted]]
             if wanted:
-                app_env_values[env_secret] = _env_values(env_file, wanted)
+                app_env_values[env_secret] = {
+                    **_env_values(env_file, [n for n in wanted if n not in extra]),
+                    **extra,
+                }
                 secret_names.append(env_secret)
                 for name in wanted:
                     bindings[name] = {"secret_ref": {"name": env_secret, "key": name}}
@@ -425,6 +441,7 @@ class SandboxService:
             secrets=secret_names,
             request=request,
             env_updated=env_updated,
+            network_intent=[n.model_dump(mode="json") for n in requirements.network_intent],
         )
 
     # -------------------------------------------------------------------------- apply
@@ -552,6 +569,60 @@ class SandboxService:
             self.cluster.kubectl(
                 "rollout", "status", f"statefulset/{release}", "-n", plan.namespace,
                 "--timeout=300s", timeout=330,
+            )  # fmt: skip
+
+    # ---------------------------------------------------------------------- network
+
+    def apply_network(
+        self, plan: SandboxPlan, keep_hosts: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Default-deny policies, intent edges, and the allow-list egress proxy."""
+        allow = allowlist(plan.network_intent, keep_hosts or [])
+        manifests = build_manifests(
+            namespace=plan.namespace,
+            labels=self._labels(plan.run_id, plan.expires_at),
+            resources=plan.request["resources"],
+            releases=plan.releases,
+            intents=plan.network_intent,
+            allow=allow,
+            proxy_script=proxy_script_text(),
+        )
+        self.cluster.kubectl(
+            "apply", "--server-side", f"--field-manager={FIELD_MANAGER}", "--force-conflicts",
+            "-f", "-",
+            stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": manifests}).encode(),
+        )  # fmt: skip
+        self.cluster.kubectl(
+            "rollout", "status", f"deployment/{PROXY_NAME}", "-n", plan.namespace,
+            "--timeout=180s", timeout=210,
+        )  # fmt: skip
+        return allow
+
+    def egress_records(self, plan: SandboxPlan) -> list[EgressRecord]:
+        log = self.cluster.kubectl(
+            "logs", f"deployment/{PROXY_NAME}", "-n", plan.namespace, "--tail=-1"
+        )  # fmt: skip
+        return parse_records(log.decode(errors="ignore"))
+
+    @contextmanager
+    def external_cut(self, plan: SandboxPlan) -> Iterator[None]:
+        """Take the egress proxy away so calls to outside hosts fail; bring it back after."""
+        self.cluster.kubectl(
+            "scale", f"deployment/{PROXY_NAME}", "--replicas=0", "-n", plan.namespace
+        )  # fmt: skip
+        try:
+            self.cluster.kubectl(
+                "wait", "--for=delete", "pod", "-l", f"app.kubernetes.io/instance={PROXY_NAME}",
+                "-n", plan.namespace, "--timeout=60s", timeout=90,
+            )  # fmt: skip
+            yield
+        finally:
+            self.cluster.kubectl(
+                "scale", f"deployment/{PROXY_NAME}", "--replicas=1", "-n", plan.namespace
+            )  # fmt: skip
+            self.cluster.kubectl(
+                "rollout", "status", f"deployment/{PROXY_NAME}", "-n", plan.namespace,
+                "--timeout=180s", timeout=210,
             )  # fmt: skip
 
     # --------------------------------------------------------------- baseline and reset

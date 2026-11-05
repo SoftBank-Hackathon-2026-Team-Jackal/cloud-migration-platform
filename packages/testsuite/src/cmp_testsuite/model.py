@@ -49,6 +49,7 @@ class SuiteCase(_Strict):
     source: Literal["STANDARD", "ORIGINAL", "AI"]
     effect: Literal["READ_ONLY", "WRITES_DATA"]
     external_side_effects: bool = False
+    covers: list[str] = Field(default_factory=list)  # catalog capabilities this test exercises
     steps: list[Step] = Field(min_length=1)
 
     def has_value_assertion(self) -> bool:
