@@ -30,7 +30,7 @@
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
 | [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☐ |
-| [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | IN_PROGRESS (구현 완료, 실제 호출 확인 대기) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | 미생성 | ☐ |
+| [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☐ |
 
 ## 선행 관계
 
