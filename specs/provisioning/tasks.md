@@ -31,7 +31,7 @@
 | [18 Plan 생성·게시와 Preview 조회 연결 (세 대상)](../../tickets/provisioning/18-onprem-plan-publish.md) | TODO | 01A, 04B, 05, 06, 07, 12, 12A, 15 | PROV-004, 005, 007, 008, 009, 014, 015, 021 | [#98](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/98) | ☐ |
 | [19 DB 연결 URL Secret 출력 (D-16)](../../tickets/provisioning/19-db-connection-url.md) | DONE | 01A, 04B, 09, 11, 12 | PROV-004, 005, 010, 012, 021 | [#79](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/79) | ☑ |
 | [20 업로드 .env를 대상 ConfigMap·Secret으로 생성](../../tickets/provisioning/20-env-config-injection.md) | TODO | 09, 11, 12, 18, 19 | PROV-004, 012, 016, 021 | [#99](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/99) | ☐ |
-| [21 데모 플랫폼에서 Provisioning 실행 환경 구성](../../tickets/provisioning/21-demo-provisioning-runtime.md) | TODO | 15 | PROV-008, 009, 015, 016, 021 | [#100](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/100) | ☐ |
+| [21 데모 플랫폼에서 Provisioning 실행 환경 구성](../../tickets/provisioning/21-demo-provisioning-runtime.md) | IN_PROGRESS (로컬 완료, 서버 반영 승인·18 후 스모크 대기) | 15 | PROV-008, 009, 015, 016, 021 | [#100](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/100) | ☐ |
 
 ## 선행 관계
 

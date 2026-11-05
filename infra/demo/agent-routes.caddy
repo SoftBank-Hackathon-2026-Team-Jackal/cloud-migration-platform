@@ -1,0 +1,9 @@
+# Only the Agent API is public. Operator, approval and tunnel-admin routes, /docs and
+# /openapi.json stay on the loopback-bound API (SSM port forwarding) and still require keys.
+@agent path /agents/*
+handle @agent {
+	reverse_proxy {$CMP_API_UPSTREAM}
+}
+handle {
+	respond 404
+}
