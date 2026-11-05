@@ -19,6 +19,7 @@ dependencies = [
   "pyyaml>=6,<7",
   "boto3>=1.35,<2",
   "anthropic>=1,<2",
+  "cryptography>=44,<47",
 ]
 
 [project.optional-dependencies]

@@ -24,6 +24,9 @@ class AnalysisInput(Contract):
     # the worker resolves it only when it clones (ticket 23).
     source_access_ref: VersionRef | None = None
     role_arns: list[Text] = Field(default_factory=list)
+    # ENV-02: the uploaded `.env` (POST /env-files). Passed through only; ENV-05 reads key names
+    # from it instead of the repository's `.env*` files.
+    env_file_ref: ContentRef | None = None
 
 
 class AnalysisRequest(Contract):

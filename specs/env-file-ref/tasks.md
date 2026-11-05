@@ -4,8 +4,8 @@
 
 | ID·티켓 | 담당 | 상태 | 선행 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
-| [ENV-01 .env 업로드 API·암호화 저장·삭제 정책](../../tickets/env-file-ref/01-env-upload-store.md) | 민서 | DRAFT | — (결정 필요 2·3) | 미생성 | ☐ |
-| [ENV-02 시작 요청 env_file_ref와 Workflow 전달](../../tickets/env-file-ref/02-migration-request-env-ref.md) | 민서 | DRAFT | ENV-01, #60과 조율 | 미생성 | ☐ |
+| [ENV-01 .env 업로드 API·암호화 저장·삭제 정책](../../tickets/env-file-ref/01-env-upload-store.md) | 민서 | IN_PROGRESS | — (결정 2·3 확정) | [#145](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/145) | ☐ |
+| [ENV-02 시작 요청 env_file_ref와 Workflow 전달](../../tickets/env-file-ref/02-migration-request-env-ref.md) | 민서 | IN_PROGRESS | ENV-01, #60과 조율 | [#146](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/146) | ☐ |
 | [ENV-03 공통 함수 resolve_env_names·render_env](../../tickets/env-file-ref/03-env-common-functions.md) | 민서 | DRAFT | ENV-01(저장소 인터페이스) | 미생성 | ☐ |
 | [ENV-04 구축(v2)을 render_env로 전환](../../tickets/env-file-ref/04-provisioning-render-env.md) | 민서 | DRAFT | ENV-02, ENV-03, ENV-05 | [#99](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/99) 재사용 | ☐ |
 | [ENV-05 분석: env_file_ref에서 키 읽기·EnvPlan 출력](../../tickets/env-file-ref/05-analysis-env-plan.md) | 박승철님 | DRAFT | ENV-02, ENV-03 | 미생성 | ☐ |
@@ -29,7 +29,7 @@ ENV-01과 ENV-03은 저장소 인터페이스만 먼저 맞추면 병렬로 진�
 
 ## 결정 필요
 
-[spec.md의 Open questions](spec.md#open-questions) 1~4. 1번은 ENV-04·ENV-06, 2·3번은 ENV-01, 4번은 ENV-07에서 막힌다.
+[spec.md의 Open questions](spec.md#open-questions) 1·4. 1번은 ENV-04·ENV-06, 4번은 ENV-07에서 막힌다. 2·3번은 2026-11-05 확정(ENV-01 착수 결정).
 
 ## 기존 티켓과의 관계
 

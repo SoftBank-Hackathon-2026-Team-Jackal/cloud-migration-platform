@@ -8,7 +8,7 @@ here; the source stays in the workspace on this worker.
 from typing import Any
 
 from cmp_contracts.analysis import AnalysisReport
-from cmp_contracts.provisioning import Image
+from cmp_contracts.provisioning import ContentRef, Image
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_testsuite import dump_bundle
 from cmp_testsuite.model import Suite
@@ -35,6 +35,7 @@ class SandboxSettings(BaseModel):
     region: str = "ap-northeast-2"
     env_names: list[str] = Field(default_factory=list)
     env_file: str | None = None
+    env_file_ref: ContentRef | None = None  # ENV-02: passed through; ENV-06 renders from it
     source_hosts: list[str] = Field(default_factory=list)
     extra_keep_hosts: list[dict[str, Any]] = Field(default_factory=list)
     # How the standard write -> read test reaches the app; without it only the health test runs.
@@ -100,6 +101,11 @@ def assemble_sandbox_input(
         "storage_class": settings.storage_class,
         "env_names": settings.env_names,
         "env_file": settings.env_file,
+        **(
+            {"env_file_ref": settings.env_file_ref.model_dump(mode="json")}
+            if settings.env_file_ref
+            else {}
+        ),
         "keep_hosts": [*keep_hosts(report, settings.region), *settings.extra_keep_hosts],
         "source_hosts": settings.source_hosts,
         **({"ai_tests": True} if settings.ai_tests else {}),

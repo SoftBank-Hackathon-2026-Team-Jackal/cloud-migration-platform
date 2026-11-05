@@ -61,7 +61,7 @@ ENV-002 비밀 보호 (PROV-021)
 - 업로드 API는 운영자 키로 보호하고 웹 서버에서만 호출한다(브라우저 직접 호출 없음).
 
 ENV-003 삭제
-- 원본은 보관 기간이 지나면 삭제한다. 기간은 결정 필요 2번.
+- 원본은 그 `.env`를 쓴 이전이 끝난 뒤 7일에 삭제한다. 이전에 쓰이지 않은 업로드는 마지막 업로드 뒤 7일. `DELETE /env-files/{id}`로 즉시 지울 수도 있다(결정 2, 2026-11-05).
 - 삭제 뒤 `env_file_ref`를 읽으면 구조화 오류(`ENV_FILE_EXPIRED`)를 낸다.
 
 ENV-004 전달
@@ -101,6 +101,6 @@ ENV-008 같은 규칙, 다른 DB 출력
 ## Open questions
 
 1. `UNREPRESENTABLE`(`DB_DSN`)과 기본값 없는 `MISSING`을 승인 전에 막을지(승인 차단), 사람이 값을 넣게 할지(Preview의 `pending_decisions`로 입력 받기).
-2. 원본 `.env` 보관 기간. 예: 운영권 인계 후 삭제, 또는 이전 종료 후 N일.
-3. 저장 위치: 업무 DB 암호화 컬럼 vs 기존 산출물 저장소(`LocalArtifactStore`, 파일 권한 0600 + 암호화). 암호화 키 보관 위치도 함께 정한다.
+2. ~~원본 `.env` 보관 기간~~ → 확정(2026-11-05): 이전 종료 7일 뒤 삭제 + 명시적 `DELETE`. [ENV-01](../../tickets/env-file-ref/01-env-upload-store.md).
+3. ~~저장 위치~~ → 확정(2026-11-05): 플랫폼 디렉터리의 파일 저장(0600) + AES-256-GCM, 키는 플랫폼 설정 `ENV_FILE_ENCRYPTION_KEY`. [ENV-01](../../tickets/env-file-ref/01-env-upload-store.md).
 4. Fixer가 새 변수를 추가할 때 EnvPlan에 `ADDED`로 넣을지, 담당은 누구인지(ENV-07).

@@ -6,6 +6,7 @@ from uuid import uuid4
 from cmp_contracts.events import MigrationEvent
 from cmp_contracts.migration import MigrationCreated, MigrationRequest, MigrationStatus
 from cmp_contracts.queues import WORKFLOW_NAME, WORKFLOW_QUEUE
+from cmp_providers.env_file_store import EncryptedEnvFileStore, EnvFileError
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -20,6 +21,7 @@ from cmp_api.event_stream import (
     stream_events,
 )
 from cmp_api.migration_events import list_events, list_logs
+from cmp_api.routes.env_files import get_env_file_store
 from cmp_api.temporal_client import get_temporal_client
 
 router = APIRouter(prefix="/migrations", tags=["migration scaffold"])
@@ -30,16 +32,51 @@ async def _handle(workflow_id: str) -> WorkflowHandle:
     return client.get_workflow_handle(workflow_id)
 
 
+def get_env_file_store_factory() -> Callable[[], EncryptedEnvFileStore]:
+    """Opened only when a request carries `env_file_ref`, so start without one needs no store."""
+    return get_env_file_store
+
+
+EnvStoreFactoryDep = Annotated[
+    Callable[[], EncryptedEnvFileStore], Depends(get_env_file_store_factory)
+]
+
+
 @router.post("", response_model=MigrationCreated, status_code=202)
-async def start_migration(request: MigrationRequest) -> MigrationCreated:
+async def start_migration(
+    request: MigrationRequest, env_store: EnvStoreFactoryDep
+) -> MigrationCreated:
+    """Start a migration. `env_file_ref` (from `POST /env-files`) is optional; an unknown,
+    changed or deleted reference is 422 `{"detail": {"code": "ENV_FILE_NOT_FOUND" |
+    "ENV_FILE_DIGEST_MISMATCH" | "ENV_FILE_EXPIRED"}}` and nothing starts."""
+    store = None
+    if request.env_file_ref is not None:
+        # ENV-02: only an existing version with the same sha256 may start a migration.
+        store = env_store()
+        try:
+            store.check(request.env_file_ref)
+        except EnvFileError as exc:
+            raise HTTPException(status_code=422, detail={"code": exc.code}) from None
     client = await get_temporal_client()
     workflow_id = f"migration-{uuid4()}"
+    # Without a reference the input stays the scaffold string, as before; with one, only the
+    # reference (id, version, sha256) travels in the Workflow input, never a value.
+    data: str | dict = (
+        request.project_id
+        if request.env_file_ref is None
+        else {
+            "project_id": request.project_id,
+            "env_file_ref": request.env_file_ref.model_dump(mode="json"),
+        }
+    )
     handle = await client.start_workflow(
         WORKFLOW_NAME,
-        request.project_id,
+        data,
         id=workflow_id,
         task_queue=WORKFLOW_QUEUE,
     )
+    if store is not None:
+        store.bind_migration(request.env_file_ref, workflow_id)  # retention follows this run
     return MigrationCreated(workflow_id=workflow_id, run_id=handle.result_run_id)
 
 

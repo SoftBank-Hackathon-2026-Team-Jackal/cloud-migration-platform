@@ -90,6 +90,7 @@ class SandboxInput(BaseModel):
     storage_class: str = "local-path"
     env_names: list[str] = []
     env_file: str | None = None
+    env_file_ref: ContentRef | None = None  # ENV-02: passed through; ENV-06 renders from it
     keep_hosts: list[dict[str, Any]] = []
     source_hosts: list[str] = []
     ai_tests: bool = (

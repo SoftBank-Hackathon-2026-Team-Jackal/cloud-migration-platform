@@ -29,6 +29,10 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.workflows.analysis import AnalysisWorkflow
     from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
 
+# ENV-02: the start input may carry `env_file_ref`; it is copied into the analysis, Sandbox and
+# Planning inputs. Only the reference travels; values stay in the encrypted store.
+ENV_FILE_REF_PATCH = "env-file-ref-v1"
+
 PUBLISH_ACTIVITY = {
     "task_queue": PROVISIONING_QUEUE,
     "start_to_close_timeout": timedelta(hours=1),
@@ -49,6 +53,7 @@ class MigrationWorkflow:
         self.review_pending = False
         self.failure_code: str | None = None
         self.pipeline: dict | None = None  # ticket 21: references the real pipeline produced
+        self.env_file_ref: dict | None = None  # ENV-02: {id, version, sha256}, never values
 
     @workflow.signal
     def sandbox_review_pending(self, pending: bool) -> None:
@@ -76,6 +81,7 @@ class MigrationWorkflow:
             "review_pending": self.review_pending,  # ticket 14B: in progress, not terminal
             "failure_code": self.failure_code,
             "pipeline": self.pipeline,
+            "env_file_ref": self.env_file_ref,
         }
 
     async def _hand_off(
@@ -205,10 +211,17 @@ class MigrationWorkflow:
 
     @workflow.run
     async def run(self, data: str | dict) -> str:
-        # A string is the project ID of the scaffold run. A dict is the real pipeline input:
-        # {"project_id", "analysis": AnalysisInput, "sandbox": SandboxSettings} (ticket 21).
+        # A string is the project ID of the scaffold run. A dict with "analysis" is the real
+        # pipeline input: {"project_id", "analysis": AnalysisInput, "sandbox": SandboxSettings,
+        # "planning"?, "env_file_ref"?} (tickets 21, 15, ENV-02). A dict without "analysis" is
+        # the API's scaffold start that only adds `env_file_ref`.
         project_id = data if isinstance(data, str) else data["project_id"]
-        pipeline_input = None if isinstance(data, str) else data
+        start = None if isinstance(data, str) else data
+        pipeline_input = start if start is not None and "analysis" in start else None
+        env_ref = (start or {}).get("env_file_ref")
+        if env_ref is not None and workflow.patched(ENV_FILE_REF_PATCH):
+            self.env_file_ref = env_ref
+        with_ref = {"env_file_ref": self.env_file_ref} if self.env_file_ref else {}
         analysis_result: dict | None = None
         if workflow.patched("analysis-child-v1"):
             if self.cancel_requested:
@@ -221,7 +234,7 @@ class MigrationWorkflow:
                 (
                     migration_id
                     if pipeline_input is None
-                    else {**pipeline_input["analysis"], "migration_id": migration_id}
+                    else {**pipeline_input["analysis"], "migration_id": migration_id, **with_ref}
                 ),
                 id=f"analysis-{migration_id}",
                 task_queue=WORKFLOW_QUEUE,
@@ -266,9 +279,12 @@ class MigrationWorkflow:
                 sandbox_arg: str | dict = workflow.info().workflow_id
                 if pipeline_input is not None and analysis_result is not None:
                     # The Sandbox loop input is built next to the analysis workspace and store.
+                    sandbox_settings = pipeline_input.get("sandbox")
+                    if with_ref:
+                        sandbox_settings = {**(sandbox_settings or {}), **with_ref}
                     sandbox_arg = await workflow.execute_activity(
                         "assemble_sandbox_input",
-                        {"analysis": analysis_result, "settings": pipeline_input.get("sandbox")},
+                        {"analysis": analysis_result, "settings": sandbox_settings},
                         task_queue=ANALYSIS_QUEUE,
                         start_to_close_timeout=timedelta(minutes=2),
                         retry_policy=RetryPolicy(maximum_attempts=2),
@@ -321,7 +337,10 @@ class MigrationWorkflow:
                     ):
                         # Ticket 15: the passed run becomes the Planning input before planning.
                         refused = await self._hand_off(
-                            pipeline_input["planning"], analysis_result, result, sandbox_arg
+                            {**pipeline_input["planning"], **with_ref},
+                            analysis_result,
+                            result,
+                            sandbox_arg,
                         )
                         if refused is not None:
                             self.failure_code = refused
