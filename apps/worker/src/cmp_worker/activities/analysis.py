@@ -12,6 +12,7 @@ from temporalio.exceptions import ApplicationError
 
 from cmp_worker.analysis_pipeline import AnalysisPipeline
 from cmp_worker.sandbox_input import SandboxSettings, assemble_sandbox_input
+from cmp_worker.source_access import SourceAccessError
 
 
 @activity.defn
@@ -111,6 +112,11 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
     non-retryable failures so a bad repository or commit does not spin through retries."""
     try:
         return await asyncio.to_thread(fn, *args)
+    except SourceAccessError as exc:
+        # A missing, revoked or refused token will not fix itself on a retry.
+        raise ApplicationError(
+            "Source access was refused", type=exc.code, non_retryable=True
+        ) from None
     except SourceFetchError:
         raise ApplicationError(
             "Source could not be fetched", type="SOURCE_FETCH_FAILED", non_retryable=True

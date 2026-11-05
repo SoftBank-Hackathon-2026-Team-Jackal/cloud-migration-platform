@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # app that has no public URL). Off by default: an input must never choose which local files
     # a worker reads in a shared deployment.
     analysis_allow_local_repositories: bool = False
+    # Where a private repository's token comes from: `none` (default; public repositories only),
+    # `env` (development: CMP_GITHUB_TOKEN in the worker's environment). The platform's token
+    # store, once GitHub login exists, is another value of this setting.
+    source_token_resolver: str = "none"
     # Ticket 20 (ADR-004): Claude. Off unless explicitly enabled; the API key is only ever read
     # by the SDK from ANTHROPIC_API_KEY. Spend limits are enforced by a shared ledger file.
     llm_enabled: bool = False

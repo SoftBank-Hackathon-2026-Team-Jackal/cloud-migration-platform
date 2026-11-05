@@ -32,7 +32,8 @@
 | [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | DONE (PR #92 병합) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☑ |
 | [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | DONE (PR #114 병합) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☑ |
 | [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | DONE (PR #119 병합) | 14C, 19, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☑ |
-| [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14B, 20, 21 | AV-001, AV-015, AV-021 | #120 | ☐ |
+| [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | DONE (PR #121 병합) | 14B, 20, 21 | AV-001, AV-015, AV-021 | #120 | ☑ |
+| [23 비공개 소스 접근(토큰 참조·교체 가능한 해석기)](../../tickets/analysis-verification/23-source-access.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 03, 19, 21 | AV-001, AV-002, AV-020 | #131 | ☐ |
 
 ## 선행 관계
 
@@ -107,6 +108,7 @@ Q-01 ────┴→ 02B ─┐
 - 2026-11-05: ADR-004와 티켓 20: Claude Sonnet 5.5 연결(`AnthropicLLMClient`)과 비용 상한(호출 전 예약·정산, 마이그레이션 $3 / 하루 $20 / 한 달 $100 기본, 차단 스위치, fallbacks 미사용). 기본은 꺼짐이며 키·장부·설정이 모두 있어야 켜진다. 실제 호출 1회 확인은 승인 후.
 - 2026-11-05: 21 구현: 부모가 dict 입력이면 분석 결과로 Sandbox 입력을 조립(`assemble_sandbox_input`)해 실제 루프를 시작하고 통과 결과를 Query `pipeline`에 둔다(문자열 입력·기존 이력 그대로). 고정된 표준 헬스 테스트는 대상의 헬스 경로를 실행 시 받도록 보정. 실제 k3d에서 분석 → 검토 → 루프(SPEC 실패 후 정정) → 발행을 한 Workflow로 검증. 병합된 11~20 티켓의 상태·이슈 번호와 spec·plan·agent-brief의 낡은 내용(AV-019 패치 산출물, 저장소, 라벨 이름 등)도 함께 정리.
 - 2026-11-05: 22 구현: 배포된 Sandbox 워커가 설정(`SANDBOX_KUBECONFIG`, 분석 저장소)이 있을 때 실제 루프를 등록(`build_sandbox_loop`), 앱 이미지는 Digest 고정 목록으로 임시 주입(`PrebuiltImages`, D-12 전), 시작 스크립트·사전 점검·실행 안내(runbook) 추가. 개발 전용 로컬 저장소 허용 설정은 기본 꺼짐.
+- 2026-11-05: 23 구현: 분석 입력에 토큰 참조(`source_access_ref`)를 추가하고, 토큰은 교체 가능한 해석기(`SourceTokenResolver`)로만 푼다. 지금은 개발용 `env`(워커 환경 변수 `CMP_GITHUB_TOKEN`), GitHub 로그인이 붙으면 해석기만 교체. 토큰은 `https://github.com/<owner>/<repo>`에만 보내고 명령줄·이력·로그·결과에 남기지 않는다. 티켓 18의 "플랫폼은 토큰을 받지 않는다" 전제를 "토큰은 플랫폼이 보관, 분석은 참조로만 사용"으로 변경.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
 - 2026-11-04(리뷰 반영): spec AV-012에 `run_suite`의 `include`, AV-015에 INFRA와 횟수 규칙 반영(AV-013 커버리지는 원문 유지). ADR-004는 작성 예정으로 표시.
 - 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.

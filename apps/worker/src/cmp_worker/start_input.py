@@ -6,6 +6,7 @@ from typing import Any
 from cmp_contracts.analysis import AnalysisInput
 
 from cmp_worker.sandbox_input import SandboxSettings
+from cmp_worker.source_access import dev_ref
 
 
 def build_start_input(
@@ -16,6 +17,7 @@ def build_start_input(
     manifests_dir: str | None = None,
     cluster_name: str | None = None,
     credential_ref: str | None = None,
+    source_access: str | None = None,
     sandbox_json: str | None = None,
 ) -> dict[str, Any]:
     """`{"project_id", "analysis": AnalysisInput, "sandbox": SandboxSettings}` as MigrationWorkflow expects.
@@ -30,6 +32,7 @@ def build_start_input(
         manifests_dir=manifests_dir,
         cluster_name=cluster_name,
         credential_ref=credential_ref,
+        source_access_ref=dev_ref() if source_access == "dev-env" else None,
     )
     sandbox = SandboxSettings.model_validate(json.loads(sandbox_json) if sandbox_json else {})
     return {
