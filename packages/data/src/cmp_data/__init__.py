@@ -1,6 +1,8 @@
 """데이터 이전(CDC) 판단 로직. 외부 I/O 없음(ticket data-migration 01)."""
 
 from .contracts import (
+    DataMigrationRequest,
+    DbEndpoint,
     PrecheckFacts,
     PrecheckResult,
     ReadinessPolicy,
@@ -14,6 +16,8 @@ from .logic import evaluate_precheck, evaluate_readiness, replication_names, syn
 
 __all__ = [
     "TABLE_STATES",
+    "DataMigrationRequest",
+    "DbEndpoint",
     "PrecheckFacts",
     "PrecheckResult",
     "ReadinessPolicy",

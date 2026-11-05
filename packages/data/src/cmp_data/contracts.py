@@ -83,3 +83,34 @@ class ReadinessSample(Strict):
     lock_waiters: int = Field(ge=0)
     lag_bytes: int | None = Field(ge=0)
     commits_per_sec: float = Field(default=0, ge=0)
+
+
+class DbEndpoint(Strict):
+    """DB 하나에 닿는 방법(비밀값 없음). SQL은 Worker가 이 Pod 안에서 psql로 실행한다(DM-001).
+
+    - KUBECONFIG: Worker 설정 디렉터리의 `<kubeconfig_ref>.yaml`(로컬·온프레미스·시험)
+    - AWS_EKS: `aws eks update-kubeconfig`(cluster_name, region)
+    - GCP_GKE: gcloud(project_id, cluster_name, location)
+    """
+
+    access: Literal["KUBECONFIG", "AWS_EKS", "GCP_GKE"]
+    kubeconfig_ref: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]+$")
+    cluster_name: str | None = None
+    region: str | None = None
+    project_id: str | None = None
+    location: str | None = None
+    namespace: str
+    pod: str
+    container: str = "postgres"
+    # 상대 DB가 이 DB에 접속할 주소(WireGuard 터널 쪽 주소, DM-011)와 DB 이름
+    peer_host: str
+    peer_port: int = Field(default=5432, ge=1, le=65535)
+    dbname: str
+
+
+class DataMigrationRequest(Strict):
+    migration_id: str
+    source: DbEndpoint
+    target: DbEndpoint
+    policy: ReadinessPolicy = Field(default_factory=ReadinessPolicy)
+    direction: Direction = "forward"

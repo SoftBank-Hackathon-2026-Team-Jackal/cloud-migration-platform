@@ -2,7 +2,7 @@
 
 ## 상태
 
-DRAFT — 사용자 검토 전
+IN PROGRESS — `dm_sample`·`dm_readiness` Activity와 이벤트 발행은 구현·k3d 검증. 남은 일: 반복 호출(Workflow 타이머, ticket 05), 같은 값 연속 시 이벤트 줄이기, 웹 화면 확인(Q4)
 
 ## 목적
 

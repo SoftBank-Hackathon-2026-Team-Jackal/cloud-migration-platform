@@ -35,6 +35,8 @@
 - DM-008 비밀값: DB 비밀번호는 Kubernetes Secret에서만 읽고, Workflow 입력·결과·이벤트·로그에 남기지 않는다.
 - DM-009 이벤트: 웹 계약을 지키는 값만 낸다(`cmp_contracts.events.validate_data` 통과). 웹 안내서(민서, Notion "이벤트 저장소·SSE·운영 로그"·`docs/engineering/events-guide.md`)가 Data에 요구하는 값: 사전 검사 4항목·시작 가능 여부, 단계, 원본·대상 LSN 원문·지연 바이트·지연 시간(1초), 테이블별 복사 행 수·**전체 행 수**·상태, 전환 가능 시점(1초), 행 수·체크섬 비교.
 - DM-010 쓰기 중단 장치는 PgBouncer다(결정 2026-11-05). Data Migration이 원본 클러스터에 PgBouncer를 두고 원본 앱의 DB 연결을 PgBouncer로 바꾼다(최초 1회 앱 재시작). 전환은 PoC처럼 `PAUSE` → 마지막 변경 확인 → PgBouncer 연결 대상을 대상 DB로 변경 → `RESUME`이며, 앱 연결은 끊지 않는다. 롤백은 연결 대상을 원본으로 되돌린다.
+- DM-012 대상 DB의 `wal_level`이 logical이 아니면(플랫폼 postgres 차트 기본값) 준비 단계에서 `ALTER SYSTEM`으로 바꾸고 Pod를 한 번 재시작한다. 역방향 복제(롤백)의 발행자가 되기 위해서다. 이 시점의 대상 DB에는 사용자가 없다.
+- DM-013 구독자는 전용 역할 `cmp_repl`(LOGIN REPLICATION, public 스키마 SELECT)로 발행 DB에 접속한다. 비밀번호는 Worker가 만들어 구독자 쪽 Secret(`cmp-<키>-<fwd|rev>`)에 두고 SQL은 stdin으로만 넘긴다.
 - DM-011 복제 경로는 WireGuard다(결정 2026-11-05). 정방향은 대상 DB(구독자)가 원본 DB로, 역방향은 원본 DB가 대상 DB로 터널을 통해 접속한다. 전환 뒤 PgBouncer도 터널을 통해 대상 DB로 붙는다. ON_PREM은 기존 Agent 터널(`tunnel_endpoint`, #71)과 MNP Preflight를 쓴다. AWS·GCP 대상의 터널 구성은 PoC 2단계(EC2 ↔ GCE, MTU 1420)와 Traffic 중계 서버 터널(ADR-006) 방식을 따른다.
 
 ## Acceptance criteria
@@ -49,6 +51,6 @@
 
 - Q1 (해결 2026-11-05) 쓰기 중단 장치 → PgBouncer(DM-010).
 - Q2 (해결 2026-11-05) 복제 경로 → WireGuard(DM-011). 남은 세부: AWS·GCP 대상에서 터널 양 끝을 노드·Pod·별도 VM 중 어디에 둘지, 터널 생명주기를 Provisioning과 Data 중 누가 소유할지(ticket 06).
-- Q3 원본 DB 접근 참조: 원본 EKS kubeconfig·Namespace·Pod·Secret 위치를 어디서 받는지(분석 결과, 연결 관리 API #118 중 무엇).
+- Q3 (해결 2026-11-05, 담당 판단) 원본·대상 DB 접근은 `DbEndpoint`(비밀값 없음)로 받는다: 접근 방식(`AWS_EKS` 이름·리전, `GCP_GKE` 프로젝트·이름·위치, `KUBECONFIG` 참조 이름), Namespace, Pod, 컨테이너, 상대가 접속할 주소(`peer_host`), DB 이름. 자격 증명은 Worker 설정(`DATA_MIGRATION_AWS_PROFILE`, `DATA_MIGRATION_GCLOUD_CONFIGURATION`, `DATA_MIGRATION_KUBECONFIG_DIR`)에만 있다. 원본 값은 분석 결과에서, 대상 값은 Provisioning `DATA_MIGRATION` 보기에서 채운다(ticket 05).
 - Q4 웹 계약 버전: 웹 저장소 main의 `contract/events.schema.json`에는 `data.progress`·`data.verify`만 있다. 플랫폼 사본에는 `data.preflight`·`data.phase`·`data.lsn`·`data.table`·`data.readiness`가 있고, 그 뒤 웹 2cf5f5b(미반영, 브랜치 `claude/provisioning-24-events-6a89a0`의 a800978)에 `cutover.plan`·`cutover.ready`·`cutover.outcome`·`cutover.verify`가 추가됐다. 웹 화면이 `data.*`를 그리려면 웹 저장소 반영이 필요하다.
 - Q5 DB 전환 승인: 웹 안내서는 두 번째 승인(`approval.required gate: cutover`)을 요구 항목으로 둔다. 승인 기록·Signal 경로(ADR-002)를 그대로 쓸지, 전환 담당(상헌·소울)과 정한다.
