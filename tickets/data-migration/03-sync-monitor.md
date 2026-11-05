@@ -10,7 +10,8 @@ DRAFT — 사용자 검토 전
 
 ## 포함 범위
 
-- 대상 `pg_subscription_rel`(테이블 상태·행 수), 원본 슬롯 지연·`pg_current_wal_lsn()`, 대상 수신 LSN 조회
+- 대상 `pg_subscription_rel`(테이블 상태·행 수), 원본 슬롯 지연·`pg_current_wal_lsn()` 원문, 대상 수신 LSN 원문 조회(웹 안내서 요구, PoC 패널에는 없던 값)
+- 테이블 전체 행 수: 원본 `pg_stat_user_tables.n_live_tup`(근사치)를 시작 시 한 번 읽어 `rows_total`에 넣는다
 - 같은 값이 연속되면 이벤트를 줄인다(poc_bridge의 중복 제거와 같음)
 - streaming 도달·제한 시간 초과·구독 꺼짐 판단
 

@@ -17,6 +17,7 @@
 MigrationWorkflow
   └─ data_copy 단계 → DataMigrationWorkflow (자식)
        1. dm_handover      Provisioning DATA_MIGRATION 보기 읽기(proceed=false면 BLOCKED)
+       1b. dm_path         WireGuard 터널과 원본 PgBouncer 준비(ticket 06, 앱 연결 1회 변경)
        2. dm_preflight     ON_PREM이면 MNP Preflight 호출(PASS가 아니면 BLOCKED)
        3. dm_precheck      원본 precheck SQL → evaluate_precheck → data.phase(preflight|blocked)
        4. dm_copy_schema   pg_dump --schema-only 원본 → 대상, 전환 확인용 marker 테이블
@@ -24,11 +25,13 @@ MigrationWorkflow
        6. dm_sample (반복)  대상 pg_subscription_rel + 원본 슬롯 지연 → sync_events → data.*
                            streaming이 될 때까지 Workflow 타이머로 간격을 둔다(무기한 Activity 없음)
        7. dm_readiness (반복) 원본 신호 → readiness_event → data.readiness
-       8. dm_switchover    PoC fast 순서(ticket 04, 쓰기 중단 장치 결정 후)
+       8. dm_switchover    PoC fast 순서, PgBouncer PAUSE·연결 대상 변경(ticket 04)
        9. dm_verify        테이블별 행 수·체크섬 → data.verify / cutover.verify
 ```
 
-SQL 실행 경로: Worker → `kubectl --kubeconfig <참조> exec -n <ns> <db pod> -- psql -XAtc` (Provisioning `cluster.database_probe`와 같은 방식). 비밀번호는 Pod 안의 환경변수·Secret을 쓰고 명령줄에 넣지 않는다. 대상의 구독 연결 문자열에 들어가는 원본 비밀번호는 대상 클러스터 Secret에서 읽어 SQL을 Pod 안에서 조립한다(Q2·Q3 결정 후 구체화).
+SQL 실행 경로: Worker → `kubectl --kubeconfig <참조> exec -n <ns> <db pod> -- psql -XAtc` (Provisioning `cluster.database_probe`와 같은 방식). 비밀번호는 Pod 안의 환경변수·Secret을 쓰고 명령줄에 넣지 않는다. 대상의 구독 연결 문자열(`host=<원본 터널 IP>`)에 들어가는 원본 비밀번호는 대상 클러스터 Secret에서 읽어 SQL을 Pod 안에서 조립한다(Q3 결정 후 구체화).
+
+쓰기 중단: 원본 클러스터의 PgBouncer(`pool_mode=transaction`)에 `PAUSE`/`RESUME`, 연결 대상 변경은 PoC처럼 `databases.ini` 교체 + `RELOAD`. 전환 뒤 PgBouncer는 터널을 통해 대상 DB로 붙는다.
 
 PoC 스크립트와의 대응:
 
@@ -42,6 +45,7 @@ PoC 스크립트와의 대응:
 | `05_switchover_fast.py` | `dm_switchover` (ticket 04) |
 | `04_compare.sh` | `dm_verify` |
 | `06_rollback.sh` | `dm_rollback` (ticket 04) |
+| `poc/cdc/cloud`(WireGuard), compose `pgbouncer` | `dm_path` (ticket 06) |
 
 ## Failure, retry, and rollback behavior
 
