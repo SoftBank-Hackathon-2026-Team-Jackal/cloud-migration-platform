@@ -21,3 +21,17 @@ DATA_MIGRATION_KUBECONFIG_DIR=~/.kube/cmp-dm DATA_LAB_SRC_HOST=<src 노드> DATA
 ```
 
 정리: `k3d cluster delete cmp-dm-src cmp-dm-dst && docker network rm cmp-dm`
+
+## 전환·롤백 실습 (ticket 04·06)
+
+```bash
+docker build -t cmp-data-cutover:dev infra/data-migration/cutover
+k3d image import cmp-data-cutover:dev -c cmp-dm-src
+WITH_APP=1 infra/local/data-lab/up.sh     # 원본 앱(loadgen, 초당 약 50건 쓰기)
+kubectl --kubeconfig ~/.kube/cmp-dm/cmp-dm-src.yaml -n data-lab logs -f deploy/chat-app   # {"ok","err","last"}
+```
+
+원본 `DbEndpoint`에는 `local_host: db.data-lab.svc`를 넣는다(cmp-cutover Pod가 원본 DB로 가는 주소).
+Activity 순서: `dm_precheck` → `dm_prepare` → `dm_copy_schema` → `dm_subscribe` → `dm_sample`(streaming까지)
+→ `dm_install_cutover` → `dm_route_app` → `dm_switchover` → (롤백) `dm_switchover`(`direction: reverse`).
+잃은 쓰기 확인: 앱 로그의 `last`까지 `lg-<pod>-<순번>`이 새 주 DB에 모두 있는지 센다.

@@ -13,4 +13,11 @@ sed 's/args: \[WAL_ARGS\]/args: []/' "$here/db.yaml" | "${dst[@]}" apply -f - >/
 "${src[@]}" rollout status sts/db --timeout=180s
 "${dst[@]}" rollout status sts/db --timeout=180s
 "${src[@]}" exec -i db-0 -c postgres -- sh -c 'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < "$here/seed.sql"
+
+# 원본 앱(loadgen): 이미지 cmp-data-cutover:dev 를 먼저 k3d로 가져와야 한다(README)
+if [[ "${WITH_APP:-0}" == 1 ]]; then
+  "${src[@]}" create configmap loadgen --from-file="$here/loadgen.py" --dry-run=client -o yaml | "${src[@]}" apply -f - >/dev/null
+  "${src[@]}" apply -f "$here/app.yaml" >/dev/null
+  "${src[@]}" rollout status deploy/chat-app --timeout=120s
+fi
 echo "ok"

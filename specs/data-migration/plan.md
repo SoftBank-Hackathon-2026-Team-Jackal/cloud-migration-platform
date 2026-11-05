@@ -31,7 +31,7 @@ MigrationWorkflow
 
 SQL 실행 경로: Worker → `kubectl --kubeconfig <참조> exec -n <ns> <db pod> -- psql -XAtc` (Provisioning `cluster.database_probe`와 같은 방식). 비밀번호는 Pod 안의 환경변수·Secret을 쓰고 명령줄에 넣지 않는다. 대상의 구독 연결 문자열(`host=<원본 터널 IP>`)에 들어가는 원본 비밀번호는 대상 클러스터 Secret에서 읽어 SQL을 Pod 안에서 조립한다(Q3 결정 후 구체화).
 
-쓰기 중단: 원본 클러스터의 PgBouncer(`pool_mode=transaction`)에 `PAUSE`/`RESUME`, 연결 대상 변경은 PoC처럼 `databases.ini` 교체 + `RELOAD`. 전환 뒤 PgBouncer는 터널을 통해 대상 DB로 붙는다.
+쓰기 중단: 원본 앱 Namespace의 `cmp-cutover` Pod(PgBouncer + 전환 실행기)를 쓴다. 전환은 밀리초 단위라 SQL마다 `kubectl exec`를 하지 않고, 실행기(`infra/data-migration/cutover/switchover.py`)가 Pod 안에서 접속을 유지한 채 한 번에 돈다. Activity는 stdin으로 설정(비밀번호 포함)을 넘기고 결과 JSON만 받는다. 연결 대상 변경은 PoC처럼 `databases.ini` 교체 + `RELOAD`이고, 성공하면 Secret의 연결 대상도 바꿔 Pod를 다시 만들어도 새 주 DB로 붙는다. 전환 뒤 PgBouncer는 터널(`peer_host`)을 통해 대상 DB로 붙는다.
 
 PoC 스크립트와의 대응:
 

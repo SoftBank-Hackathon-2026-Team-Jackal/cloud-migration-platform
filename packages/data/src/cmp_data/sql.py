@@ -71,7 +71,7 @@ SET_WAL_LOGICAL_SQL = "alter system set wal_level = 'logical'"
 
 ENSURE_MARKER_SQL = f"""
 create table if not exists {MARKER_TABLE} (
-  id int primary key, token text not null, at timestamptz not null default now());
+  id bigserial primary key, token text not null, at timestamptz not null default now());
 """
 
 USER_TABLES_SQL = """

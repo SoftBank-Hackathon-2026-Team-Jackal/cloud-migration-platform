@@ -2,24 +2,19 @@
 
 ## 상태
 
-DRAFT — 사용자 검토 전. 결정: 쓰기 중단은 PgBouncer(DM-010), 복제 경로는 WireGuard(DM-011)
+PgBouncer: DONE(로컬 k3d 검증, PR 전). WireGuard: TODO(실습은 NodePort로 대신함)
 
-## 목적
+## PgBouncer (DM-010)
 
-PoC의 전제(앱이 PgBouncer를 거쳐 DB에 붙음, 두 DB가 사설 경로로 서로 닿음)를 실제 환경에 만든다.
+- 이미지 `infra/data-migration/cutover`(alpine 3.22, PgBouncer 1.24, psycopg 3, 비 root UID 10001). Pod 하나에 컨테이너 둘: `pgbouncer`, `runner`(전환 실행기)
+- `dm_install_cutover`: 원본 앱 Namespace에 Secret `cmp-cutover`(userlist, 연결 대상, 원래 URL)를 만들고 Deployment·Service(`cmp-pgbouncer:6432`)를 server-side apply. 처음 연결 대상은 원본 DB(`local_host`). 서버 쪽 로그인은 DB 컨테이너의 관리자 계정, 앱은 자기 사용자로 붙는다.
+- `dm_route_app`: 앱 Secret의 `DATABASE_URL` 호스트·포트만 PgBouncer로 바꾸고 Deployment 재시작(최초 1회, 재실행 시 건너뜀)
+- `pool_mode = transaction`, 레플리카 1, `Recreate`
 
-## 포함 범위
+실습: 초당 약 50건 쓰기 중 설치·앱 연결 변경에서 오류 0건(앱 재시작은 롤링).
 
-- 원본 클러스터에 PgBouncer 배포(`pool_mode=transaction`, 관리 사용자, `databases.ini` 교체 가능), 원본 앱 DB 연결을 PgBouncer로 변경(1회 재시작). 연결 문자열은 Secret에만 둔다(database_url 규칙)
-- WireGuard 터널: 대상 DB → 원본 DB(정방향 구독), 원본 DB → 대상 DB(역방향 구독, 전환 뒤 PgBouncer). MTU 1420(PoC·ADR-006 실측)
-- ON_PREM은 기존 Agent 터널(#71)을 쓰고 새로 만들지 않는다
+## WireGuard (DM-011) — 남은 일
 
-## 미정
-
-- AWS·GCP 대상에서 터널 양 끝 위치(노드, Pod 사이드카, 별도 VM)와 터널 생명주기 소유(Provisioning 또는 Data)
-- PgBouncer 배치 시점(복제 시작 전 또는 전환 직전)과 앱 재시작 승인 여부
-
-## 수용 기준(초안)
-
-- 원본 앱이 PgBouncer를 거쳐 오류 없이 동작하고, `PAUSE`/`RESUME`이 앱 오류 없이 동작한다.
-- 대상 DB Pod에서 원본 DB로, 원본 DB Pod에서 대상 DB로 터널을 통해 `psql` 접속이 된다.
+- 실습에서는 두 k3d 클러스터를 같은 docker 네트워크에 두고 NodePort(30432)로 `peer_host`를 대신했다.
+- 실제 환경: 정방향(대상 DB → 원본 DB), 역방향·PgBouncer(원본 → 대상 DB) 모두 터널을 지난다. `peer_host`에 터널 쪽 주소를 넣으면 코드 변경 없이 동작한다.
+- 미정: AWS·GCP 대상에서 터널 양 끝 위치(노드, 게이트웨이 Pod, 별도 VM), 터널 생명주기 소유(Provisioning 또는 Data). ON_PREM은 Agent 터널(#71, `tunnel_endpoint`)을 쓴다.

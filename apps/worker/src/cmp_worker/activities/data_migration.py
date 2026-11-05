@@ -61,6 +61,7 @@ class DbPod(Protocol):
     def restart(self, timeout: int = 180) -> None: ...
     def read_secret(self, name: str) -> str | None: ...
     def create_secret(self, name: str, value: str) -> None: ...
+    def login(self) -> tuple[str, str]: ...
 
 
 class KubectlDbPod:
@@ -108,6 +109,14 @@ class KubectlDbPod:
             return None
         raw = (item.get("data") or {}).get(SECRET_KEY)
         return base64.b64decode(raw).decode() if raw else None
+
+    def login(self) -> tuple[str, str]:
+        """DB 컨테이너의 관리자 로그인(POSTGRES_USER/POSTGRES_PASSWORD). 메모리에만 둔다."""
+        out = self._exec('printf "%s\\n%s" "$POSTGRES_USER" "$POSTGRES_PASSWORD"').decode()
+        user, _, password = out.partition("\n")
+        if not user or not password:
+            raise CommandError("kubectl")
+        return user, password
 
     def create_secret(self, name: str, value: str) -> None:
         # `kubectl create -f -`: 값이 last-applied 주석에 복사되지 않는다(k8s_workloads_cli 규칙).

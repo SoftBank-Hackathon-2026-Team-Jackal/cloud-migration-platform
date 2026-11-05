@@ -105,6 +105,9 @@ class DbEndpoint(Strict):
     # 상대 DB가 이 DB에 접속할 주소(WireGuard 터널 쪽 주소, DM-011)와 DB 이름
     peer_host: str
     peer_port: int = Field(default=5432, ge=1, le=65535)
+    # 같은 클러스터 안에서 이 DB로 가는 주소(원본이면 cmp-cutover Pod가 쓴다). 없으면 peer_host
+    local_host: str | None = None
+    local_port: int = Field(default=5432, ge=1, le=65535)
     dbname: str
 
 
