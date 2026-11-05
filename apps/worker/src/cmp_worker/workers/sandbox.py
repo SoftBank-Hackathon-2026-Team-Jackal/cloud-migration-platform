@@ -1,16 +1,66 @@
 """Worker for the Sandbox activity queue."""
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from cmp_contracts.queues import SANDBOX_QUEUE
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from cmp_worker.activities import sandbox
-from cmp_worker.activities.sandbox_loop import SandboxLoopActivities
+from cmp_worker.activities.k8s_workloads_cli import CommandRunner
+from cmp_worker.activities.sandbox_loop import SandboxLoopActivities, make_proxy_suite_runner
+from cmp_worker.artifact_store import LocalArtifactStore
+from cmp_worker.prebuilt_builder import PrebuiltImages
+from cmp_worker.sandbox_deploy import SANDBOX_CONTEXT, SandboxCluster, SandboxService
+
+if TYPE_CHECKING:
+    from cmp_worker.config import Settings
+
+
+def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivities | None:
+    """The real Sandbox loop needs the dedicated cluster's kubeconfig and the analysis store (the
+    same directory the analysis worker writes to). Without both, only the scaffold runs.
+
+    Raises ValueError at start-up for a configuration that can only fail later, such as application
+    images that are not pinned by digest.
+    """
+    # Imported here, not at module level: reading the settings must not happen when a Workflow
+    # sandbox imports this module (the settings read files, which a Workflow may not do).
+    from cmp_worker.config import settings
+    from cmp_worker.llm_factory import build_llm_factory
+
+    config = config or settings
+    if not config.sandbox_kubeconfig or not config.analysis_artifact_store_dir:
+        return None
+    kubeconfig = Path(config.sandbox_kubeconfig).expanduser()
+    if not kubeconfig.is_file():
+        raise ValueError("SANDBOX_KUBECONFIG_NOT_FOUND")
+    repo_root = Path(__file__).resolve().parents[5]  # resolved here: a Workflow import may not
+    resources = Path(config.analysis_resources_dir) if config.analysis_resources_dir else repo_root
+    workspace_root = Path(
+        config.sandbox_workspace_root
+        or Path(config.analysis_workspace_root or "/tmp/cmp-analysis") / "sandbox-fixes"
+    )
+    service = SandboxService(
+        SandboxCluster(CommandRunner(), kubeconfig=kubeconfig, context=SANDBOX_CONTEXT),
+        database_chart_dir=resources / "infra/helm/postgres",
+        application_chart_dir=resources / "infra/helm/application",
+        helm_timeout=config.sandbox_helm_timeout,
+    )
+    return SandboxLoopActivities(
+        service=service,
+        store=LocalArtifactStore(config.analysis_artifact_store_dir),
+        workspace_root=workspace_root,
+        build=PrebuiltImages.from_json(config.sandbox_prebuilt_images),
+        suite_runner=make_proxy_suite_runner(service),
+        llm_factory=build_llm_factory(config),
+    )
 
 
 def create_worker(client: Client, loop: SandboxLoopActivities | None = None) -> Worker:
-    """`loop` carries the real Sandbox loop Activities (ticket 14B). It is injected because its
-    build step (D-12) and model client (ADR-004) are not configured yet."""
+    """`loop` is built from settings when it is not given (see `build_sandbox_loop`)."""
+    loop = loop or build_sandbox_loop()
     return Worker(
         client,
         task_queue=SANDBOX_QUEUE,
