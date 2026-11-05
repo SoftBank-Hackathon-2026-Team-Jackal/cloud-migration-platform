@@ -36,6 +36,7 @@
 | [23 환경 연결 관리 API (AWS 역할 위임·GCP·Agent 목록)](../../tickets/provisioning/23-environment-connections.md) | DONE (로컬 범위, 실제 계정·데모 반영 승인 대기) | 15, 16, 21 | PROV-003, 021, 022 | [#118](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/118) | ☑ |
 | [24 이전 이벤트 저장소·SSE·운영 로그 공통 모듈](../../tickets/provisioning/24-migration-events.md) | IN_PROGRESS (로컬 완료, 리뷰·push 대기) | 07, 13, 18 | PROV-014, 015, 018, 021 | [#122](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/122) | ☐ |
 | [25 터널 상태 만료(신선도) 처리](../../tickets/provisioning/25-tunnel-status-freshness.md) | DONE (로컬 범위, 리뷰·push 대기) | 13, 16, 17, 23 | PROV-009, 019, 020, 021 | [#135](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/135) | ☑ |
+| [27 대상 DB 논리 복제 준비와 복제 가능 판정 보정](../../tickets/provisioning/27-target-db-replication.md) | DONE (로컬 범위, 리뷰·push 대기, 새 Agent 릴리스 필요) | 02, 04B, 09, 11, 12, 13 | PROV-005, 011, 018, 020 | [#151](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/151) | ☑ |
 
 ## 선행 관계
 

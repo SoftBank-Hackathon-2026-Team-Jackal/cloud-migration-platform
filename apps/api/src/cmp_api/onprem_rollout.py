@@ -466,4 +466,10 @@ def outcome(job: AgentJob) -> dict | None:
     code = (job.result or {}).get("code", "AGENT_RESULT_MISSING")
     ready = job.status == "SUCCEEDED" and code == "READY"
     status = job.status if job.status != "SUCCEEDED" or ready else "UNKNOWN"
-    return {"status": status, "code": code, "resource_refs": resource_refs(rollout, ready=ready)}
+    refs = resource_refs(rollout, ready=ready)
+    replication = (job.result or {}).get("replication")
+    if ready and isinstance(replication, dict):  # ticket 27; absent from older Agents
+        refs["db_replication_capable"] = "true" if replication.get("capable") is True else "false"
+        if replication.get("capable") is not True and replication.get("code"):
+            refs["db_replication_code"] = str(replication["code"])
+    return {"status": status, "code": code, "resource_refs": refs}

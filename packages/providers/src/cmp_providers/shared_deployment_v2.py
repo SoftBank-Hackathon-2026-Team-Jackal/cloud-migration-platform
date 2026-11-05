@@ -27,6 +27,7 @@ from pydantic import ValidationError
 
 from cmp_providers.artifacts import canonical_json_bytes
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
+from cmp_providers.db_replication import default_parameters
 
 
 def _issue(code: str, path: str) -> ValidationIssue:
@@ -154,6 +155,7 @@ def render_shared_deployment_v2(
                 username=db.username,
                 secret_name=db.password_secret_ref.name,
                 secret_key=db.password_secret_ref.key,
+                parameters=default_parameters(request.provider, resource.release_name),
             ),
             resources=resource.resources,
             storage=PersistentStorage(

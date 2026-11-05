@@ -95,7 +95,7 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
     "name": "demoapp",
     "user": "demoapp",
     "password_secret": {"namespace": "cmp-demo-target", "name": "cmp-demo-db-auth", "key": "password"},
-    "replication_capable": true,      // 배포 직후 실측. 미확인이면 null + warnings
+    "replication_capable": true,      // 배포 직후 실측(27: 역할 + wal_level=logical + 슬롯·송신자>0). 미확인이면 null + warnings, false면 원인 코드가 warnings에
     "exposure": "CLUSTER_INTERNAL",   // 클러스터 내부 전용. 원본 접근 경로는 Data Migration이 준비
     "storage": {"pvc": "cmp-demo-db", "storage_class": "cmp-pd-balanced", "size_gib": 10},
     "release": "cmp-demo-db",
@@ -154,7 +154,7 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
 - `make smoke-temporal`은 로컬 Docker(Temporal)가 꺼져 있어 실행하지 못했다. Workflow 변경(complete 입력에 `step` 추가)은 Temporal 테스트 환경의 실제 Workflow 테스트로 확인했다.
 - 실제 EKS/GKE/K3s 재실행으로 저장된 결과는 아직 없다. 09·11·12의 실측 refs 형식 fixture로만 정규화를 확인했고, 실제 연결은 14에서 확인한다.
 - 검사 목록은 Provider의 고정 검사 순서와 첫 실패 코드에서 추론한 값이다. 실행이 개별 검사 결과를 직접 보고하지는 않는다. GCP `image_pull_secret`은 ECR 이미지가 없으면 실행하지 않는데도 READY에서는 `PASSED`로 표시된다.
-- ON_PREM은 외부 Ingress가 없어 `external_endpoint`가 없다. 그래서 Traffic 인계는 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단된다. 복제 권한도 확인하지 않아 `replication_capable=null`과 `REPLICATION_NOT_VERIFIED` 경고가 붙는다.
+- ON_PREM은 외부 Ingress가 없어 `external_endpoint`가 없다. 그래서 Traffic 인계는 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단된다. 복제 권한도 확인하지 않아 `replication_capable=null`과 `REPLICATION_NOT_VERIFIED` 경고가 붙는다. (2026-11-06 티켓 27: 새 Agent가 같은 판정을 보고하면 실측값으로 바뀌고 이 경고가 사라진다. 판정은 역할뿐 아니라 `wal_level=logical`과 슬롯·송신자 여유까지 확인하며, false면 `WAL_LEVEL_NOT_LOGICAL` 같은 원인 코드가 `warnings`에 남는다.)
 - 상위 `MigrationWorkflow`와 실제 Data/Traffic Worker의 소비는 범위 밖이다.
 
 > 2026-11-05 티켓 16 변경: ON_PREM Data 인계는 터널 경유 DB 접속이 확인된 뒤에만 진행하고 `database.tunnel_endpoint`를 인계 뷰에 채운다(16 T2·T7). 저장된 결과는 바꾸지 않는다(T6).

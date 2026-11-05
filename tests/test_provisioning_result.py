@@ -671,3 +671,35 @@ def test_odd_ref_values_never_block_execution_completion(db):
     result = stored(db)
     assert result.database.port is None and result.database.name == "demoapp"
     assert result.application.health_path is None
+
+
+@pytest.mark.parametrize(
+    ("extra", "capable", "warning"),
+    [
+        ({"db_replication_capable": "true"}, True, None),
+        (
+            {"db_replication_capable": "false", "db_replication_code": "WAL_LEVEL_NOT_LOGICAL"},
+            False,
+            "WAL_LEVEL_NOT_LOGICAL",
+        ),
+        ({}, None, "REPLICATION_NOT_VERIFIED"),
+    ],
+)
+async def test_onprem_agent_replication_check_reaches_the_handoff(
+    temporal, db, providers, extra, capable, warning
+):
+    """Ticket 27: a new Agent's replication check replaces the permanent unverified warning."""
+    approved = Approved(db, "ON_PREM", "FULL")
+    providers.outcomes["execute_on_prem_plan"] = {
+        "status": "SUCCEEDED",
+        "code": "READY",
+        "resource_refs": ONPREM_REFS | extra,
+    }
+    await execute(temporal, approved)
+    result = stored(db)
+    assert result.status == "READY"
+    assert result.database.replication_capable is capable
+    replication_warnings = {
+        w for w in result.warnings if "REPLICATION" in w or w == "WAL_LEVEL_NOT_LOGICAL"
+    }
+    assert replication_warnings == ({warning} if warning else set())

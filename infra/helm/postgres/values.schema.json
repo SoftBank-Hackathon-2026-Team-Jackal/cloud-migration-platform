@@ -1,5 +1,49 @@
 {
   "$defs": {
+    "DatabaseParameters": {
+      "additionalProperties": false,
+      "description": "Ticket 27: the only server settings the Chart passes as `postgres -c k=v`.\n\n`app` holds display-only custom settings (`app.<key>`), e.g. the demo app's `node_name`.",
+      "properties": {
+        "wal_level": {
+          "enum": [
+            "replica",
+            "logical"
+          ],
+          "title": "Wal Level",
+          "type": "string"
+        },
+        "max_replication_slots": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Max Replication Slots",
+          "type": "integer"
+        },
+        "max_wal_senders": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Max Wal Senders",
+          "type": "integer"
+        },
+        "app": {
+          "maxProperties": 8,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,30}$": {
+              "pattern": "^[A-Za-z0-9._-]{1,63}$",
+              "type": "string"
+            }
+          },
+          "title": "App",
+          "type": "object"
+        }
+      },
+      "required": [
+        "wal_level",
+        "max_replication_slots",
+        "max_wal_senders"
+      ],
+      "title": "DatabaseParameters",
+      "type": "object"
+    },
     "DatabaseSettings": {
       "additionalProperties": false,
       "properties": {
@@ -33,6 +77,17 @@
           "pattern": "^[a-zA-Z0-9._-]+$",
           "title": "Secret Key",
           "type": "string"
+        },
+        "parameters": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DatabaseParameters"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
