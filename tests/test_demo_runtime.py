@@ -134,26 +134,69 @@ def test_compose_targets_slim_api_and_tool_worker():
     assert services["worker"]["build"]["target"] == "worker"
 
 
-def test_edge_forwards_only_agent_routes():
+def test_edge_sends_only_agent_and_relay_routes_to_the_api():
     routes = (DEMO / "agent-routes.caddy").read_text()
     code = [
         line.strip()
         for line in routes.splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
+    # Everything that is not the Agent API or the relay polling API is the web front end; the
+    # operator, approval and tunnel-admin routes and /docs never get a route to the API.
     assert code == [
-        "@agent path /agents/*",
-        "handle @agent {",
+        "@backend path /agents/* /relays/*",
+        "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
         "}",
         "handle {",
-        "respond 404",
+        "reverse_proxy {$CMP_WEB_UPSTREAM}",
         "}",
     ]
     caddyfile = (DEMO / "Caddyfile").read_text()
     assert "import agent-routes.caddy" in caddyfile
     assert "disable_http_challenge" in caddyfile
     assert "auto_https disable_redirects" in caddyfile
+    edge = _env("edge")
+    assert edge["CMP_API_UPSTREAM"] == "api:8000"
+    assert edge["CMP_WEB_UPSTREAM"] == "web:3000"
+
+
+def test_web_is_internal_only_and_reaches_the_api_over_the_compose_network():
+    web = _compose()["services"]["web"]
+    assert web["profiles"] == ["public"]
+    assert "ports" not in web
+    assert web["expose"] == ["3000"]
+    env = web["environment"]
+    assert env["PLATFORM_API_BASE"] == "http://api:8000"
+    assert env["AUTH_TRUST_HOST"] == "true"
+    # Secrets come from /opt/cmp/.env (generated once); the web never gets DB, approval or cloud credentials.
+    assert env["AUTH_SECRET"] == "${WEB_AUTH_SECRET:-}"
+    # The web's /api/agents routes mint and revoke Agent enrollments with the admin key but have no user
+    # login yet, so the public web must not get that key by default (an operator may add it to
+    # /opt/cmp/web.env once those routes are authenticated).
+    for name in (
+        "PLATFORM_ENROLLMENT_ADMIN_KEY",
+        "AGENT_ENROLLMENT_ADMIN_KEY",
+        "DATABASE_URL",
+        "APPROVAL_ADMIN_KEY",
+        "AWS_CONFIG_FILE",
+        "CMP_GCP_KEY_FILE",
+    ):
+        assert name not in env, name
+    assert not any("/opt/cmp/secrets" in mount for mount in web.get("volumes", []))
+    # Built on the host from the web release that release-web.sh extracts; a missing web release
+    # must not break the API deploy.
+    assert web["build"]["context"] == "${CMP_WEB_DIR:-/opt/cmp/web/current}"
+    assert {"path": "/opt/cmp/web.env", "required": False} in web["env_file"]
+
+
+def test_release_web_script_uploads_only_under_releases_and_checks_the_account():
+    script = (DEMO / "release-web.sh").read_text()
+    assert "714066696240" in script
+    assert "releases/web-" in script
+    assert "ln -sfn" in script and "/opt/cmp/web/current" in script
+    syntax = subprocess.run(["bash", "-n", str(DEMO / "release-web.sh")], check=False)
+    assert syntax.returncode == 0
 
 
 def test_security_group_opens_only_https_and_imds_reaches_containers():
@@ -183,7 +226,12 @@ def test_ensure_secrets_generates_missing_keys_and_keeps_existing(tmp_path):
     assert env_file.read_text() == first
     values = dict(line.split("=", 1) for line in first.splitlines())
     assert values["PLATFORM_DB_PASSWORD"] == "keep-me"
-    for name in ("TEMPORAL_DB_PASSWORD", "AGENT_ENROLLMENT_ADMIN_KEY", "APPROVAL_ADMIN_KEY"):
+    for name in (
+        "TEMPORAL_DB_PASSWORD",
+        "AGENT_ENROLLMENT_ADMIN_KEY",
+        "APPROVAL_ADMIN_KEY",
+        "WEB_AUTH_SECRET",
+    ):
         assert re.fullmatch(r"[0-9a-f]{48,64}", values[name]), name
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
 
@@ -202,6 +250,10 @@ def test_start_script_uses_secret_helper_and_checks_worker_tools():
     assert "ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets" in start
     assert "openssl rand" not in start
     assert "--profile public up -d edge" in start
+    # The web front end is built from the extracted web release when there is one.
+    assert "/opt/cmp/web/current/Dockerfile" in start
+    assert "--profile public up -d --build web" in start
+    assert start.index("up -d --build web") < start.index("up -d edge")
     for tool in (
         "terraform version",
         "helm version",

@@ -75,7 +75,7 @@ services:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
     command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    # Loopback only; the public edge forwards /agents/* on the internal network.
+    # Loopback only; the public edge forwards /agents/* and /relays/* on the internal network.
     ports:
       - "127.0.0.1:8000:8000"
 
@@ -112,8 +112,36 @@ services:
       - /root/.aws:mode=0700
       - /root/.kube:mode=0700
 
-  # Public HTTPS entry for the on-premises Agent (ticket 21). Opt-in: start.sh starts it only when
-  # CMP_PUBLIC_HOST is set. Only /agents/* is forwarded; everything else answers 404.
+  # Web front end (cloud-migration-web). Internal only: the edge forwards every path except /agents/* and
+  # /relays/* here, and its server code reaches the API at http://api:8000. Opt-in like the edge. Built on
+  # the host from /opt/cmp/web/current, which infra/demo/release-web.sh uploads and extracts. Operator-only
+  # values (GitHub OAuth app id/secret, optional GEMINI_API_KEY) go in /opt/cmp/web.env (0600). The web does
+  # NOT get AGENT_ENROLLMENT_ADMIN_KEY: its /api/agents routes have no user login yet, so a public web holding
+  # the key would let anyone mint Agent enrollments (without it the connections screens use their mock data).
+  web:
+    build:
+      context: ${CMP_WEB_DIR:-/opt/cmp/web/current}
+    restart: unless-stopped
+    profiles: ["public"]
+    depends_on:
+      - api
+    environment:
+      PLATFORM_API_BASE: http://api:8000
+      PLATFORM_PUBLIC_URL: https://${CMP_PUBLIC_HOST:-localhost}
+      AUTH_SECRET: ${WEB_AUTH_SECRET:-}
+      AUTH_URL: https://${CMP_PUBLIC_HOST:-localhost}
+      AUTH_TRUST_HOST: "true"
+    env_file:
+      - path: /opt/cmp/web.env
+        required: false
+    volumes:
+      - /opt/cmp/data/web-models:/models
+      - /opt/cmp/data/web-cache:/cache
+    expose:
+      - "3000"
+
+  # Public HTTPS entry (ticket 21). Opt-in: start.sh starts it only when CMP_PUBLIC_HOST is set.
+  # /agents/* and /relays/* go to the API; everything else goes to the web front end.
   edge:
     image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     restart: unless-stopped
@@ -123,6 +151,7 @@ services:
     environment:
       CMP_PUBLIC_HOST: ${CMP_PUBLIC_HOST:-}
       CMP_API_UPSTREAM: api:8000
+      CMP_WEB_UPSTREAM: web:3000
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./agent-routes.caddy:/etc/caddy/agent-routes.caddy:ro

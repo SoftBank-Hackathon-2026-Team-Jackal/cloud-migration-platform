@@ -4,6 +4,8 @@ set -euo pipefail
 release_dir="${1:?release directory required}"
 cd "$release_dir"
 install -d -m 700 /opt/cmp/data/plans /opt/cmp/data/artifact-store /opt/cmp/data/caddy
+# The web container runs as uid 1000 (node) and keeps the voice model and its cache here.
+install -d -m 700 -o 1000 -g 1000 /opt/cmp/data/web-models /opt/cmp/data/web-cache
 
 for attempt in {1..60}; do
   if docker compose version >/dev/null 2>&1; then
@@ -22,6 +24,10 @@ compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
 "${compose[@]}" up -d --build api worker
 # Public Agent edge is opt-in: set CMP_PUBLIC_HOST in /opt/cmp/.env after 443 ingress is approved.
 if grep -q '^CMP_PUBLIC_HOST=.' /opt/cmp/.env; then
+  # The web front end is built from the release that infra/demo/release-web.sh extracted, when there is one.
+  if [[ -f /opt/cmp/web/current/Dockerfile ]]; then
+    "${compose[@]}" --profile public up -d --build web
+  fi
   "${compose[@]}" --profile public up -d edge
 fi
 
