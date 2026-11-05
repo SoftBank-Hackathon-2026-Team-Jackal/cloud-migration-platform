@@ -50,6 +50,11 @@ from cmp_scanners.network import build_network, merge_network_intents
 from cmp_scanners.source import fetch_source as checkout_source
 
 from cmp_worker.artifact_store import ArtifactRef, ArtifactStore
+from cmp_worker.source_access import (
+    NoSourceTokenResolver,
+    SourceTokenResolver,
+    github_repository,
+)
 
 
 class AnalysisPipeline:
@@ -63,7 +68,9 @@ class AnalysisPipeline:
         llm_factory: Callable[[str, str], LLMClient] | None = None,
         aws_clients_factory: Callable[[AnalysisInput], AwsClients] | None = None,
         allow_local_repositories: bool = False,
+        source_resolver: SourceTokenResolver | None = None,
     ) -> None:
+        self.source_resolver = source_resolver or NoSourceTokenResolver()
         self.store = store
         self.workspace_root = Path(workspace_root)
         self.skills_root = Path(skills_root)
@@ -91,11 +98,20 @@ class AnalysisPipeline:
         data = self._input(inp)
         if not data.repository or not data.requested_commit:
             raise ValueError("SOURCE_INPUT_MISSING")
+        token = None
+        if data.source_access_ref is not None:
+            # The token goes only to a plain github.com repository, and only now, to clone.
+            github_repository(data.repository)
+            credential = self.source_resolver.resolve(
+                data.source_access_ref, host="github.com", purpose="READ"
+            )
+            token = credential.token
         snapshot = checkout_source(
             data.repository,
             requested_commit=data.requested_commit,
             migration_id=data.migration_id,
             workspace_root=self.workspace_root,
+            token=token,
             allow_local=self.allow_local,
         )
         return {

@@ -10,7 +10,7 @@
 | Sandbox 클러스터 | 전용 `k3d-cmp-sandbox`. 만드는 법은 [티켓 11의 환경 준비](../../tickets/analysis-verification/11-sandbox-apply.md). 다른 컨텍스트는 코드가 거절한다 |
 | Temporal·DB | `make infra-up`(Docker Compose). 주소는 `TEMPORAL_ADDRESS`(기본 `localhost:7233`) |
 | 모델 키 | Claude를 쓰려면 워커를 띄우는 셸에 `ANTHROPIC_API_KEY`를 내보낸다. `.env` 파일이나 저장소에는 적지 않는다 |
-| 분석할 앱 | 로컬 복제본 경로 또는 공개 URL. 비공개 저장소는 로컬 복제본을 쓰고 `ANALYSIS_ALLOW_LOCAL_REPOSITORIES=true`(개발 전용)를 켠다 |
+| 분석할 앱 | 공개 URL이면 그대로. 비공개 GitHub 저장소는 개인 토큰을 워커에만 주고(`SOURCE_TOKEN_RESOLVER=env`, 환경 변수 `CMP_GITHUB_TOKEN`, 읽기 권한이면 충분) 시작할 때 `--source-access dev-env`를 준다. 로컬 복제본을 쓰려면 `ANALYSIS_ALLOW_LOCAL_REPOSITORIES=true`(개발 전용)를 켠다. 토큰은 `.env`에 적지 않고 워커를 띄우는 셸에서만 내보낸다 |
 | 앱 이미지 | 이미 빌드·푸시된 이미지(Digest 고정). 실제 Build(D-12)가 정해지기 전에는 이것으로 대신한다. 레지스트리가 비공개면 k3d가 받을 수 있게 공개하거나 pull 자격 증명을 넣어야 한다 |
 
 ## 2. 설정 (`.env`, 값은 예시)

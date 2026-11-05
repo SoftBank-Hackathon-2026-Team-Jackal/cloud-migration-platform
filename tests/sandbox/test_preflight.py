@@ -138,3 +138,36 @@ def test_sandbox_settings_are_optional_and_typos_are_refused():
         )
     with pytest.raises(ValueError):
         build_start_input(project_id="p", repository="r", commit="c", sandbox_json="not json")
+
+
+def test_the_source_token_setting_is_checked_without_showing_the_token(tmp_path):
+    none = check(settings(tmp_path))
+    assert none["source:token"].status == OK and "public" in none["source:token"].detail
+    missing = check(settings(tmp_path, source_token_resolver="env"))
+    assert missing["source:token"].status == FAIL
+    present = check(
+        settings(tmp_path, source_token_resolver="env"),
+        environ={"CMP_GITHUB_TOKEN": "ghp_secretvalue123"},
+    )
+    assert present["source:token"].status == OK and "ghp_secretvalue123" not in summary(
+        list(present.values())
+    )
+    assert (
+        check(settings(tmp_path, source_token_resolver="platform"))["source:token"].status == FAIL
+    )
+
+
+def test_start_input_carries_the_dev_reference_and_never_a_token():
+    data = build_start_input(
+        project_id="p",
+        repository="https://github.com/acme/demo-app",
+        commit="a" * 40,
+        source_access="dev-env",
+    )
+    assert data["analysis"]["source_access_ref"] == {"id": "dev-env", "version": "1"}
+    assert (
+        build_start_input(project_id="p", repository="r", commit="c")["analysis"][
+            "source_access_ref"
+        ]
+        is None
+    )

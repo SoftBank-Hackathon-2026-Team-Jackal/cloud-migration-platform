@@ -173,6 +173,20 @@ def run_checks(
             )
         )
 
+    if config.source_token_resolver == "env":
+        has = bool(env.get("CMP_GITHUB_TOKEN"))
+        out.append(
+            Check("source:token", OK, "CMP_GITHUB_TOKEN is set")
+            if has
+            else Check(
+                "source:token", FAIL, "SOURCE_TOKEN_RESOLVER=env but CMP_GITHUB_TOKEN is not set"
+            )
+        )
+    elif config.source_token_resolver == "none":
+        out.append(Check("source:token", OK, "public repositories only"))
+    else:
+        out.append(Check("source:token", FAIL, "SOURCE_TOKEN_RESOLVER must be none or env"))
+
     if repository:
         path = Path(repository).expanduser()
         if path.exists():

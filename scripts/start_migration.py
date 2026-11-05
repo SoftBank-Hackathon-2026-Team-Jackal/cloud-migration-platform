@@ -26,7 +26,8 @@ async def main(args: argparse.Namespace) -> int:
         data = build_start_input(
             project_id=args.project_id, repository=args.repository, commit=args.commit,
             manifests_dir=args.manifests_dir, cluster_name=args.cluster_name,
-            credential_ref=args.credential_ref, sandbox_json=args.sandbox,
+            credential_ref=args.credential_ref, source_access=args.source_access,
+            sandbox_json=args.sandbox,
         )  # fmt: skip
     except (ValidationError, ValueError) as exc:
         print(f"Input is invalid: {type(exc).__name__}")
@@ -50,6 +51,11 @@ if __name__ == "__main__":
     parser.add_argument("--manifests-dir")
     parser.add_argument("--cluster-name")
     parser.add_argument("--credential-ref")
+    parser.add_argument(
+        "--source-access",
+        choices=["dev-env"],
+        help="read a private repository with CMP_GITHUB_TOKEN from the worker's environment",
+    )
     parser.add_argument("--sandbox", help="SandboxSettings as JSON")
     parser.add_argument("--workflow-id")
     sys.exit(asyncio.run(main(parser.parse_args())))
