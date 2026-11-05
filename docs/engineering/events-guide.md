@@ -96,7 +96,7 @@ Helm heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`)은 Temp
 
 | 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
 | --- | --- | --- | --- |
-| `data.preflight` | `run_network_preflight` 끝(매번 전체) | `NetworkPreflightResult`: `status`, `checks[{name,status,code,evidence}]`(이름·`bytes_received`·`bytes_expected`·`seconds` 자동 변환), `probe_location`, `input_fingerprint`, `checked_at`, `may_start` = `may_start_data_migration(...)`. `network`(CIDR·경로·DB 주소)는 요청값에서 채운다. `evidence`는 원문 문자열(비밀 없음), `mtu`는 지금 항상 `NOT_ATTEMPTED` | `{"status":"PASS","checks":[{"name":"check_route","status":"PASS","code":null,"evidence":"dev wg0"}],…}` |
+| `data.preflight` | `run_network_preflight` 끝(매번 전체). **Activity가 직접 낸다**(MNP-01 N3, `cmp_worker.preflight_events`) — 데이터 담당이 따로 낼 필요 없음 | `NetworkPreflightResult`: `status`, `checks[{name,status,code,evidence}]`(이름·`bytes_received`·`bytes_expected`·`seconds` 자동 변환), `probe_location`, `input_fingerprint`, `checked_at`, `may_start` = `may_start_data_migration(...)`. `network`(CIDR·경로·DB 주소)는 요청값에서 채운다. `evidence`는 원문 문자열(비밀 없음), `mtu`는 지금 항상 `NOT_ATTEMPTED` | `{"status":"PASS","checks":[{"name":"check_route","status":"PASS","code":null,"evidence":"dev wg0"}],…}` |
 | `data.phase` | 단계가 바뀔 때 | `preflight`·`blocked`·`schema`·`copying`→`copy`·`catching_up`→`catchup`·`streaming` | `{"phase":"copying"}` |
 | `data.lsn` | 1초 주기 | `pg_current_wal_lsn()` → `source_lsn`, 대상 replay LSN → `target_lsn`, 슬롯 지연 → `lag_bytes`, `lag_ms`(없으면 null) | `{"source_lsn":"0/3000148","target_lsn":"0/3000100","lag_bytes":72,"lag_ms":null}` |
 | `data.table` | 테이블 상태가 바뀔 때 | `pg_subscription_rel.srsubstate`(i→waiting, d→copying, f·s·r→copied), 복사 행 수 | `{"name":"messages","rows_copied":1200,"rows_total":5000,"state":"copying"}` |

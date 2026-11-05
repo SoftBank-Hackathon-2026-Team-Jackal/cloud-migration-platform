@@ -304,14 +304,18 @@ async def test_activity_returns_result_dict_and_unconfigured_worker_never_passes
 
     payload = request().model_dump(mode="json")
     ok = await ActivityEnvironment().run(
-        NetworkPreflightActivities(lambda: FakeExecutor()).run_network_preflight, payload
+        NetworkPreflightActivities(lambda _request: FakeExecutor()).run_network_preflight, payload
     )
     assert ok["status"] == "PASS" and ok["tested_endpoint"] == "10.20.3.15:5432"
+
+    class NoAgents:  # probe_target.agent_id is not a registered on-prem Agent: direct path
+        def is_agent(self, agent_id):
+            return False
 
     for key in ("PREFLIGHT_KUBECONFIG", "PREFLIGHT_CONTEXT"):
         monkeypatch.delenv(key, raising=False)
     unconfigured = await ActivityEnvironment().run(
-        build_network_preflight_activities().run_network_preflight, payload
+        build_network_preflight_activities(NoAgents()).run_network_preflight, payload
     )
     assert unconfigured["status"] == "UNKNOWN"
     assert {c["code"] for c in unconfigured["checks"][1:]} == {"PROBE_LOCATION_UNAVAILABLE"}

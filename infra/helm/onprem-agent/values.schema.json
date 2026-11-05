@@ -32,6 +32,17 @@
     "idleSeconds": {"type": "number", "minimum": 1},
     "terminationGracePeriodSeconds": {"type": "integer", "minimum": 960},
     "resources": {"type": "object"},
+    "networkPreflight": {
+      "type": "object",
+      "properties": {
+        "image": {"type": "string", "pattern": "^([^\\s@]+@sha256:[a-f0-9]{64})?$"},
+        "allowedImages": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[^\\s@]+@sha256:[a-f0-9]{64}$"}
+        }
+      },
+      "additionalProperties": false
+    },
     "tunnel": {
       "type": "object",
       "properties": {

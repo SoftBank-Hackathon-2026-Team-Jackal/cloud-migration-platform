@@ -189,9 +189,13 @@ def enqueue_job(
 
 
 def _dispatch_block(session: Session, job: AgentJob) -> str | None:
-    """Approved ON_PREM rollout jobs are re-checked against the business DB on every claim."""
-    from cmp_api.onprem_rollout import check_dispatchable, is_rollout  # avoid import cycle
+    """Approved ON_PREM rollout jobs are re-checked against the business DB on every claim;
+    Network Preflight jobs must still target this registered Agent and cluster (MNP-01 N3)."""
+    from cmp_api.agent_preflight import claim_block, is_preflight  # avoid import cycle
+    from cmp_api.onprem_rollout import check_dispatchable, is_rollout
 
+    if is_preflight(job.payload):
+        return claim_block(session, job)
     return check_dispatchable(session, job.payload) if is_rollout(job.payload) else None
 
 
@@ -245,13 +249,18 @@ def report_job(
         raise AgentRegistrationError("JOB_NOT_FOUND")
     if status not in {"SUCCEEDED", "FAILED", "UNKNOWN"}:
         raise AgentRegistrationError("INVALID_JOB_STATUS")
-    if (
-        set(result) != {"code"}
-        or not isinstance(result["code"], str)
-        or not re.fullmatch(r"[A-Z0-9_]{1,64}", result["code"])
-    ):
+    code = result.get("code")
+    if not isinstance(code, str) or not re.fullmatch(r"[A-Z0-9_]{1,64}", code):
         raise AgentRegistrationError("INVALID_JOB_RESULT")
-    if job.status == status and job.result == result:
+    from cmp_api.agent_preflight import is_preflight, normalise_report, same_report
+
+    if is_preflight(job.payload):
+        result = normalise_report(status, result)
+        if job.status == status and same_report(job.result, result):
+            return
+    elif set(result) != {"code"}:
+        raise AgentRegistrationError("INVALID_JOB_RESULT")
+    elif job.status == status and job.result == result:
         return
     if job.status != "RUNNING":
         raise AgentRegistrationError("INVALID_JOB_STATUS")

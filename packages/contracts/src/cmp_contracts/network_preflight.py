@@ -5,11 +5,12 @@ routed CIDRs, the expected tunnel path and where the probe runs. Results hold co
 diagnostics only; never credentials, query payloads or tunnel keys.
 """
 
+import hashlib
 from datetime import datetime
 from ipaddress import IPv4Network
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from cmp_contracts.provisioning import Contract, Text
 
@@ -120,3 +121,32 @@ class NetworkPreflightResult(Contract):
     probe_location: ProbeLocation
     checked_at: datetime
     input_fingerprint: str
+
+
+# --- Agent job (decision N3: the on-prem Agent probes from inside the cluster) ---------------
+
+PREFLIGHT_JOB_MODE = "NETWORK_PREFLIGHT"
+AgentJobId = Annotated[str, Field(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")]
+
+
+class NetworkPreflightJob(Contract):
+    """Queued for the Agent named by `request.probe_target`. References only: the DB auth is a
+    Secret name/key in the probe Namespace, never a value."""
+
+    mode: Literal["NETWORK_PREFLIGHT"]
+    job_id: AgentJobId
+    agent_id: K8sName
+    cluster_uid: Text
+    request: NetworkPreflightRequest
+
+    @model_validator(mode="after")
+    def _bound_to_target(self):
+        target = self.request.probe_target
+        if self.agent_id != target.agent_id or self.cluster_uid != target.cluster_uid:
+            raise ValueError("job target must match probe_target")
+        return self
+
+
+def preflight_job_id(migration_id: str, fingerprint: str) -> str:
+    """One Agent job per (migration, exact request): retries and lost responses reuse it."""
+    return "preflight-" + hashlib.sha256(f"{migration_id}:{fingerprint}".encode()).hexdigest()[:24]

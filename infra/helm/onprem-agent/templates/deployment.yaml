@@ -43,6 +43,12 @@ spec:
             - {{ .Values.helmTimeout | quote }}
             - --idle-seconds
             - {{ .Values.idleSeconds | quote }}
+            {{- with .Values.networkPreflight.image }}
+            - --preflight-image
+            - {{ . | quote }}
+            - --preflight-allowed-images
+            - {{ join "," ($.Values.networkPreflight.allowedImages | default (list .)) | quote }}
+            {{- end }}
           env:
             - name: HOME
               value: /tmp

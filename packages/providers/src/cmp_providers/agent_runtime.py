@@ -17,6 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from cmp_providers.agent_preflight import PreflightJobRunner, probe_executor_factory
 from cmp_providers.onprem_agent import (
     MANAGED,
     ClusterTarget,
@@ -260,6 +261,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--enrollment-token-file", type=Path)
     parser.add_argument("--helm-timeout", default="5m")
     parser.add_argument("--idle-seconds", type=float, default=10)
+    # MNP-01 N3: digest-pinned probe image for NETWORK_PREFLIGHT jobs and its allowlist.
+    parser.add_argument("--preflight-image", default=os.environ.get("CMP_PREFLIGHT_IMAGE", ""))
+    parser.add_argument(
+        "--preflight-allowed-images",
+        default=os.environ.get("CMP_PREFLIGHT_ALLOWED_IMAGES", ""),
+        help="comma-separated digest-pinned images",
+    )
     args = parser.parse_args(argv)
     try:
         client = AgentControlClient(args.platform_url)
@@ -287,10 +295,15 @@ def main(argv: list[str] | None = None) -> int:
     def discover() -> str:
         return target.cluster_uid if target.cluster_uid else target.discover_cluster_uid()
 
+    allowed = frozenset(filter(None, args.preflight_allowed_images.split(",")))
+    preflight = PreflightJobRunner(
+        target, probe_executor_factory(target, args.preflight_image, allowed)
+    )
+
     def poll(credential: str) -> dict | None:
         if not target.cluster_uid:
             target.discover_cluster_uid()
-        return RolloutAgent(args.agent_id, credential, client, target).poll_once()
+        return RolloutAgent(args.agent_id, credential, client, target, preflight).poll_once()
 
     daemon = AgentDaemon(
         agent_id=args.agent_id,

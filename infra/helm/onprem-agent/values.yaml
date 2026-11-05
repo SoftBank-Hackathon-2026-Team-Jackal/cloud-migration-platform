@@ -31,6 +31,14 @@ resources:
   limits:
     memory: 512Mi
 
+# MNP-01 (#51, N3): probe image for NETWORK_PREFLIGHT jobs (needs psql, nc, getent, ip, timeout;
+# the k3d check used postgres:16-alpine). Must be pinned by digest. Empty: the Agent refuses
+# preflight jobs with PREFLIGHT_NOT_CONFIGURED and the Chart grants no Pod create/delete.
+networkPreflight:
+  image: ""
+  # Digest-pinned images the Agent may run; empty means just `image`.
+  allowedImages: []
+
 # Ticket 17 (#71): WireGuard client + tunnel-IP-only forwarders (decisions W1~W9).
 tunnel:
   enabled: true
