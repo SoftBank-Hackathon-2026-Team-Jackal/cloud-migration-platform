@@ -844,6 +844,122 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/migrations/{migration_id}/planning-input:
+    put:
+      tags:
+      - provisioning planning
+      summary: Put Planning Input
+      operationId: put_planning_input_provisioning_migrations__migration_id__planning_input_put
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      - name: x-approval-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Approval-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanningInputRegistration'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningInputRegistered'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/plans/{plan_id}/revisions/{revision}/preview:
+    get:
+      tags:
+      - provisioning planning
+      summary: Get Plan Preview
+      operationId: get_plan_preview_provisioning_plans__plan_id__revisions__revision__preview_get
+      parameters:
+      - name: plan_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Plan Id
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Revision
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanPreviewView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/migrations/{migration_id}/plan:
+    get:
+      tags:
+      - provisioning planning
+      summary: Get Migration Plan
+      description: 'Latest published Revision of the Migration''s Plan (P2: one Plan
+        per Migration).'
+      operationId: get_migration_plan_provisioning_migrations__migration_id__plan_get
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanPreviewView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -906,6 +1022,29 @@ components:
       - owner_id
       - cluster_uid
       title: AgentStatus
+    AnalysisInputV2:
+      properties:
+        result_ref:
+          $ref: '#/components/schemas/VersionRef'
+        requirements_ref:
+          $ref: '#/components/schemas/ContentRef'
+        source_refs:
+          patternProperties:
+            ^[A-Za-z][A-Za-z0-9_-]{0,47}$:
+              $ref: '#/components/schemas/S3ArchiveRef'
+          type: object
+          title: Source Refs
+        config_artifact_ref:
+          anyOf:
+          - $ref: '#/components/schemas/ContentRef'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - result_ref
+      - requirements_ref
+      - source_refs
+      title: AnalysisInputV2
     ApprovalRequest:
       properties:
         decision:
@@ -1074,6 +1213,66 @@ components:
       - sha256
       - size_bytes
       title: ArtifactRef
+    AwsTargetSettings:
+      properties:
+        provider:
+          type: string
+          const: AWS
+          title: Provider
+        settings:
+          additionalProperties: true
+          type: object
+          title: Settings
+      additionalProperties: false
+      type: object
+      required:
+      - provider
+      - settings
+      title: AwsTargetSettings
+    BuildEvidenceV2:
+      properties:
+        resource_id:
+          type: string
+          pattern: ^[A-Za-z][A-Za-z0-9_-]{0,47}$
+          title: Resource Id
+        result_ref:
+          $ref: '#/components/schemas/VersionRef'
+        status:
+          type: string
+          enum:
+          - SUCCEEDED
+          - FAILED
+          title: Status
+        source_ref:
+          $ref: '#/components/schemas/S3ArchiveRef'
+        image_uri:
+          anyOf:
+          - type: string
+            pattern: ^[^\s@]+@sha256:[a-f0-9]{64}$
+          - type: 'null'
+          title: Image Uri
+        image_digest:
+          anyOf:
+          - type: string
+            pattern: ^sha256:[a-f0-9]{64}$
+          - type: 'null'
+          title: Image Digest
+        platforms:
+          items:
+            type: string
+            enum:
+            - linux/amd64
+            - linux/arm64
+          type: array
+          title: Platforms
+      additionalProperties: false
+      type: object
+      required:
+      - resource_id
+      - result_ref
+      - status
+      - source_ref
+      title: BuildEvidenceV2
     Check:
       properties:
         layer:
@@ -1149,6 +1348,29 @@ components:
       - payload
       - status
       title: ClaimedJob
+    ContentRef:
+      properties:
+        id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Id
+        version:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Version
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          title: Sha256
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - version
+      - sha256
+      title: ContentRef
     EnrollmentRequest:
       properties:
         owner_id:
@@ -1195,6 +1417,18 @@ components:
       - enrollment_token
       - expires_in_seconds
       title: EnrollmentResponse
+    EnvironmentInputV2:
+      properties:
+        env_file_ref:
+          $ref: '#/components/schemas/ContentRef'
+        mapping_ref:
+          $ref: '#/components/schemas/ContentRef'
+      additionalProperties: false
+      type: object
+      required:
+      - env_file_ref
+      - mapping_ref
+      title: EnvironmentInputV2
     Failure:
       properties:
         stage:
@@ -1224,6 +1458,22 @@ components:
       - code
       - recoverability
       title: Failure
+    GcpTargetSettings:
+      properties:
+        provider:
+          type: string
+          const: GCP
+          title: Provider
+        settings:
+          additionalProperties: true
+          type: object
+          title: Settings
+      additionalProperties: false
+      type: object
+      required:
+      - provider
+      - settings
+      title: GcpTargetSettings
     HTTPValidationError:
       properties:
         detail:
@@ -1316,6 +1566,249 @@ components:
       - approval_pending
       - cancel_requested
       title: MigrationStatus
+    OnPremTargetSettings:
+      properties:
+        provider:
+          type: string
+          const: ON_PREM
+          title: Provider
+        environment_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Environment Id
+        agent_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+        namespace:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Namespace
+        storage_class:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Storage Class
+        database_image:
+          type: string
+          pattern: ^[^\s@]+@sha256:[a-f0-9]{64}$
+          title: Database Image
+      additionalProperties: false
+      type: object
+      required:
+      - provider
+      - environment_id
+      - agent_id
+      - cluster_uid
+      - namespace
+      - storage_class
+      - database_image
+      title: OnPremTargetSettings
+    PlanPreviewView:
+      properties:
+        plan_id:
+          type: string
+          title: Plan Id
+        revision:
+          type: integer
+          title: Revision
+        latest:
+          type: boolean
+          title: Latest
+        migration_id:
+          type: string
+          title: Migration Id
+        provider:
+          type: string
+          enum:
+          - AWS
+          - GCP
+          - ON_PREM
+          title: Provider
+        scope:
+          type: string
+          enum:
+          - INFRASTRUCTURE
+          - WORKLOADS
+          - FULL
+          title: Scope
+        manifest_digest:
+          type: string
+          title: Manifest Digest
+        preview_digest:
+          type: string
+          title: Preview Digest
+        approvable:
+          type: boolean
+          title: Approvable
+        approval_issues:
+          items:
+            type: string
+          type: array
+          title: Approval Issues
+        preview:
+          $ref: '#/components/schemas/Preview'
+      type: object
+      required:
+      - plan_id
+      - revision
+      - latest
+      - migration_id
+      - provider
+      - scope
+      - manifest_digest
+      - preview_digest
+      - approvable
+      - approval_issues
+      - preview
+      title: PlanPreviewView
+    PlanningInputRegistered:
+      properties:
+        migration_id:
+          type: string
+          title: Migration Id
+        input_digest:
+          type: string
+          title: Input Digest
+      type: object
+      required:
+      - migration_id
+      - input_digest
+      title: PlanningInputRegistered
+    PlanningInputRegistration:
+      properties:
+        contract_version:
+          type: string
+          const: '1'
+          title: Contract Version
+        planning_request:
+          $ref: '#/components/schemas/PlanningRequestV2'
+        target:
+          oneOf:
+          - $ref: '#/components/schemas/OnPremTargetSettings'
+          - $ref: '#/components/schemas/AwsTargetSettings'
+          - $ref: '#/components/schemas/GcpTargetSettings'
+          title: Target
+          discriminator:
+            propertyName: provider
+            mapping:
+              AWS: '#/components/schemas/AwsTargetSettings'
+              GCP: '#/components/schemas/GcpTargetSettings'
+              ON_PREM: '#/components/schemas/OnPremTargetSettings'
+        requirements_json:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Requirements Json
+      additionalProperties: false
+      type: object
+      required:
+      - contract_version
+      - planning_request
+      - target
+      title: PlanningInputRegistration
+    PlanningPolicyV2:
+      properties:
+        template_version:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Template Version
+      additionalProperties: false
+      type: object
+      required:
+      - template_version
+      title: PlanningPolicyV2
+    PlanningRequestV2:
+      properties:
+        contract_version:
+          type: string
+          const: '2'
+          title: Contract Version
+        migration_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Migration Id
+        analysis:
+          $ref: '#/components/schemas/AnalysisInputV2'
+        builds:
+          items:
+            $ref: '#/components/schemas/BuildEvidenceV2'
+          type: array
+          title: Builds
+        sandbox:
+          $ref: '#/components/schemas/SandboxEvidenceV2'
+        target_selection:
+          $ref: '#/components/schemas/TargetSelectionV2'
+        environment:
+          $ref: '#/components/schemas/EnvironmentInputV2'
+        policy:
+          $ref: '#/components/schemas/PlanningPolicyV2'
+      additionalProperties: false
+      type: object
+      required:
+      - contract_version
+      - migration_id
+      - analysis
+      - builds
+      - sandbox
+      - target_selection
+      - environment
+      - policy
+      title: PlanningRequestV2
+    Preview:
+      properties:
+        contract_version:
+          type: string
+          const: '1'
+          title: Contract Version
+        manifest_digest:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          title: Manifest Digest
+        changes:
+          items:
+            $ref: '#/components/schemas/ResourceChange'
+          type: array
+          title: Changes
+        applied_defaults:
+          items:
+            $ref: '#/components/schemas/ResourceChange'
+          type: array
+          title: Applied Defaults
+        warnings:
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+          type: array
+          title: Warnings
+        errors:
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+          type: array
+          title: Errors
+        pending_decisions:
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+          type: array
+          title: Pending Decisions
+      additionalProperties: false
+      type: object
+      required:
+      - contract_version
+      - manifest_digest
+      - changes
+      title: Preview
     ProductionRolloutJob:
       properties:
         mode:
@@ -1590,6 +2083,53 @@ components:
       - job_id
       - accepted
       title: ReportAck
+    ResourceChange:
+      properties:
+        resource_type:
+          type: string
+          enum:
+          - NETWORK
+          - CLUSTER
+          - NODE
+          - APP
+          - DATABASE
+          - STORAGE
+          - INGRESS
+          title: Resource Type
+        action:
+          type: string
+          enum:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - READ
+          - NO_CHANGE
+          title: Action
+        name:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Name
+        quantity:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Quantity
+        size:
+          anyOf:
+          - type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          - type: 'null'
+          title: Size
+      additionalProperties: false
+      type: object
+      required:
+      - resource_type
+      - action
+      - name
+      title: ResourceChange
     ResultApplication:
       properties:
         external_endpoint:
@@ -1766,6 +2306,75 @@ components:
       - job_id
       - agent_id
       title: RolloutStatusResponse
+    S3ArchiveRef:
+      properties:
+        uri:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Uri
+        version_id:
+          anyOf:
+          - type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          - type: 'null'
+          title: Version Id
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          title: Sha256
+      additionalProperties: false
+      type: object
+      required:
+      - uri
+      - sha256
+      title: S3ArchiveRef
+      description: Content-addressed source or test archive, optionally pinned to
+        an S3 version.
+    SandboxEvidenceV2:
+      properties:
+        result_ref:
+          $ref: '#/components/schemas/VersionRef'
+        status:
+          type: string
+          enum:
+          - PASSED
+          - FAILED
+          title: Status
+        validated_workloads:
+          items:
+            $ref: '#/components/schemas/ValidatedWorkloadV2'
+          type: array
+          title: Validated Workloads
+        requirements_ref:
+          $ref: '#/components/schemas/ContentRef'
+        report_ref:
+          $ref: '#/components/schemas/ContentRef'
+        test_suite_ref:
+          $ref: '#/components/schemas/S3ArchiveRef'
+        cleanup_status:
+          type: string
+          enum:
+          - CLEANED
+          - FAILED
+          - PENDING
+          title: Cleanup Status
+        config_artifact_ref:
+          anyOf:
+          - $ref: '#/components/schemas/ContentRef'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - result_ref
+      - status
+      - validated_workloads
+      - requirements_ref
+      - report_ref
+      - test_suite_ref
+      - cleanup_status
+      title: SandboxEvidenceV2
     SecretRefV2:
       properties:
         name:
@@ -1786,6 +2395,44 @@ components:
       - name
       - key
       title: SecretRefV2
+    TargetSelectionV2:
+      properties:
+        ref:
+          $ref: '#/components/schemas/VersionRef'
+        provider:
+          type: string
+          enum:
+          - AWS
+          - GCP
+          - ON_PREM
+          title: Provider
+        location:
+          anyOf:
+          - type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          - type: 'null'
+          title: Location
+        access_ref:
+          $ref: '#/components/schemas/VersionRef'
+        capabilities_ref:
+          $ref: '#/components/schemas/VersionRef'
+        profile:
+          anyOf:
+          - type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          - type: 'null'
+          title: Profile
+      additionalProperties: false
+      type: object
+      required:
+      - ref
+      - provider
+      - location
+      - access_ref
+      - capabilities_ref
+      title: TargetSelectionV2
     TunnelConfigResponse:
       properties:
         tunnel_ip:
@@ -1871,6 +2518,37 @@ components:
       - app_health_ok
       - db_connect_ok
       title: TunnelStatusReport
+    ValidatedWorkloadV2:
+      properties:
+        resource_id:
+          type: string
+          pattern: ^[A-Za-z][A-Za-z0-9_-]{0,47}$
+          title: Resource Id
+        build_ref:
+          $ref: '#/components/schemas/VersionRef'
+        image_digest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+          title: Image Digest
+        platform:
+          type: string
+          enum:
+          - linux/amd64
+          - linux/arm64
+          title: Platform
+        source_sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+          title: Source Sha256
+      additionalProperties: false
+      type: object
+      required:
+      - resource_id
+      - build_ref
+      - image_digest
+      - platform
+      - source_sha256
+      title: ValidatedWorkloadV2
     ValidationError:
       properties:
         loc:
@@ -1897,6 +2575,24 @@ components:
       - msg
       - type
       title: ValidationError
+    ValidationIssue:
+      properties:
+        code:
+          type: string
+          title: Code
+        path:
+          type: string
+          title: Path
+        message:
+          type: string
+          title: Message
+      additionalProperties: false
+      type: object
+      required:
+      - code
+      - path
+      - message
+      title: ValidationIssue
     VersionRef:
       properties:
         id:

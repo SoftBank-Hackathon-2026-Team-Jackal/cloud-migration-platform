@@ -210,7 +210,7 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 ### 12A 온프레미스 Preview (#41)
 
-ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.
+ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). 18(#98)이 이 함수를 운영 Plan 게시 경로에서 호출한다. AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.
 
 ## 11. ProvisioningResult와 후속 단계 (`PROV-018`~`020`)
 
@@ -302,3 +302,7 @@ Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다.
 ### 빌드·Sandbox 순서 변경 (ADR-003, B-01)
 
 앞선 단계의 `Sandbox → 최종 Build` 설명은 [ADR-003](../../docs/decisions/ADR-003.md)으로 대체한다. 계획 입력은 Sandbox가 실제 실행한 Build 참조·이미지 Digest·플랫폼/설정 범위와 Build 출처를 요구하며 통과 후 재빌드하지 않는다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 S3→ECR 공통 빌더를 제공하며 현재 내부 v1 모델·테스트의 순서 전환은 후속 통합 작업이다.
+
+### Ticket 18 Plan 생성·게시와 Preview 조회 (#98)
+
+`cmp_worker.plan_publish.PlanPublisher`가 Migration별 Planning 입력 등록(`cmp_api.plan_inputs`)을 읽어 01A 검증 → 대상별 Plan·Preview → `publish_plan_revision`(입력 Digest 함께 저장)을 수행한다. ON_PREM은 Agent 등록·폐기·cluster UID를 확인한 뒤 04B 렌더·Chart 패키징(`cmp_providers.chart_package`)·12A Preview로 `WORKLOADS` Revision을, AWS/GCP는 05·06 저장 Plan으로 `INFRASTRUCTURE` Revision을 만든다. 같은 입력의 재실행은 최신 Revision을 재사용한다. 승인자는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/preview` 또는 `GET /provisioning/migrations/{migration_id}/plan`으로 Preview와 승인용 Digest를 본다. Temporal 연결은 §10과 [temporal-flow](../../docs/architecture/temporal-flow.md)를 따른다. AWS/GCP 워크로드 Plan 게시(09·11), `.env` 값 주입(20), S3 ArtifactStore(21)는 후속이다. 결정은 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05).

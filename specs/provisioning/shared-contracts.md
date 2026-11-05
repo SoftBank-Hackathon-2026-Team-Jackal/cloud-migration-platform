@@ -43,7 +43,7 @@ Preview는 manifest Digest와 허용된 자원 변경 요약(종류·행위·이
 
 `ApprovalTarget`은 Plan ID·Revision·scope·manifest Digest·Preview Digest다. **승인 대상의 식별 정보이며 사용자 승인/권한의 증거가 아니다.** 07은 인증된 사용자·작업 권한·승인/거절 상태와 함께 이 값을 DB에 저장하고, 최신 활성 Plan·DB 승인 기록에서 읽은 값으로 실행 직전 비교해야 한다. 클라이언트가 보낸 ApprovalTarget만으로 실행하면 안 된다. 현재 구현은 DB 최신 Revision 조회, State drift 확인, 파일 재조회 또는 실제 실행을 수행하지 않는다.
 
-실행 scope는 정확히 일치해야 한다. INFRASTRUCTURE 승인을 WORKLOADS/FULL 실행에 재사용할 수 없으며 FULL 승인의 일부만 실행하려는 경우도 현재 함수는 별도 범위 승인을 요구한다. 변경된 target 계정/State, Spec·Plan·Chart/Values Digest, 이미지·템플릿·Revision 또는 Preview는 기존 승인 대상과 일치하지 않는다. 저장소에서 같은 Revision을 덮어쓰지 않고 새 Revision으로 발급하는 책임은 후속 Planning 저장 경계에 있다.
+실행 scope는 정확히 일치해야 한다. INFRASTRUCTURE 승인을 WORKLOADS/FULL 실행에 재사용할 수 없으며 FULL 승인의 일부만 실행하려는 경우도 현재 함수는 별도 범위 승인을 요구한다. 변경된 target 계정/State, Spec·Plan·Chart/Values Digest, 이미지·템플릿·Revision 또는 Preview는 기존 승인 대상과 일치하지 않는다. 저장소에서 같은 Revision을 덮어쓰지 않고 새 Revision으로 발급하는 책임은 Planning 저장 경계(18의 입력 Digest 판정)에 있다.
 
 ## DB Chart 입력과 동적 바인딩
 
@@ -100,7 +100,7 @@ identity = approval_target(manifest, preview)
 
 15(#69)는 새 공유 계약을 만들지 않는다. 04A 등록 계약의 `cluster_uid`를 발급 시 선택으로 바꾸고 Agent 마지막 접속·폐기 상태를 추가했다. 상세는 [공통 배포 계약 §상시 실행·설치·폐기](onprem-shared-deployment.md#상시-실행설치폐기-15-69)를 따른다.
 
-`cmp_providers.onprem_preview.onprem_preview(manifest, contents)`는 ON_PREM WORKLOADS/FULL 계획이 고정한 `database_values`·`application_values` 바이트를 `verify_artifact_bytes`로 확인하고 공통 `Preview`를 만든다. 보여 주는 내용은 기존 K3s·Agent·Namespace, DB StatefulSet·PVC, 앱 Deployment·Service, 외부 공개 없음, 적용 기본값(Namespace 생성, DB 비밀번호 Secret 생성)이다. 클러스터를 조회하지 않으므로 경고 `CLUSTER_STATE_NOT_INSPECTED`를 붙인다. 사용자 Secret은 이름·키만 `USER_SECRET_REQUIRED` 경고로 표시하고 환경변수·Secret 값은 넣지 않는다. Values의 대상·이미지가 manifest와 다르면 `errors`에 `VALUES_TARGET_MISMATCH`/`IMAGE_MISMATCH`를 넣어 `approval_issues`가 승인을 거절하게 한다. Digest 불일치·비 ON_PREM은 `ProvisioningInputError`로 Preview를 만들지 않는다. Planning 저장 경계와의 연결은 후속이다. 상세는 [12A 티켓](../../tickets/provisioning/12a-onprem-preview.md)을 따른다.
+`cmp_providers.onprem_preview.onprem_preview(manifest, contents)`는 ON_PREM WORKLOADS/FULL 계획이 고정한 `database_values`·`application_values` 바이트를 `verify_artifact_bytes`로 확인하고 공통 `Preview`를 만든다. 보여 주는 내용은 기존 K3s·Agent·Namespace, DB StatefulSet·PVC, 앱 Deployment·Service, 외부 공개 없음, 적용 기본값(Namespace 생성, DB 비밀번호 Secret 생성)이다. 클러스터를 조회하지 않으므로 경고 `CLUSTER_STATE_NOT_INSPECTED`를 붙인다. 사용자 Secret은 이름·키만 `USER_SECRET_REQUIRED` 경고로 표시하고 환경변수·Secret 값은 넣지 않는다. Values의 대상·이미지가 manifest와 다르면 `errors`에 `VALUES_TARGET_MISMATCH`/`IMAGE_MISMATCH`를 넣어 `approval_issues`가 승인을 거절하게 한다. Digest 불일치·비 ON_PREM은 `ProvisioningInputError`로 Preview를 만들지 않는다. Planning 저장 경계와의 연결은 18이 구현했다(아래 §18). 상세는 [12A 티켓](../../tickets/provisioning/12a-onprem-preview.md)을 따른다.
 
 ## Provisioning 결과 인계 (13)
 
@@ -110,3 +110,6 @@ identity = approval_target(manifest, preview)
 
 `cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`가 추가됐다. `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합치며, Data 인계는 터널 경유 DB 접속 확인 뒤에만 진행한다. 중계 서버용 Agent 목록과 ON_PREM `external_endpoint`는 Traffic 담당 답변을 기다린다([티켓 16 답변 대기](../../tickets/provisioning/16-tunnel-config-exchange.md)).
 
+## Plan 생성·게시와 Preview 조회 (18)
+
+새 공유 모델은 `cmp_contracts.plan_publish`의 `PlanningInputRegistration`(Planning 입력 v2 + Provider별 대상 설정 + 선택 요구사항 바이트)과 `plan_id_for`(Migration당 Plan ID)뿐이다. 기존 `PlanManifest`·`Preview`·`approval_target`·`onprem_preview`·05/06 Plan 함수는 바꾸지 않고 호출한다. `publish_plan_revision`은 선택 인자 `input_digest`를 받아 같은 트랜잭션에 `provisioning_plan_publications`를 기록한다(기존 호출 동작은 그대로). `ProvisioningApprovalWorkflow` 요청은 선택 필드 `approval_timeout_seconds`를 받아 승인 없이 기간이 지나면 `EXPIRED/APPROVAL_EXPIRED`로 끝난다. 상세는 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05)을 따른다.
