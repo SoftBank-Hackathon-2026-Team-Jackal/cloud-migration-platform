@@ -1,7 +1,7 @@
 # Ticket 15 — Planning 인계(입력 v2)
 
 ## 상태
-IN_PROGRESS — Issue #141 (사용자 검토 완료, 2026-11-05)
+DONE — PR #142 병합, Issue #141. 미확인 1건: 등록한 입력으로 `publish_migration_plan`이 실제로 계획을 게시하는지(수용 기준 4번)
 
 ## 목적
 분석·빌드·검증 결과를 Planning 입력 v2(`PlanningInputRegistration`)로 조립하고 Planning이 읽는 곳에 등록해, 부모 Workflow가 검증을 통과한 뒤 바로 계획 단계로 이어지게 한다. 같은 테스트 묶음을 Production에서 다시 돌릴 수 있게 문서도 남긴다.

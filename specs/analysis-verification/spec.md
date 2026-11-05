@@ -167,7 +167,7 @@
 - 공통 Build 모듈(`ImageBuilder(BuildContext).build(source_uri, source_version_id=...)`)에 작업 ID·리소스 ID·시도 ID·S3 URI·대상 플랫폼(capabilities 아키텍처)으로 빌드를 요청하고 `image_uri`·`image_digest`·`source_ref`·로그 위치를 받는다.
 - 같은 `source_sha256` + 플랫폼으로 이미 성공한 빌드가 있으면 다시 요청하지 않고 기존 Digest를 쓴다.
 - 실패 코드를 **수정 대상(Fixer) / 재패키징 / 재시도 / 사람 검토**로 분류한다.
-- Sandbox 안에서 빌드하지 않는다(ADR-003). 현재 호출은 함수 직접 호출이며, Worker 권한 배치와 전체 시간 상한은 결정 대기(D-12).
+- Sandbox 안에서 빌드하지 않는다(ADR-003). 현재 호출은 함수 직접 호출이며(`BUILD_*` 설정이 모두 있을 때 Sandbox 루프가 소스를 S3에 올리고 호출, 티켓 25), Worker 권한 배치와 전체 시간 상한은 결정 대기(D-12). 이미지를 못 만들면 Sandbox 없이 사람 검토(`BUILD:<코드>`)로 넘어간다.
 
 ### Sandbox 검증
 
@@ -230,6 +230,7 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 - Planning 입력 v2(`PlanningRequestV2`)의 `analysis`·`builds[]`·`sandbox` 블록을 채울 수 있게 낸다: `validated_workloads`(리소스별 Build 참조·이미지 Digest·플랫폼·소스 SHA-256), 요구사항 참조, 보고서, `test_suite_ref`, 정리 상태. Build 결과는 불변 기록으로 저장해 `result_ref`를 발급한다.
 - 통과 후 다시 빌드하지 않는다. 통과 Digest = Build Digest = Production 배포 Digest(P-10).
 - 검증 이후 대상 선택이나 요구사항이 바뀌면 이전 검증을 그대로 넘기지 않는다.
+- 구현(티켓 15): 통과한 실행은 `--planning` 설정이 있을 때 Planning 입력으로 조립·검증(`prepare_plan_v2`)해 등록한다. 빌드 증거가 없으면(미리 빌드한 이미지 경로) 등록하지 않고 `BUILD_EVIDENCE_MISSING`으로 멈춘다.
 - Production에서는 배포 직후 준비 검사만 하고, 테스트 묶음은 데이터 이전 후·트래픽 전환 전에 실행한다(실행 시점은 해당 파트 결정).
 
 #### AV-019 — 코드 수정 반환

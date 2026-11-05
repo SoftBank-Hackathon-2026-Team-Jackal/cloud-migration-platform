@@ -1,7 +1,7 @@
 # Ticket 25 — 빌드 연결(소스 묶음 S3 업로드 → Build 모듈 → 빌드 증거)
 
 ## 상태
-IN_PROGRESS — Issue #140 (사용자 검토 완료, 2026-11-05)
+DONE — PR #142 병합, Issue #140. 미확인: 실제 AWS(S3·ECR·Build 모듈) 1회 실행(D-06·D-12·승인 필요)
 
 ## 목적
 지금 Sandbox 루프의 앱 이미지는 사람이 적어 준 Digest(`PrebuiltImages`)다. 설정이 있으면 실제 경로 — 소스 묶음을 S3에 올리고, 민서님의 Build 모듈로 이미지를 빌드하고, 결과를 `BuildAttempt` 증거로 남기는 경로 — 를 쓰게 한다. 테스트 묶음도 S3에 올려 Planning이 요구하는 `S3ArchiveRef`를 만든다. 15번(Planning 인계)이 이 증거를 쓴다.

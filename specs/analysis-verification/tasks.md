@@ -25,7 +25,7 @@
 | [14A 실패 분류와 Fixer](../../tickets/analysis-verification/14a-classify-fixer.md) | DONE (PR #107 병합) | 08, 10, 11B, 13 | AV-015, AV-017 | #106 | ☑ |
 | [14B 갱신 루프와 부모 종료 상태](../../tickets/analysis-verification/14b-fix-loop.md) | DONE (PR #110 병합) | 14A | AV-015, AV-019, AV-020 | #109 | ☑ |
 | [14C 최종 발행·재승인·수정 패치 산출물](../../tickets/analysis-verification/14c-publish.md) | DONE (PR #112 병합) | 14B | AV-017, AV-019, AV-020 | #111 | ☑ |
-| [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14C, 21, 22, 25 |  AV-018 | #141 | ☐ |
+| [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | DONE (PR #142 병합, 미확인: 등록 후 실제 계획 게시) | 14C, 21, 22, 25 | AV-018 | #141 | ☑ |
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
@@ -35,7 +35,7 @@
 | [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | DONE (PR #121 병합) | 14B, 20, 21 | AV-001, AV-015, AV-021 | #120 | ☑ |
 | [23 비공개 소스 접근(토큰 참조·교체 가능한 해석기)](../../tickets/analysis-verification/23-source-access.md) | DONE (PR #132 병합) | 03, 19, 21 | AV-001, AV-002, AV-020 | #131 | ☑ |
 | [24 실행 도구·입력 검증·만료 Sandbox 정리·Tester 연결](../../tickets/analysis-verification/24-ops-and-tester.md) | DONE | 12, 14B, 22 (D-09는 인터페이스만) | AV-011, AV-012, AV-020 | #136 | ☑ |
-| [25 빌드 연결(소스 S3 업로드 → Build 모듈 → 빌드 증거)](../../tickets/analysis-verification/25-build-wiring.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 09, 10, 22 (실제 AWS는 D-06·D-12·승인) | AV-009, AV-010, AV-018 | #140 | ☐ |
+| [25 빌드 연결(소스 S3 업로드 → Build 모듈 → 빌드 증거)](../../tickets/analysis-verification/25-build-wiring.md) | DONE (PR #142 병합, 미확인: 실제 AWS 실행) | 09, 10, 22 (실제 AWS는 D-06·D-12·승인) | AV-009, AV-010, AV-018 | #140 | ☑ |
 
 ## 선행 관계
 
@@ -51,7 +51,8 @@ Q-01 ────┴→ 02B ─┐
 02B + 07 → 11 → 11B    │
 03~08B + 06 → 19 (분석 Activity 통합)
 08A + 08 + 12 + 14A + ADR-004 → 20 (Claude 연결·비용 상한)
-14C + 19 + 20 → 21 (분석 → Sandbox 루프 → 발행 연결) → 22 (워커 실제 조립·실행 준비) → 15
+14C + 19 + 20 → 21 (분석 → Sandbox 루프 → 발행 연결) → 22 (워커 실제 조립·실행 준비) → 23 (비공개 소스), 24 (실행 도구·Tester)
+09 + 10 + 22 → 25 (빌드 연결) → 15 (Planning 인계)
 07 + 08A + 11 → 12
 08 + 11 + 12 → 13
 08 + 08B + 10 + 11B + 13 → 14A → 14B → 14C → 21 → 15 → 16
@@ -61,7 +62,7 @@ Q-01 ────┴→ 02B ─┐
 
 정확한 선행 조건은 위 표와 각 티켓을 따른다. D-05는 Sandbox 전용 Queue를 추가하기로 결정했다. 외부 의존: 06은 AWS 테스트 계정, 08은 D-01(실제 LLM 연결 시), 10은 B-01(완료)과 D-12, 11은 공통 렌더 v2(완료)와 D-11, 15는 D-02, 16은 데모 앱·Sandbox 기반(D-08).
 
-**추천 순서:** 01 → Q-01 → 02 → 02B → 03 → 04 → 05 → 07 → 08A → 08 → 08B → 09 → 10 → 11 → 11B → 12 → 13 → 14A → 14B → 14C → 19 → 20 → 21 → (06, 15) → 16 → 17. 외부 의존이 없는 것부터 이어 첫 사이클 뼈대(스캔 → 빌드 → Sandbox 루프)를 먼저 완성한다. 17은 첫 사이클이 끝난 뒤 착수한다. 18은 02·03 구현을 재사용하되 #56 병합과 분석 담당자 계약 확인 후 별도로 진행한다.
+**추천 순서:** 01 → Q-01 → 02 → 02B → 03 → 04 → 05 → 07 → 08A → 08 → 08B → 09 → 10 → 11 → 11B → 12 → 13 → 14A → 14B → 14C → 19 → 20 → 21 → 22 → 23 → 24 → 25 → 15 → (06) → 16 → 17. 외부 의존이 없는 것부터 이어 첫 사이클 뼈대(스캔 → 빌드 → Sandbox 루프)를 먼저 완성한다. 17은 첫 사이클이 끝난 뒤 착수한다. 18은 02·03 구현을 재사용하되 #56 병합과 분석 담당자 계약 확인 후 별도로 진행한다.
 
 ## 결정 대기
 
@@ -77,7 +78,7 @@ Q-01 ────┴→ 02B ─┐
 | D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 12 | 승철·소울 |
 | D-10 | Production 테스트 묶음 실행 시점(데이터 이전 후·트래픽 전환 전)·데이터 정리 | 15 | 민서·소울·상헌 |
 | D-11 | DB 이미지를 고르는 "대상 구성 단계"의 소유자, Sandbox·Production 공유 방식(요구사항엔 이미지 없음, #22) | 11 | 민서 |
-| D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한(`resource_id`·`source_version_id`는 구현됨) | 10 | 민서 |
+| D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한(`resource_id`·`source_version_id`는 구현됨). 코드 연결은 25에서 끝났고(`BUILD_*` 설정이 모두 있을 때 켜짐) 실제 AWS 실행이 이 결정과 승인을 기다린다 | 10, 25 | 민서 |
 | D-13 | DB 내부 상태 사전 점검 담당(기본 키·시퀀스·복제 설정) | 07 | 소울 |
 | D-14 | PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체(현재 확장 요구는 Planning이 거절) | 07 | 민서 |
 | D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법(그 전까지 `AnalysisReport`에 기록) | 01, 06, 13 | 민서 |

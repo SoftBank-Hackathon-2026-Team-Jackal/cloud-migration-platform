@@ -93,7 +93,7 @@ MigrationWorkflow (migration)
 - 자식 Workflow로 분리하는 이유: 독립 취소·정리(finally teardown), 시도별 이력 구분, 사람 검토 대기. temporal-flow.md §7의 분리 근거(별도 취소·정리)에 해당한다.
 - 분석 스캔·매핑과 08B 검토 Signal·Query는 `workflows/analysis.py`의 `AnalysisWorkflow` 자식에 둔다. 현재 API에서 `migration_id`는 부모 Workflow ID이며 요청의 `project_id`와 구분한다. 자식 ID는 `analysis-<migration_id>`로 고정하고 재분석은 `analysis_ref` 버전으로 구분한다. 다른 버전에 대한 검토 Signal은 거절한다.
 - 02는 `workflows/migration.py`의 분석 자식 호출·결과·실패·취소 처리와 Workflow Worker의 자식 등록, `workers/analysis.py`의 분석 Activity 등록을 변경한다. 02B는 `workflows/migration.py`의 Sandbox 자식 호출과 Workflow Worker의 자식 등록, `workers/sandbox.py`의 Sandbox Activity 등록을 변경한다. 08B는 분석 자식 내부만 수정한다. 부모 변경은 해당 연결에 한정하고 PR 설명에 변경 범위와 replay 결과를 기록해 민서님께 공유한다.
-- 14와 15도 부모 `workflows/migration.py`를 변경할 수 있다. 14는 종료 상태 값 반환(검토 대기는 진행 중 플래그, 종료 상태는 완료·실패·취소), 15는 분석·Sandbox 결과 참조를 Planning 입력으로 인계하는 부분에 한정한다. 두 티켓 모두 변경 범위, 기존 이력 replay 결과, Worker 배포 영향을 PR 설명에 기록해 민서님께 공유한다. 14B 구현으로 `needs_review`·`stopped_render`는 새 실행에서 `failed`(원인은 `failure_code`)로 대체되고 검토 대기는 `review_pending` 플래그가 되었다(`sandbox-terminal-v1` 패치, 이전 이력은 그대로 replay). API SSE 종료 조건에 `failed`를 추가하는 일은 민서님 요청 사항이다.
+- 14와 15도 부모 `workflows/migration.py`를 변경할 수 있다. 14는 종료 상태 값 반환(검토 대기는 진행 중 플래그, 종료 상태는 완료·실패·취소), 15는 분석·Sandbox 결과 참조를 Planning 입력으로 인계하는 부분에 한정한다. 두 티켓 모두 변경 범위, 기존 이력 replay 결과, Worker 배포 영향을 PR 설명에 기록해 민서님께 공유한다. 15 구현(PR #142): Sandbox 통과 직후 `_hand_off` 호출 1곳을 `planning-handoff-v1`로 감쌌다(`planning` 설정이 있을 때만). 14B 구현으로 `needs_review`·`stopped_render`는 새 실행에서 `failed`(원인은 `failure_code`)로 대체되고 검토 대기는 `review_pending` 플래그가 되었다(`sandbox-terminal-v1` 패치, 이전 이력은 그대로 replay). API SSE 종료 조건에 `failed`를 추가하는 일은 민서님 요청 사항이다.
 - 부모·자식 Workflow는 기존 `WORKFLOW_QUEUE`(`migration`), 분석 Activity는 `ANALYSIS_QUEUE`, Sandbox Activity는 `SANDBOX_QUEUE`를 사용한다. 기존 승인·취소 동작과 기존 Workflow 이력 replay를 확인하고 필요하면 Temporal의 결정적 버전 분기를 적용한다.
 - 02 골격은 `analysis-child-v1` 패치로 기존 이력을 구분한다. 자식 실패는 부모에 전파하고, 부모의 `request_cancel` Signal은 자식 취소 완료를 기다린 후 `cancelled`를 반환한다. 부모의 외부 취소 시에도 자식에 취소를 요청한다. 부모가 종료될 때 미완료 자식의 ParentClosePolicy는 `TERMINATE`다. 스캔 결과와 최종 보고서는 실제 분석 증거가 아닌 작은 fixture다.
 - 02B 골격은 별도 `sandbox-child-v1` 패치로 기존 부모 이력을 보존하며 `sandbox-<migration_id>` 자식을 호출한다. 자식과 부모의 취소는 정리 Activity를 실행한다. 검토가 필요한 경우 정리를 완료한 뒤 `NEEDS_REVIEW`에서 Signal을 기다린다. 골격의 검토 Signal은 검토 종료만 나타내며 통과나 운영 승인으로 취급하지 않는다. `PASSED` 이외에는 부모가 다음 scaffold 단계로 진행하지 않는다. 빌드·판정·수정·정리는 무해한 mock이며 실제 Sandbox 증거가 아니다.
@@ -470,6 +470,9 @@ class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvi
 | `compute_treatment`, `record_review` | analysis | 30초 | 3 | 결정적. 사용자 응답 대기는 Workflow의 Signal 대기(Activity 아님) |
 | `publish_final_report` | sandbox | 1분 | 3 | 불변 저장, 같은 내용이면 같은 참조 |
 | `teardown_sandbox` | sandbox | 3분 | 5 | 취소·실패에도 실행, TTL 이중 정리 |
+| `sbx_ai_tests` (티켓 24) | sandbox | 20분 | 2 | 설정 `ai_tests`와 원본 실행기가 있을 때만. 없으면 모델을 부르지 않음 |
+| `sbx_plan_assemble` (티켓 15) | sandbox | 10분 | 2 | Planning 입력 조립·검증, 테스트 묶음 S3 업로드. 거절은 결과 코드 |
+| `register_planning_input` (티켓 15) | provisioning | 3분 | 2 | 민서님 등록 함수 호출. 거절은 결과 코드 |
 
 수치는 측정 후 조정한다. 비재시도 오류는 `ApplicationError(non_retryable=True)`로 구분한다.
 
