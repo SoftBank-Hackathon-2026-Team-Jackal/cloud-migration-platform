@@ -33,6 +33,8 @@ MANAGED_BY = "cmp-sandbox"
 FIELD_MANAGER = "cmp-sandbox"
 LABEL_RUN = "cmp.sandbox/run-id"
 LABEL_EXPIRES = "cmp.sandbox/expires-at"
+ANNOTATION_CONTENT = "cmp.sandbox/content-sha256"
+BASELINE_PATH = "/var/lib/postgresql/data/cmp-baseline.dump"
 DEFAULT_TTL = timedelta(hours=2)
 _NAMESPACE = re.compile(r"^cmp-sbx-[a-z0-9][a-z0-9-]*$")
 _ENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
@@ -90,6 +92,55 @@ class SandboxPlan(BaseModel):
     releases: dict[str, str]
     secrets: list[str]
     request: dict[str, Any]
+    env_updated: list[str] = []  # app env Secrets whose content changed in this prepare
+
+
+class ResourceRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    image_digest: str
+    values_sha256: str
+    action: Literal["CREATED", "UNCHANGED", "UPGRADED", "RESTARTED", "RECREATED"]
+
+
+class AttemptRecord(BaseModel):
+    """What one attempt did to the shared Sandbox; digests and hashes only, never secrets."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    attempt: int
+    resources: dict[str, ResourceRecord]
+    baseline: Literal["KEPT", "LOST"]
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def plan_update(previous: SandboxPlan, current: SandboxPlan) -> dict[str, str]:
+    """Decide, per resource, the smallest change that brings the Sandbox to `current`."""
+    old = {r["id"]: r for r in previous.request["resources"]}
+    new = {r["id"]: r for r in current.request["resources"]}
+    if set(old) != set(new):
+        raise SandboxError("RESOURCE_SET_CHANGED")
+    env_changed = {name.removesuffix("-env") for name in current.env_updated}
+    actions: dict[str, str] = {}
+    for resource_id, after in new.items():
+        before = old[resource_id]
+        if before == after:
+            same_env = after["release_name"] in env_changed
+            actions[resource_id] = "RESTARTED" if same_env else "UNCHANGED"
+        elif after["kind"] == "POSTGRESQL":
+            immutable = (
+                before["version"] != after["version"]
+                or before["storage"] != after["storage"]
+                or before["database"] != after["database"]
+                or before["release_name"] != after["release_name"]
+            )
+            actions[resource_id] = "RECREATED" if immutable else "UPGRADED"
+        else:
+            actions[resource_id] = "UPGRADED"
+    return actions
 
 
 class SandboxCluster:
@@ -178,17 +229,45 @@ class SandboxService:
         except (ValueError, UnicodeDecodeError):
             raise SandboxError("SECRET_UNREADABLE") from None
 
-    def _create_secret(
-        self, namespace: str, name: str, data: dict[str, str], labels: dict[str, str]
-    ) -> None:
+    def _secret_manifest(
+        self,
+        namespace: str,
+        name: str,
+        data: dict[str, str],
+        labels: dict[str, str],
+        annotations: dict[str, str] | None = None,
+    ) -> bytes:
+        metadata: dict[str, Any] = {"name": name, "namespace": namespace, "labels": labels}
+        if annotations:
+            metadata["annotations"] = annotations
         manifest = {
             "apiVersion": "v1",
             "kind": "Secret",
-            "metadata": {"name": name, "namespace": namespace, "labels": labels},
+            "metadata": metadata,
             "type": "Opaque",
             "stringData": data,
         }
-        self.cluster.kubectl("create", "-f", "-", stdin=json.dumps(manifest).encode())
+        return json.dumps(manifest).encode()
+
+    def _create_secret(
+        self,
+        namespace: str,
+        name: str,
+        data: dict[str, str],
+        labels: dict[str, str],
+        annotations: dict[str, str] | None = None,
+    ) -> None:
+        self.cluster.kubectl(
+            "create", "-f", "-",
+            stdin=self._secret_manifest(namespace, name, data, labels, annotations),
+        )  # fmt: skip
+
+    def _stored_content_hash(self, namespace: str, name: str) -> str:
+        out = self.cluster.kubectl(
+            "get", "secret", name, "-n", namespace, "--ignore-not-found",
+            "-o", f'go-template={{{{index .metadata.annotations "{ANNOTATION_CONTENT}"}}}}',
+        )  # fmt: skip
+        return out.decode(errors="ignore").strip()
 
     # ------------------------------------------------------------------------ prepare
 
@@ -204,6 +283,7 @@ class SandboxService:
         env_file: Path | None,
         now: datetime | None = None,
         ttl: timedelta = DEFAULT_TTL,
+        update_env: bool = False,
     ) -> SandboxPlan:
         started = now or datetime.now(UTC)
         expires_at = int((started + ttl).timestamp())
@@ -300,9 +380,19 @@ class SandboxService:
                 database=db.database.name,
             )
             self._create_secret(namespace, url_secret, {URL_SECRET_KEY: url}, labels)
+        env_updated: list[str] = []
         for name, values in app_env_values.items():
+            # The hash is salted by run and only lives on the Secret in the cluster.
+            digest = hashlib.sha256(run_id.encode() + b"\0" + _canonical(values)).hexdigest()
+            annotations = {ANNOTATION_CONTENT: digest}
             if not self._secret_exists(namespace, name):
-                self._create_secret(namespace, name, values, labels)
+                self._create_secret(namespace, name, values, labels, annotations)
+            elif update_env and self._stored_content_hash(namespace, name) != digest:
+                self.cluster.kubectl(
+                    "replace", "-f", "-",
+                    stdin=self._secret_manifest(namespace, name, values, labels, annotations),
+                )  # fmt: skip
+                env_updated.append(name)
 
         return SandboxPlan(
             namespace=namespace,
@@ -311,37 +401,152 @@ class SandboxService:
             releases=releases,
             secrets=secret_names,
             request=request,
+            env_updated=env_updated,
         )
 
     # -------------------------------------------------------------------------- apply
 
     def apply_sandbox(self, plan: SandboxPlan) -> dict[str, Any]:
-        rendered = render_shared_deployment_v2(
+        rendered = self._render(plan)
+        ordered = sorted(rendered.resources, key=lambda r: r.kind != "POSTGRESQL")
+        endpoints: dict[str, str] = {}
+        for resource in ordered:
+            self._helm_release(plan, resource)
+            port = 5432 if resource.kind == "POSTGRESQL" else self._app_port(plan, resource.id)
+            endpoints[resource.id] = f"{resource.release_name}.{plan.namespace}.svc:{port}"
+        return {
+            "namespace": plan.namespace,
+            "releases": plan.releases,
+            "endpoints": endpoints,
+            "resources": self._records(rendered),
+        }
+
+    def _helm_release(self, plan: SandboxPlan, resource: Any) -> None:
+        chart = (
+            self.database_chart_dir if resource.kind == "POSTGRESQL" else self.application_chart_dir
+        )
+        with tempfile.TemporaryDirectory(prefix="cmp-sbx-values-") as directory:
+            path = Path(directory) / "values.json"
+            path.write_text(json.dumps(resource.helm_values.model_dump(mode="json")))
+            path.chmod(0o600)
+            self.cluster.helm(
+                "upgrade", resource.release_name, str(chart), "--install", "--wait",
+                "--timeout", "5m", "--namespace", plan.namespace, "--values", str(path),
+                timeout=420,
+            )  # fmt: skip
+
+    def _render(self, plan: SandboxPlan) -> Any:
+        return render_shared_deployment_v2(
             plan.request,
             database_chart_dir=self.database_chart_dir,
             application_chart_dir=self.application_chart_dir,
             helm_bin=self.cluster.helm_bin,
         )
-        ordered = sorted(rendered.resources, key=lambda r: r.kind != "POSTGRESQL")
-        endpoints: dict[str, str] = {}
-        for resource in ordered:
-            chart = (
-                self.database_chart_dir
-                if resource.kind == "POSTGRESQL"
-                else self.application_chart_dir
+
+    # ------------------------------------------------------------------------- update
+
+    def update_sandbox(
+        self, previous: SandboxPlan, plan: SandboxPlan, attempt: int
+    ) -> AttemptRecord:
+        """Bring the running Sandbox to `plan` with the smallest change per resource."""
+        actions = plan_update(previous, plan)
+        rendered = self._render(plan)
+        by_id = {r.id: r for r in rendered.resources}
+        recreated = [i for i, a in actions.items() if a == "RECREATED"]
+        for resource_id in recreated:
+            release = by_id[resource_id].release_name
+            self.cluster.helm(
+                "uninstall", release, "--namespace", plan.namespace, "--wait", timeout=420
             )
-            with tempfile.TemporaryDirectory(prefix="cmp-sbx-values-") as directory:
-                path = Path(directory) / "values.json"
-                path.write_text(json.dumps(resource.helm_values.model_dump(mode="json")))
-                path.chmod(0o600)
-                self.cluster.helm(
-                    "upgrade", resource.release_name, str(chart), "--install", "--wait",
-                    "--timeout", "5m", "--namespace", plan.namespace, "--values", str(path),
-                    timeout=420,
-                )  # fmt: skip
-            port = 5432 if resource.kind == "POSTGRESQL" else self._app_port(plan, resource.id)
-            endpoints[resource.id] = f"{resource.release_name}.{plan.namespace}.svc:{port}"
-        return {"namespace": plan.namespace, "releases": plan.releases, "endpoints": endpoints}
+            # A StatefulSet keeps its volume after uninstall; a new layout needs a fresh one.
+            self.cluster.kubectl(
+                "delete", "pvc", release, "-n", plan.namespace, "--ignore-not-found",
+                "--wait=true", timeout=300,
+            )  # fmt: skip
+        ordered = sorted(rendered.resources, key=lambda r: r.kind != "POSTGRESQL")
+        for resource in ordered:
+            if actions[resource.id] in {"UPGRADED", "RECREATED"}:
+                self._helm_release(plan, resource)
+        for resource in ordered:
+            if resource.kind != "APPLICATION":
+                continue
+            if actions[resource.id] == "RESTARTED" or (
+                recreated and actions[resource.id] == "UNCHANGED"
+            ):
+                self._restart(plan.namespace, resource.release_name)
+                actions[resource.id] = "RESTARTED"
+        digests = self._records(rendered)
+        return AttemptRecord(
+            attempt=attempt,
+            resources={i: ResourceRecord(**digests[i], action=actions[i]) for i in digests},
+            baseline="LOST" if recreated else "KEPT",
+        )
+
+    def _restart(self, namespace: str, release: str) -> None:
+        self.cluster.kubectl(
+            "rollout", "restart", f"deployment/{release}", "-n", namespace
+        )  # fmt: skip
+        self.cluster.kubectl(
+            "rollout", "status", f"deployment/{release}", "-n", namespace, "--timeout=300s",
+            timeout=330,
+        )  # fmt: skip
+
+    # --------------------------------------------------------------- baseline and reset
+
+    @staticmethod
+    def _database(plan: SandboxPlan) -> dict[str, Any]:
+        return next(r for r in plan.request["resources"] if r["kind"] == "POSTGRESQL")
+
+    def _in_database(self, plan: SandboxPlan, script: str) -> bytes:
+        db = self._database(plan)
+        # The pod reads its own Secret through its environment; no password crosses the CLI.
+        return self.cluster.kubectl(
+            "exec", "-n", plan.namespace, f"statefulset/{db['release_name']}", "--",
+            "sh", "-c", script, timeout=600,
+        )  # fmt: skip
+
+    _PG = (
+        'PGPASSWORD="$POSTGRES_PASSWORD" {tool} -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+    )
+
+    def snapshot_baseline(self, plan: SandboxPlan) -> dict[str, str]:
+        dump = self._PG.format(tool="pg_dump") + f" -Fc -f {BASELINE_PATH}"
+        try:
+            self._in_database(plan, dump)
+        except SandboxError:
+            raise SandboxError("BASELINE_SAVE_FAILED") from None
+        return {"baseline": "SAVED"}
+
+    def reset_test_data(self, plan: SandboxPlan) -> dict[str, str]:
+        try:
+            self._in_database(plan, f"test -s {BASELINE_PATH}")
+        except SandboxError:
+            raise SandboxError("BASELINE_MISSING") from None
+        restore = (
+            self._PG.format(tool="psql")
+            + ' -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public" && '
+            + self._PG.format(tool="pg_restore")
+            + f" --no-owner --schema=public {BASELINE_PATH}"
+        )
+        try:
+            self._in_database(plan, restore)
+        except SandboxError:
+            raise SandboxError("RESET_FAILED") from None
+        for app in (r for r in plan.request["resources"] if r["kind"] == "APPLICATION"):
+            self._restart(plan.namespace, app["release_name"])
+        return {"reset": "OK"}
+
+    @staticmethod
+    def _records(rendered: Any) -> dict[str, dict[str, str]]:
+        return {
+            r.id: {
+                "image_digest": r.helm_values.image.uri.rsplit("@", 1)[1],
+                "values_sha256": hashlib.sha256(
+                    _canonical(r.helm_values.model_dump(mode="json"))
+                ).hexdigest(),
+            }
+            for r in rendered.resources
+        }
 
     @staticmethod
     def _app_port(plan: SandboxPlan, resource_id: str) -> int:

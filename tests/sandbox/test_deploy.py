@@ -72,14 +72,14 @@ class FakeRunner:
     def run(self, args, *, stdin=None, timeout=300, env=None):
         self.calls.append((list(args), stdin))
         text = " ".join(args)
+        for needle, out in self.outputs.items():
+            if needle in text:
+                return out
         if "get secret" in text and "--ignore-not-found" in text:
             name = args[args.index("secret") + 1]
             if name in self.existing and "jsonpath" in text:
                 return base64.b64encode(self.existing[name].encode())
             return b"secret/" + name.encode() if name in self.existing else b""
-        for needle, out in self.outputs.items():
-            if needle in text:
-                return out
         return b""
 
     def commands(self, verb):
