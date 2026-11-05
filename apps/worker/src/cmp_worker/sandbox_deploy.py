@@ -759,7 +759,8 @@ class SandboxService:
         if left.strip():
             raise SandboxError("TEARDOWN_INCOMPLETE")
 
-    def cleanup_expired(self, *, now: datetime | None = None) -> list[str]:
+    def list_sandboxes(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
+        """Sandbox namespaces this service manages. One without an expiry label is never expired."""
         moment = int((now or datetime.now(UTC)).timestamp())
         listing = json.loads(
             self.cluster.kubectl(
@@ -772,11 +773,29 @@ class SandboxService:
             )
             or b'{"items": []}'
         )
-        deleted = []
+        rows: list[dict[str, Any]] = []
         for item in listing.get("items", []):
             meta = item.get("metadata", {})
-            expires = meta.get("labels", {}).get(LABEL_EXPIRES, "")
-            if expires.isdigit() and int(expires) < moment and _NAMESPACE.fullmatch(meta["name"]):
-                self.teardown_sandbox(meta["name"])
-                deleted.append(meta["name"])
+            name = meta.get("name", "")
+            if not _NAMESPACE.fullmatch(name):
+                continue
+            labels = meta.get("labels", {})
+            raw = labels.get(LABEL_EXPIRES, "")
+            expires = int(raw) if raw.isdigit() else None
+            rows.append(
+                {
+                    "namespace": name,
+                    "run_id": labels.get(LABEL_RUN, ""),
+                    "expires_at": expires,
+                    "expired": expires is not None and expires < moment,
+                }
+            )
+        return rows
+
+    def cleanup_expired(self, *, now: datetime | None = None) -> list[str]:
+        deleted = []
+        for row in self.list_sandboxes(now=now):
+            if row["expired"]:
+                self.teardown_sandbox(row["namespace"])
+                deleted.append(row["namespace"])
         return deleted

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from cmp_contracts.analysis import AnalysisInput
+from cmp_scanners.source import SourceFetchError, check_source_input
 
 from cmp_worker.sandbox_input import SandboxSettings
 from cmp_worker.source_access import dev_ref
@@ -25,6 +26,10 @@ def build_start_input(
     The analysis input never carries a credential, only the name of a local profile. The migration
     ID is the Workflow ID, which the workflow fills in itself.
     """
+    try:
+        check_source_input(repository, commit)
+    except SourceFetchError as exc:
+        raise ValueError(str(exc)) from None
     analysis = AnalysisInput(
         migration_id=project_id,
         repository=repository,

@@ -38,6 +38,7 @@ class SandboxSettings(BaseModel):
     source_hosts: list[str] = Field(default_factory=list)
     extra_keep_hosts: list[dict[str, Any]] = Field(default_factory=list)
     # How the standard write -> read test reaches the app; without it only the health test runs.
+    ai_tests: bool = False
     write_path: str | None = None
     read_path: str | None = None
 
@@ -101,6 +102,7 @@ def assemble_sandbox_input(
         "env_file": settings.env_file,
         "keep_hosts": [*keep_hosts(report, settings.region), *settings.extra_keep_hosts],
         "source_hosts": settings.source_hosts,
+        **({"ai_tests": True} if settings.ai_tests else {}),
         "analysis_report_ref": report_ref,
         "review_ref": review.get("review_ref"),
     }

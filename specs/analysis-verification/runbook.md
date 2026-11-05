@@ -67,12 +67,27 @@ uv run python scripts/review_signal.py approve <Workflow ID> --version <버전> 
 - 발행된 최종 분석 버전·요구사항·패치 산출물은 저장소 디렉터리에 해시 이름 파일로 있다.
 - Sandbox 네임스페이스(`cmp-sbx-*`)는 통과·실패·취소 모두 워커가 지운다. 남았다면 `kubectl --kubeconfig $SANDBOX_KUBECONFIG --context k3d-cmp-sandbox get ns`로 찾아 지운다(라벨 `cmp.sandbox/expires-at`이 만료 시각이다).
 
+### Sandbox 상태 보기와 정리
+
+```bash
+uv run python scripts/sandbox_ctl.py status
+uv run python scripts/sandbox_ctl.py cleanup                          # 만료된 것만
+uv run python scripts/sandbox_ctl.py cleanup --all --confirm DELETE-ALL  # 전부(확인어 필요)
+```
+
+전용 클러스터(`k3d-cmp-sandbox`)의 `cmp-sbx-*`만 다룬다. 워커가 죽어 남은 만료 Sandbox는 `cleanup`을 주기적으로(예: 15분마다 cron·launchd) 실행해 지운다. 출력에는 네임스페이스·실행 ID·만료 시각만 나온다.
+
+### AI 생성 테스트
+
+`--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다. 원본 쪽 테스트 자원(D-09)이 연결되어 있지 않으면 모델을 부르지 않고 결과 `ai_tests.reason`에 `ORIGIN_UNAVAILABLE`이 남는다(비용 0). 지금은 원본 자원이 없어 항상 이 경우다.
+
 ## 7. 자주 막히는 곳
 
 | 증상 | 원인과 조치 |
 | --- | --- |
 | 단계가 `sbx_build`에서 실패, 코드 `BUILD_NOT_CONFIGURED` | `SANDBOX_PREBUILT_IMAGES`가 비어 있다. 앱마다 Digest 고정 이미지를 적는다 |
 | `PREBUILT_IMAGE_NOT_DIGEST_PINNED` | 태그(`:latest`)는 거절한다. `@sha256:` 형태로 적는다 |
+| 커밋·저장소 값 거절(`not a plain value`) | `-`로 시작하거나 공백·제어 문자가 있다. 값을 고친다 |
 | `LLM_DISABLED`, `BUDGET_RUN/DAY/MONTH` | 모델이 꺼졌거나 한도에 닿았다. 정상 동작이며 사람 검토로 넘어간다 |
 | Planning이 요구사항을 못 읽음 | `ARTIFACT_STORE_DIR`와 `ANALYSIS_ARTIFACT_STORE_DIR`가 다르다 |
 | 앱이 시작하지 않음 | 첫 시도는 포트·헬스 경로가 틀릴 수 있고, 이 경우 SPEC으로 분류되어 Fixer가 고친다 |
@@ -85,4 +100,4 @@ uv run python scripts/review_signal.py approve <Workflow ID> --version <버전> 
 
 ## 9. 아직 없는 것
 
-실제 Build(S3·ECR·Docker, D-12), Planning 인계(티켓 15), 승인 API·화면, 만료된 Sandbox의 주기적 정리 작업, 수정 패치의 push·PR 자동 생성(후순위). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.
+실제 Build(S3·ECR·Docker, D-12), Planning 인계(티켓 15), 승인 API·화면, 수정 패치의 push·PR 자동 생성(후순위), 원본 쪽 테스트 자원(AI 테스트 실제 사용, D-09). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.
