@@ -30,13 +30,15 @@ def create_worker(client: Client) -> Worker:
         adc_email=settings.provisioning_gcp_adc_email,
         terraform_bin=settings.terraform_bin,
     )
+    plans = build_plan_publish_activities(SessionLocal)
     return Worker(
         client,
         task_queue=PROVISIONING_QUEUE,
         activities=[
             prepare_plan,
             provision_target,
-            build_plan_publish_activities(SessionLocal).publish_migration_plan,  # ticket 18
+            plans.publish_migration_plan,  # ticket 18
+            plans.publish_workload_plan,  # ticket 22
             approval.claim_approved_execution,
             approval.complete_approved_execution,
             approval.get_migration_handoff,  # ticket 13

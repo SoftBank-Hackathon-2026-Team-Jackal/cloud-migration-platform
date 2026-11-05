@@ -965,8 +965,11 @@ paths:
       tags:
       - provisioning planning
       summary: Get Migration Plan
-      description: 'Latest published Revision of the Migration''s Plan (P2: one Plan
-        per Migration).'
+      description: 'Latest Revision of the Plan to approve now (18 P6, 22 W10).
+
+
+        AWS/GCP: the WORKLOADS Plan once it is published, else the infrastructure
+        Plan.'
       operationId: get_migration_plan_provisioning_migrations__migration_id__plan_get
       parameters:
       - name: migration_id
@@ -1631,6 +1634,10 @@ components:
           additionalProperties: true
           type: object
           title: Settings
+        workloads:
+          anyOf:
+          - $ref: '#/components/schemas/CloudWorkloadSettings'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -1756,6 +1763,33 @@ components:
       - payload
       - status
       title: ClaimedJob
+    CloudWorkloadSettings:
+      properties:
+        namespace:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Namespace
+        storage_class:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Storage Class
+        database_image:
+          type: string
+          pattern: ^[^\s@]+@sha256:[a-f0-9]{64}$
+          title: Database Image
+      additionalProperties: false
+      type: object
+      required:
+      - namespace
+      - storage_class
+      - database_image
+      title: CloudWorkloadSettings
+      description: 'Ticket 22 W3: deployment choices for the 09/11 DB + App workloads
+        on the new cluster.'
     ClusterList:
       properties:
         connection_id:
@@ -2157,6 +2191,10 @@ components:
           additionalProperties: true
           type: object
           title: Settings
+        workloads:
+          anyOf:
+          - $ref: '#/components/schemas/CloudWorkloadSettings'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
