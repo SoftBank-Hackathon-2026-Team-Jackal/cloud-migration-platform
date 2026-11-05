@@ -28,6 +28,11 @@ ARG KUBECTL_VERSION=v1.37.1
 ARG HELM_VERSION=v4.3.1
 ARG AWSCLI_VERSION=2.35.21
 ARG GCLOUD_VERSION=588.0.0
+# Ticket 28 (#152): Docker CLI + buildx for the Build module, talking to the host daemon through
+# the mounted socket (compose.yaml). buildx matches the host plugin (cloudformation.yaml UserData).
+# Docker 28.x CLI still negotiates with the host's older Engine API.
+ARG DOCKER_VERSION=28.5.2
+ARG BUILDX_VERSION=v0.37.2
 # Terraform/kubectl/Helm: official published SHA-256. AWS CLI and gcloud publish no SHA-256 file;
 # these were computed from the official download URLs on 2026-11-05 and are pinned here.
 ARG TERRAFORM_SHA256_amd64=c168cab7c637a8769fdb90089ddd19de701bc6ff8aca64dc2e2185fe46f59f67
@@ -40,15 +45,23 @@ ARG AWSCLI_SHA256_amd64=1fe665267a6149dfb8551cec52b419fa6e82533fab6dd76789392092
 ARG AWSCLI_SHA256_arm64=1d7a1f26a1bd9f0610663b7a4b571def6990692c8c66223ebe09ac2445787bcc
 ARG GCLOUD_SHA256_amd64=e38ceac43022bb5a4d94d5a4a9c9c51f90f28c910b59a018ae07011e220c4412
 ARG GCLOUD_SHA256_arm64=15d0365242d72caebda77647642ae73f68bde10b1f71338c8a704aea200d8ab1
+# buildx: official checksums.txt. Docker static archive: no SHA-256 file is published; computed from
+# download.docker.com on 2026-11-06.
+ARG DOCKER_SHA256_amd64=ea90cfd12e1eeb12aa1c971741adb8bd4ed88e2a574eaac13f5029a1dbc6300d
+ARG DOCKER_SHA256_arm64=9e4f82996ab790724094475ebed33a736434bfe5d45231b676fef22ffb80044d
+ARG BUILDX_SHA256_amd64=982ca20490b45ed1ec8d99795974d3d874a358f75938c9c237305010e6b7e548
+ARG BUILDX_SHA256_arm64=efa38cb7aa7db2dbb9ad049b00b0a9737f66f033626177b5a4e845184ad7ab29
 
 RUN set -eux; \
     case "${TARGETARCH}" in \
-      amd64) aws_arch=x86_64; gcloud_arch=x86_64; \
+      amd64) aws_arch=x86_64; gcloud_arch=x86_64; docker_arch=x86_64; \
              tf_sha="${TERRAFORM_SHA256_amd64}"; kubectl_sha="${KUBECTL_SHA256_amd64}"; \
-             helm_sha="${HELM_SHA256_amd64}"; aws_sha="${AWSCLI_SHA256_amd64}"; gcloud_sha="${GCLOUD_SHA256_amd64}" ;; \
-      arm64) aws_arch=aarch64; gcloud_arch=arm; \
+             helm_sha="${HELM_SHA256_amd64}"; aws_sha="${AWSCLI_SHA256_amd64}"; gcloud_sha="${GCLOUD_SHA256_amd64}"; \
+             docker_sha="${DOCKER_SHA256_amd64}"; buildx_sha="${BUILDX_SHA256_amd64}" ;; \
+      arm64) aws_arch=aarch64; gcloud_arch=arm; docker_arch=aarch64; \
              tf_sha="${TERRAFORM_SHA256_arm64}"; kubectl_sha="${KUBECTL_SHA256_arm64}"; \
-             helm_sha="${HELM_SHA256_arm64}"; aws_sha="${AWSCLI_SHA256_arm64}"; gcloud_sha="${GCLOUD_SHA256_arm64}" ;; \
+             helm_sha="${HELM_SHA256_arm64}"; aws_sha="${AWSCLI_SHA256_arm64}"; gcloud_sha="${GCLOUD_SHA256_arm64}"; \
+             docker_sha="${DOCKER_SHA256_arm64}"; buildx_sha="${BUILDX_SHA256_arm64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}"; exit 1 ;; \
     esac; \
     apt-get update; \
@@ -78,6 +91,17 @@ RUN set -eux; \
     CLOUDSDK_COMPONENT_MANAGER_SNAPSHOT_URL="https://dl.google.com/dl/cloudsdk/channels/rapid/components-v${GCLOUD_VERSION}.json" \
       /opt/google-cloud-sdk/bin/gcloud components install gke-gcloud-auth-plugin --quiet; \
     rm -rf /opt/google-cloud-sdk/.install/.backup /root/.config/gcloud; \
+    # Docker CLI only (no daemon): builds run on the host daemon through the mounted socket.
+    curl -fsSLo docker.tgz \
+      "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz"; \
+    echo "${docker_sha}  docker.tgz" | sha256sum -c -; \
+    tar -xzf docker.tgz docker/docker; \
+    install -m 0755 docker/docker /usr/local/bin/docker; \
+    install -d -m 0755 /usr/local/lib/docker/cli-plugins; \
+    curl -fsSLo /usr/local/lib/docker/cli-plugins/docker-buildx \
+      "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${TARGETARCH}"; \
+    echo "${buildx_sha}  /usr/local/lib/docker/cli-plugins/docker-buildx" | sha256sum -c -; \
+    chmod 0755 /usr/local/lib/docker/cli-plugins/docker-buildx; \
     rm -rf /tmp/*; \
     apt-get purge -y curl unzip; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
 

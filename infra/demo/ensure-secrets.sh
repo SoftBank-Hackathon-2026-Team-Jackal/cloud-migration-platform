@@ -2,7 +2,8 @@
 # Create or complete demo host secrets without overwriting existing values (ticket 21, #100).
 #   ensure-secrets.sh <env-file> <secrets-dir>
 # - <env-file>: generated keys are appended only when missing (redeploys keep existing keys).
-# - <secrets-dir>/aws/config: named profile backed by the EC2 instance role (no static keys).
+# - <secrets-dir>/aws/config: named profiles backed by the EC2 instance role (no static keys):
+#   Provisioning (optionally assuming PROVISIONING_AWS_ROLE_ARN) and cmp-demo-build (ticket 28).
 # - <secrets-dir>/gcp/: operator places key.json here out of band; this script never creates it.
 set -euo pipefail
 
@@ -42,6 +43,11 @@ aws_config="$secrets_dir/aws/config"
     printf 'role_arn = %s\n' "$role_arn"
     printf 'role_session_name = cmp-demo-worker\n'
   fi
+  printf 'credential_source = Ec2InstanceMetadata\n'
+  printf 'region = %s\n' "$region"
+  # Ticket 28 (#152): the Build module (S3 sources/tests/builds, platform ECR) always uses the
+  # instance role itself, never PROVISIONING_AWS_ROLE_ARN.
+  printf '[profile cmp-demo-build]\n'
   printf 'credential_source = Ec2InstanceMetadata\n'
   printf 'region = %s\n' "$region"
 } >"$aws_config.tmp"

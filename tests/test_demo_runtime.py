@@ -99,12 +99,12 @@ def test_worker_image_pins_every_cli_with_a_checksum():
     dockerfile = DEMO / "Dockerfile"
     args = _dockerfile_args(dockerfile)
     text = dockerfile.read_text()
-    for tool in ("TERRAFORM", "KUBECTL", "HELM", "AWSCLI", "GCLOUD"):
+    for tool in ("TERRAFORM", "KUBECTL", "HELM", "AWSCLI", "GCLOUD", "DOCKER", "BUILDX"):
         assert re.fullmatch(r"v?\d+\.\d+\.\d+", args[f"{tool}_VERSION"]), tool
         for arch in ("amd64", "arm64"):
             assert re.fullmatch(r"[0-9a-f]{64}", args[f"{tool}_SHA256_{arch}"]), (tool, arch)
     # Every download is verified before use.
-    assert text.count("curl -fsSLo") == text.count("sha256sum -c -") == 5
+    assert text.count("curl -fsSLo") == text.count("sha256sum -c -") == 7
     assert "components-v${GCLOUD_VERSION}.json" in text
     assert "gke-gcloud-auth-plugin" in text
     assert re.search(r"^FROM api AS worker$", text, re.MULTILINE)
