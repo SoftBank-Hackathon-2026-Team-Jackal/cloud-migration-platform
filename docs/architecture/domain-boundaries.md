@@ -80,7 +80,7 @@ AWS→온프레미스 K3s에서는 Data Migration이 복제 시작 전 [Migratio
 | 책임 제외 | PostgreSQL 초기 복사·복제, 대상 인프라 생성, 사용자 승인 정책 결정 |
 | 의존 모듈 | Provisioning·Data Migration 결과, 상태 관측, 추후 확정될 트래픽 제어 수단 |
 
-현재 **논의 중인 안**은 `사용자 → Route 53 → Envoy 중계 → 원본 AWS ALB/EKS 또는 대상 GKE·K3s`다. 이 안에서는 Route 53이 진입점을, Envoy가 가중치 전환을 담당한다. 온프레미스 NAT 환경에는 WireGuard 연결을 고려한다. 최종 채택, 중계 서버의 구축·운영·제거·인계, 데이터 Cutover 전후의 롤백 경계는 확정되지 않았다. 트래픽만 원본으로 되돌리는 방식이 항상 데이터 복구를 의미하지는 않는다.
+**Envoy 중계 방식으로 결정**했다([ADR-006](../decisions/ADR-006.md)). 구조는 `사용자 → (Route 53) → Envoy 중계 → 원본 AWS ALB/EKS 또는 대상 GKE·K3s`이고 Envoy가 가중치 전환을 담당한다. P0 데모에는 도메인·TLS가 없어 Route 53 최종 DNS 전환은 확장으로 둔다. 온프레미스 NAT 환경에는 WireGuard 연결을 고려한다. 최종 채택, 중계 서버의 구축·운영·제거·인계, 데이터 Cutover 전후의 롤백 경계는 확정되지 않았다. 트래픽만 원본으로 되돌리는 방식이 항상 데이터 복구를 의미하지는 않는다.
 
 ## 8. 공통 Provider 모듈
 
