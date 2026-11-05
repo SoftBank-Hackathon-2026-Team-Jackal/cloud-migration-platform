@@ -20,6 +20,8 @@ bash infra/demo/ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets
 
 compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
 "${compose[@]}" up -d platform-db temporal-db temporal temporal-ui
+# Build first: the migration must run with the new release's code, not the previously built image.
+"${compose[@]}" build api worker
 "${compose[@]}" run --rm api alembic upgrade head
 "${compose[@]}" up -d --build api worker
 # Public Agent edge is opt-in: set CMP_PUBLIC_HOST in /opt/cmp/.env after 443 ingress is approved.
