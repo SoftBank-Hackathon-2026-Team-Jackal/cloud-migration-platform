@@ -1,8 +1,8 @@
-"""Tunnel configuration exchange API (ticket 16, reply-independent part T2~T9).
+"""Tunnel configuration exchange API (ticket 16).
 
 Agents use their existing Bearer credential (04A/15; revoked Agents are refused there). Relay
-servers are registered by the operator with the enrollment admin key and get their own
-credential once. The relay-side Agent list (P1) waits for the Traffic owner's reply.
+servers are registered by the operator with the enrollment admin key, get their own credential
+once, and poll the Agent list with it (P1/T12).
 """
 
 import base64
@@ -17,9 +17,12 @@ from cmp_api.routes.agents import CredentialDep, SessionDep, require_admin
 from cmp_api.tunnels import (
     TunnelError,
     agent_config,
+    authenticate_relay,
     config_version,
     record_status,
     register_key,
+    relay_agent_list,
+    relay_peers,
     upsert_relay,
 )
 
@@ -48,15 +51,16 @@ class TunnelKeyRequest(Strict):
     _key = field_validator("public_key")(lambda cls, v: _wireguard_public_key(v))
 
 
-class TunnelKeyResponse(BaseModel):
-    tunnel_ip: str
-    config_version: int
-
-
 class RelayPeer(BaseModel):
     relay_id: str
     endpoint: str
     public_key: str
+
+
+class TunnelKeyResponse(BaseModel):
+    tunnel_ip: str
+    relays: list[RelayPeer]  # P1: the Agent can start the tunnel without a second call
+    config_version: int
 
 
 class TunnelConfigResponse(BaseModel):
@@ -81,6 +85,20 @@ class RelayRegistration(Strict):
     public_key: str
 
     _key = field_validator("public_key")(lambda cls, v: _wireguard_public_key(v))
+
+
+class RelayAgent(BaseModel):
+    agent_id: str
+    public_key: str
+    tunnel_ip: str
+    allowed_ips: list[str]  # WireGuard peer AllowedIPs: the Agent's /32
+    allowed_ports: list[int]  # empty when revoked
+    revoked: bool  # true: remove this peer
+
+
+class RelayAgentList(BaseModel):
+    list_version: str  # changes whenever any entry changes
+    agents: list[RelayAgent]
 
 
 class RelayRegistered(BaseModel):
@@ -109,7 +127,11 @@ def put_tunnel_key(
         tunnel = register_key(session, agent_id, request.public_key)
     except TunnelError as exc:
         raise _error(exc) from None
-    return {"tunnel_ip": tunnel.tunnel_ip, "config_version": config_version(session)}
+    return {
+        "tunnel_ip": tunnel.tunnel_ip,
+        "relays": relay_peers(session),
+        "config_version": config_version(session),
+    }
 
 
 @router.get("/agents/{agent_id}/tunnel/config", response_model=TunnelConfigResponse)
@@ -146,3 +168,13 @@ def put_relay(relay_id: Name, request: RelayRegistration, session: SessionDep, r
         "credential": credential,
         "config_version": config_version(session),
     }
+
+
+@router.get("/relays/{relay_id}/agents", response_model=RelayAgentList)
+def get_relay_agents(relay_id: str, session: SessionDep, credential: CredentialDep):
+    """P1: polled by the relay. Bearer = the relay credential returned at registration (T3)."""
+    try:
+        authenticate_relay(session, relay_id, credential)
+    except TunnelError:
+        raise HTTPException(status_code=403, detail="Relay unauthorized") from None
+    return relay_agent_list(session)
