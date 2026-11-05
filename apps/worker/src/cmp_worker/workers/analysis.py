@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from cmp_contracts.queues import ANALYSIS_QUEUE
+from cmp_providers.resources import resource_root
 from cmp_scanners.aws_infra import get_session, make_clients
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -26,7 +27,7 @@ from cmp_worker.config import settings as default_settings
 from cmp_worker.llm_factory import build_llm_factory
 from cmp_worker.source_access import build_source_resolver
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]
+_REPO_ROOT = resource_root()  # ticket 43: CMP_RESOURCE_ROOT in the worker image
 
 
 def build_pipeline(config: Settings = default_settings) -> AnalysisPipeline | None:

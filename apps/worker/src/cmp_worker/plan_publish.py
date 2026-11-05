@@ -69,6 +69,7 @@ from cmp_providers.network_policy import TEMPLATE_VERSION as NETWORK_POLICY_TEMP
 from cmp_providers.network_policy import describe, production_policies, with_connections
 from cmp_providers.onprem_preview import onprem_preview
 from cmp_providers.plans import manifest_digest
+from cmp_providers.resources import resource_root
 from cmp_providers.shared_deployment_v2 import render_shared_deployment_v2
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -78,7 +79,7 @@ from cmp_worker.activities.aws_workloads import target_from_refs as aws_target
 from cmp_worker.activities.gcp_workloads import target_from_refs as gcp_target
 from cmp_worker.provisioning_v2 import prepare_plan_v2
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = resource_root()
 DB_CHART = ROOT / "infra/helm/postgres"
 APP_CHART = ROOT / "infra/helm/application"
 CLUSTER_TARGETS = {"AWS": aws_target, "GCP": gcp_target}  # 09 W11 / 11 K12 ref names

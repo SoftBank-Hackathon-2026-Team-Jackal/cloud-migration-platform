@@ -24,6 +24,8 @@ bash infra/demo/release.sh HEAD
 
 worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1.17.0, kubectl v1.37.1, Helm v4.3.1, AWS CLI 2.35.21, gcloud 588.0.0(+`gke-gcloud-auth-plugin`)을 버전·SHA-256으로 고정한다. API는 도구가 없는 `api` 대상을 쓴다.
 
+두 대상 모두 런타임 리소스(`infra/terraform`, `infra/helm`, `catalog`, `skills`)를 `/app` 아래 저장소와 같은 상대 경로로 복사하고 `CMP_RESOURCE_ROOT=/app`을 지정한다(ticket 43). 패키지는 site-packages에 설치되므로 코드는 자기 위치가 아니라 이 값으로 템플릿·차트를 찾는다(`cmp_providers.resources`). 새 리소스 디렉터리를 코드에서 쓰면 `RUNTIME_RESOURCE_DIRS`와 Dockerfile `COPY`를 함께 고친다(`tests/test_worker_image_resources.py`가 대조). Terraform lock 파일은 `linux_amd64`·`linux_arm64`·`darwin_arm64`·`darwin_amd64` 해시를 담는다.
+
 | 설정 | 서비스 | 값·출처 |
 | --- | --- | --- |
 | `DATABASE_URL`, `TEMPORAL_ADDRESS` | api, worker | 업무 PostgreSQL·Temporal (compose 내부망) |
