@@ -1,7 +1,9 @@
-"""`publish_migration_plan`: the MigrationWorkflow `planning` step (ticket 18, P7).
+"""Plan publication Activities for the MigrationWorkflow (tickets 18 P7 and 22 W8).
 
-Input `{migration_id}`; output small codes/identifiers only. Without a configured platform
-ArtifactStore the Activity reports `SCAFFOLD`, and the Workflow keeps the scaffold path.
+`publish_migration_plan` input `{migration_id}`; `publish_workload_plan` input
+`{migration_id, infrastructure: {plan_id, revision}}` (the executed AWS/GCP infra Revision).
+Outputs are small codes/identifiers only. Without a configured platform ArtifactStore the
+Activities report `SCAFFOLD`, and the Workflow keeps the scaffold path.
 """
 
 import asyncio
@@ -11,6 +13,7 @@ from temporalio import activity
 from cmp_worker.plan_publish import PlanPublisher
 
 HEARTBEAT_SECONDS = 30
+SCAFFOLD = {"status": "SCAFFOLD", "code": "PLANNING_NOT_CONFIGURED"}
 
 
 class PlanPublishActivities:
@@ -20,15 +23,25 @@ class PlanPublishActivities:
     @activity.defn(name="publish_migration_plan")
     async def publish_migration_plan(self, request: dict) -> dict:
         if self._publisher is None:
-            return {"status": "SCAFFOLD", "code": "PLANNING_NOT_CONFIGURED"}
-        activity.heartbeat("started")
-        work = asyncio.create_task(
-            asyncio.to_thread(self._publisher.publish, request["migration_id"])
+            return SCAFFOLD
+        return await self._run(self._publisher.publish, request["migration_id"])
+
+    @activity.defn(name="publish_workload_plan")
+    async def publish_workload_plan(self, request: dict) -> dict:
+        if self._publisher is None:
+            return SCAFFOLD
+        return await self._run(
+            self._publisher.publish_workloads, request["migration_id"], request["infrastructure"]
         )
+
+    @staticmethod
+    async def _run(fn, *args) -> dict:
+        activity.heartbeat("started")
+        work = asyncio.create_task(asyncio.to_thread(fn, *args))
         while not work.done():
             await asyncio.wait({work}, timeout=HEARTBEAT_SECONDS)
             if not work.done():
-                activity.heartbeat("planning")  # Terraform Plan can take minutes
+                activity.heartbeat("planning")  # Terraform Plan / Helm render can take minutes
         return work.result()
 
 
@@ -44,14 +57,18 @@ def build_plan_publish_activities(session_factory) -> PlanPublishActivities:
     if not api_settings.artifact_store_dir:
         return PlanPublishActivities(None)
     root = settings.provisioning_artifact_root
+    from cmp_worker.provisioning_events import PlanReadyEvents
+
     return PlanPublishActivities(
-        PlanPublisher(
-            session_factory,
-            LocalArtifactStore(Path(api_settings.artifact_store_dir)),
-            cloud_artifact_root=Path(root) if root else None,
-            aws_profile=settings.provisioning_aws_profile,
-            gcloud_configuration=settings.provisioning_gcloud_configuration,
-            gcp_adc_email=settings.provisioning_gcp_adc_email,
-            terraform_bin=settings.terraform_bin,
+        PlanReadyEvents(  # ticket 24: `plan.ready` after each successful publication
+            PlanPublisher(
+                session_factory,
+                LocalArtifactStore(Path(api_settings.artifact_store_dir)),
+                cloud_artifact_root=Path(root) if root else None,
+                aws_profile=settings.provisioning_aws_profile,
+                gcloud_configuration=settings.provisioning_gcloud_configuration,
+                gcp_adc_email=settings.provisioning_gcp_adc_email,
+                terraform_bin=settings.terraform_bin,
+            )
         )
     )

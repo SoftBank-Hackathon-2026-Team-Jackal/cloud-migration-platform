@@ -1,0 +1,30 @@
+# 트래픽 전환 로컬 시험(#62): Envoy 가중치 전환·롤백. 실행: docker compose -f infra/local/traffic-lab/compose.yaml up -d
+#   docker compose -f infra/local/traffic-lab/compose.yaml exec driver sh -c "pip install -q pydantic && python drive.py"
+name: envoy-lab
+services:
+  backend-origin:
+    image: python:3.13-slim
+    command: ["python", "-u", "/app/backend.py"]
+    environment: { NAME: origin }
+    volumes: ["./backend.py:/app/backend.py:ro"]
+    ports: ["8001:8000"]
+  backend-target:
+    image: python:3.13-slim
+    command: ["python", "-u", "/app/backend.py"]
+    environment: { NAME: target }
+    volumes: ["./backend.py:/app/backend.py:ro"]
+    ports: ["8002:8000"]
+  envoy:
+    image: envoyproxy/envoy:v1.32-latest
+    restart: on-failure
+    command: ["-c", "/etc/envoy/bootstrap.yaml", "--log-level", "warn"]
+    volumes: ["./bootstrap.yaml:/etc/envoy/bootstrap.yaml:ro", "rds:/etc/envoy/rds"]
+    ports: ["8080:8080", "9901:9901"]
+    depends_on: [backend-origin, backend-target]
+  driver:
+    image: python:3.13-slim
+    working_dir: /lab
+    command: ["sleep", "infinity"]
+    volumes: ["../../../packages/traffic/src:/lab/src:ro", "./drive.py:/lab/drive.py:ro", "rds:/etc/envoy/rds"]
+    depends_on: [envoy]
+volumes: { rds: {} }

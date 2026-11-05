@@ -20,6 +20,9 @@ class AnalysisInput(Contract):
     manifests_dir: Text | None = None  # relative to the checked-out workspace
     cluster_name: Text | None = None  # source EKS cluster, read-only AWS scan when set
     credential_ref: Text | None = None  # named local profile, never a key
+    # Reference to the user's access token for a private repository. A name, never a token:
+    # the worker resolves it only when it clones (ticket 23).
+    source_access_ref: VersionRef | None = None
     role_arns: list[Text] = Field(default_factory=list)
 
 

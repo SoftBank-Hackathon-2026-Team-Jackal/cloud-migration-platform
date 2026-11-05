@@ -11,6 +11,18 @@ class Settings(BaseSettings):
     approval_admin_key: str | None = None
     # P0 platform artifact store for approved ON_PREM rollout bytes (digest filenames; S3 later).
     artifact_store_dir: str | None = None
+    # Ticket 23 (ADR-005): environment connections. The platform principal (demo: EC2 instance
+    # role; locally a named dev profile) is the only identity that calls sts:AssumeRole.
+    connection_platform_aws_profile: str | None = None
+    connection_platform_principal_arn: str | None = None
+    # HTTPS prefix of the S3-hosted CloudFormation templates (quick-create needs an S3 URL).
+    connection_template_base_url: str | None = None
+    # Generated AWS config (platform profiles + one assume-role profile per connection), shared
+    # with the worker through AWS_CONFIG_FILE; the base file holds the platform's own profile.
+    connection_aws_config_file: str | None = None
+    connection_aws_base_config_file: str | None = None
+    # GCP demo: the platform's fixed project; other projects are refused.
+    connection_gcp_project_id: str | None = None
 
 
 settings = Settings()

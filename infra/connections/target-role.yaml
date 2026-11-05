@@ -1,0 +1,209 @@
+# Cloud Migration Platform - target (EKS new build) connection role. Ticket 23, ADR-005.
+# Created by the user in the target AWS account from the platform's quick-create link.
+# Trust: the platform principal with the platform-issued External ID only.
+# Scope (where IAM supports it):
+#   - creates must carry the platform's Terraform tag (aws:RequestTag/cmp:managed-by),
+#   - changes/deletes only on resources carrying that tag (aws:ResourceTag/cmp:managed-by),
+#   - IAM writes only on roles/policies named with ResourcePrefix, PassRole only to EKS/EC2,
+#   - explicit deny for IAM users, access keys and changes to this role itself.
+# Actions that IAM cannot tag-scope (e.g. CreateRoute, AuthorizeSecurityGroupEgress) are limited
+# to the ec2 resource-tag condition where AWS evaluates it. Real Apply with this role is unverified.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloud Migration Platform target build role (cross-account AssumeRole with External ID)
+Parameters:
+  PlatformPrincipalArn:
+    Type: String
+    Description: ARN of the platform principal allowed to assume this role (shown by the platform)
+    AllowedPattern: "^arn:aws(-cn|-us-gov)?:iam::[0-9]{12}:role/.+$"
+  ExternalId:
+    Type: String
+    Description: External ID issued by the platform for this connection (do not change)
+    AllowedPattern: "^cmp-[0-9a-f]{32}$"
+  ResourcePrefix:
+    Type: String
+    Default: cmp-
+    Description: Name prefix of IAM roles/policies the platform's Terraform creates
+    AllowedPattern: "^[a-z][a-z0-9-]{1,19}$"
+  ManagedByTag:
+    Type: String
+    Default: terraform
+    Description: Value of the cmp:managed-by tag the platform's Terraform puts on every resource
+Resources:
+  ConnectionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Cloud Migration Platform target build role
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PlatformWithExternalId
+            Effect: Allow
+            Principal:
+              AWS:
+                Ref: PlatformPrincipalArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId:
+                  Ref: ExternalId
+      Tags:
+        - Key: cmp:managed-by
+          Value: cloud-migration-platform
+        - Key: cmp:connection-role
+          Value: target
+  TargetBuild:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Create and manage only platform-tagged EKS, VPC and IAM resources
+      Roles:
+        - Ref: ConnectionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Read
+            Effect: Allow
+            Action:
+              - ec2:Describe*
+              - eks:Describe*
+              - eks:List*
+              - elasticloadbalancing:Describe*
+              - iam:Get*
+              - iam:List*
+              - sts:GetCallerIdentity
+            Resource: "*"
+          - Sid: CreateTagged
+            Effect: Allow
+            Action:
+              - ec2:AllocateAddress
+              - ec2:CreateInternetGateway
+              - ec2:CreateNatGateway
+              - ec2:CreateRouteTable
+              - ec2:CreateSecurityGroup
+              - ec2:CreateSubnet
+              - ec2:CreateVpc
+              - eks:CreateAddon
+              - eks:CreateCluster
+              - eks:CreateNodegroup
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          - Sid: TagOnCreate
+            Effect: Allow
+            Action:
+              - ec2:CreateTags
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          - Sid: ChangeTagged
+            Effect: Allow
+            Action:
+              - ec2:AssociateRouteTable
+              - ec2:AttachInternetGateway
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:CreateRoute
+              - ec2:DeleteInternetGateway
+              - ec2:DeleteNatGateway
+              - ec2:DeleteRoute
+              - ec2:DeleteRouteTable
+              - ec2:DeleteSecurityGroup
+              - ec2:DeleteSubnet
+              - ec2:DeleteTags
+              - ec2:DeleteVpc
+              - ec2:DetachInternetGateway
+              - ec2:DisassociateAddress
+              - ec2:DisassociateRouteTable
+              - ec2:ModifySubnetAttribute
+              - ec2:ModifyVpcAttribute
+              - ec2:ReleaseAddress
+              - ec2:RevokeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupIngress
+              - eks:DeleteAddon
+              - eks:DeleteCluster
+              - eks:DeleteNodegroup
+              - eks:TagResource
+              - eks:UntagResource
+              - eks:UpdateAddon
+              - eks:UpdateClusterConfig
+              - eks:UpdateClusterVersion
+              - eks:UpdateNodegroupConfig
+              - eks:UpdateNodegroupVersion
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          - Sid: PlatformIamOnly
+            Effect: Allow
+            Action:
+              - iam:AttachRolePolicy
+              - iam:CreateOpenIDConnectProvider
+              - iam:CreatePolicy
+              - iam:CreatePolicyVersion
+              - iam:CreateRole
+              - iam:DeleteOpenIDConnectProvider
+              - iam:DeletePolicy
+              - iam:DeletePolicyVersion
+              - iam:DeleteRole
+              - iam:DeleteRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PutRolePolicy
+              - iam:TagOpenIDConnectProvider
+              - iam:TagPolicy
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:UpdateAssumeRolePolicy
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/oidc.eks.*"
+          - Sid: PassPlatformRolesToEks
+            Effect: Allow
+            Action: iam:PassRole
+            Resource:
+              Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ResourcePrefix}*"
+            Condition:
+              StringEquals:
+                iam:PassedToService:
+                  - eks.amazonaws.com
+                  - ec2.amazonaws.com
+          - Sid: EksServiceLinkedRoles
+            Effect: Allow
+            Action: iam:CreateServiceLinkedRole
+            Resource: "*"
+            Condition:
+              StringEquals:
+                iam:AWSServiceName:
+                  - eks.amazonaws.com
+                  - eks-nodegroup.amazonaws.com
+                  - elasticloadbalancing.amazonaws.com
+          - Sid: NeverLongLivedCredentialsOrSelfChange
+            Effect: Deny
+            Action:
+              - iam:CreateAccessKey
+              - iam:CreateLoginProfile
+              - iam:CreateUser
+              - iam:UpdateAccessKey
+            Resource: "*"
+          - Sid: NeverChangeThisRole
+            Effect: Deny
+            Action:
+              - iam:AttachRolePolicy
+              - iam:DeleteRole
+              - iam:DeleteRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PutRolePermissionsBoundary
+              - iam:PutRolePolicy
+              - iam:UpdateAssumeRolePolicy
+            Resource:
+              Fn::GetAtt: [ConnectionRole, Arn]
+Outputs:
+  RoleArn:
+    Description: Register this Role ARN on the platform connection page
+    Value:
+      Fn::GetAtt: [ConnectionRole, Arn]

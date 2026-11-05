@@ -24,6 +24,7 @@ from cmp_worker.artifact_store import LocalArtifactStore
 from cmp_worker.config import Settings
 from cmp_worker.config import settings as default_settings
 from cmp_worker.llm_factory import build_llm_factory
+from cmp_worker.source_access import build_source_resolver
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
@@ -39,6 +40,8 @@ def build_pipeline(config: Settings = default_settings) -> AnalysisPipeline | No
         workspace_root=config.analysis_workspace_root,
         skills_root=resources / "skills",
         catalog_dir=resources / "catalog",
+        allow_local_repositories=config.analysis_allow_local_repositories,
+        source_resolver=build_source_resolver(config.source_token_resolver),
         llm_factory=build_llm_factory(config),  # None unless Claude is switched on (ADR-004)
         aws_clients_factory=lambda inp: make_clients(
             get_session(inp.credential_ref or "", region=region)

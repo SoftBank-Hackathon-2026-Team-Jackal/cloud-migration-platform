@@ -1,7 +1,7 @@
 # Ticket 11 — Sandbox 구성·적용·정리
 
 ## 상태
-IN_PROGRESS — 구현 완료(실제 k3d `cmp-sandbox`에서 검증), 리뷰 대기, Issue #93
+DONE — PR #94 병합, Issue #93 (실제 k3d `cmp-sandbox`에서 검증)
 
 ## 목적
 Sandbox 워커가 구체 환경 값을 정하고 공통 차트로 Sandbox를 띄운 뒤, 끝나면 반드시 정리한다.
@@ -69,5 +69,5 @@ k3d kubeconfig write cmp-sandbox -o ~/.kube/cmp-sandbox.yaml
 - [x] 수용 기준과 Test Seam 확인
 - [x] 관련 테스트 통과와 회귀 확인
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
+- [x] 구현·계약 정합성 및 최종 리뷰
 - [x] 미검증 항목과 결과 증거 기록

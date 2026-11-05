@@ -11,6 +11,8 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from cmp_worker.analysis_pipeline import AnalysisPipeline
+from cmp_worker.sandbox_input import SandboxSettings, assemble_sandbox_input
+from cmp_worker.source_access import SourceAccessError
 
 
 @activity.defn
@@ -110,6 +112,11 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
     non-retryable failures so a bad repository or commit does not spin through retries."""
     try:
         return await asyncio.to_thread(fn, *args)
+    except SourceAccessError as exc:
+        # A missing, revoked or refused token will not fix itself on a retry.
+        raise ApplicationError(
+            "Source access was refused", type=exc.code, non_retryable=True
+        ) from None
     except SourceFetchError:
         raise ApplicationError(
             "Source could not be fetched", type="SOURCE_FETCH_FAILED", non_retryable=True
@@ -197,8 +204,26 @@ class AnalysisActivities:
         )
         return {**record.model_dump(mode="json"), "review_ref": ref.model_dump()}
 
+    @activity.defn(name="assemble_sandbox_input")
+    async def assemble_sandbox_input(self, payload: dict) -> dict:
+        """Turn the analysis result into the Sandbox loop input (ticket 21)."""
+        try:
+            return await asyncio.to_thread(
+                assemble_sandbox_input,
+                payload["analysis"],
+                SandboxSettings.model_validate(payload.get("settings") or {}),
+                self.pipeline.store,
+            )
+        except (KeyError, ValueError, ValidationError):
+            raise ApplicationError(
+                "Sandbox input could not be assembled",
+                type="SANDBOX_INPUT_INVALID",
+                non_retryable=True,
+            ) from None
+
     def all(self) -> list[Callable[..., Any]]:
         return [
+            self.assemble_sandbox_input,
             self.fetch_source,
             self.scan_code,
             self.scan_manifests,

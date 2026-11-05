@@ -12,6 +12,7 @@ from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
 from cmp_worker.activities.plan_publish import build_plan_publish_activities
 from cmp_worker.activities.provisioning import prepare_plan, provision_target
 from cmp_worker.config import settings
+from cmp_worker.events import emit_migration_event
 
 
 def create_worker(client: Client) -> Worker:
@@ -30,13 +31,15 @@ def create_worker(client: Client) -> Worker:
         adc_email=settings.provisioning_gcp_adc_email,
         terraform_bin=settings.terraform_bin,
     )
+    plans = build_plan_publish_activities(SessionLocal)
     return Worker(
         client,
         task_queue=PROVISIONING_QUEUE,
         activities=[
             prepare_plan,
             provision_target,
-            build_plan_publish_activities(SessionLocal).publish_migration_plan,  # ticket 18
+            plans.publish_migration_plan,  # ticket 18
+            plans.publish_workload_plan,  # ticket 22
             approval.claim_approved_execution,
             approval.complete_approved_execution,
             approval.get_migration_handoff,  # ticket 13
@@ -45,5 +48,6 @@ def create_worker(client: Client) -> Worker:
             build_gcp_workloads_activities(SessionLocal).execute_gcp_workloads,  # ticket 11
             execute_on_prem_plan_activity(),  # ticket 12
             gcp_infra.execute_gcp_plan,  # ticket 10
+            emit_migration_event,  # ticket 24: Workflow-side event emission
         ],
     )

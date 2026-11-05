@@ -15,6 +15,8 @@ from cmp_providers.plans import manifest_digest
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio import activity
 
+from cmp_worker.provisioning_events import log_result, terraform_progress
+
 HEARTBEAT_SECONDS = 30
 
 
@@ -55,7 +57,7 @@ class GcpInfraActivities:
             preview = Preview.model_validate(row.preview)
         if manifest_digest(manifest) != request["manifest_digest"]:
             return _failed("MANIFEST_DIGEST_MISMATCH")
-        return apply_gcp_infrastructure(
+        result = apply_gcp_infrastructure(
             manifest,
             preview,
             self._artifact_root / f"{request['plan_id']}-r{request['revision']}",
@@ -65,7 +67,9 @@ class GcpInfraActivities:
             terraform_bin=self._terraform_bin,
             runner=self._runner,
             adc_email=self._adc_lookup,
+            progress=terraform_progress(manifest.migration_id, preview),  # ticket 24
         )
+        return log_result(manifest.migration_id, "execute_gcp_plan", result)
 
     @activity.defn(name="execute_gcp_plan")
     async def execute_gcp_plan(self, request: dict) -> dict:

@@ -115,7 +115,7 @@ Provisioning Preview 생성 → 계획 메타데이터를 업무 DB에 기록
 
 현재 논의된 전달 수단은 **Temporal Signal**이다. Signal은 비동기 메시지이므로 API가 승인 요청을 수락한 시점과 Workflow가 승인 상태를 처리·재개한 시점을 동일하게 취급하지 않는다. P0에서는 업무 DB 승인 기록을 유지하되 범용 Outbox는 보류한다. 승인 이벤트 ID 기반 재전달·상태 재조회로 기록 성공/Signal 실패를 복구하고, 같은 승인과 실행을 중복 적용하지 않는다. 미전달 상태를 사용자에게 완료로 표시하지 않는다. [ADR-002](../decisions/ADR-002.md)를 따른다. Temporal Update는 대안으로 검토할 수 있지만 이번 단계에서 인터페이스를 바꾸거나 채택하지 않는다.
 
-07(#34)은 이 흐름을 Plan Revision별 `ProvisioningApprovalWorkflow`로 구현했다. API가 DB에 결정을 기록한 뒤 Signal-With-Start로 `approval_id`만 전달하고, 응답에서 기록·전달(`delivery_status`)·Workflow 상태·실행 상태를 분리한다. 실행 직전 Activity가 DB를 재검증하며 고유 실행 표식으로 executor를 한 번만 호출한다. 18(#98)부터 `MigrationWorkflow`의 `planning` 단계는 `provisioning-plan-v1` patch 아래 `publish_migration_plan` Activity로 Plan Revision을 게시하고, 그 Revision의 `ProvisioningApprovalWorkflow`를 같은 Workflow ID의 자식으로 시작해 승인·실행 결과를 기다린다. API의 Signal-With-Start가 이 자식에 승인을 전달한다. 결과가 `EXECUTED`일 때만 다음 단계로 가고, 거절(`plan_rejected`)·승인 만료(`approval_expired`, 기본 7일)·실패(`provisioning_failed`)·게시 실패(`plan_failed`)는 실행 없이 끝난다. 플랫폼 ArtifactStore(`ARTIFACT_STORE_DIR`)가 없는 환경은 Activity가 `SCAFFOLD`를 돌려 기존 boolean 승인 Signal·`provision_target` scaffold 경로를 쓴다. 상세는 [18 착수 결정 P7·P8](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05). 08(#2)부터 실행은 claim → Provider별 장시간 Activity(Heartbeat, 재시도 없음) → complete 순서이며, 결과가 불명확하면 `UNKNOWN`으로 기록하고 실제 상태 확인 전에는 다시 실행하지 않는다.
+07(#34)은 이 흐름을 Plan Revision별 `ProvisioningApprovalWorkflow`로 구현했다. API가 DB에 결정을 기록한 뒤 Signal-With-Start로 `approval_id`만 전달하고, 응답에서 기록·전달(`delivery_status`)·Workflow 상태·실행 상태를 분리한다. 실행 직전 Activity가 DB를 재검증하며 고유 실행 표식으로 executor를 한 번만 호출한다. 18(#98)부터 `MigrationWorkflow`의 `planning` 단계는 `provisioning-plan-v1` patch 아래 `publish_migration_plan` Activity로 Plan Revision을 게시하고, 그 Revision의 `ProvisioningApprovalWorkflow`를 같은 Workflow ID의 자식으로 시작해 승인·실행 결과를 기다린다. API의 Signal-With-Start가 이 자식에 승인을 전달한다. 결과가 `EXECUTED`일 때만 다음 단계로 가고, 거절(`plan_rejected`)·승인 만료(`approval_expired`, 기본 7일)·실패(`provisioning_failed`)·게시 실패(`plan_failed`)는 실행 없이 끝난다. 플랫폼 ArtifactStore(`ARTIFACT_STORE_DIR`)가 없는 환경은 Activity가 `SCAFFOLD`를 돌려 기존 boolean 승인 Signal·`provision_target` scaffold 경로를 쓴다. 상세는 [18 착수 결정 P7·P8](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05). 22(#108)부터 AWS/GCP `INFRASTRUCTURE` 실행이 `EXECUTED`이면 `provisioning-cloud-workloads-v1` patch 아래 `workload_planning` 단계에서 `publish_workload_plan` Activity(`{migration_id, infrastructure: {plan_id, revision}}`)로 별도 `WORKLOADS` Plan을 게시하고, 같은 방식의 Revision 승인 자식으로 09·11 배포 결과를 기다린다. 상태 Query의 `plan`은 워크로드 Plan, `infrastructure_plan`은 인프라 Plan이며 Data/Traffic 인계는 워크로드 Revision으로 읽는다. 18 이전·ON_PREM 이력은 patch 표식이 없어 그대로 재생된다([22 착수 결정 W8](../../tickets/provisioning/22-cloud-workload-plan.md#착수-결정-2026-11-05)). 08(#2)부터 실행은 claim → Provider별 장시간 Activity(Heartbeat, 재시도 없음) → complete 순서이며, 결과가 불명확하면 `UNKNOWN`으로 기록하고 실제 상태 확인 전에는 다시 실행하지 않는다.
 
 ## 9. 재시도·Timeout·Heartbeat
 
@@ -161,6 +161,8 @@ CREATED → ANALYZING → BUILDING → SANDBOX_VERIFYING → PLANNING
 ```
 
 Temporal Query 또는 업무 DB의 상태 Projection을 조회 원천으로 검토할 수 있다. **SSE는 FastAPI가 Frontend에 제공**하며 Temporal Server가 직접 SSE를 방송한다고 가정하지 않는다. 동일 상태를 Temporal과 업무 DB에 함께 저장한다면 갱신 순서·지연·장애 후 재조정 규칙이 필요하다. 로그와 큰 산출물은 Workflow History 대신 별도 저장소의 참조로 전달한다.
+
+세부 진행은 업무 DB의 append-only `migration_events`(이전별 `seq`)에 Activity가 기록하고, FastAPI SSE가 snapshot·`Last-Event-ID`로 전달한다. Workflow 코드는 이벤트를 직접 쓰지 않는다(결정성). 전체 상태(진행·대기·종료)는 계속 Workflow Query로 판단한다. 상세는 [이전 이벤트 명세](../../specs/provisioning/migration-events.md)를 따른다.
 
 ## 13. 단계 사이 데이터 계약
 
