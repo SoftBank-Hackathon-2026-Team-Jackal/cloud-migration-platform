@@ -1,6 +1,7 @@
 """Business-DB claim/completion around provider execution and the Migration handoff (07/08/13)."""
 
 import asyncio
+from collections.abc import Callable
 
 from cmp_api.approvals import claim_execution, complete_execution
 from cmp_api.provisioning_results import load_result
@@ -11,8 +12,14 @@ from temporalio import activity
 
 
 class ApprovalActivities:
-    def __init__(self, session_factory: sessionmaker[Session]):
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        clock: Callable[[], int] | None = None,
+    ):
         self._session_factory = session_factory
+        # Ticket 25 F4: tunnel freshness is judged at read time; tests inject the clock.
+        self._clock = clock
 
     def _claim(self, approval_id: str) -> dict:
         with self._session_factory() as session:
@@ -38,7 +45,8 @@ class ApprovalActivities:
             result = load_result(session, plan_id, revision)
             tunnel = None
             if result is not None and result.provider == "ON_PREM":
-                tunnel = tunnel_view(session, result.cluster.agent_id)
+                now = self._clock() if self._clock else None
+                tunnel = tunnel_view(session, result.cluster.agent_id, now=now)
             return handoff(result, consumer, plan_id, revision, tunnel)
 
     @activity.defn(name="claim_approved_execution")

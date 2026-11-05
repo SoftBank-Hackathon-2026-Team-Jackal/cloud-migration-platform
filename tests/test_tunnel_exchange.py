@@ -8,6 +8,7 @@ registration, the relay-side Agent list (P1), tunnel status and the ON_PREM Data
 import asyncio
 import base64
 import os
+import time
 
 import pytest
 from cmp_api.agent_registry import revoke_agent
@@ -201,10 +202,10 @@ def onprem_ready(db):
     return approved
 
 
-def handoff(db, consumer):
+def handoff(db, consumer, clock=None):
     return asyncio.run(
         ActivityEnvironment().run(
-            ApprovalActivities(db).get_migration_handoff,
+            ApprovalActivities(db, clock=clock).get_migration_handoff,
             {"plan_id": "plan-001", "revision": 1, "consumer": consumer},
         )
     )
@@ -213,7 +214,7 @@ def handoff(db, consumer):
 def report(client, headers, **body):
     payload = {
         "tunnel_ip": "10.200.0.2",
-        "last_handshake_at": 1793836800,
+        "last_handshake_at": int(time.time()),
         "app_health_ok": True,
         "db_connect_ok": True,
     } | body
@@ -411,3 +412,115 @@ def test_alembic_migration_matches_tunnel_models(tmp_path, monkeypatch):
     tables = ("agent_tunnels", "relay_servers", "tunnel_settings", "agent_tunnel_status")
     assert [d for d in diff if any(t in str(d) for t in tables)] == []
     command.downgrade(Config("alembic.ini"), "20261105_02")
+
+
+# --- Ticket 25 (#135): tunnel status freshness -----------------------------------------------
+
+
+def reported_at(db, agent_id="agent-001") -> int:
+    from cmp_api.tunnels import TunnelStatus
+
+    with db() as s:
+        return s.get(TunnelStatus, agent_id).reported_at
+
+
+def onprem_verified(client, db, **body):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    onprem_ready(db)
+    assert report(client, headers, **body).status_code == 202
+    return headers
+
+
+@pytest.mark.parametrize("consumer", ["DATA_MIGRATION", "TRAFFIC_MIGRATION"])
+def test_fresh_tunnel_report_lets_the_onprem_handoff_proceed(client, db, consumer):
+    onprem_verified(client, db)
+    at = reported_at(db)
+    view = handoff(db, consumer, clock=lambda: at + 60)  # F2: TTL 60 s is inclusive
+    assert view["proceed"] is True and view["blocked_by"] == []
+
+
+def test_stale_report_blocks_both_onprem_handoffs_without_tunnel_values(client, db):
+    onprem_verified(client, db)
+    at = reported_at(db)
+    later = lambda: at + 61
+
+    data = handoff(db, "DATA_MIGRATION", clock=later)
+    assert data["proceed"] is False and data["blocked_by"] == ["TUNNEL_STATUS_STALE"]
+    assert data["database"]["tunnel_endpoint"] is None
+
+    traffic = handoff(db, "TRAFFIC_MIGRATION", clock=later)
+    assert traffic["proceed"] is False and traffic["blocked_by"] == ["TUNNEL_STATUS_STALE"]
+    app = traffic["application"]
+    assert (app["external_endpoint"], app["external_host"], app["external_port"]) == (None,) * 3
+
+    # T6: the stored result itself is never rewritten either way.
+    with db() as s:
+        stored = load_result(s, "plan-001", 1)
+        assert stored.database.tunnel_endpoint is None
+        assert (stored.application.external_endpoint, stored.application.external_host) == (
+            None,
+            None,
+        )
+
+
+def test_stale_handshake_blocks_even_with_a_recent_report(client, db):
+    onprem_verified(client, db, last_handshake_at=int(time.time()) - 181)
+    at = reported_at(db)
+    for consumer in ("DATA_MIGRATION", "TRAFFIC_MIGRATION"):
+        view = handoff(db, consumer, clock=lambda: at)
+        assert view["blocked_by"] == ["TUNNEL_STATUS_STALE"]
+
+
+def test_a_new_report_reenables_the_handoff(client, db):
+    headers = onprem_verified(client, db)
+    first = reported_at(db)
+    assert handoff(db, "TRAFFIC_MIGRATION", clock=lambda: first + 3600)["proceed"] is False
+
+    assert report(client, headers).status_code == 202
+    again = reported_at(db)
+    view = handoff(db, "TRAFFIC_MIGRATION", clock=lambda: again + 1)
+    assert view["proceed"] is True
+    assert view["application"]["external_host"] == "10.200.0.2"
+
+
+def test_never_verified_and_failed_checks_keep_their_codes_when_stale(client, db):
+    """F3: TUNNEL_STATUS_STALE only replaces a check that passed; failures keep 16's codes."""
+    onprem_verified(client, db, app_health_ok=False, db_connect_ok=False)
+    at = reported_at(db)
+    later = lambda: at + 3600
+    assert handoff(db, "DATA_MIGRATION", clock=later)["blocked_by"] == ["TUNNEL_DB_NOT_VERIFIED"]
+    assert handoff(db, "TRAFFIC_MIGRATION", clock=later)["blocked_by"] == [
+        "EXTERNAL_ENDPOINT_UNAVAILABLE"
+    ]
+
+
+def test_freshness_ttls_are_settings(client, db, monkeypatch):
+    onprem_verified(client, db)
+    at = reported_at(db)
+    monkeypatch.setattr(settings, "tunnel_status_ttl_seconds", 300)
+    monkeypatch.setattr(settings, "tunnel_handshake_stale_seconds", 600)
+    assert handoff(db, "DATA_MIGRATION", clock=lambda: at + 120)["proceed"] is True
+    monkeypatch.setattr(settings, "tunnel_status_ttl_seconds", 30)
+    assert handoff(db, "DATA_MIGRATION", clock=lambda: at + 31)["proceed"] is False
+
+
+def test_tunnel_view_reports_staleness_and_fresh_until():
+    from cmp_api.tunnels import TunnelStatus, tunnel_freshness
+
+    status = TunnelStatus(
+        agent_id="a",
+        tunnel_ip="10.200.0.2",
+        last_handshake_at=1000,
+        app_health_ok=True,
+        db_connect_ok=True,
+        reported_at=1100,
+    )
+    # fresh_until = min(reported_at + 60, last_handshake_at + 180)
+    assert tunnel_freshness(status, now=1160) == (False, 1160)
+    assert tunnel_freshness(status, now=1161) == (True, 1160)
+    status.last_handshake_at = 950
+    assert tunnel_freshness(status, now=1130) == (False, 1130)
+    assert tunnel_freshness(status, now=1131) == (True, 1130)
+    status.last_handshake_at = None
+    assert tunnel_freshness(status, now=1100) == (True, None)

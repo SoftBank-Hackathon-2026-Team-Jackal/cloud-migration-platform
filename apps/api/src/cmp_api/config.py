@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     connection_aws_base_config_file: str | None = None
     # GCP demo: the platform's fixed project; other projects are refused.
     connection_gcp_project_id: str | None = None
+    # Ticket 25 (F1/F2): a tunnel report is current evidence only while it is recent (60 s = four
+    # missed 15 s Agent reports) and its WireGuard handshake is within Reject-After-Time (180 s).
+    tunnel_status_ttl_seconds: int = 60
+    tunnel_handshake_stale_seconds: int = 180
 
 
 settings = Settings()

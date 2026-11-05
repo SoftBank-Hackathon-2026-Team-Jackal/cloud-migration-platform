@@ -3801,12 +3801,22 @@ components:
         db_connect_ok:
           type: boolean
           title: Db Connect Ok
+        stale:
+          type: boolean
+          title: Stale
+        fresh_until:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Fresh Until
       type: object
       required:
       - tunnel_ip
       - last_handshake_at
       - app_health_ok
       - db_connect_ok
+      - stale
+      - fresh_until
       title: TunnelSummary
     ValidatedWorkloadV2:
       properties:

@@ -110,6 +110,8 @@ identity = approval_target(manifest, preview)
 
 `cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록(응답에 중계 서버 목록 포함)·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록·중계 서버용 Agent 목록(`GET /relays/{relay_id}/agents`, 중계 서버 자격 증명, 폐기 Agent는 `revoked: true`로 남음, 내용 digest인 `list_version`)을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`와 `ApplicationHandoff.external_host`·`external_port`가 추가됐다. `external_endpoint`는 "중계 서버가 전달할 목적지"이며 호환을 위해 유지하고, 같은 목적지를 host·port로도 준다(AWS/GCP는 LB 주소·80). `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합친다. Data 인계는 터널 경유 DB 접속 확인 뒤, Traffic 인계는 터널 경유 앱 헬스 확인 뒤(`http://터널IP:앱포트`)에만 진행한다. 중계 서버 공인 주소는 어느 인계 필드에도 없다. 상세는 [티켓 16 T1~T13](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.
 
+**터널 상태 만료 (25, #135):** 터널 보고는 `now - reported_at <= TUNNEL_STATUS_TTL_SECONDS`(기본 60초 = 15초 보고 4회 누락)이고 `last_handshake_at`이 `TUNNEL_HANDSHAKE_STALE_SECONDS`(기본 180초, WireGuard Reject-After-Time) 이내일 때만 현재 근거다(API 서버 시계, 읽는 시점마다 판정). 확인 항목이 보고상 성공이어도 보고가 만료되면 ON_PREM 인계 뷰는 `tunnel_endpoint`·`external_*`를 채우지 않고 `blocked_by: ["TUNNEL_STATUS_STALE"]`(Data·Traffic 공통)로 막는다. 보고 없음·보고상 실패는 기존 코드(`TUNNEL_DB_NOT_VERIFIED`, `EXTERNAL_ENDPOINT_UNAVAILABLE`) 그대로다. 새 보고가 오면 다음 조회에서 다시 진행된다. 저장된 결과는 바뀌지 않고 AWS/GCP는 영향이 없다. 상세는 [티켓 25 F1~F7](../../tickets/provisioning/25-tunnel-status-freshness.md)을 따른다.
+
 ## Plan 생성·게시와 Preview 조회 (18)
 
 새 공유 모델은 `cmp_contracts.plan_publish`의 `PlanningInputRegistration`(Planning 입력 v2 + Provider별 대상 설정 + 선택 요구사항 바이트)과 `plan_id_for`(Migration당 Plan ID)뿐이다. 기존 `PlanManifest`·`Preview`·`approval_target`·`onprem_preview`·05/06 Plan 함수는 바꾸지 않고 호출한다. `publish_plan_revision`은 선택 인자 `input_digest`를 받아 같은 트랜잭션에 `provisioning_plan_publications`를 기록한다(기존 호출 동작은 그대로). `ProvisioningApprovalWorkflow` 요청은 선택 필드 `approval_timeout_seconds`를 받아 승인 없이 기간이 지나면 `EXPIRED/APPROVAL_EXPIRED`로 끝난다. 상세는 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05)을 따른다.
@@ -137,11 +139,13 @@ Agent 항목:
 
 ```json
 {"agent_id": "...", "cluster_uid": "...", "last_seen_at": 0, "online": true, "revoked": false, "version": null,
- "tunnel": {"tunnel_ip": "10.200.0.2", "last_handshake_at": 0, "app_health_ok": true, "db_connect_ok": true}}
+ "tunnel": {"tunnel_ip": "10.200.0.2", "last_handshake_at": 0, "app_health_ok": true, "db_connect_ok": true,
+            "stale": false, "fresh_until": 60}}
 ```
 
 - `online`: 폐기되지 않았고 `last_seen_at`이 60초 이내다.
 - `tunnel`: 16의 마지막 `agent_tunnel_status` 보고다. 보고가 없으면 `null`이다.
+- `tunnel.stale`·`tunnel.fresh_until`(25 F6, 추가 필드): 보고가 위 만료 규칙상 현재 근거가 아니면 `stale: true`다. `fresh_until`은 `min(reported_at + 60, last_handshake_at + 180)`(설정값 기준), handshake가 없으면 `null`이고 `stale: true`다. 화면은 `stale`이면 앱/DB OK를 "확인 만료"로 보인다. `online`은 위 정의 그대로다.
 - `version`: Agent 버전 보고가 후속이라 `null`이다.
 
 **`credential_ref` 해석:** 역할이 등록된 AWS 연결의 `credential_ref`는 `cmp-conn-<연결 hex>`다. 이 이름은 생성된 AWS config 파일(`connection_aws_config_file`)의 프로필이다. 프로필은 `role_arn`, `external_id`, `source_profile = connection_platform_aws_profile`, `role_session_name`, `duration_seconds = 3600`, `region`이다. 분석 `cmp_scanners.aws_infra.get_session(credential_ref)`과 Provisioning `aws_profile`에 그대로 넘긴다. 프로세스는 `AWS_CONFIG_FILE`이 이 파일을 가리켜야 한다. 대기 중인 연결과 GCP 연결은 `credential_ref: null`이다. GCP 데모는 기존 `provisioning_gcloud_configuration`·ADC 설정을 쓴다.

@@ -168,6 +168,10 @@ class TunnelSummary(BaseModel):
     last_handshake_at: int | None
     app_health_ok: bool
     db_connect_ok: bool
+    # Ticket 25 F6: true when this report is no longer current evidence (report older than
+    # TUNNEL_STATUS_TTL_SECONDS or no handshake within TUNNEL_HANDSHAKE_STALE_SECONDS).
+    stale: bool
+    fresh_until: int | None
 
 
 class AgentSummary(BaseModel):

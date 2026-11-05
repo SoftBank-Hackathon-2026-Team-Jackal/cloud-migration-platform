@@ -160,3 +160,5 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
 > 2026-11-05 티켓 16 변경: ON_PREM Data 인계는 터널 경유 DB 접속이 확인된 뒤에만 진행하고 `database.tunnel_endpoint`를 인계 뷰에 채운다(16 T2·T7). 저장된 결과는 바꾸지 않는다(T6).
 >
 > 2026-11-05 티켓 16 답변 반영: `application.external_host`·`external_port`를 추가했다(16 T10, AWS/GCP는 `external_endpoint`에서 나눈 값). ON_PREM Traffic 인계는 터널 경유 앱 헬스가 확인되면 인계 뷰에 `external_endpoint = http://터널IP:앱포트`와 host·port를 채워 진행한다(16 T11). 확인 전에는 위처럼 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단된다. R7 조건 자체는 바뀌지 않는다.
+>
+> 2026-11-05 티켓 25 변경: 터널 확인 보고가 만료되면(보고 60초·handshake 180초, 설정값) ON_PREM Data·Traffic 인계 뷰는 터널 값을 채우지 않고 `TUNNEL_STATUS_STALE`로 차단한다(25 F1~F5). 저장된 결과는 그대로다.

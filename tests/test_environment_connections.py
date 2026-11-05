@@ -547,11 +547,51 @@ def test_unified_list_matches_the_web_contract(client, aws, monkeypatch):
             "last_handshake_at": now - 5,
             "app_health_ok": True,
             "db_connect_ok": False,
+            "stale": False,
+            "fresh_until": now + 60,
         },
     }
     assert agents_by_id["agent-stale"]["online"] is False
     assert agents_by_id["agent-stale"]["tunnel"] is None
     assert client.get("/agent-admin/agents", headers=ADMIN).json() == {"agents": body["agents"]}
+
+
+def test_agent_tunnel_marks_stale_reports_without_changing_online(client):
+    """Ticket 25 F6: `tunnel.stale` follows report/handshake age; `online` stays as in 23."""
+    s = client.session
+    register_agent(s, agent_id="agent-001", cluster_uid="uid-1")
+    s.query(connections.RegisteredAgent).one().last_seen_at = 1000
+    tunnel = register_key(s, "agent-001", "A" * 43 + "=")
+    status = TunnelStatus(
+        agent_id="agent-001",
+        tunnel_ip=tunnel.tunnel_ip,
+        last_handshake_at=990,
+        app_health_ok=True,
+        db_connect_ok=True,
+        reported_at=1000,
+    )
+    s.add(status)
+    s.commit()
+
+    def summary(now):
+        (item,) = connections.agent_summaries(s, now=now)
+        return item
+
+    fresh = summary(1060)
+    assert (fresh["online"], fresh["tunnel"]["stale"], fresh["tunnel"]["fresh_until"]) == (
+        True,
+        False,
+        1060,
+    )
+    assert summary(1061)["tunnel"]["stale"] is True
+    assert summary(1061)["online"] is False  # 23 rule (last_seen_at + 60), unchanged
+    status.last_handshake_at = 800  # handshake 200 s old although the report is recent
+    s.commit()
+    assert summary(1000)["tunnel"] | {"stale": True, "fresh_until": 980} == summary(1000)["tunnel"]
+    status.last_handshake_at = None
+    s.commit()
+    assert summary(1000)["tunnel"]["stale"] is True
+    assert summary(1000)["tunnel"]["fresh_until"] is None
 
 
 def test_delete_removes_platform_data_and_points_at_the_stack(client):
