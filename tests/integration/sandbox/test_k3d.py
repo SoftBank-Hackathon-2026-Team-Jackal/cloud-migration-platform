@@ -39,6 +39,10 @@ PODINFO = Image(
     uri="ghcr.io/stefanprodan/podinfo@sha256:862ca45e61b32392f7941a1bdfdbe5ff8b6899070135f1bdca1c287d0057fc94",
     platforms=["linux/amd64", "linux/arm64"],
 )
+PODINFO_OLD = Image(
+    uri="ghcr.io/stefanprodan/podinfo@sha256:d2b3cd93a48acdc91327533ce28fcb3169b2d9feaf73817dc2eb68858df64edb",
+    platforms=["linux/amd64", "linux/arm64"],
+)
 ENV_VALUE = "k3d-env-secret-value-7788"
 
 
@@ -85,17 +89,18 @@ def service():
     )
 
 
-def prepare(service, run_id, tmp_path):
+def prepare(service, run_id, tmp_path, *, app=PODINFO, env_value=ENV_VALUE, **kw):
     env_file = tmp_path / ".env"
-    env_file.write_text(f"FEATURE_X={ENV_VALUE}\nAWS_REGION=ap-northeast-2\n")
+    env_file.write_text(f"FEATURE_X={env_value}\nAWS_REGION=ap-northeast-2\n")
     return service.prepare_sandbox(
         requirements(),
         migration_id="it-mig",
         run_id=run_id,
-        images=SandboxImages(database=POSTGRES, applications={"demo-api": PODINFO}),
+        images=SandboxImages(database=POSTGRES, applications={"demo-api": app}),
         capabilities=SandboxCapabilities(storage_class="local-path"),
         env_names=["FEATURE_X"],  # AWS_REGION is an excluded variable and is never copied
         env_file=env_file,
+        **kw,
     )
 
 
@@ -171,3 +176,78 @@ def test_the_dedicated_context_is_the_only_one_the_cluster_accepts():
         SandboxCluster(
             CommandRunner(), kubeconfig=Path(KUBECONFIG).expanduser(), context="minikube"
         )
+
+
+def jsonpath(*args):
+    return kubectl(*args).stdout.strip()
+
+
+def sql(plan, statement):
+    release = plan.releases["demo-db"]
+    script = f'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "{statement}"'
+    return kubectl("exec", "-n", plan.namespace, f"statefulset/{release}", "--", "sh", "-c", script)
+
+
+def test_update_changes_only_what_differs_and_reset_restores_the_baseline(service, tmp_path):
+    run_id = "up-" + uuid.uuid4().hex[:8]
+    first = prepare(service, run_id, tmp_path, app=PODINFO_OLD)
+    try:
+        service.apply_sandbox(first)
+        service.check_sandbox(first)
+        ns, db, app = first.namespace, first.releases["demo-db"], first.releases["demo-api"]
+        db_pod = jsonpath("get", "pod", f"{db}-0", "-n", ns, "-o", "jsonpath={.metadata.uid}")
+        db_rev = jsonpath("get", "secret", "-n", ns, "-l", f"name={db},owner=helm", "-o", "name")
+        assert db_pod
+
+        # Baseline first, then data the test run is allowed to change.
+        assert service.snapshot_baseline(first) == {"baseline": "SAVED"}
+        assert sql(first, "create table scratch(id int)").returncode == 0
+
+        # Image-only change: the database release and pod are untouched.
+        second = prepare(service, run_id, tmp_path, app=PODINFO, update_env=True)
+        record = service.update_sandbox(first, second, attempt=2)
+        assert {k: v.action for k, v in record.resources.items()} == {
+            "demo-api": "UPGRADED",
+            "demo-db": "UNCHANGED",
+        }
+        assert record.baseline == "KEPT"
+        assert record.resources["demo-api"].image_digest == PODINFO.uri.rsplit("@", 1)[1]
+        assert (
+            jsonpath("get", "pod", f"{db}-0", "-n", ns, "-o", "jsonpath={.metadata.uid}") == db_pod
+        )
+        assert (
+            jsonpath("get", "secret", "-n", ns, "-l", f"name={db},owner=helm", "-o", "name")
+            == db_rev
+        )
+        service.check_sandbox(second)
+
+        # Changed env value: the application pod is restarted, the database is not.
+        app_pods = jsonpath(
+            "get", "pod", "-n", ns, "-l", f"app.kubernetes.io/instance={app}", "-o", "name"
+        )
+        third = prepare(
+            service, run_id, tmp_path, app=PODINFO, env_value="rotated-7799", update_env=True
+        )
+        assert third.env_updated == [f"{app}-env"]
+        record = service.update_sandbox(second, third, attempt=3)
+        assert record.resources["demo-api"].action == "RESTARTED"
+        assert (
+            jsonpath(
+                "get", "pod", "-n", ns, "-l", f"app.kubernetes.io/instance={app}", "-o", "name"
+            )
+            != app_pods
+        )
+        assert (
+            jsonpath("get", "pod", f"{db}-0", "-n", ns, "-o", "jsonpath={.metadata.uid}") == db_pod
+        )
+        assert "rotated-7799" not in json.dumps(
+            [third.model_dump(mode="json"), record.model_dump(mode="json")]
+        )
+
+        # Reset removes what the run created and keeps what the baseline held.
+        assert sql(third, "select count(*) from scratch").stdout.strip() == "0"
+        assert service.reset_test_data(third) == {"reset": "OK"}
+        assert "does not exist" in sql(third, "select count(*) from scratch").stderr
+        service.check_sandbox(third)
+    finally:
+        service.teardown_sandbox(first.namespace)
