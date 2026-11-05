@@ -38,8 +38,12 @@ def psql(ref: str, sql: str) -> str:
     return done.stdout.decode().strip()
 
 
-FINGERPRINT = """select (select count(*) from messages) || '|' || (select count(*) from audit_log)
-  || '|' || (select md5(string_agg(id::text || body, ',' order by id)) from messages)"""
+def fingerprint(upto: int) -> str:
+    """id <= upto 범위만 비교한다(실습 원본 앱이 계속 쓰고 있어도 같은 범위를 본다)."""
+    return f"""select (select count(*) from messages where id <= {upto}) || '|'
+      || (select count(*) from audit_log) || '|'
+      || (select md5(string_agg(id::text || body, ',' order by id)) from messages
+          where id <= {upto})"""
 
 
 @pytest.fixture
@@ -98,11 +102,12 @@ async def test_initial_copy_and_cdc_reach_streaming_with_matching_data(
                        "from generate_series(1, 300) g; update messages set body = 'lab-edit' "
                        "where id % 97 = 0; delete from audit_log where ctid in "
                        "(select ctid from audit_log limit 1);")  # fmt: skip
+    upto = int(psql("cmp-dm-src", "select max(id) from messages"))
     for _ in range(30):
-        if psql("cmp-dm-src", FINGERPRINT) == psql("cmp-dm-dst", FINGERPRINT):
+        if psql("cmp-dm-src", fingerprint(upto)) == psql("cmp-dm-dst", fingerprint(upto)):
             break
         await asyncio.sleep(1)
-    assert psql("cmp-dm-src", FINGERPRINT) == psql("cmp-dm-dst", FINGERPRINT)
+    assert psql("cmp-dm-src", fingerprint(upto)) == psql("cmp-dm-dst", fingerprint(upto))
 
     ready = await env.run(dm.dm_readiness, request_payload)
     assert ready["ready"], ready
