@@ -17,7 +17,7 @@ GOOD = {"requests": 100, "failed": 0, "p99_ms": 100.0}
 POLICY = {"observe_seconds": 1, "min_requests": 30}
 
 
-def fake_worker(client, windows, *, fail_apply_at=None, calls=None):
+def fake_worker(client, windows, *, fail_apply_at=None, calls=None, queue=MIGRATION_QUEUE):
     calls = calls if calls is not None else []
     seq = iter(windows)
 
@@ -47,7 +47,7 @@ def fake_worker(client, windows, *, fail_apply_at=None, calls=None):
 
     return Worker(
         client,
-        task_queue=MIGRATION_QUEUE,
+        task_queue=queue,
         activities=[prepare, set_weight, observe, rollback],
     )
 
@@ -130,3 +130,22 @@ async def test_workflow_history_replays_without_nondeterminism() -> None:
             await handle.result()
         history = await handle.fetch_history()
     await Replayer(workflows=[TrafficShiftWorkflow]).replay_workflow(history)
+
+
+@pytest.mark.asyncio
+async def test_activities_run_on_the_relay_queue_when_the_request_names_one() -> None:
+    """Envoy가 있는 중계 서버 호스트의 워커가 직접 받도록 전용 큐로 보낼 수 있다."""
+    result, calls = await run(
+        [GOOD, GOOD, GOOD], {"relay_queue": "relay-seoul-1"}, queue="relay-seoul-1"
+    )
+    assert result["status"] == "DONE"
+    assert [c[1] for c in calls if c[0] == "set"] == [10, 50, 100]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["has space", "x" * 200, "../etc", 123])
+async def test_invalid_relay_queue_name_is_rejected_before_anything_runs(bad) -> None:
+    from temporalio.client import WorkflowFailureError
+
+    with pytest.raises(WorkflowFailureError):
+        await run([GOOD], {"relay_queue": bad})

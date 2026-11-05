@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
+from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     from cmp_contracts.queues import MIGRATION_QUEUE
@@ -24,6 +25,7 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.activities import traffic
 
 ZERO = {"requests": 0, "failed": 0, "p99_ms": 0.0}
+QUEUE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 
 
 @workflow.defn
@@ -32,6 +34,7 @@ class TrafficShiftWorkflow:
         self.cancel_requested = False
         self.snapshot: dict = {}
         self.events: list[dict] = []
+        self.queue = MIGRATION_QUEUE
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -45,7 +48,7 @@ class TrafficShiftWorkflow:
         return await workflow.execute_activity(
             fn,
             payload,
-            task_queue=MIGRATION_QUEUE,
+            task_queue=self.queue,
             schedule_to_start_timeout=timedelta(minutes=5),
             start_to_close_timeout=timedelta(seconds=timeout_s),
             retry_policy=RetryPolicy(maximum_attempts=attempts),
@@ -82,6 +85,11 @@ class TrafficShiftWorkflow:
 
     @workflow.run
     async def run(self, request: dict) -> dict:
+        # Envoy가 있는 중계 서버 호스트의 워커가 직접 받도록 전용 큐를 쓸 수 있다(없으면 기본 큐).
+        queue = request.get("relay_queue") or MIGRATION_QUEUE
+        if not isinstance(queue, str) or not QUEUE_NAME.fullmatch(queue):
+            raise ApplicationError("invalid relay_queue name", non_retryable=True)
+        self.queue = queue
         policy = TrafficPolicy.model_validate(request.get("policy") or {})
         handover = Handover.model_validate(request["handover"])
         db_gate_ok = request.get("db_gate_ok")
