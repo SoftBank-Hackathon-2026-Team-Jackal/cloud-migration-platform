@@ -9,6 +9,7 @@ from cmp_worker.activities.aws_workloads_cli import build_aws_workloads_activiti
 from cmp_worker.activities.gcp_infra import GcpInfraActivities
 from cmp_worker.activities.gcp_workloads_cli import build_gcp_workloads_activities
 from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
+from cmp_worker.activities.plan_publish import build_plan_publish_activities
 from cmp_worker.activities.provisioning import prepare_plan, provision_target
 from cmp_worker.config import settings
 
@@ -35,6 +36,7 @@ def create_worker(client: Client) -> Worker:
         activities=[
             prepare_plan,
             provision_target,
+            build_plan_publish_activities(SessionLocal).publish_migration_plan,  # ticket 18
             approval.claim_approved_execution,
             approval.complete_approved_execution,
             approval.get_migration_handoff,  # ticket 13

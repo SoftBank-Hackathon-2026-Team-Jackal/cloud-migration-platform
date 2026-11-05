@@ -70,8 +70,19 @@ class ProvisioningApprovalWorkflow:
 
     @workflow.run
     async def run(self, request: dict) -> dict:
+        # Ticket 18 P8: a MigrationWorkflow parent sets an approval window; API-started runs
+        # (no field) wait without limit as before. Expiry closes the Workflow normally, so a late
+        # Signal-With-Start finds it closed and never starts execution.
+        timeout = request.get("approval_timeout_seconds")
         try:
-            await workflow.wait_condition(lambda: bool(self.pending))
+            if timeout:
+                await workflow.wait_condition(
+                    lambda: bool(self.pending), timeout=timedelta(seconds=timeout)
+                )
+            else:
+                await workflow.wait_condition(lambda: bool(self.pending))
+        except TimeoutError:
+            return self._finish({"status": "EXPIRED", "code": "APPROVAL_EXPIRED"})
         except asyncio.CancelledError:
             return self._finish({"status": "CANCELLED", "code": "CANCELLED_BEFORE_EXECUTION"})
         self.approval_id = self.pending.pop(0)
