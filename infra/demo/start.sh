@@ -31,7 +31,7 @@ for attempt in {1..30}; do
   platform_db_health="$(docker inspect --format '{{.State.Health.Status}}' cmp-demo-platform-db-1 2>/dev/null || true)"
   temporal_db_health="$(docker inspect --format '{{.State.Health.Status}}' cmp-demo-temporal-db-1 2>/dev/null || true)"
   if [[ "$worker_running" == true && "$platform_db_health" == healthy && "$temporal_db_health" == healthy ]] && curl --fail --silent http://127.0.0.1:8000/health | grep -q '"status":"ok"' \
-    && docker exec cmp-demo-worker-1 sh -c 'terraform version && helm version --short && kubectl version --client && aws --version && gcloud --version' >/dev/null 2>&1; then
+    && docker exec cmp-demo-worker-1 sh -c 'terraform version && helm version --short && kubectl version --client && aws --version && gcloud --version && docker version && docker buildx version' >/dev/null 2>&1; then
     echo "CMP demo API healthy"
     "${compose[@]}" ps
     exit 0

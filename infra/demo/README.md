@@ -62,6 +62,38 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/docs         
 
 Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰을 발급한 뒤 15의 Chart에 `platform.url=https://<CMP_PUBLIC_HOST>`로 설치한다. 등록·작업 수신이 되면 18의 Plan 게시 → 승인 → ON_PREM 실행 스모크를 진행한다(18 완료 후).
 
+## 빌드 실행 환경 (#152, ticket 28)
+
+빌드 모듈(B-01)이 데모 서버에서 S3 소스를 받아 플랫폼 ECR에 push하도록 **별도 스택** `cmp-demo-build`(`build-stack.yaml`)를 둔다. 기존 `cmp-demo-control-plane` 스택은 갱신하지 않는다(미반영 EIP 때문에 공인 IP가 바뀐다).
+
+| 항목 | 값 |
+| --- | --- |
+| ECR 저장소 | `cmp-platform-builds` (`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-platform-builds`), `IMMUTABLE`, 푸시 시 스캔, 태그 없는 이미지만 7일 뒤 만료, 스택 삭제 시 보존 |
+| 인스턴스 역할 인라인 정책 | `cmp-demo-build`: `ecr:GetAuthorizationToken`, 그 저장소의 pull·push, 배포 버킷 `sources/`·`tests/`·`builds/`의 `GetObject`·`PutObject`, 버킷 `ListBucket`. `releases/`는 읽기 전용 그대로 |
+| worker 설정 | `BUILD_ECR_REPOSITORY`·`BUILD_SOURCE_BUCKET`·`BUILD_LOG_BUCKET`·`BUILD_PLATFORM`(`/opt/cmp/.env`, 비면 사전 빌드 이미지), `BUILD_AWS_PROFILE`·`AWS_PROFILE`=`cmp-demo-build`(인스턴스 역할 프로필) |
+| worker 빌드 | 이미지의 Docker CLI 28.5.2·buildx v0.37.2 → 마운트한 호스트 `/var/run/docker.sock`의 데몬 |
+
+**소켓 위험**: Docker 소켓을 가진 컨테이너는 호스트 root와 같은 권한이다. worker에만 주며, 빌드하는 앱 Dockerfile의 `RUN`도 호스트 데몬에서 실행된다. 대회용 단일 호스트에서만 허용한다. 운영급 대안은 rootless BuildKit을 별도 서비스로 두고 worker가 `BUILDKIT_HOST`(TLS)로만 접속하거나, 빌드를 CodeBuild·Kaniko 같은 격리 실행으로 옮기는 것이다.
+
+### 반영 (각 단계 사용자 승인 필요)
+
+```sh
+bash infra/demo/deploy-build-stack.sh --plan   # 변경 세트만 만들고 실행하지 않음
+bash infra/demo/deploy-build-stack.sh          # 스택 생성, BUILD_* 네 줄 출력
+# SSM 세션에서 출력된 네 줄을 /opt/cmp/.env에 추가한 뒤
+bash infra/demo/release.sh HEAD
+```
+
+### 서버 점검
+
+```sh
+# SSM 세션에서
+docker exec cmp-demo-worker-1 sh -c 'docker version --format "{{.Server.Version}}"; docker buildx version'
+docker exec cmp-demo-worker-1 aws sts get-caller-identity --query Arn --output text   # .../cmp-demo-control-plane-InstanceRole-.../i-...
+docker exec cmp-demo-worker-1 aws ecr describe-repositories --region ap-northeast-2 --repository-names cmp-platform-builds --query 'repositories[0].imageTagMutability' --output text  # IMMUTABLE
+docker exec cmp-demo-worker-1 python -c 'from cmp_worker.config import settings as s; from cmp_worker.build_wiring import BuildSettings as B; print(B.from_values(s.build_source_bucket, s.build_ecr_repository, s.build_log_bucket, s.build_platform, s.build_aws_profile))'
+```
+
 ## 접속과 확인
 
 SSM Session Manager의 포트 포워딩으로 로컬 `8000`을 EC2 `8000`에 연결하면 `/health`와 `/docs`를 볼 수 있다. Temporal UI는 같은 방식으로 `8080`에 접속한다. API/Temporal UI는 EC2의 loopback에만 바인딩된다. 공개 URL은 Agent 경로(`/agents/*`)만 전달하는 에지뿐이다.

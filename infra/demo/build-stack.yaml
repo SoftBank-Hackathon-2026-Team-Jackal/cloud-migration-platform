@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  CMP demo build registry and Sandbox storage access (ticket 28, #152). A separate stack: it adds
+  an inline policy to the EXISTING control-plane instance role and never updates
+  cmp-demo-control-plane.
+
+Parameters:
+  InstanceRoleName:
+    Type: String
+    Description: Name of the existing demo EC2 instance role (cmp-demo-control-plane InstanceRole).
+    AllowedPattern: '^[\w+=,.@-]{1,64}$'
+  DeployBucketName:
+    Type: String
+    Description: Existing deploy bucket; releases/ stays read-only.
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+  RepositoryName:
+    Type: String
+    Default: cmp-platform-builds
+    AllowedPattern: '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'
+  # Key prefixes the worker writes today (confirm with the Sandbox owner before changing):
+  # package_source -> sources/<sha>.tar.gz, upload_suite -> tests/<sha>.tar.gz,
+  # ImageBuilder log -> builds/<migration>/<resource>/<attempt>.json.
+  SourcePrefix:
+    Type: String
+    Default: sources
+    AllowedPattern: '^[A-Za-z0-9_-]+$'
+  SuitePrefix:
+    Type: String
+    Default: tests
+    AllowedPattern: '^[A-Za-z0-9_-]+$'
+  LogPrefix:
+    Type: String
+    Default: builds
+    AllowedPattern: '^[A-Za-z0-9_-]+$'
+  UntaggedImageDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+
+Rules:
+  ReleasesStayReadOnly:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref SourcePrefix, releases]]
+        AssertDescription: releases/ belongs to the deploy pipeline.
+      - Assert: !Not [!Equals [!Ref SuitePrefix, releases]]
+        AssertDescription: releases/ belongs to the deploy pipeline.
+      - Assert: !Not [!Equals [!Ref LogPrefix, releases]]
+        AssertDescription: releases/ belongs to the deploy pipeline.
+
+Resources:
+  BuildRepository:
+    Type: AWS::ECR::Repository
+    # Images are pinned by digest in approved Plans; never delete them with the stack.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref RepositoryName
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {"rules": [{"rulePriority": 1,
+            "description": "Expire untagged images (failed or superseded pushes)",
+            "selection": {"tagStatus": "untagged", "countType": "sinceImagePushed",
+                          "countUnit": "days", "countNumber": ${UntaggedImageDays}},
+            "action": {"type": "expire"}}]}
+      Tags:
+        - Key: Project
+          Value: cloud-migration-platform
+        - Key: Purpose
+          Value: hackathon-demo-builds
+
+  BuildAccessPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref InstanceRoleName
+      PolicyName: cmp-demo-build
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # The registry login token cannot be scoped to a repository.
+          - Sid: EcrLogin
+            Effect: Allow
+            Action: ecr:GetAuthorizationToken
+            Resource: '*'
+          - Sid: EcrPull
+            Effect: Allow
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchCheckLayerAvailability
+              - ecr:DescribeImages
+              - ecr:DescribeRepositories
+            Resource: !GetAtt BuildRepository.Arn
+          - Sid: EcrPush
+            Effect: Allow
+            Action:
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+            Resource: !GetAtt BuildRepository.Arn
+          # HeadObject answers 404 (not 403) for a missing key only with ListBucket, and S3 does
+          # not pass s3:prefix for that check, so a prefix condition here would break the
+          # "upload only when missing" step. Listing shows key names only.
+          - Sid: SandboxList
+            Effect: Allow
+            Action: s3:ListBucket
+            Resource: !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}'
+          - Sid: SandboxObjects
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${SourcePrefix}/*'
+              - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${SuitePrefix}/*'
+              - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${LogPrefix}/*'
+
+Outputs:
+  RepositoryName:
+    Value: !Ref BuildRepository
+  RepositoryArn:
+    Value: !GetAtt BuildRepository.Arn
+  RepositoryUri:
+    Value: !GetAtt BuildRepository.RepositoryUri
+  BuildPolicyName:
+    Value: cmp-demo-build
+  SourceBucket:
+    Value: !Ref DeployBucketName

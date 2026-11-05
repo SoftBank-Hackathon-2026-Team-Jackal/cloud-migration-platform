@@ -102,11 +102,23 @@ services:
       CMP_GCP_KEY_FILE: /run/cmp/gcp/key.json
       CMP_GCP_PROJECT: ${CMP_GCP_PROJECT:-}
       PROVISIONING_GCLOUD_CONFIGURATION: cmp-demo
+      # Ticket 28 (#152): the Build module. Names only, from /opt/cmp/.env (deploy-build-stack.sh
+      # prints them); all empty keeps the pre-built images. The Build module's own `aws` calls take
+      # the process profile, so AWS_PROFILE names the instance-role build profile explicitly.
+      BUILD_ECR_REPOSITORY: ${BUILD_ECR_REPOSITORY:-}
+      BUILD_SOURCE_BUCKET: ${BUILD_SOURCE_BUCKET:-}
+      BUILD_LOG_BUCKET: ${BUILD_LOG_BUCKET:-}
+      BUILD_PLATFORM: ${BUILD_PLATFORM:-}
+      BUILD_AWS_PROFILE: cmp-demo-build
+      AWS_PROFILE: cmp-demo-build
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
       - /opt/cmp/secrets/gcp:/run/cmp/gcp:ro
+      # Ticket 28: builds run on the host daemon. Whoever holds this socket is root-equivalent on
+      # the host; only the worker gets it (production: rootless BuildKit, see README).
+      - /var/run/docker.sock:/var/run/docker.sock
     tmpfs:
       - /root/.config/gcloud:mode=0700
       - /root/.aws:mode=0700
