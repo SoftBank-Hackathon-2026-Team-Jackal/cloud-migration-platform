@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from cmp_contracts.artifact import ArtifactRef, Digest
-from cmp_contracts.chart import KubernetesName
+from cmp_contracts.chart import KubernetesName, SecretKey
 from cmp_contracts.provisioning import Contract, Positive, Text
 from cmp_contracts.shared_deployment_v2 import SecretRefV2
 
@@ -38,6 +38,15 @@ class RolloutDatabase(Contract):
     )
 
 
+class RolloutEnvSecret(Contract):
+    """ENV-04: a Secret the platform renders from the approved EnvPlan (`<app>-env`,
+    `<db>-conn`). Only the name and keys cross this boundary; the Agent fetches the data for its
+    own RUNNING job from `GET /agents/{id}/jobs/{job}/env-secrets` and applies it in the cluster."""
+
+    name: KubernetesName
+    keys: list[SecretKey] = Field(min_length=1)
+
+
 class RolloutApplication(Contract):
     release: ReleaseName
     chart: ArtifactRef
@@ -46,6 +55,11 @@ class RolloutApplication(Contract):
     health_path: Annotated[str, Field(pattern=r"^/[A-Za-z0-9/_.-]*$")]
     # User-provided Secrets that must already exist; checked before any Helm mutation.
     secret_refs: list[SecretRefV2] = Field(default_factory=list)
+    # ENV-04: platform-rendered Secrets. Omitted while empty so jobs without an EnvPlan keep
+    # identical payloads; an Agent older than ENV-04 rejects a job that carries it.
+    env_secrets: list[RolloutEnvSecret] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
 
 
 class ProductionRolloutJob(Contract):

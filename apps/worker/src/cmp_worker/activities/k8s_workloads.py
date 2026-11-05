@@ -24,10 +24,21 @@ from typing import Any, ClassVar, Protocol
 from cmp_api.approvals import PlanApproval, PlanExecution, PlanRevision, latest_revision
 from cmp_contracts.application import ApplicationValues
 from cmp_contracts.chart import DynamicBinding, PostgresChartValues
+from cmp_contracts.env_plan import EnvPlan
 from cmp_contracts.plan import PlanManifest
+from cmp_contracts.provisioning import ContentRef
+from cmp_contracts.shared_deployment_v2 import SecretRefV2
 from cmp_providers.application import prepare_application, resolve_application, verify_application
 from cmp_providers.artifacts import canonical_json_bytes, verify_artifact_bytes
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url, connection_url_secret_name
+from cmp_providers.env_file import (
+    DbOutputRefs,
+    EnvFileError,
+    EnvFileStore,
+    database_outputs,
+    deployment_secrets,
+    render_env,
+)
 from cmp_providers.plans import manifest_digest
 from pydantic import TypeAdapter
 from sqlalchemy import select
@@ -146,6 +157,7 @@ class Approved:
     db_values: PostgresChartValues
     app_values: dict
     files: dict[str, bytes]
+    env_plan: EnvPlan | None = None  # ENV-04: from the approved SPEC artifact
 
 
 def outcome(status: str, code: str, refs: dict[str, str]) -> dict:
@@ -206,8 +218,10 @@ class ApprovedWorkloads:
         resolver: TargetResolver,
         runtime: WorkloadRuntime,
         timeouts: Timeouts | None = None,
+        env_store: EnvFileStore | None = None,
     ):
         self._session_factory = session_factory
+        self._env_store = env_store
         self._root = artifact_root
         self._resolver = resolver
         self._runtime = runtime
@@ -271,11 +285,40 @@ class ApprovedWorkloads:
                 raise WorkloadFailure("SCOPE_MISMATCH")
             files = self._read_artifacts(manifest)
             db_values, app_values = self._verify_values(manifest, files)
+            env_plan = self._env_plan(manifest, app_values)
             target = self._resolver.resolve(session, manifest, request)
         if target is None:
             raise WorkloadFailure("CLUSTER_TARGET_UNAVAILABLE")
         self.check_target(manifest, target)
-        return Approved(manifest, target, db_values, app_values, files)
+        return Approved(manifest, target, db_values, app_values, files, env_plan)
+
+    def _env_plan(self, manifest: PlanManifest, app_values: dict) -> EnvPlan | None:
+        """ENV-04: the EnvPlan pinned in the approved SPEC artifact, or None (old Plans)."""
+        ref = manifest.artifacts.get("spec")
+        if ref is None:
+            return None
+        folder = self._root / f"{manifest.plan.plan_id}-r{manifest.plan.revision}"
+        try:
+            content = (folder / ref.sha256).read_bytes()
+        except OSError:
+            raise WorkloadFailure("ARTIFACT_MISSING") from None
+        try:
+            verify_artifact_bytes(ref, content)
+        except ValueError:
+            raise WorkloadFailure("ARTIFACT_DIGEST_MISMATCH") from None
+        try:
+            document = json.loads(content)
+        except ValueError:
+            return None
+        if not isinstance(document, dict) or "env_plan" not in document:
+            return None
+        try:
+            plan = EnvPlan.model_validate(document["env_plan"])
+        except ValueError:
+            raise WorkloadFailure("INVALID_ENV_PLAN") from None
+        if plan.env_file_ref != ContentRef.model_validate(app_values["config_ref"]):
+            raise WorkloadFailure("ENV_PLAN_REF_MISMATCH")
+        return plan
 
     def _read_artifacts(self, manifest: PlanManifest) -> dict[str, bytes]:
         if self._root is None:
@@ -452,7 +495,11 @@ class ApprovedWorkloads:
         refs["namespace"] = namespace
         await self.prepare_namespace(cluster, approved, refs)
 
-        # User-provided references must already exist; this run never creates them.
+        if approved.env_plan is not None:
+            await self._apply_env(cluster, approved, refs)
+
+        # User-provided references must already exist; this run never creates them
+        # (ENV-04 `-env`/`-conn` were created just above from the approved EnvPlan).
         for item in ApplicationValues.model_validate(app).env:
             source = item.source
             if source.kind == "USER_SECRET":
@@ -573,6 +620,55 @@ class ApprovedWorkloads:
         )
         await self.expose(cluster, approved, refs)
 
+    async def _apply_env(self, cluster, approved: Approved, refs: dict[str, str]) -> None:
+        """ENV-04: `render_env` with the target DB outputs → `<app>-env` and `<db>-conn`.
+
+        Values are read here, applied via stdin (`apply_secret`) and dropped; only Secret names
+        reach the result. An unmanaged Secret with the same name is never overwritten."""
+        if self._env_store is None:
+            raise WorkloadFailure("ENV_FILE_STORE_UNCONFIGURED")
+        db, app, plan = approved.db_values, approved.app_values, approved.env_plan
+        namespace = db.namespace
+        outputs = database_outputs(
+            release=db.release_name,
+            namespace=namespace,
+            name=db.database.name,
+            username=db.database.username,
+            password_secret_ref=SecretRefV2(
+                name=db.database.secret_name, key=db.database.secret_key
+            ),
+        )
+        db_refs = DbOutputRefs.from_outputs(outputs, database_release=db.release_name)
+
+        def render():
+            return render_env(
+                self._env_store,
+                plan,
+                plan.env_file_ref,
+                db_refs,
+                app_release=app["release_name"],
+            )
+
+        try:
+            rendered = await self._call(render)
+        except EnvFileError as error:
+            raise WorkloadFailure(error.code) from None
+        if rendered.decisions:
+            raise WorkloadFailure(rendered.decisions[0].code)
+        expected = {(i.name, i.secret_ref.name, i.secret_ref.key) for i in rendered.env}
+        if _secret_env(app, db) != expected:
+            raise WorkloadFailure("ENV_BINDING_MISMATCH")
+        secrets_to_apply = deployment_secrets(rendered, outputs, database_release=db.release_name)
+        del rendered
+        for secret in secrets_to_apply:
+            if await self._call(cluster.secret_managed, namespace, secret.name) is False:
+                raise WorkloadFailure("SECRET_NAME_CONFLICT")
+        for secret in secrets_to_apply:
+            data = secret.reveal()
+            await self._call(cluster.apply_secret, namespace, secret.name, data)
+            del data
+        refs["env_secrets"] = ",".join(secret.name for secret in secrets_to_apply)
+
     async def _execute(self, request: dict) -> dict:
         result = await self._run(request)
         log_workload_result(self.activity_name, result)  # ticket 24: operational log
@@ -601,3 +697,19 @@ class ApprovedWorkloads:
             activity.logger.warning(f"{self.activity_name} interrupted", extra={"refs": refs})
             return outcome("UNKNOWN", "EXECUTION_INTERRUPTED", refs)
         return outcome("SUCCEEDED", "WORKLOADS_READY", refs)
+
+
+def _secret_env(app: dict, db: PostgresChartValues) -> set[tuple[str, str | None, str]]:
+    """Each resolved App env as `(name, Secret name, key)`; plain DB fields have no Secret."""
+    found = set()
+    for item in ApplicationValues.model_validate(app).env:
+        source = item.source
+        if source.kind == "USER_SECRET":
+            found.add((item.name, source.name, source.key))
+        elif source.kind == "DATABASE" and source.field == "secret_ref":
+            found.add((item.name, db.database.secret_name, db.database.secret_key))
+        elif source.kind == "DATABASE" and source.field == "connection_url_secret_ref":
+            found.add((item.name, connection_url_secret_name(db.release_name), URL_SECRET_KEY))
+        else:
+            found.add((item.name, None, getattr(source, "field", source.kind)))
+    return found

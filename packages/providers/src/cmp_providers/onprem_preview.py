@@ -6,7 +6,7 @@ environment values or Secret values. Target/image mismatches become Preview erro
 approval contract refuses the plan.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from cmp_contracts.chart import PostgresChartValues
 from cmp_contracts.plan import PlanManifest, Preview, ResourceChange
@@ -49,7 +49,14 @@ def _resources(cpu: int, memory: int) -> str:
     return f"CPU {cpu}m · 메모리 {memory}MiB"
 
 
-def onprem_preview(manifest: PlanManifest, contents: Mapping[str, bytes]) -> Preview:
+def onprem_preview(
+    manifest: PlanManifest,
+    contents: Mapping[str, bytes],
+    *,
+    platform_secrets: Collection[str] = (),
+) -> Preview:
+    """`platform_secrets` (ENV-04): Secret names the Agent creates from the approved EnvPlan
+    (`<app>-env`, `<db>-conn`); they are not required from the user."""
     target = manifest.target
     if target.provider != "ON_PREM" or manifest.scope not in ("WORKLOADS", "FULL"):
         _reject("UNSUPPORTED_TARGET", "manifest.target", "ON_PREM 워크로드 계획만 지원합니다.")
@@ -90,6 +97,7 @@ def onprem_preview(manifest: PlanManifest, contents: Mapping[str, bytes]) -> Pre
             for source in secret_sources
             # DB password and URL Secrets are prepared by the Agent, not the user (ticket 19).
             if (source.name, source.key) not in {db_secret, url_secret}
+            and source.name not in platform_secrets
         }
     )
     changes = [

@@ -63,17 +63,27 @@ def cloud_plan_input(registration: PlanningInputRegistration, plan: dict):
 
 def input_digest(registration: PlanningInputRegistration) -> str:
     request = registration.planning_request
-    return sha256_json(
-        {
-            "contract_version": registration.contract_version,
-            "planning_request": request.model_dump(mode="json"),
-            # Ticket 22 W3: workload settings feed only the WORKLOADS Plan Digest, so adding them
-            # neither re-plans infrastructure nor changes 18 Digests of existing registrations.
-            "target": registration.target.model_dump(mode="json", exclude={"workloads"}),
-            "requirements_sha256": request.analysis.requirements_ref.sha256,
-            "template_version": template_version(registration),
-        }
-    )
+    payload = {
+        "contract_version": registration.contract_version,
+        "planning_request": request.model_dump(mode="json"),
+        # Ticket 22 W3: workload settings feed only the WORKLOADS Plan Digest, so adding them
+        # neither re-plans infrastructure nor changes 18 Digests of existing registrations.
+        "target": registration.target.model_dump(mode="json", exclude={"workloads"}),
+        "requirements_sha256": request.analysis.requirements_ref.sha256,
+        "template_version": template_version(registration),
+    }
+    # ENV-04: the EnvPlan feeds the Digest of the Plan whose execution renders it: the ON_PREM
+    # Plan here, the AWS/GCP WORKLOADS Plan in `env_plan_digest` (infrastructure is unaffected).
+    if registration.env_plan is not None and registration.target.provider == "ON_PREM":
+        payload["env_plan"] = registration.env_plan.model_dump(mode="json")
+    return sha256_json(payload)
+
+
+def env_plan_digest(registration: PlanningInputRegistration) -> dict:
+    """Extra WORKLOADS Digest input for AWS/GCP (empty when no EnvPlan, keeping old Digests)."""
+    if registration.env_plan is None:
+        return {}
+    return {"env_plan": registration.env_plan.model_dump(mode="json")}
 
 
 def _check(registration: PlanningInputRegistration, migration_id: str) -> None:
@@ -83,6 +93,9 @@ def _check(registration: PlanningInputRegistration, migration_id: str) -> None:
         raise PlanInputError("MIGRATION_MISMATCH")
     if registration.target.provider != selection.provider:
         raise PlanInputError("TARGET_PROVIDER_MISMATCH")
+    env_plan = registration.env_plan
+    if env_plan is not None and env_plan.env_file_ref != request.environment.env_file_ref:
+        raise PlanInputError("ENV_PLAN_REF_MISMATCH")
     if selection.provider in _CLOUD_MODELS:
         plan = {"plan_id": "validation", "revision": 1, "template_version": "validation"}
         if cloud_plan_input(registration, plan).region != selection.location:

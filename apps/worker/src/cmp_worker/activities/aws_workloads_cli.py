@@ -120,6 +120,8 @@ class KubectlSession(k8s_workloads_cli.KubectlSession):
 
 def build_aws_workloads_activities(session_factory):
     """Worker wiring from the same environment variables ticket 08 uses."""
+    from cmp_api.env_store import optional_env_file_store
+
     from cmp_worker.activities.aws_workloads import AwsWorkloadsActivities, ExecutionRefsResolver
 
     root = os.environ.get("PROVISIONING_ARTIFACT_ROOT")
@@ -134,4 +136,5 @@ def build_aws_workloads_activities(session_factory):
         artifact_root=Path(root) if root else None,
         resolver=ExecutionRefsResolver(),
         runtime=runtime,
+        env_store=optional_env_file_store(),  # ENV-04: platform `.env` store (API settings)
     )

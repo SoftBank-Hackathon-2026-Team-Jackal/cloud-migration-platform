@@ -9,6 +9,7 @@ Results hold codes and identifiers only; never Secret values, Terraform output o
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from cmp_api.agent_registry import RegisteredAgent
@@ -24,12 +25,14 @@ from cmp_api.onprem_rollout import LocalArtifactStore, RolloutError
 from cmp_api.plan_inputs import (
     PlanInputError,
     cloud_plan_input,
+    env_plan_digest,
     input_digest,
     load_planning_input,
     template_version,
 )
 from cmp_contracts.artifact import ArtifactRef
-from cmp_contracts.plan import OnPremIdentity, PlanManifest, Preview
+from cmp_contracts.env_plan import EnvPlan, EnvPlanEntry, EnvVarRef
+from cmp_contracts.plan import OnPremIdentity, PlanManifest, Preview, ResourceChange
 from cmp_contracts.plan_publish import (
     WORKLOAD_TEMPLATE,
     CloudWorkloadSettings,
@@ -38,12 +41,13 @@ from cmp_contracts.plan_publish import (
     plan_id_for,
     workload_plan_id_for,
 )
-from cmp_contracts.provisioning import ProvisioningInputError
+from cmp_contracts.provisioning import ProvisioningInputError, ValidationIssue
 from cmp_contracts.provisioning_v2 import (
     ApplicationRequirement,
     PostgresRequirement,
     ProvisioningSpecV2,
 )
+from cmp_contracts.shared_deployment_v2 import SecretRefV2
 from cmp_providers.app_renderer import ApplicationRenderError, render_application
 from cmp_providers.application import prepare_application, resolve_application
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes, sha256_json
@@ -51,6 +55,15 @@ from cmp_providers.aws_preview import plan_aws_infrastructure
 from cmp_providers.chart_package import package_chart
 from cmp_providers.cloud_workload_preview import cloud_workload_preview
 from cmp_providers.database_url import connection_url_secret_name
+from cmp_providers.env_file import (
+    DbOutputRefs,
+    EnvFileError,
+    EnvFileStore,
+    app_env_secret_name,
+    connection_secret_name,
+    database_outputs,
+    preview_env,
+)
 from cmp_providers.gcp_preview import plan_gcp_infrastructure
 from cmp_providers.onprem_preview import onprem_preview
 from cmp_providers.plans import manifest_digest
@@ -101,18 +114,101 @@ def _release(resource_id: str) -> str:
     return resource_id.lower().replace("_", "-")
 
 
-def deployment_request(
-    spec: ProvisioningSpecV2,
-    target: OnPremTargetSettings | CloudWorkloadSettings,
-    provider: str = "ON_PREM",
-) -> dict:
-    """P4: the 04B request for the P0 topology (one PostgreSQL, one application)."""
+def _topology(spec: ProvisioningSpecV2) -> tuple[PostgresRequirement, ApplicationRequirement]:
     resources = spec.requirements.resources
     databases = [r for r in resources if isinstance(r, PostgresRequirement)]
     apps = [r for r in resources if isinstance(r, ApplicationRequirement)]
     if len(databases) != 1 or len(apps) != 1:
         raise PublishFailure("UNSUPPORTED_TOPOLOGY")
-    [database], [app] = databases, apps
+    return databases[0], apps[0]
+
+
+# REPLACED bindings that keep their existing platform step (DB password Secret, ticket 19 URL
+# Secret); the other bindings and every PASS key are plain Secret references (ENV-04).
+DB_OUTPUT_BINDINGS = {"password_secret_ref", "connection_url_secret_ref"}
+
+
+@dataclass
+class EnvRendering:
+    """ENV-04 plan-time result of an EnvPlan: names, keys and codes only, never a value."""
+
+    bindings: dict | None  # app v2 env_bindings; None → the requirements' bindings (blocked)
+    pending: list[ValidationIssue] = field(default_factory=list)
+    defaults: list[ResourceChange] = field(default_factory=list)
+    platform_secrets: tuple[str, ...] = ()  # `-env`/`-conn` the executing side creates
+
+
+def _env_binding(entry: EnvPlanEntry, item: EnvVarRef, database_id: str) -> dict:
+    if entry.binding in DB_OUTPUT_BINDINGS:
+        return {"resource_id": database_id, "output": entry.binding}
+    return {"secret_ref": item.secret_ref.model_dump(mode="json")}
+
+
+def _keys(plan: EnvPlan, disposition: str) -> list[str]:
+    return sorted(e.key for e in plan.entries if e.disposition == disposition)
+
+
+def _env_changes(
+    plan: EnvPlan, app_release: str, db_release: str, rendered
+) -> list[ResourceChange]:
+    """Preview lines: key names and dispositions only (ENV-04). Nothing when blocked."""
+    if rendered.decisions:
+        return []
+    changes = []
+    passed = _keys(plan, "PASS")
+    if passed:
+        changes.append(
+            ResourceChange(
+                resource_type="APP",
+                action="CREATE",
+                name=f"앱 환경변수 Secret {app_env_secret_name(app_release)} 생성·갱신",
+                size=f"PASS 키 {', '.join(passed)} (값은 실행 시 .env에서 읽고 Plan에 없음)",
+            )
+        )
+    replaced = sorted((e.key, e.binding) for e in plan.entries if e.disposition == "REPLACED")
+    if replaced:
+        changes.append(
+            ResourceChange(
+                resource_type="DATABASE",
+                action="CREATE",
+                name="대상 DB 출력 연결(REPLACED, secretKeyRef)",
+                size=", ".join(f"{key}→{binding}" for key, binding in replaced),
+            )
+        )
+    conn = connection_secret_name(db_release)
+    if any(item.secret_ref.name == conn for item in rendered.env):
+        changes.append(
+            ResourceChange(
+                resource_type="DATABASE",
+                action="CREATE",
+                name=f"DB 연결 Secret {conn} 생성·갱신",
+                size="host·port·name·username (플랫폼 관리)",
+            )
+        )
+    excluded = _keys(plan, "EXCLUDED")
+    if excluded:
+        changes.append(
+            ResourceChange(
+                resource_type="APP",
+                action="NO_CHANGE",
+                name="대상에 복사하지 않는 .env 키(EXCLUDED)",
+                size=", ".join(excluded),
+            )
+        )
+    return changes
+
+
+def deployment_request(
+    spec: ProvisioningSpecV2,
+    target: OnPremTargetSettings | CloudWorkloadSettings,
+    provider: str = "ON_PREM",
+    env_bindings: dict | None = None,
+) -> dict:
+    """P4: the 04B request for the P0 topology (one PostgreSQL, one application).
+
+    `env_bindings` (ENV-04): the app's bindings rendered from the approved EnvPlan; replaces the
+    requirements' bindings."""
+    database, app = _topology(spec)
     [image] = [i for i in spec.images if i.resource_id == app.id]
     db_release = _release(database.id)
     return {
@@ -148,10 +244,14 @@ def deployment_request(
                 "resources": {"cpu_millicores": app.cpu_millicores, "memory_mib": app.memory_mib},
                 "port": app.port,
                 "health_path": app.health_path,
-                "env_bindings": {
-                    name: binding.model_dump(mode="json")
-                    for name, binding in app.env_bindings.items()
-                },
+                "env_bindings": (
+                    env_bindings
+                    if env_bindings is not None
+                    else {
+                        name: binding.model_dump(mode="json")
+                        for name, binding in app.env_bindings.items()
+                    }
+                ),
             },
         ],
     }
@@ -171,6 +271,7 @@ class PlanPublisher:
         helm_bin: str = "helm",
         aws_template_dir: Path | None = None,
         gcp_template_dir: Path | None = None,
+        env_store: EnvFileStore | None = None,
     ):
         self._sessions = session_factory
         self._store = store
@@ -182,6 +283,7 @@ class PlanPublisher:
         self._helm = helm_bin
         self._aws_template = aws_template_dir
         self._gcp_template = gcp_template_dir
+        self._env_store = env_store
 
     # -- entry point -----------------------------------------------------------------------
 
@@ -198,9 +300,10 @@ class PlanPublisher:
             def build(plan):
                 spec, pending = self._validated(registration)
                 if registration.target.provider == "ON_PREM":
-                    manifest, preview = self._onprem(session, registration, spec, plan)
-                else:
-                    manifest, preview = self._cloud(registration, plan)
+                    env = self._env(registration, spec, registration.target.namespace)
+                    manifest, preview = self._onprem(session, registration, spec, plan, env)
+                    return manifest, _with_env(preview, env), [*pending, *_pending(env)]
+                manifest, preview = self._cloud(registration, plan)
                 return manifest, preview, pending
 
             return self._publish_revision(
@@ -256,6 +359,64 @@ class PlanPublisher:
             "preview_digest": sha256_json(row.preview),
         }
 
+    def _env(self, registration, spec, namespace: str) -> EnvRendering | None:
+        """ENV-04: the approved EnvPlan → app env bindings + Preview lines (names only).
+
+        Reads key names, never values. Decisions (UNREPRESENTABLE, MISSING, ...) become
+        `pending_decisions`, so the Revision is published for review and 07 refuses approval."""
+        plan = registration.env_plan
+        if plan is None:
+            return None
+        if self._env_store is None:
+            raise PublishFailure("ENV_FILE_STORE_UNCONFIGURED")
+        database, app = _topology(spec)
+        db_release, app_release = _release(database.id), _release(app.id)
+        outputs = database_outputs(
+            release=db_release,
+            namespace=namespace,
+            name=database.database.name,
+            username=database.database.username,
+            password_secret_ref=SecretRefV2(name=f"{db_release}-auth", key="password"),
+        )
+        try:
+            rendered = preview_env(
+                self._env_store,
+                plan,
+                spec.environment.env_file_ref,
+                DbOutputRefs.from_outputs(outputs, database_release=db_release),
+                app_release=app_release,
+            )
+        except EnvFileError as error:
+            raise PublishFailure("ENV_FILE_UNAVAILABLE", [error.code]) from None
+        entries = {entry.key: entry for entry in plan.entries}
+        for name, binding in app.env_bindings.items():
+            entry = entries.get(name)
+            if entry is None or (entry.disposition, entry.binding) != ("REPLACED", binding.output):
+                raise PublishFailure("PLANNING_INPUT_INVALID", ["ENV_PLAN_BINDING_MISMATCH"])
+        pending = [
+            ValidationIssue(
+                code=decision.code,
+                path=f"environment.env_plan.{decision.key}",
+                message="Resolve this .env key before approval.",
+            )
+            for decision in rendered.decisions
+        ]
+        bindings = (
+            None
+            if rendered.decisions
+            else {
+                item.name: _env_binding(entries[item.name], item, database.id)
+                for item in rendered.env
+            }
+        )
+        platform = {app_env_secret_name(app_release), connection_secret_name(db_release)}
+        return EnvRendering(
+            bindings,
+            pending,
+            _env_changes(plan, app_release, db_release, rendered),
+            tuple(sorted(platform)) if bindings is not None else (),
+        )
+
     def _validated(self, registration: PlanningInputRegistration):
         request = registration.planning_request
         try:
@@ -270,7 +431,7 @@ class PlanPublisher:
 
     # -- ON_PREM ---------------------------------------------------------------------------
 
-    def _onprem(self, session, registration, spec, plan) -> tuple[PlanManifest, Preview]:
+    def _onprem(self, session, registration, spec, plan, env=None) -> tuple[PlanManifest, Preview]:
         target: OnPremTargetSettings = registration.target
         agent = session.get(RegisteredAgent, target.agent_id)
         if agent is None:
@@ -279,7 +440,7 @@ class PlanPublisher:
             raise PublishFailure("AGENT_REVOKED")
         if agent.cluster_uid != target.cluster_uid:
             raise PublishFailure("CLUSTER_UID_MISMATCH")
-        deployment = deployment_request(spec, target)
+        deployment = deployment_request(spec, target, env_bindings=env and env.bindings)
         try:
             rendered = render_shared_deployment_v2(
                 deployment,
@@ -297,6 +458,7 @@ class PlanPublisher:
             "spec": spec.model_dump(mode="json"),
             "target": target.model_dump(mode="json"),
             "deployment": deployment,
+            **_env_plan_document(registration),
         }
         contents = {
             "spec": ("SPEC", canonical_json_bytes(spec_document)),
@@ -334,7 +496,11 @@ class PlanPublisher:
             artifacts=artifacts,
         )
         try:
-            preview = onprem_preview(manifest, {role: c for role, (_, c) in contents.items()})
+            preview = onprem_preview(
+                manifest,
+                {role: c for role, (_, c) in contents.items()},
+                platform_secrets=env.platform_secrets if env else (),
+            )
         except ProvisioningInputError as error:
             raise PublishFailure("PREVIEW_FAILED", _codes(error)) from None
         return manifest, preview
@@ -425,24 +591,26 @@ class PlanPublisher:
                         "resource_refs": refs,
                     },
                     "template_version": WORKLOAD_TEMPLATE,
+                    **env_plan_digest(registration),
                 }
             )
             plan_id = workload_plan_id_for(migration_id)
 
             def build(plan):
                 spec, pending = self._validated(registration)
+                env = self._env(registration, spec, target.workloads.namespace)
                 manifest, preview = self._workloads(
-                    session, registration, spec, plan, infra, refs, cluster
+                    session, registration, spec, plan, infra, refs, cluster, env
                 )
-                return manifest, preview, pending
+                return manifest, _with_env(preview, env), [*pending, *_pending(env)]
 
             return self._publish_revision(session, plan_id, digest, WORKLOAD_TEMPLATE, build)
 
-    def _workloads(self, session, registration, spec, plan, infra, refs, cluster):
+    def _workloads(self, session, registration, spec, plan, infra, refs, cluster, env=None):
         if self._cloud_root is None:
             raise PublishFailure("PLAN_FAILED", ["ARTIFACT_ROOT_NOT_CONFIGURED"])
         provider, settings = registration.target.provider, registration.target.workloads
-        deployment = deployment_request(spec, settings, provider)
+        deployment = deployment_request(spec, settings, provider, env and env.bindings)
         try:
             rendered = render_shared_deployment_v2(
                 deployment,
@@ -477,6 +645,7 @@ class PlanPublisher:
                 "resource_refs": refs,
             },
             "deployment": deployment,
+            **_env_plan_document(registration),
         }
         contents = {
             "spec": canonical_json_bytes(spec_document),
@@ -522,6 +691,26 @@ class PlanPublisher:
         return manifest, preview
 
 
+def _env_plan_document(registration: PlanningInputRegistration) -> dict:
+    """ENV-04: the EnvPlan rides in the approved SPEC artifact (Digest in the manifest), where
+    the deploy Activity and the Agent secrets API read it. Absent → the old bytes exactly."""
+    if registration.env_plan is None:
+        return {}
+    return {"env_plan": registration.env_plan.model_dump(mode="json")}
+
+
+def _with_env(preview: Preview, env: EnvRendering | None) -> Preview:
+    if env is None or not env.defaults:
+        return preview
+    return preview.model_copy(
+        update={"applied_defaults": [*preview.applied_defaults, *env.defaults]}
+    )
+
+
+def _pending(env: EnvRendering | None) -> list[ValidationIssue]:
+    return env.pending if env is not None else []
+
+
 def _infrastructure_result(session: Session, migration_id: str, provider: str, ref: dict):
     """W4: the stored, latest, fully SUCCEEDED infrastructure Revision of this Migration."""
     plan_id, revision = ref.get("plan_id"), ref.get("revision")
@@ -552,10 +741,7 @@ def _infrastructure_result(session: Session, migration_id: str, provider: str, r
 def _application_template(spec: ProvisioningSpecV2, deployment: dict) -> tuple[dict, list]:
     """W6: the 09/11 v1 App Values template and its DynamicBinding rules."""
     database, app = deployment["resources"]
-    env = {
-        name: {"kind": "DATABASE", "field": DATABASE_FIELDS[binding["output"]]}
-        for name, binding in app["env_bindings"].items()
-    }
+    env = {name: _v1_source(binding) for name, binding in app["env_bindings"].items()}
     template = {
         "contract_version": "1",
         "environment": "PRODUCTION",
@@ -584,6 +770,14 @@ def _application_template(spec: ProvisioningSpecV2, deployment: dict) -> tuple[d
     }
     plan = prepare_application(template)
     return plan.values.model_dump(mode="json"), [r.model_dump(mode="json") for r in plan.bindings]
+
+
+def _v1_source(binding: dict) -> dict:
+    """v2 binding → 09/11 v1 env source. A Secret reference (ENV-04 `-env`/`-conn`) is a
+    `USER_SECRET` the deploy Activity creates before its existence check."""
+    if "secret_ref" in binding:
+        return {"kind": "USER_SECRET", **binding["secret_ref"]}
+    return {"kind": "DATABASE", "field": DATABASE_FIELDS[binding["output"]]}
 
 
 def _write_artifacts(folder: Path, contents) -> None:

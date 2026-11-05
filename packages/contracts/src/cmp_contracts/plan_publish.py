@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from cmp_contracts.chart import KubernetesName
+from cmp_contracts.env_plan import EnvPlan
 from cmp_contracts.provisioning import Contract, Text
 from cmp_contracts.provisioning_v2 import ImageUri, PlanningRequestV2
 
@@ -73,3 +74,9 @@ class PlanningInputRegistration(Contract):
     target: TargetSettings
     # Optional exact requirements bytes (UTF-8 text) when the store does not hold them yet.
     requirements_json: str | None = None
+    # ENV-04 (#99): the approved per-key `.env` plan (key names and dispositions only, never a
+    # value). Supplied by the operator now, by analysis later (ENV-05). Its `env_file_ref` must
+    # equal `planning_request.environment.env_file_ref`. Absent: production keeps the
+    # reference-only behavior (pre-created ConfigMap/Secret). Omitted while unset so stored
+    # registrations and their Digests stay identical.
+    env_plan: EnvPlan | None = Field(default=None, exclude_if=lambda value: value is None)

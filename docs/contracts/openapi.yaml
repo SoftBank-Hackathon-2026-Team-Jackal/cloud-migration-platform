@@ -459,6 +459,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/jobs/{job_id}/env-secrets:
+    get:
+      tags:
+      - on-premises agents
+      summary: Job Env Secrets Route
+      description: 'ENV-04: the `<app>-env`/`<db>-conn` Secret data rendered from
+        the approved EnvPlan for
+
+        the caller''s own RUNNING rollout job. Values only in this response (never
+        in the job body,
+
+        results, events or logs); the Agent applies them inside the user''s cluster.'
+      operationId: job_env_secrets_route_agents__agent_id__jobs__job_id__env_secrets_get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvSecretsResponse'
+        '404':
+          description: '`ENV_SECRETS_NOT_FOUND`: not this Agent''s RUNNING EnvPlan
+            job'
+        '409':
+          description: Approval or `.env` check failed (code only, e.g. ENV_MISSING)
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agent-admin/agents/{agent_id}:
     get:
       tags:
@@ -2344,6 +2396,91 @@ components:
       - code
       - key
       title: EnvFileWarning
+    EnvPlan:
+      properties:
+        env_file_ref:
+          $ref: '#/components/schemas/ContentRef'
+        entries:
+          items:
+            $ref: '#/components/schemas/EnvPlanEntry'
+          type: array
+          title: Entries
+      additionalProperties: false
+      type: object
+      required:
+      - env_file_ref
+      - entries
+      title: EnvPlan
+    EnvPlanEntry:
+      properties:
+        key:
+          type: string
+          pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+          title: Key
+        disposition:
+          type: string
+          enum:
+          - PASS
+          - EXCLUDED
+          - REPLACED
+          - UNREPRESENTABLE
+          - MISSING
+          title: Disposition
+        binding:
+          anyOf:
+          - type: string
+            enum:
+            - host
+            - port
+            - name
+            - username
+            - password_secret_ref
+            - connection_url_secret_ref
+          - type: 'null'
+          title: Binding
+        reason:
+          anyOf:
+          - type: string
+            pattern: ^[A-Z][A-Z0-9_]*$
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - key
+      - disposition
+      title: EnvPlanEntry
+    EnvSecret:
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Name
+        data:
+          additionalProperties:
+            type: string
+          type: object
+          title: Data
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - data
+      title: EnvSecret
+    EnvSecretsResponse:
+      properties:
+        secrets:
+          items:
+            $ref: '#/components/schemas/EnvSecret'
+          type: array
+          title: Secrets
+      additionalProperties: false
+      type: object
+      required:
+      - secrets
+      title: EnvSecretsResponse
     EnvironmentInputV2:
       properties:
         env_file_ref:
@@ -2965,6 +3102,10 @@ components:
           - type: string
           - type: 'null'
           title: Requirements Json
+        env_plan:
+          anyOf:
+          - $ref: '#/components/schemas/EnvPlan'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -3594,6 +3735,11 @@ components:
             $ref: '#/components/schemas/SecretRefV2'
           type: array
           title: Secret Refs
+        env_secrets:
+          items:
+            $ref: '#/components/schemas/RolloutEnvSecret'
+          type: array
+          title: Env Secrets
       additionalProperties: false
       type: object
       required:
@@ -3654,6 +3800,37 @@ components:
       - values
       - password_secret
       title: RolloutDatabase
+    RolloutEnvSecret:
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Name
+        keys:
+          items:
+            type: string
+            maxLength: 253
+            minLength: 1
+            pattern: ^[a-zA-Z0-9._-]+$
+          type: array
+          minItems: 1
+          title: Keys
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - keys
+      title: RolloutEnvSecret
+      description: 'ENV-04: a Secret the platform renders from the approved EnvPlan
+        (`<app>-env`,
+
+        `<db>-conn`). Only the name and keys cross this boundary; the Agent fetches
+        the data for its
+
+        own RUNNING job from `GET /agents/{id}/jobs/{job}/env-secrets` and applies
+        it in the cluster.'
     RolloutStatusResponse:
       properties:
         plan_id:

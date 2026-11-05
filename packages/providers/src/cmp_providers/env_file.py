@@ -188,6 +188,38 @@ def _blocked(decisions: list[EnvDecision]) -> RenderedEnv:
     return RenderedEnv(env=[], secrets=[], decisions=decisions)
 
 
+def _plan_decisions(env_plan: EnvPlan, db_outputs: DbOutputRefs | None) -> list[EnvDecision]:
+    decisions = []
+    for entry in sorted(env_plan.entries, key=lambda e: e.key):
+        if entry.disposition == "UNREPRESENTABLE":
+            decisions.append(EnvDecision(key=entry.key, code="ENV_UNREPRESENTABLE"))
+        elif entry.disposition == "MISSING":
+            decisions.append(EnvDecision(key=entry.key, code="ENV_MISSING"))
+        elif entry.disposition == "REPLACED" and db_outputs is None:
+            decisions.append(EnvDecision(key=entry.key, code="ENV_DB_OUTPUT_MISSING"))
+    return decisions
+
+
+def _pass_keys(env_plan: EnvPlan) -> list[str]:
+    return sorted(e.key for e in env_plan.entries if e.disposition == "PASS")
+
+
+def _env_refs(
+    env_plan: EnvPlan, db_outputs: DbOutputRefs | None, app_release: str
+) -> list[EnvVarRef]:
+    secret_name = app_env_secret_name(app_release)
+    env: list[EnvVarRef] = []
+    for entry in sorted(env_plan.entries, key=lambda e: e.key):
+        if entry.disposition == "PASS":
+            ref = SecretRefV2(name=secret_name, key=entry.key)
+        elif entry.disposition == "REPLACED":
+            ref = getattr(db_outputs, entry.binding)
+        else:
+            continue
+        env.append(EnvVarRef(name=entry.key, secret_ref=ref))
+    return env
+
+
 def render_env(
     store: EnvFileStore,
     env_plan: EnvPlan,
@@ -209,37 +241,76 @@ def render_env(
     if env_plan.env_file_ref != env_file_ref:
         raise EnvFileError("ENV_PLAN_REF_MISMATCH")
     store.read_names(env_file_ref)  # existence, digest and expiry; names only
-    entries = sorted(env_plan.entries, key=lambda e: e.key)
-    decisions = []
-    for entry in entries:
-        if entry.disposition == "UNREPRESENTABLE":
-            decisions.append(EnvDecision(key=entry.key, code="ENV_UNREPRESENTABLE"))
-        elif entry.disposition == "MISSING":
-            decisions.append(EnvDecision(key=entry.key, code="ENV_MISSING"))
-        elif entry.disposition == "REPLACED" and db_outputs is None:
-            decisions.append(EnvDecision(key=entry.key, code="ENV_DB_OUTPUT_MISSING"))
+    decisions = _plan_decisions(env_plan, db_outputs)
     if decisions:
         return _blocked(decisions)
 
-    pass_keys = [e.key for e in entries if e.disposition == "PASS"]
+    pass_keys = _pass_keys(env_plan)
     values = store.read_values(env_file_ref, pass_keys) if pass_keys else {}
     absent = [k for k in pass_keys if k not in values]
     if absent:
         return _blocked([EnvDecision(key=k, code="ENV_VALUE_MISSING") for k in absent])
 
     secret_name = app_env_secret_name(app_release)
-    env: list[EnvVarRef] = []
-    for entry in entries:
-        if entry.disposition == "PASS":
-            ref = SecretRefV2(name=secret_name, key=entry.key)
-        elif entry.disposition == "REPLACED":
-            ref = getattr(db_outputs, entry.binding)
-        else:
-            continue
-        env.append(EnvVarRef(name=entry.key, secret_ref=ref))
     secrets = (
         [RenderedSecret(name=secret_name, data={k: SecretStr(values[k]) for k in pass_keys})]
         if pass_keys
         else []
     )
-    return RenderedEnv(env=env, secrets=secrets, decisions=[])
+    return RenderedEnv(
+        env=_env_refs(env_plan, db_outputs, app_release), secrets=secrets, decisions=[]
+    )
+
+
+def preview_env(
+    store: EnvFileStore,
+    env_plan: EnvPlan,
+    env_file_ref: ContentRef,
+    db_outputs: DbOutputRefs | None,
+    *,
+    app_release: str,
+) -> RenderedEnv:
+    """Plan-time twin of `render_env` (ENV-04): same `env` and `decisions`, but reads key names
+    only, so `secrets` is always empty. `ENV_VALUE_MISSING` is decided from the declared names
+    (a declared key always has a value, possibly empty)."""
+    if env_plan.env_file_ref != env_file_ref:
+        raise EnvFileError("ENV_PLAN_REF_MISMATCH")
+    names = set(store.read_names(env_file_ref))
+    decisions = _plan_decisions(env_plan, db_outputs)
+    if decisions:
+        return _blocked(decisions)
+    absent = [k for k in _pass_keys(env_plan) if k not in names]
+    if absent:
+        return _blocked([EnvDecision(key=k, code="ENV_VALUE_MISSING") for k in absent])
+    return RenderedEnv(env=_env_refs(env_plan, db_outputs, app_release), secrets=[], decisions=[])
+
+
+def database_outputs(
+    *, release: str, namespace: str, name: str, username: str, password_secret_ref: SecretRefV2
+) -> DatabaseOutputsV2:
+    """Production DB outputs from approved, non-secret Values (ENV-04): the Service host, the
+    password Secret and the ticket 19 URL Secret. Same shape as `render_shared_deployment_v2`."""
+    return DatabaseOutputsV2(
+        host=f"{release}.{namespace}.svc",
+        port=5432,
+        name=name,
+        username=username,
+        password_secret_ref=password_secret_ref,
+        connection_url_secret_ref=SecretRefV2(
+            name=connection_url_secret_name(release), key=URL_SECRET_KEY
+        ),
+    )
+
+
+def deployment_secrets(
+    rendered: RenderedEnv, outputs: DatabaseOutputsV2, *, database_release: str
+) -> list[RenderedSecret]:
+    """Secrets the executing actor applies for one app (ENV-04): `<app release>-env` from
+    `render_env` and `<db release>-conn` when the env refers to it. `-auth`/`-url` are made by
+    the existing DB password and ticket 19 steps, not here."""
+    conn = connection_secret_name(database_release)
+    secrets = list(rendered.secrets)
+    if any(item.secret_ref.name == conn for item in rendered.env):
+        data = connection_secret_data(outputs)
+        secrets.append(RenderedSecret(name=conn, data={k: SecretStr(v) for k, v in data.items()}))
+    return sorted(secrets, key=lambda s: s.name)

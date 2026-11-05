@@ -250,8 +250,9 @@ class FakeCluster:
         if manifest["kind"] == "StorageClass":
             self.storage_classes[manifest["metadata"]["name"]] = manifest
 
-    def apply_secret(self, namespace, name, secret_type, data):
+    def apply_secret(self, namespace, name, *args):
         # Not logged to trace: the real runtime sends this only via stdin.
+        secret_type, data = args if len(args) == 2 else ("Opaque", args[0])
         self.secrets[(namespace, name)] = dict(data)
         self.secret_types[(namespace, name)] = secret_type
 

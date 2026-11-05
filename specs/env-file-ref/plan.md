@@ -33,9 +33,9 @@ MigrationWorkflow
 
 - 값을 읽는 함수는 `render_env` 하나다. 분석은 `resolve_env_names`만 쓴다(값을 읽을 권한이 필요 없다).
 - `render_env`는 순수 함수에 가깝게 둔다. 저장소에서 값을 읽는 부분만 주입한다(`EnvFileStore`). 실제 클러스터에 Secret을 만드는 것은 호출하는 실행 주체(샌드박스 Activity, 구축 Activity, ON_PREM Agent)의 몫이다.
-- ON_PREM은 Agent가 클러스터 안에서 Secret을 만든다. 값은 작업 본문에 넣지 않고 Agent 인증 API로 작업별로 받는다(구체 경로는 ENV-04에서 결정).
+- ON_PREM은 Agent가 클러스터 안에서 Secret을 만든다. 값은 작업 본문에 넣지 않고 Agent 인증 API `GET /agents/{agent_id}/jobs/{job_id}/env-secrets`로 자기 RUNNING 작업의 것만 받는다(ENV-04 E6).
 - Secret 이름 규칙: 앱 env는 `<앱 release>-env`, DB 출력은 기존 `<DB release>-auth`(비밀번호)·`<DB release>-url`(19번 URL)을 쓴다. `host`·`port`·`name`·`username`은 새 DB 연결 Secret `<DB release>-conn`의 같은 이름 키로 참조한다(ENV-03 D3 확정). 이 Secret은 ENV-04·ENV-06이 `connection_secret_data(outputs)`로 만든다.
-- EnvPlan은 분석 결과 산출물로 저장하고, 승인 대상 Plan의 입력 Digest에 포함한다(승인 후 변경 감지).
+- EnvPlan은 승인 대상 Plan의 입력 Digest와 SPEC 산출물에 포함한다(승인 후 변경 감지). ENV-05 전까지는 Planning 입력 등록의 선택 필드 `env_plan`으로 받는다(ENV-04 E1).
 
 ## 검증
 

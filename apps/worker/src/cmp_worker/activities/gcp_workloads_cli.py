@@ -82,8 +82,12 @@ class GcpCliRuntime(CommandRunner):
 
 
 class GkeKubectlSession(k8s_workloads_cli.KubectlSession):
-    def apply_secret(self, namespace: str, name: str, secret_type: str, data: dict) -> None:
-        """Create or refresh via stdin server-side apply (managedFields hold names, not values)."""
+    def apply_secret(self, namespace: str, name: str, *args) -> None:
+        """Create or refresh via stdin server-side apply (managedFields hold names, not values).
+
+        `(namespace, name, secret_type, data)` for the registry pull Secret, or the shared
+        `ClusterSession` form `(namespace, name, data)` (Opaque; ticket 19 URL, ENV-04 env)."""
+        secret_type, data = args if len(args) == 2 else ("Opaque", args[0])
         manifest = {
             "apiVersion": "v1",
             "kind": "Secret",
@@ -107,6 +111,8 @@ class GkeKubectlSession(k8s_workloads_cli.KubectlSession):
 
 def build_gcp_workloads_activities(session_factory):
     """Worker wiring; reuses ticket 08/09 variables plus the explicit gcloud configuration."""
+    from cmp_api.env_store import optional_env_file_store
+
     from cmp_worker.activities.gcp_workloads import ExecutionRefsResolver, GcpWorkloadsActivities
 
     root = os.environ.get("PROVISIONING_ARTIFACT_ROOT")
@@ -123,4 +129,5 @@ def build_gcp_workloads_activities(session_factory):
         artifact_root=Path(root) if root else None,
         resolver=ExecutionRefsResolver(),
         runtime=runtime,
+        env_store=optional_env_file_store(),  # ENV-04: platform `.env` store (API settings)
     )

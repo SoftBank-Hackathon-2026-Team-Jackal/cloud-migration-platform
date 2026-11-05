@@ -185,3 +185,7 @@ API 설정(`cmp_api.config`):
 API 설정(`cmp_api.config`): `env_file_store_dir`(`ENV_FILE_STORE_DIR`), `env_file_encryption_key`(`ENV_FILE_ENCRYPTION_KEY`, base64url 32바이트, 서버 `.env`에만).
 
 Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`를 분석 자식 입력 `AnalysisInput.env_file_ref`(추가 선택 필드), Sandbox `SandboxSettings`·`SandboxInput.env_file_ref`(추가 선택 필드), Planning 인계 설정 `PlanningSettings.env_file_ref`(시작 요청 값이 우선)로 복사한다. `status` 쿼리에 `env_file_ref`가 추가됐다. API의 scaffold 시작(`analysis` 없음)은 `{project_id, env_file_ref}` dict로 시작하며 분석·Sandbox 자식은 여전히 scaffold 문자열 입력이다.
+
+## 구축 env 렌더 (ENV-04)
+
+[ENV-04](../../tickets/env-file-ref/04-provisioning-render-env.md#착수-결정-2026-11-06). 추가 공개 함수: `cmp_providers.env_file.preview_env`·`database_outputs`·`deployment_secrets`, 저장소 연결 `cmp_api.env_store.configured_env_file_store`·`optional_env_file_store`. 계약 추가(모두 선택, 없으면 이전 바이트 그대로): `PlanningInputRegistration.env_plan: EnvPlan`, `RolloutApplication.env_secrets: [RolloutEnvSecret{name, keys}]`. SPEC 산출물 JSON에 `env_plan`이 생긴다(있을 때만). `onprem_preview(..., platform_secrets=...)` 선택 인자. HTTP: `GET /agents/{agent_id}/jobs/{job_id}/env-secrets` → `{secrets: [{name, data}]}`(Agent 인증, 자기 RUNNING 작업, `no-store`; 404 `ENV_SECRETS_NOT_FOUND`, 409 승인·저장소·결정 코드, 503 저장소 미설정). `GkeKubectlSession.apply_secret`는 공통 3인자 형태도 받는다.

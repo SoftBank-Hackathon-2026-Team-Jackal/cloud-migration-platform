@@ -8,6 +8,7 @@ from cmp_contracts.chart import KubernetesName
 from cmp_contracts.network_preflight import NetworkPreflightJob, ProbeObservation
 from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from cmp_contracts.provisioning import Text
+from cmp_providers.env_file import EnvFileError, EnvFileStore
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -26,7 +27,14 @@ from cmp_api.agent_registry import (
 )
 from cmp_api.config import settings
 from cmp_api.db import SessionLocal
-from cmp_api.onprem_rollout import ArtifactStore, LocalArtifactStore, RolloutError, job_artifact
+from cmp_api.env_store import configured_env_file_store
+from cmp_api.onprem_rollout import (
+    ArtifactStore,
+    LocalArtifactStore,
+    RolloutError,
+    job_artifact,
+    job_env_secrets,
+)
 
 router = APIRouter(tags=["on-premises agents"])
 
@@ -236,6 +244,61 @@ def job_artifact_bytes(
         status = 404 if exc.code == "ARTIFACT_NOT_FOUND" else 409
         raise HTTPException(status_code=status, detail=exc.code) from None
     return Response(content=content, media_type="application/octet-stream")
+
+
+def get_env_store() -> EnvFileStore:
+    try:
+        return configured_env_file_store()
+    except EnvFileError as exc:
+        raise HTTPException(status_code=503, detail=exc.code) from None
+
+
+class EnvSecret(Request):
+    name: KubernetesName
+    data: dict[str, str]
+
+
+class EnvSecretsResponse(Request):
+    secrets: list[EnvSecret]
+
+
+@router.get(
+    "/agents/{agent_id}/jobs/{job_id}/env-secrets",
+    response_model=EnvSecretsResponse,
+    responses={
+        404: {"description": "`ENV_SECRETS_NOT_FOUND`: not this Agent's RUNNING EnvPlan job"},
+        409: {"description": "Approval or `.env` check failed (code only, e.g. ENV_MISSING)"},
+    },
+)
+def job_env_secrets_route(
+    agent_id: str,
+    job_id: str,
+    session: SessionDep,
+    credential: CredentialDep,
+    store: Annotated[ArtifactStore, Depends(get_artifact_store)],
+    env_store: Annotated[EnvFileStore, Depends(get_env_store)],
+):
+    """ENV-04: the `<app>-env`/`<db>-conn` Secret data rendered from the approved EnvPlan for
+    the caller's own RUNNING rollout job. Values only in this response (never in the job body,
+    results, events or logs); the Agent applies them inside the user's cluster."""
+    try:
+        agent = authenticate_agent(session, agent_id=agent_id, credential=credential)
+    except AgentRegistrationError:
+        raise HTTPException(status_code=403, detail="Agent unauthorized") from None
+    job = session.get(AgentJob, job_id)
+    if job is None or job.agent_id != agent.id or job.owner_id != agent.owner_id:
+        raise HTTPException(status_code=404, detail="ENV_SECRETS_NOT_FOUND")
+    try:
+        secrets = job_env_secrets(session, job, store, env_store)
+    except RolloutError as exc:
+        status = 404 if exc.code == "ENV_SECRETS_NOT_FOUND" else 409
+        raise HTTPException(status_code=status, detail=exc.code) from None
+    body = EnvSecretsResponse(secrets=[EnvSecret(name=s.name, data=s.reveal()) for s in secrets])
+    return Response(
+        content=body.model_dump_json(),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _admin_status(agent: RegisteredAgent) -> dict:
