@@ -284,7 +284,7 @@ NetworkPolicy(Sandbox 워커 생성):
 
 테스트:
 - 테스트 정의: YAML 시나리오(`request` → `expect`) + 필요 시 Python 검사. 각 테스트에 `READ_ONLY` / `WRITES_DATA`, 외부 부수효과 여부를 표시한다. 외부 부수효과가 있는 테스트는 기본 제외.
-- 묶음: 정의 + 메타데이터를 tar.gz로 묶어 `s3://<버킷>/<migration_id>/tests/<sha256>.tar.gz`. 이 SHA-256이 `test_suite_ref`이자 고정 해시다.
+- 묶음: 정의 + 메타데이터를 tar.gz로 묶어 D-02의 해시 이름 저장소(`ArtifactStore`, 후속에 `s3://<버킷>/<migration_id>/tests/<sha256>.tar.gz`). 이 SHA-256이 `test_suite_ref`이자 고정 해시다.
 - `run_suite(suite_ref, base_url, auth_ref, include=READ_ONLY|ALL)`: 실행 전에 해시를 확인하고 결과를 구조화해 반환한다. Production에서는 민서님 쪽이 이 함수를 호출한다.
 - 표준 테스트(첫 사이클): 헬스체크, 앱 API로 DB 쓰기 → 읽기 → 내용 일치, 재시작 후 데이터 유지(PVC).
 - AI 테스트 검증(`validate_tests`):
