@@ -80,6 +80,7 @@ class FakeCluster:
         self.cluster_uid = "cluster-a"
         self.helm_timeout = "1m"
         self.available = True
+        self.db_probe = "160004|true|logical|10|10"
         self.broken = set()
         self.mutations = []
         self.releases = {}
@@ -128,6 +129,10 @@ class FakeCluster:
         return CompletedProcess([], 1 if failed else 0, b"", b"")
 
     def kubectl(self, *args, content=None, timeout=40):
+        if "sh" in args:  # ticket 27 replication probe in the DB container
+            if self.db_probe is None:
+                return CompletedProcess([], 2, b"", b"psql: error")
+            return ok(self.db_probe.encode())
         return ok()  # pg_isready and the Service-proxied health check succeed
 
 
@@ -265,3 +270,31 @@ def test_rollout_still_serving_old_pod_is_not_ready():
 
     cluster.helm = stuck
     assert run(cluster) == ("FAILED", "WORKLOAD_NOT_READY")
+
+
+@pytest.mark.parametrize(
+    ("probe", "replication"),
+    [
+        ("160004|true|logical|10|10", {"capable": True, "code": None}),
+        ("160004|true|replica|10|10", {"capable": False, "code": "WAL_LEVEL_NOT_LOGICAL"}),
+        (None, None),  # probe command failed: not verified, no field reported
+    ],
+)
+def test_agent_reports_the_replication_check_with_ready(probe, replication):
+    """Ticket 27: same SQL check as AWS/GCP; only the judged flag and code leave the Agent."""
+    cluster = FakeCluster()
+    cluster.db_probe = probe
+    client = FakeClient(job().model_dump(mode="json"))
+    RolloutAgent("agent-a", "cred", client, cluster).poll_once()
+    [report] = client.reports
+    assert (report["status"], report["code"]) == ("SUCCEEDED", "READY")
+    assert report.get("replication") == replication
+
+
+def test_failed_rollout_reports_no_replication_check():
+    cluster = FakeCluster()
+    cluster.broken.add("demo-db")
+    client = FakeClient(job().model_dump(mode="json"))
+    RolloutAgent("agent-a", "cred", client, cluster).poll_once()
+    [report] = client.reports
+    assert report["status"] == "FAILED" and "replication" not in report

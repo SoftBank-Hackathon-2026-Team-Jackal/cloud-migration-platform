@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from cmp_contracts.chart import KubernetesName
 from cmp_contracts.network_preflight import NetworkPreflightJob, ProbeObservation
-from cmp_contracts.onprem_rollout import ProductionRolloutJob
+from cmp_contracts.onprem_rollout import ProductionRolloutJob, RolloutReplication
 from cmp_contracts.provisioning import Text
 from cmp_providers.env_file import EnvFileError, EnvFileStore
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response
@@ -71,6 +71,8 @@ class JobReport(Request):
     code: str = Field(pattern=r"^[A-Z0-9_]{1,64}$")
     # NETWORK_PREFLIGHT only (MNP-01 N3): what the probe saw; codes/IPs/counters, no secrets.
     observation: ProbeObservation | None = None
+    # PRODUCTION_ROLLOUT only (ticket 27): the DB replication-capable check after READY.
+    replication: RolloutReplication | None = None
 
 
 class ClaimedJob(Request):
@@ -195,6 +197,11 @@ def submit_result(
             | (
                 {"observation": report.observation.model_dump(mode="json")}
                 if report.observation is not None
+                else {}
+            )
+            | (
+                {"replication": report.replication.model_dump(mode="json")}
+                if report.replication is not None
                 else {}
             ),
         )

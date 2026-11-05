@@ -12,12 +12,35 @@ KubernetesName = Annotated[
 SecretKey = Annotated[str, Field(min_length=1, max_length=253, pattern=r"^[a-zA-Z0-9._-]+$")]
 
 
+ReplicationCount = Annotated[int, Field(ge=0, le=64)]
+AppSettingKey = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,30}$")]
+AppSettingValue = Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,63}$")]
+
+
+class DatabaseParameters(Contract):
+    """Ticket 27: the only server settings the Chart passes as `postgres -c k=v`.
+
+    `app` holds display-only custom settings (`app.<key>`), e.g. the demo app's `node_name`.
+    """
+
+    wal_level: Literal["replica", "logical"]
+    max_replication_slots: ReplicationCount
+    max_wal_senders: ReplicationCount
+    app: dict[AppSettingKey, AppSettingValue] = Field(
+        default_factory=dict, max_length=8, exclude_if=lambda value: not value
+    )
+
+
 class DatabaseSettings(Contract):
     version: Literal["16"]
     name: Text
     username: Text
     secret_name: KubernetesName
     secret_key: SecretKey
+    # Absent in Values approved before ticket 27: bytes, digest and render stay unchanged.
+    parameters: DatabaseParameters | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PodResources(Contract):

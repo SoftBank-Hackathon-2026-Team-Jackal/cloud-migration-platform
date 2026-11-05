@@ -356,6 +356,9 @@ def build_provisioning_result(
     warnings = []
     if database and succeeded and database.replication_capable is None:
         warnings.append("REPLICATION_NOT_VERIFIED")
+    elif database and succeeded and database.replication_capable is False:
+        # Ticket 27: READY workloads, but the target cannot publish yet; say why.
+        warnings.append(refs.get("db_replication_code") or "REPLICATION_NOT_CAPABLE")
     if application and succeeded and application.external_endpoint is None:
         warnings.append("EXTERNAL_ENDPOINT_UNAVAILABLE")
 

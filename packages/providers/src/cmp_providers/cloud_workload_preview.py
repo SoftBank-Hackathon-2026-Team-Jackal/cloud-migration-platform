@@ -12,6 +12,7 @@ from cmp_contracts.plan import PlanManifest, Preview, ResourceChange
 from cmp_contracts.provisioning import ProvisioningInputError, ValidationIssue
 
 from cmp_providers.artifacts import verify_artifact_bytes
+from cmp_providers.db_replication import parameters_summary
 from cmp_providers.plans import manifest_digest
 
 INGRESS = {"AWS": "AWS ALB(internet-facing, HTTP:80)", "GCP": "GCE Ingress(외부 HTTP:80)"}
@@ -80,7 +81,7 @@ def cloud_workload_preview(
             quantity=1,
             size=(
                 f"PostgreSQL {db.database.version} StatefulSet · DB {db.database.name} · "
-                f"PVC {db.storage.size_gib} GiB"
+                f"PVC {db.storage.size_gib} GiB{parameters_summary(db)}"
             ),
         ),
         ResourceChange(
