@@ -28,7 +28,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from cmp_api.agent_registry import RegisteredAgent
 from cmp_api.db import Base
-from cmp_api.tunnels import TunnelStatus
+from cmp_api.tunnels import TunnelStatus, tunnel_freshness
 
 AWS_KINDS = ("AWS_SOURCE", "AWS_TARGET")
 KINDS = (*AWS_KINDS, "GCP_TARGET")
@@ -336,6 +336,7 @@ def agent_summaries(session: Session, *, now: int | None = None) -> list[dict]:
     items = []
     for agent in session.scalars(select(RegisteredAgent).order_by(RegisteredAgent.id)):
         tunnel = tunnels.get(agent.id)
+        stale, fresh_until = (True, None) if tunnel is None else tunnel_freshness(tunnel, now=now)
         items.append(
             {
                 "agent_id": agent.id,
@@ -353,6 +354,8 @@ def agent_summaries(session: Session, *, now: int | None = None) -> list[dict]:
                     "last_handshake_at": tunnel.last_handshake_at,
                     "app_health_ok": tunnel.app_health_ok,
                     "db_connect_ok": tunnel.db_connect_ok,
+                    "stale": stale,
+                    "fresh_until": fresh_until,
                 },
             }
         )

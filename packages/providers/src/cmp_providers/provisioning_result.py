@@ -392,8 +392,10 @@ def handoff(
     """R7: the view one downstream Worker needs, with a proceed/blocked decision.
 
     `tunnel` is the latest tunnel check of an ON_PREM Agent (ticket 16 T6), merged here at read
-    time so the stored result stays immutable.
+    time so the stored result stays immutable. A passed check whose report is `stale` (ticket 25
+    F3/F5) is not current evidence: nothing is filled and `TUNNEL_STATUS_STALE` blocks.
     """
+    stale = bool(tunnel and tunnel.get("stale"))
     base = {"plan_id": plan_id, "revision": revision, "consumer": consumer}
     if result is None:
         return {**base, "proceed": False, "blocked_by": ["RESULT_NOT_FOUND"]}
@@ -414,7 +416,10 @@ def handoff(
         elif result.status == "READY" and result.provider == "ON_PREM":
             # Ticket 16 T2/T7: on-prem data moves through the tunnel; proceed only once the
             # Agent reported a successful DB connection over it.
-            if tunnel and tunnel.get("db_connect_ok"):
+            db_verified = bool(tunnel and tunnel.get("db_connect_ok"))
+            if db_verified and stale:
+                blocked.append("TUNNEL_STATUS_STALE")
+            elif db_verified:
                 database["tunnel_endpoint"] = f"{tunnel['tunnel_ip']}:5432"
             else:
                 blocked.append("TUNNEL_DB_NOT_VERIFIED")
@@ -425,7 +430,10 @@ def handoff(
         # Ticket 16 T11 (P2): ON_PREM forwards to the tunnel-side app port as-is, but only once
         # the Agent reported a healthy app over the tunnel.
         onprem_ready = result.status == "READY" and result.provider == "ON_PREM"
-        if onprem_ready and app and app.ready and app.port and tunnel and tunnel["app_health_ok"]:
+        app_verified = bool(
+            onprem_ready and app and app.ready and app.port and tunnel and tunnel["app_health_ok"]
+        )
+        if app_verified and not stale:
             host = tunnel["tunnel_ip"]
             application |= {
                 "external_endpoint": f"http://{host}:{app.port}",
@@ -436,6 +444,8 @@ def handoff(
         if result.status == "READY":
             if not (app and app.ready):
                 blocked.append("APPLICATION_NOT_READY")
+            elif app_verified and stale:
+                blocked.append("TUNNEL_STATUS_STALE")
             elif not application["external_endpoint"]:
                 blocked.append("EXTERNAL_ENDPOINT_UNAVAILABLE")
         view["application"] = application

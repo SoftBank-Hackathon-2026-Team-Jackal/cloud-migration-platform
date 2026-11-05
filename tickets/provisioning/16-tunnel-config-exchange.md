@@ -105,6 +105,7 @@ Agent와 중계 서버가 플랫폼을 통해 서로의 공개키·주소를 얻
 ## 설계 변경 기록
 - 2026-11-05 사용자 결정: 중계 서버안(Route 53 → Envoy 중계 → WireGuard → 온프레미스)을 전제로 한다. Provisioning은 Agent 쪽 연결과 플랫폼 교환 API·결과 계약까지, 중계 서버 내부는 Traffic 담당이다. PROV-009의 "Data/Traffic이 사용할 대상 접근 참조 제공"을 터널 목적지로 구체화한다. 같은 날 `external_endpoint`를 "중계 서버가 전달할 목적지"로 정의하기로 결정했다(T1). 13·shared-contracts의 필드 설명과 spec 문구 갱신은 구현 PR에 포함한다.
 - 2026-11-05 P1 답변: 폐기 Agent를 목록에서 빼지 않고 폐기 표시로 남긴다(수용 기준 변경). P2 답변: ON_PREM 전달 포트는 앱 포트 그대로, 주소·포트·헬스 경로를 따로 준다(T10·T11). DNS는 확장 범위로 미룬다.
+- 2026-11-05 티켓 25: T6·T7·T11의 "최신 터널 상태"는 만료되지 않은 보고만 뜻한다(보고 60초·handshake 180초, 설정값). 만료된 성공 보고는 `TUNNEL_STATUS_STALE`로 차단한다([25 F1~F7](25-tunnel-status-freshness.md)).
 - 참고: 상헌님 실측(11/3~4) — 서울 AWS 중계 ↔ 춘천 서버 WireGuard 왕복 4.5ms, MTU 1420 필수, 양쪽 PersistentKeepalive 권장.
 
 ## 완료 체크리스트

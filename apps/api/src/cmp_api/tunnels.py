@@ -17,6 +17,7 @@ from sqlalchemy import Boolean, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from cmp_api.agent_registry import RegisteredAgent
+from cmp_api.config import settings
 from cmp_api.db import Base
 from cmp_api.provisioning_results import ProvisioningResultRecord
 
@@ -230,17 +231,35 @@ def record_status(
     session.commit()
 
 
-def tunnel_view(session: Session, agent_id: str | None) -> dict | None:
-    """Latest tunnel check for the handoff (T6/T7); None when nothing was reported."""
+def tunnel_freshness(status: TunnelStatus, *, now: int) -> tuple[bool, int | None]:
+    """Ticket 25 F1: (stale, fresh_until) of a tunnel report at `now` (API server clock).
+
+    Fresh only while the report itself is recent (Agent and API alive) and the handshake it is
+    based on is recent (tunnel alive). Without a handshake the report is never current evidence.
+    """
+    if status.last_handshake_at is None:
+        return True, None
+    fresh_until = min(
+        status.reported_at + settings.tunnel_status_ttl_seconds,
+        status.last_handshake_at + settings.tunnel_handshake_stale_seconds,
+    )
+    return now > fresh_until, fresh_until
+
+
+def tunnel_view(session: Session, agent_id: str | None, *, now: int | None = None) -> dict | None:
+    """Latest tunnel check for the handoff (T6/T7, 25 F5); None when nothing was reported."""
     if not agent_id:
         return None
     status = session.get(TunnelStatus, agent_id)
     if status is None:
         return None
+    stale, fresh_until = tunnel_freshness(status, now=_now() if now is None else now)
     return {
         "tunnel_ip": status.tunnel_ip,
         "app_health_ok": status.app_health_ok,
         "db_connect_ok": status.db_connect_ok,
         "last_handshake_at": status.last_handshake_at,
         "code": status.code,
+        "stale": stale,
+        "fresh_until": fresh_until,
     }
