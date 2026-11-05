@@ -251,3 +251,71 @@ def test_update_changes_only_what_differs_and_reset_restores_the_baseline(servic
         service.check_sandbox(third)
     finally:
         service.teardown_sandbox(first.namespace)
+
+
+def test_a_pinned_suite_runs_in_the_sandbox_and_dependency_checks_use_the_real_database(
+    service, tmp_path
+):
+    from cmp_testsuite import (
+        ActionStep,
+        CaseResult,
+        Expect,
+        HttpStep,
+        Suite,
+        SuiteCase,
+        SuiteError,
+        dump_bundle,
+        run_case,
+        run_suite,
+    )
+    from cmp_testsuite.standard import AppApi, standard_cases
+    from cmp_testsuite.validate import validate_tests
+    from cmp_worker.artifact_store import LocalArtifactStore
+
+    run_id = "st-" + uuid.uuid4().hex[:8]
+    plan = prepare(service, run_id, tmp_path)
+    store = LocalArtifactStore(tmp_path / "suite-store")
+    try:
+        service.apply_sandbox(plan)
+        service.check_sandbox(plan)
+        survives = SuiteCase(
+            id="app-up-after-db-restart", source="STANDARD", effect="READ_ONLY",
+            steps=[ActionStep(action="RESTART_DATABASE"), HttpStep(path="/healthz", expect=Expect(status=200))],
+        )  # fmt: skip
+        info = SuiteCase(
+            id="ai-info", source="AI", effect="READ_ONLY",
+            steps=[HttpStep(path="/", expect=Expect(status=200, body_contains="podinfo"))],
+        )  # fmt: skip
+        suite = Suite(
+            name="demo", cases=[*standard_cases(AppApi(health_path="/healthz")), survives]
+        )
+        ref = store.put(dump_bundle(suite), ref_id="suite", kind="test-suite")
+        actions = {"RESTART_DATABASE": lambda: service.restart_database(plan)}
+        with service.cluster.proxy() as proxy:
+            base = proxy + service.service_path(plan, "demo-api")
+            result = run_suite(ref, base, store=store, actions=actions)
+            assert result.passed, result.results
+            assert {r.id: r.status for r in result.results} == {
+                "std-health": "PASSED",
+                "app-up-after-db-restart": "PASSED",
+            }
+
+            # The same pinned suite refuses to run once its bytes change.
+            (store.root / ref.sha256).write_bytes(dump_bundle(Suite(name="demo", cases=[info])))
+            with pytest.raises(SuiteError):
+                run_suite(ref, base, store=store)
+
+            # podinfo does not use the database, so cutting it must not fail the test: refused.
+            def target(case):
+                return run_case(case, base)
+
+            verdict = validate_tests(
+                [info],
+                target=target,
+                origin=lambda case: CaseResult(id=case.id, status="PASSED"),
+                cut_dependency=lambda: service.database_cut(plan),
+            ).verdicts[0]
+            assert (verdict.accepted, verdict.reason) == (False, "PASSES_WITHOUT_DEPENDENCY")
+        service.check_sandbox(plan)  # the database is back after the cut
+    finally:
+        service.teardown_sandbox(plan.namespace)

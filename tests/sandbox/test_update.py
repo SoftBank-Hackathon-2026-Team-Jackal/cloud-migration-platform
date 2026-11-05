@@ -234,3 +234,35 @@ def test_reset_without_a_saved_baseline_fails_with_a_code(tmp_path):
     with pytest.raises(SandboxError) as exc:
         service.reset_test_data(plan)
     assert exc.value.code == "BASELINE_MISSING"
+
+
+def test_the_database_can_be_cut_for_a_check_and_is_always_brought_back(tmp_path):
+    runner = FakeRunner()
+    service = make_service(runner)
+    plan = plan_with(service, tmp_path)
+    runner.calls.clear()
+    with pytest.raises(RuntimeError), service.database_cut(plan):
+        assert any("--replicas=0" in a for a, _ in runner.calls)
+        raise RuntimeError("the check blew up")
+    scale = [a for a, _ in runner.calls if "scale" in a]
+    assert "--replicas=0" in scale[0] and "--replicas=1" in scale[1]
+    assert f"statefulset/{plan.releases['orders-db']}" in scale[1]
+
+
+def test_the_database_restart_waits_for_the_rollout(tmp_path):
+    runner = FakeRunner()
+    service = make_service(runner)
+    plan = plan_with(service, tmp_path)
+    runner.calls.clear()
+    service.restart_database(plan)
+    verbs = [a[a.index("rollout") + 1] for a, _ in runner.calls if "rollout" in a]
+    assert verbs == ["restart", "status"]
+
+
+def test_the_application_is_reached_through_the_service_proxy_path(tmp_path):
+    service = make_service(FakeRunner())
+    plan = plan_with(service, tmp_path)
+    path = service.service_path(plan, "orders-api")
+    assert path == (
+        f"/api/v1/namespaces/{plan.namespace}/services/{plan.releases['orders-api']}:8080/proxy"
+    )

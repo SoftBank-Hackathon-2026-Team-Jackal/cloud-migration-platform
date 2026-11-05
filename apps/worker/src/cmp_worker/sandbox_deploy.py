@@ -12,8 +12,10 @@ import hashlib
 import json
 import re
 import secrets
+import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -166,6 +168,27 @@ class SandboxCluster:
             self._runner.helm, "--kubeconfig", self._kubeconfig, "--kube-context", self.context, *args,
         ]  # fmt: skip
         return self._run(command, None, timeout)
+
+    @contextmanager
+    def proxy(self) -> Iterator[str]:
+        """`kubectl proxy` on a free local port, so a test runner outside the cluster can reach
+        Services. It only listens on 127.0.0.1 and ends with the block."""
+        command = [
+            self._runner.kubectl, "--kubeconfig", self._kubeconfig, "--context", self.context,
+            "proxy", "--port=0", "--address=127.0.0.1",
+        ]  # fmt: skip
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
+        try:
+            line = process.stdout.readline() if process.stdout else ""
+            match = re.search(r"127\.0\.0\.1:(\d+)", line)
+            if not match:
+                raise SandboxError("PROXY_FAILED")
+            yield f"http://127.0.0.1:{match.group(1)}"
+        finally:
+            process.terminate()
+            process.wait(timeout=10)
 
     def _run(self, command: list[str], stdin: bytes | None, timeout: int) -> bytes:
         try:
@@ -490,6 +513,46 @@ class SandboxService:
             "rollout", "status", f"deployment/{release}", "-n", namespace, "--timeout=300s",
             timeout=330,
         )  # fmt: skip
+
+    # ------------------------------------------------------------- test-suite support
+
+    def service_path(self, plan: SandboxPlan, resource_id: str) -> str:
+        """Path under `kubectl proxy` that reaches an application Service."""
+        app = next(r for r in plan.request["resources"] if r["id"] == resource_id)
+        return (
+            f"/api/v1/namespaces/{plan.namespace}/services/"
+            f"{app['release_name']}:{app['port']}/proxy"
+        )
+
+    def restart_database(self, plan: SandboxPlan) -> None:
+        release = self._database(plan)["release_name"]
+        self.cluster.kubectl("rollout", "restart", f"statefulset/{release}", "-n", plan.namespace)
+        self.cluster.kubectl(
+            "rollout", "status", f"statefulset/{release}", "-n", plan.namespace,
+            "--timeout=300s", timeout=330,
+        )  # fmt: skip
+
+    @contextmanager
+    def database_cut(self, plan: SandboxPlan) -> Iterator[None]:
+        """Scale the database to zero (its volume stays), and bring it back afterwards."""
+        release = self._database(plan)["release_name"]
+        self.cluster.kubectl(
+            "scale", f"statefulset/{release}", "--replicas=0", "-n", plan.namespace
+        )  # fmt: skip
+        try:
+            self.cluster.kubectl(
+                "wait", "--for=delete", "pod", f"{release}-0", "-n", plan.namespace,
+                "--timeout=120s", timeout=150,
+            )  # fmt: skip
+            yield
+        finally:
+            self.cluster.kubectl(
+                "scale", f"statefulset/{release}", "--replicas=1", "-n", plan.namespace
+            )  # fmt: skip
+            self.cluster.kubectl(
+                "rollout", "status", f"statefulset/{release}", "-n", plan.namespace,
+                "--timeout=300s", timeout=330,
+            )  # fmt: skip
 
     # --------------------------------------------------------------- baseline and reset
 
