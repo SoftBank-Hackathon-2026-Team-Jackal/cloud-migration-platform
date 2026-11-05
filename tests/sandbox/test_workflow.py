@@ -75,6 +75,18 @@ async def test_before_02b_history_replays():
 
 
 @pytest.mark.asyncio
+async def test_before_14b_stopped_render_history_replays():
+    """A parent that ended as `stopped_render` before 14B still replays (no patch marker)."""
+    history = WorkflowHistory.from_json(
+        "parent-render",
+        Path("tests/fixtures/analysis/migration-before-14b-stopped-render.json").read_text(),
+    )
+    await Replayer(
+        workflows=[MigrationWorkflow, AnalysisWorkflow, SandboxVerificationWorkflow]
+    ).replay_workflow(history)
+
+
+@pytest.mark.asyncio
 async def test_sandbox_scaffold_passes_and_cleans_up():
     async with await WorkflowEnvironment.start_time_skipping(  # noqa: SIM117
         test_server_existing_path=os.environ.get("CMP_TEST_SERVER_PATH")
@@ -148,7 +160,8 @@ async def test_parent_stops_when_sandbox_render_fails():
             handle = await env.client.start_workflow(
                 MigrationWorkflow.run, "project", id="parent-render", task_queue=WORKFLOW_QUEUE
             )
-            assert await asyncio.wait_for(handle.result(), timeout=5) == "stopped_render"
+            assert await asyncio.wait_for(handle.result(), timeout=5) == "failed"
+            assert (await handle.query("status"))["failure_code"] == "STOPPED_RENDER"
             history = await handle.fetch_history()
             assert "prepare_image" not in scheduled_names(history)
 

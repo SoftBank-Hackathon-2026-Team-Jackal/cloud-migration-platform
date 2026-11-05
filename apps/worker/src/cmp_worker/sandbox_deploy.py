@@ -231,7 +231,9 @@ class SandboxService:
         database_chart_dir: Path,
         application_chart_dir: Path,
         password_factory: Callable[[], str] = lambda: secrets.token_urlsafe(24),
+        helm_timeout: str = "5m",
     ) -> None:
+        self.helm_timeout = helm_timeout
         self.cluster = cluster
         self.database_chart_dir = Path(database_chart_dir)
         self.application_chart_dir = Path(application_chart_dir)
@@ -471,7 +473,7 @@ class SandboxService:
             path.chmod(0o600)
             self.cluster.helm(
                 "upgrade", resource.release_name, str(chart), "--install", "--wait",
-                "--timeout", "5m", "--namespace", plan.namespace, "--values", str(path),
+                "--timeout", self.helm_timeout, "--namespace", plan.namespace, "--values", str(path),
                 timeout=420,
             )  # fmt: skip
 
@@ -570,6 +572,35 @@ class SandboxService:
                 "rollout", "status", f"statefulset/{release}", "-n", plan.namespace,
                 "--timeout=300s", timeout=330,
             )  # fmt: skip
+
+    # ------------------------------------------------------------ failure evidence
+
+    def app_logs(self, plan: SandboxPlan, *, tail: int = 200) -> str:
+        """Recent application log lines, newest last. Callers mask before showing anyone."""
+        parts = []
+        for app in (r for r in plan.request["resources"] if r["kind"] == "APPLICATION"):
+            try:
+                out = self.cluster.kubectl(
+                    "logs", f"deployment/{app['release_name']}", "-n", plan.namespace,
+                    f"--tail={tail}",
+                )  # fmt: skip
+            except SandboxError:
+                continue
+            parts.append(out.decode(errors="ignore"))
+        return "\n".join(parts)
+
+    def pod_event_reasons(self, plan: SandboxPlan) -> list[str]:
+        """Distinct event reasons in the namespace (for example ImagePullBackOff)."""
+        try:
+            out = self.cluster.kubectl(
+                "get", "events", "-n", plan.namespace, "-o",
+                "go-template={{range .items}}{{.reason}}{{\"\\n\"}}{{end}}",
+            )  # fmt: skip
+        except SandboxError:
+            return []
+        return sorted(
+            {line.strip() for line in out.decode(errors="ignore").splitlines() if line.strip()}
+        )
 
     # ---------------------------------------------------------------------- network
 
