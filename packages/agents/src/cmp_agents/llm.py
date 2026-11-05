@@ -8,6 +8,15 @@ from typing import Any, Literal, Protocol
 _ids = itertools.count(1)
 
 
+class LLMError(Exception):
+    """A model call that cannot continue. `code` is stable and safe to show; a run that hits one
+    stops with that reason and is not retried by the agent loops."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
 @dataclass(frozen=True)
 class ToolCall:
     id: str
@@ -21,6 +30,7 @@ class Message:
     content: str
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
+    provider_blocks: tuple[Any, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +46,10 @@ class LLMResponse:
     text: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    # Provider content blocks to send back unchanged on the next turn (thinking blocks).
+    provider_blocks: Sequence[Any] | None = None
 
 
 class LLMClient(Protocol):

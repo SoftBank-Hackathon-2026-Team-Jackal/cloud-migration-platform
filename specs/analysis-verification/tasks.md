@@ -22,14 +22,15 @@
 | [11B Sandbox 제자리 갱신과 테스트 데이터 초기화](../../tickets/analysis-verification/11b-sandbox-update.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 11 | AV-011, AV-015 | #95 | ☐ |
 | [12 테스트 묶음·Tester·`run_suite`](../../tickets/analysis-verification/12-test-suite.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 07, 08A, 11 | AV-012, AV-020 | #97 | ☐ |
 | [13 통신 규칙·판정·실행 기록](../../tickets/analysis-verification/13-judge-telemetry.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 08, 11, 12 | AV-013, AV-014 | 미생성 | ☐ |
-| [14A 실패 분류와 Fixer](../../tickets/analysis-verification/14a-classify-fixer.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 08, 10, 11B, 13 | AV-015, AV-017 | 미생성 | ☐ |
-| [14B 갱신 루프와 부모 종료 상태](../../tickets/analysis-verification/14b-fix-loop.md) | DRAFT | 14A | AV-015, AV-019, AV-020 | 미생성 | ☐ |
-| [14C 최종 발행·재승인·수정 패치 산출물](../../tickets/analysis-verification/14c-publish.md) | DRAFT | 14B | AV-017, AV-019, AV-020 | 미생성 | ☐ |
+| [14A 실패 분류와 Fixer](../../tickets/analysis-verification/14a-classify-fixer.md) | DONE (PR #107 병합) | 08, 10, 11B, 13 | AV-015, AV-017 | 미기록 | ☑ |
+| [14B 갱신 루프와 부모 종료 상태](../../tickets/analysis-verification/14b-fix-loop.md) | DONE (PR #110 병합) | 14A | AV-015, AV-019, AV-020 | #109 | ☑ |
+| [14C 최종 발행·재승인·수정 패치 산출물](../../tickets/analysis-verification/14c-publish.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14B | AV-017, AV-019, AV-020 | #111 | ☐ |
 | [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | DRAFT | 14C, D-02(저장 경계) | AV-018 | 미생성 | ☐ |
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
 | [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☐ |
+| [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☐ |
 
 ## 선행 관계
 
@@ -58,7 +59,7 @@ Q-01 ────┴→ 02B ─┐
 
 | ID | 내용 | 영향 티켓 | 담당 |
 | --- | --- | --- | --- |
-| D-01 | 공급자는 Claude, 연결은 Anthropic SDK(Messages API 도구 호출)로 결정. 모델·코드 전송 범위(근거 주변 조각만 전송)·키 관리·비용 한도는 ADR-004 작성 예정 | 08, 12, 14, 17 | 승철·팀 |
+| D-01 | 결정됨 — Claude, Anthropic SDK(Messages API 도구 호출), 모델 `claude-sonnet-5-5`, 비용 상한은 코드로 강제(ADR-004, 티켓 20) | 08, 12, 14, 17 | 승철·팀 |
 | D-02 | 결정됨(승철) — 첫 사이클의 `*_ref`는 해시 이름 로컬 불변 저장소(`LocalArtifactStore` 관례, S3는 후속). 분석·Build 결과의 저장·정규화는 분석 쪽이 맡음 | 10, 15, 19 | 승철 |
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 | 10, 14 | 민서 |
 | D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
@@ -96,6 +97,9 @@ Q-01 ────┴→ 02B ─┐
 - 2026-11-05: 12 구현: `packages/testsuite`(시나리오 형식·결정적 묶음·`run_suite` 해시 거부·표준 테스트·`validate_tests` 네 조건)와 Tester(`generate_tests`, Fixer 입력 없음). 묶음 저장은 D-02 로컬 저장소(S3 후속), 조건 3은 DB scale 0, 원본 실행기는 D-09 대기로 인터페이스+가짜. 실제 k3d에서 검증.
 - 2026-11-05: 13 구현: 기본 차단 NetworkPolicy·DNS·`network_intent` 항목·허용 목록 출구 프록시(`apply_network`, 기록 `egress_records`, 외부 차단 `external_cut`)와 순수 함수 `judge`, `covers` 기반 `coverage_report`. 프록시는 Sandbox 워커 소유로 확정. 실제 k3d에서 검증.
 - 2026-11-05: 티켓 14를 14A(분류·Fixer)·14B(갱신 루프·종료 상태)·14C(발행·재승인·패치 산출물)로 분할. GitHub App은 쓰지 않기로 하고 Draft PR은 패치 산출물로 바꿈. 14A 구현: `classify_failure`(INFRA→RENDER→BUILD→SPEC→CODE→SPEC), 렌더 필드 비교, Fixer(요구사항·intent 수정, 코드 수정, 테스트·`.env` 수정 거절, INFRA·RENDER 모델 호출 금지).
+- 2026-11-05: 14B 구현(#109): `SandboxVerificationWorkflow`에 실제 갱신 루프 추가(문자열 입력은 scaffold 그대로, dict 입력이 실제 경로, `sbx_*` Activity). 검토 대기는 종료 상태가 아닌 부모 플래그(`review_pending`)로, 실패는 `failed` 하나(원인 `failure_code`)로 정리(`sandbox-terminal-v1` 패치). SPEC 경로는 실제 k3d로 검증, 나머지는 가짜 Activity 이력. 부모→Sandbox 자식 입력 연결과 API SSE 종료 조건(`failed`) 반영은 남음.
+- 2026-11-05: 14C 구현: 통과 시 최종 분석 버전 발행(`SANDBOX_VERIFIED`, 새 버전 해시), 처리가 바뀐 행만 `ReapprovalGate`로 재승인, 코드 수정은 실제 git 패치 산출물(적용 결과 해시 검증, 전송 없음)로 반환. 재승인 Signal·Query(`approve_changed_rows`, `reapproval_state`)를 API에 연결하는 일은 남음.
+- 2026-11-05: ADR-004와 티켓 20: Claude Sonnet 5.5 연결(`AnthropicLLMClient`)과 비용 상한(호출 전 예약·정산, 마이그레이션 $3 / 하루 $20 / 한 달 $100 기본, 차단 스위치, fallbacks 미사용). 기본은 꺼짐이며 키·장부·설정이 모두 있어야 켜진다. 실제 호출 1회 확인은 승인 후.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
 - 2026-11-04(리뷰 반영): spec AV-012에 `run_suite`의 `include`, AV-015에 INFRA와 횟수 규칙 반영(AV-013 커버리지는 원문 유지). ADR-004는 작성 예정으로 표시.
 - 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.

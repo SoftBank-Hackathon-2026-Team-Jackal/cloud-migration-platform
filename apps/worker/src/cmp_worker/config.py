@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     analysis_artifact_store_dir: str | None = None
     analysis_resources_dir: str | None = None
     analysis_aws_region: str | None = "ap-northeast-2"
+    # Ticket 20 (ADR-004): Claude. Off unless explicitly enabled; the API key is only ever read
+    # by the SDK from ANTHROPIC_API_KEY. Spend limits are enforced by a shared ledger file.
+    llm_enabled: bool = False
+    llm_model: str = "claude-sonnet-5-5"
+    llm_max_output_tokens: int = 16000
+    llm_ledger_path: str | None = None
+    llm_kill_switch_path: str | None = None
+    llm_limit_run_usd: float = 3.0
+    llm_limit_day_usd: float = 20.0
+    llm_limit_month_usd: float = 100.0
     # Ticket 10: gcloud configuration and the expected Google ADC principal for GCP Apply.
     provisioning_gcloud_configuration: str | None = None
     provisioning_gcp_adc_email: str | None = None

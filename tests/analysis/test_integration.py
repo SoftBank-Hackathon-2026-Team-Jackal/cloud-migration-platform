@@ -16,7 +16,7 @@ REF_ID = "analysis"
 
 
 def mapping_llm(*rows):
-    return lambda: FakeLLMClient(
+    return lambda *_: FakeLLMClient(
         [LLMResponse(tool_calls=[call("submit_mapping", rows=list(rows))])]
     )
 

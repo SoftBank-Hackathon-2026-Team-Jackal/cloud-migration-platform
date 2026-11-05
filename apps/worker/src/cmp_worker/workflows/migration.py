@@ -45,6 +45,13 @@ class MigrationWorkflow:
         self.plan: dict | None = None
         self.plan_code: str | None = None
         self.infrastructure_plan: dict | None = None  # ticket 22: executed AWS/GCP infra Plan
+        self.review_pending = False
+        self.failure_code: str | None = None
+
+    @workflow.signal
+    def sandbox_review_pending(self, pending: bool) -> None:
+        """The Sandbox child waits for (or no longer waits for) a person; not a terminal state."""
+        self.review_pending = bool(pending)
 
     @workflow.signal
     def approve(self) -> None:
@@ -64,6 +71,8 @@ class MigrationWorkflow:
             "plan": self.plan,  # ticket 18: published Plan Revision identifiers only
             "plan_code": self.plan_code,
             "infrastructure_plan": self.infrastructure_plan,
+            "review_pending": self.review_pending,  # ticket 14B: in progress, not terminal
+            "failure_code": self.failure_code,
         }
 
     async def _plan_and_provision(self) -> str | None:
@@ -232,6 +241,12 @@ class MigrationWorkflow:
                         return "cancelled"
                     result = await child
                     if result["status"] != "PASSED":
+                        if workflow.patched("sandbox-terminal-v1"):
+                            # Ticket 14B: one failure terminal state; the cause is a code.
+                            self.failure_code = result["status"]
+                            self.review_pending = False
+                            self.phase = "failed"
+                            return "failed"
                         self.phase = result["status"].lower()
                         return self.phase
                 except asyncio.CancelledError:

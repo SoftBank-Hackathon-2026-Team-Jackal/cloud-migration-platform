@@ -70,6 +70,17 @@ def test_environment_failures_are_infra_and_never_reach_the_fixer():
         assert result.failure_class == "INFRA" and not result.fixer_allowed, case
 
 
+def test_a_failed_rollout_with_an_application_cause_is_not_infra():
+    spec = klass(sandbox_error="CLUSTER_COMMAND_FAILED", infra_timeout=True, app_cause_in_pod=True)
+    assert spec.failure_class == "SPEC" and spec.fixer_allowed
+    crash = klass(
+        sandbox_error="CLUSTER_COMMAND_FAILED", app_cause_in_pod=True, stack_in_app_code=True
+    )
+    assert crash.failure_class == "CODE"
+    bare = klass(sandbox_error="CLUSTER_COMMAND_FAILED", infra_timeout=True)
+    assert bare.failure_class == "INFRA"
+
+
 def test_a_timeout_with_an_application_cause_is_not_infra():
     result = klass(
         infra_timeout=True,
