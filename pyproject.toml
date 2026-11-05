@@ -29,6 +29,7 @@ dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "httpx>=0.27,<1", "ruff>=0.8,
 packages = [
   "cmp_api", "cmp_api.routes", "cmp_worker", "cmp_worker.workflows",
   "cmp_worker.activities", "cmp_worker.workers", "cmp_contracts", "cmp_providers", "cmp_scanners", "cmp_agents", "cmp_testsuite", "cmp_traffic",
+  "cmp_data",
 ]
 
 [tool.setuptools.package-dir]
@@ -40,6 +41,7 @@ cmp_scanners = "packages/scanners/src/cmp_scanners"
 cmp_agents = "packages/agents/src/cmp_agents"
 cmp_testsuite = "packages/testsuite/src/cmp_testsuite"
 cmp_traffic = "packages/traffic/src/cmp_traffic"
+cmp_data = "packages/data/src/cmp_data"
 
 [tool.setuptools.package-data]
 cmp_agents = ["prompts/*.md"]
