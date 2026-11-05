@@ -6,7 +6,11 @@ from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import CancelledError, ChildWorkflowError, WorkflowAlreadyStartedError
 
 with workflow.unsafe.imports_passed_through():
-    from cmp_contracts.plan_publish import DEFAULT_APPROVAL_TIMEOUT_SECONDS, PLAN_PATCH
+    from cmp_contracts.plan_publish import (
+        DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        PLAN_PATCH,
+        WORKLOAD_PATCH,
+    )
     from cmp_contracts.queues import (
         ANALYSIS_QUEUE,
         APPROVAL_WORKFLOW_NAME,
@@ -24,6 +28,13 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.workflows.analysis import AnalysisWorkflow
     from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
 
+PUBLISH_ACTIVITY = {
+    "task_queue": PROVISIONING_QUEUE,
+    "start_to_close_timeout": timedelta(hours=1),
+    "heartbeat_timeout": timedelta(minutes=5),
+    "retry_policy": RetryPolicy(maximum_attempts=3),  # publication is input-idempotent
+}
+
 
 @workflow.defn
 class MigrationWorkflow:
@@ -33,6 +44,7 @@ class MigrationWorkflow:
         self.cancel_requested = False
         self.plan: dict | None = None
         self.plan_code: str | None = None
+        self.infrastructure_plan: dict | None = None  # ticket 22: executed AWS/GCP infra Plan
         self.review_pending = False
         self.failure_code: str | None = None
         self.pipeline: dict | None = None  # ticket 21: references the real pipeline produced
@@ -59,6 +71,7 @@ class MigrationWorkflow:
             "mode": "scaffold",
             "plan": self.plan,  # ticket 18: published Plan Revision identifiers only
             "plan_code": self.plan_code,
+            "infrastructure_plan": self.infrastructure_plan,
             "review_pending": self.review_pending,  # ticket 14B: in progress, not terminal
             "failure_code": self.failure_code,
             "pipeline": self.pipeline,
@@ -68,19 +81,36 @@ class MigrationWorkflow:
         """Ticket 18 P7: publish the Plan, wait for its Revision approval child, return the outcome.
 
         None means planning is not configured (scaffold path). Otherwise a terminal phase, or
-        "executed" when the approved provider execution succeeded.
+        "executed" when the approved provider execution succeeded. Ticket 22 W8: after an AWS/GCP
+        infrastructure execution, the WORKLOADS Plan for 09/11 goes through the same approval.
         """
         self.phase = "planning"
         published = await workflow.execute_activity(
             "publish_migration_plan",
             {"migration_id": workflow.info().workflow_id},
-            task_queue=PROVISIONING_QUEUE,
-            start_to_close_timeout=timedelta(hours=1),
-            heartbeat_timeout=timedelta(minutes=5),
-            retry_policy=RetryPolicy(maximum_attempts=3),  # publication is input-idempotent
+            **PUBLISH_ACTIVITY,
         )
         if published["status"] == "SCAFFOLD":
             return None
+        outcome = await self._approve_and_execute(published)
+        cloud_infra = published.get("provider") in ("AWS", "GCP") and (
+            published.get("scope") == "INFRASTRUCTURE"
+        )
+        if outcome != "executed" or not cloud_infra or not workflow.patched(WORKLOAD_PATCH):
+            return outcome
+        if self.cancel_requested:
+            return "cancelled"
+        self.infrastructure_plan = self.plan
+        self.phase = "workload_planning"
+        workloads = await workflow.execute_activity(
+            "publish_workload_plan",
+            {"migration_id": workflow.info().workflow_id, "infrastructure": self.plan},
+            **PUBLISH_ACTIVITY,
+        )
+        return await self._approve_and_execute(workloads)
+
+    async def _approve_and_execute(self, published: dict) -> str:
+        """Wait for the published Revision's approval child; return a terminal phase/"executed"."""
         self.plan_code = published["code"]
         if published["status"] != "PUBLISHED":
             return "plan_failed"

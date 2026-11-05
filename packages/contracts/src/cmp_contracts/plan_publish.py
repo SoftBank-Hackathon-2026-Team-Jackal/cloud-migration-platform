@@ -14,12 +14,28 @@ from cmp_contracts.provisioning import Contract, Text
 from cmp_contracts.provisioning_v2 import ImageUri, PlanningRequestV2
 
 PLAN_PATCH = "provisioning-plan-v1"
+WORKLOAD_PATCH = "provisioning-cloud-workloads-v1"  # ticket 22 W8
+WORKLOAD_TEMPLATE = "cloud-workloads-v1"
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 7 * 24 * 3600  # P8: default only, not a product policy.
 
 
 def plan_id_for(migration_id: str) -> str:
     """P2: one Plan per Migration; a safe opaque ID that satisfies the 05/06 pattern."""
     return "plan-" + hashlib.sha256(migration_id.encode("utf-8")).hexdigest()[:24]
+
+
+def workload_plan_id_for(migration_id: str) -> str:
+    """Ticket 22 W2: the Migration's AWS/GCP WORKLOADS Plan, separate from its infra Plan."""
+    digest = hashlib.sha256(f"WORKLOADS:{migration_id}".encode()).hexdigest()
+    return "plan-" + digest[:24]
+
+
+class CloudWorkloadSettings(Contract):
+    """Ticket 22 W3: deployment choices for the 09/11 DB + App workloads on the new cluster."""
+
+    namespace: KubernetesName
+    storage_class: KubernetesName  # 09/11 create it with their provisioner when absent.
+    database_image: ImageUri  # PostgreSQL 16 image pinned by Digest.
 
 
 class OnPremTargetSettings(Contract):
@@ -36,11 +52,13 @@ class AwsTargetSettings(Contract):
     provider: Literal["AWS"]
     # AwsPlanInput fields except migration_id/plan; validated when the Plan is built.
     settings: dict
+    workloads: CloudWorkloadSettings | None = None  # ticket 22; absent → no workload Plan
 
 
 class GcpTargetSettings(Contract):
     provider: Literal["GCP"]
     settings: dict  # GcpPlanInput fields except migration_id/plan.
+    workloads: CloudWorkloadSettings | None = None  # ticket 22
 
 
 TargetSettings = Annotated[

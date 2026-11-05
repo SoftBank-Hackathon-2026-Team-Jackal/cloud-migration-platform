@@ -1,17 +1,16 @@
 """Migration event store and operational log (ticket 24).
 
 Revision ID: 20261105_06
-Revises: 20261105_04
+Revises: 20261105_05
 
-Ticket 23 adds 20261105_05 (environment connections) on another branch; whichever merges second
-re-chains its down_revision onto the other.
+Chained after ticket 23's 20261105_05 (environment connections).
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "20261105_06"
-down_revision = "20261105_04"
+down_revision = "20261105_05"
 branch_labels = None
 depends_on = None
 

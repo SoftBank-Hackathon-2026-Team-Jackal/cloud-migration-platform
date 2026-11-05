@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from cmp_contracts.plan import PlanManifest, Preview, Scope
-from cmp_contracts.plan_publish import PlanningInputRegistration, plan_id_for
+from cmp_contracts.plan_publish import (
+    PlanningInputRegistration,
+    plan_id_for,
+    workload_plan_id_for,
+)
 from cmp_providers.artifacts import sha256_json
 from cmp_providers.plans import approval_issues, manifest_digest
 from fastapi import APIRouter, Depends, HTTPException
@@ -109,8 +113,14 @@ def get_plan_preview(plan_id: str, revision: int, session: SessionDep, approver:
 
 @router.get("/migrations/{migration_id}/plan", response_model=PlanPreviewView)
 def get_migration_plan(migration_id: str, session: SessionDep, approver: ApproverDep):
-    """Latest published Revision of the Migration's Plan (P2: one Plan per Migration)."""
-    plan_id = plan_id_for(migration_id)
-    revision = latest_revision(session, plan_id)
-    row = session.get(PlanRevision, (plan_id, revision)) if revision else None
+    """Latest Revision of the Plan to approve now (18 P6, 22 W10).
+
+    AWS/GCP: the WORKLOADS Plan once it is published, else the infrastructure Plan.
+    """
+    row = None
+    for plan_id in (workload_plan_id_for(migration_id), plan_id_for(migration_id)):
+        revision = latest_revision(session, plan_id)
+        if revision:
+            row = session.get(PlanRevision, (plan_id, revision))
+            break
     return _view(session, approver, row)
