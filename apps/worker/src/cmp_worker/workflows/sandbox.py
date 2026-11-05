@@ -25,6 +25,7 @@ class SandboxVerificationWorkflow:
         self.integrated = False
         self.reapproval: ReapprovalGate | None = None
         self.early_rejections: list[dict[str, str]] = []
+        self.ai_tests: dict | None = None
 
     @workflow.query
     def status(self) -> dict:
@@ -201,6 +202,7 @@ class SandboxVerificationWorkflow:
                 reasons = [f"SANDBOX:{prep['sandbox_error']}"]
                 outcome = "NEEDS_REVIEW"
             infra_streak, tests_ran, baseline_ok = 0, False, False
+            suite_ref, ai_pending = data["suite_ref"], True
             self.attempt = 1
             while plan is not None:
                 self.phase = "sbx_apply"
@@ -216,6 +218,33 @@ class SandboxVerificationWorkflow:
                     minutes=20,
                 )
                 baseline_ok = baseline_ok or applied.get("baseline") in ("SAVED", "KEPT")
+                # AI tests are asked for once, on the first healthy Sandbox, and only when switched
+                # on. Old histories never reach `patched`, so they replay as before.
+                if (
+                    ai_pending
+                    and applied.get("sandbox_error") is None
+                    and data.get("ai_tests")
+                    and workflow.patched("ai-tests-v1")
+                ):
+                    self.phase = "sbx_ai_tests"
+                    asked = await act(
+                        "sbx_ai_tests",
+                        {
+                            "plan": plan,
+                            "input": data,
+                            "requirements_ref": requirements_ref,
+                            "suite_ref": suite_ref,
+                            "analysis_report_ref": data.get("analysis_report_ref"),
+                            "migration_id": data["migration_id"],
+                        },
+                        minutes=20,
+                    )
+                    suite_ref = asked["suite_ref"]
+                    self.ai_tests = {
+                        k: asked.get(k) for k in ("status", "reason", "accepted", "rejected")
+                    }
+                if applied.get("sandbox_error") is None:
+                    ai_pending = False
                 self.phase = "sbx_verify"
                 verified = await act(
                     "sbx_verify",
@@ -224,7 +253,7 @@ class SandboxVerificationWorkflow:
                         "plan": plan,
                         "applied": applied,
                         "source": source,
-                        "suite_ref": data["suite_ref"],
+                        "suite_ref": suite_ref,
                         "reset": tests_ran,
                     },
                     minutes=15,
@@ -271,7 +300,7 @@ class SandboxVerificationWorkflow:
                         "classification": classified,
                         "requirements_ref": requirements_ref,
                         "logs_ref": verified["logs_ref"],
-                        "suite_ref": data["suite_ref"],
+                        "suite_ref": suite_ref,
                         "source": source,
                         "analysis_report_ref": data.get("analysis_report_ref"),
                         "migration_id": data["migration_id"],
@@ -325,7 +354,7 @@ class SandboxVerificationWorkflow:
         if outcome == "PASSED":
             self.phase = "sbx_plan_publish"
             publish = {
-                "input": data,
+                "input": {**data, "suite_ref": suite_ref},
                 "requirements_ref": requirements_ref,
                 "source": source,
                 "row_changes": row_changes,
@@ -377,4 +406,5 @@ class SandboxVerificationWorkflow:
             "requirements_ref": requirements_ref,
             "source": source,
             "published": published,
+            **({"ai_tests": self.ai_tests} if self.ai_tests is not None else {}),
         }

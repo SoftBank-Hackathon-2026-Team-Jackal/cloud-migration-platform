@@ -15,6 +15,8 @@ from cmp_scanners.envfile import is_env_file, parse_env_names
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# A value git could read as an option or split into several arguments is refused before git runs.
+_PLAIN_VALUE = re.compile(r"^[^\s\x00-\x1f\x7f-][^\s\x00-\x1f\x7f]*$")
 _SKIP_DIRS = {".git", "node_modules", ".venv"}
 _GIT_TIMEOUT = 300
 
@@ -96,6 +98,14 @@ def _env_names(workspace: Path) -> dict[str, list[str]]:
     return found
 
 
+def check_source_input(repository: str, requested_commit: str) -> None:
+    """Refuse values that start with `-` or hold whitespace or control characters."""
+    if not _PLAIN_VALUE.fullmatch(repository):
+        raise SourceFetchError("repository address is not a plain value")
+    if not _PLAIN_VALUE.fullmatch(requested_commit):
+        raise SourceFetchError("requested commit is not a plain value")
+
+
 def fetch_source(
     repository: str,
     *,
@@ -108,6 +118,7 @@ def fetch_source(
 ) -> SourceSnapshot:
     if not _SAFE_ID.fullmatch(migration_id):
         raise SourceFetchError("invalid migration id")
+    check_source_input(repository, requested_commit)
     if not allow_local and not repository.startswith("https://"):
         raise SourceFetchError("only https repositories are allowed")
     root = _check_root(Path(workspace_root))

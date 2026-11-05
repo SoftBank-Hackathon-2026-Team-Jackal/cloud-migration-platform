@@ -7,19 +7,24 @@ never enter Workflow history; logs are masked and stored by reference.
 
 import re
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, propose_fix
 from cmp_agents.llm import LLMClient
+from cmp_agents.tester import SuiteRequest, generate_tests
 from cmp_contracts.analysis import AnalysisReport, ReviewRecord
 from cmp_contracts.provisioning import Image
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_contracts.verification import canonical_requirements
 from cmp_scanners.masking import mask_text
 from cmp_testsuite import SuiteResult, load_bundle, run_suite
+from cmp_testsuite.model import HttpStep
+from cmp_testsuite.runner import run_case
+from cmp_testsuite.validate import CaseRunner, pin_suite, validate_tests
 from pydantic import BaseModel, ConfigDict
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -79,6 +84,9 @@ class SandboxInput(BaseModel):
     env_file: str | None = None
     keep_hosts: list[dict[str, Any]] = []
     source_hosts: list[str] = []
+    ai_tests: bool = (
+        False  # ask the Tester once the first Sandbox is healthy (needs an origin runner)
+    )
     analysis_report_ref: ArtifactRef | None = None  # the analysis version a person approved
     review_ref: ArtifactRef | None = None  # its stored ReviewRecord
 
@@ -109,6 +117,22 @@ def make_proxy_suite_runner(service: SandboxService) -> SuiteRunner:
     return run
 
 
+def make_proxy_case_runner(
+    service: SandboxService,
+) -> Callable[[SandboxPlan], AbstractContextManager[CaseRunner]]:
+    """Run one case at a time against the Sandbox application through `kubectl proxy`."""
+
+    @contextmanager
+    def open_runner(plan: SandboxPlan) -> Iterator[CaseRunner]:
+        app = next(r for r in plan.request["resources"] if r["kind"] == "APPLICATION")
+        with service.cluster.proxy() as proxy:
+            base = proxy + service.service_path(plan, app["id"])
+            variables = {"health_path": app["health_path"], "run_id": "ai-check"}
+            yield lambda case: run_case(case, base, variables=dict(variables))
+
+    return open_runner
+
+
 class SandboxLoopActivities:
     def __init__(
         self,
@@ -120,7 +144,15 @@ class SandboxLoopActivities:
         suite_runner: SuiteRunner,
         llm_factory: Callable[[str, str], LLMClient] | None = None,
         pr_publisher: DraftPrPublisher | None = None,
+        target_case_runner: Callable[[SandboxPlan], AbstractContextManager[CaseRunner]]
+        | None = None,
+        origin_case_runner: Callable[[], AbstractContextManager[CaseRunner]] | None = None,
+        cut_dependency: Callable[[SandboxPlan], AbstractContextManager[None]] | None = None,
     ) -> None:
+        # The origin test resource (D-09) has no default: without it AI tests are never requested.
+        self.origin_case_runner = origin_case_runner
+        self.target_case_runner = target_case_runner or make_proxy_case_runner(service)
+        self.cut_dependency = cut_dependency or service.database_cut
         self.pr_publisher = pr_publisher or PreparedOnlyPublisher()
         self.service = service
         self.store = store
@@ -322,6 +354,55 @@ class SandboxLoopActivities:
             "source": {"workspace": str(target)},
         }  # fmt: skip
 
+    @activity.defn(name="sbx_ai_tests")
+    async def sbx_ai_tests(self, payload: dict) -> dict:
+        """Ask the Tester for tests and keep only those that pass the four conditions (AV-012).
+
+        Without an origin test resource (D-09) or a model, nothing is asked and the suite stays.
+        """
+        suite_ref = ArtifactRef.model_validate(payload["suite_ref"])
+        same = {"suite_ref": suite_ref.model_dump(mode="json"), "accepted": [], "rejected": {}}
+        if self.origin_case_runner is None:
+            return {**same, "status": "NOT_CALLED", "reason": "ORIGIN_UNAVAILABLE"}
+        if self.llm_factory is None:
+            return {**same, "status": "NOT_CALLED", "reason": "LLM_NOT_CONFIGURED"}
+        suite = load_bundle(self.store.get(suite_ref))
+        routes = {
+            f"{step.method} {step.path}": "used by a standard test"
+            for c in suite.cases
+            for step in c.steps
+            if isinstance(step, HttpStep)
+        }
+        report = self._report(payload.get("analysis_report_ref"))
+        usages = report.usage_profile.usages if report else []
+        generated = generate_tests(
+            SuiteRequest(
+                usage_summary="\n".join(usages) or "(none)",
+                api_routes=routes,
+                existing_ids=[c.id for c in suite.cases],
+            ),
+            llm=self.llm_factory(payload["migration_id"], "tester"),
+        )
+        if generated.status != "GENERATED":
+            return {**same, "status": "FAILED", "reason": generated.failure_reason}
+        plan = SandboxPlan.model_validate(payload["plan"])
+        with self.origin_case_runner() as origin, self.target_case_runner(plan) as target:
+            validation = validate_tests(
+                generated.cases,
+                target=target,
+                origin=origin,
+                cut_dependency=lambda: self.cut_dependency(plan),
+            )
+        rejected = {v.case_id: v.reason for v in validation.verdicts if not v.accepted}
+        if not validation.accepted:
+            return {**same, "status": "NONE_ACCEPTED", "rejected": rejected}
+        _pinned, data = pin_suite(f"{suite.name}+ai", suite.cases, validation.accepted)
+        ref = self.store.put(data, ref_id="suite-ai", kind="test-suite")
+        return {
+            "status": "PINNED", "suite_ref": ref.model_dump(mode="json"),
+            "accepted": [c.id for c in validation.accepted], "rejected": rejected,
+        }  # fmt: skip
+
     # ------------------------------------------------------------------ publication
 
     def _report(self, ref: dict | None) -> AnalysisReport | None:
@@ -469,6 +550,6 @@ class SandboxLoopActivities:
     def all(self) -> list[Callable]:
         return [
             self.sbx_build, self.sbx_prepare, self.sbx_apply, self.sbx_verify,
-            self.sbx_classify, self.sbx_fix, self.sbx_plan_publish, self.sbx_publish,
+            self.sbx_classify, self.sbx_fix, self.sbx_ai_tests, self.sbx_plan_publish, self.sbx_publish,
             self.sbx_teardown,
         ]  # fmt: skip
