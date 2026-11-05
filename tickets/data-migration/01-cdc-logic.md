@@ -2,7 +2,7 @@
 
 ## 상태
 
-DONE(로컬 검증, PR 전) — Issue 미생성
+DONE(로컬 검증, PR 전) — [Issue #137](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/137)
 
 ## 목적
 
