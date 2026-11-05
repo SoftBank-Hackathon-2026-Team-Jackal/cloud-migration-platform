@@ -22,7 +22,8 @@ MigrationWorkflow
 | 저장소 읽기 인터페이스 `EnvFileStore`(read_names·read_values)와 InMemory 구현. 쓰기·삭제는 ENV-01 구현 몫 | `packages/providers` (`cmp_providers.env_file`) | 민서 |
 | `resolve_env_names`, `render_env`, DB 연결 Secret 이름·데이터 | `cmp_providers.env_file` | 민서 |
 | 분석용 EnvPlan 빌더 `build_env_plan`(편의 함수, 분석 모듈 미수정) | `cmp_providers.env_plan_builder` | 민서(최종 규칙은 박승철님) |
-| 업로드·삭제 API, 암호화 저장 구현 | `apps/api` | 민서 |
+| 업로드·삭제 API | `apps/api` (`cmp_api.routes.env_files`) | 민서 |
+| 암호화 저장 구현 `EncryptedEnvFileStore` | `packages/providers` (`cmp_providers.env_file_store`, 워커도 읽기 위해 API 밖) | 민서 |
 | `MigrationRequest.env_file_ref`와 Workflow 전달 | `cmp_contracts.migration`, `apps/worker` Migration Workflow | 민서(#60과 조율) |
 | 구축 렌더 전환 | `cmp_worker.plan_publish`, `k8s_workloads`, ON_PREM 작업 | 민서 |
 | 분석 EnvPlan 출력 | 분석 Activity·`cmp_scanners.assembly` | 박승철님 |

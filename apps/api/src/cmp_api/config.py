@@ -1,3 +1,4 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,10 @@ class Settings(BaseSettings):
     # missed 15 s Agent reports) and its WireGuard handshake is within Reject-After-Time (180 s).
     tunnel_status_ttl_seconds: int = 60
     tunnel_handshake_stale_seconds: int = 180
+    # ENV-01: uploaded `.env` files, encrypted (AES-256-GCM) under this directory (files 0600).
+    # The key is a base64url 32-byte value from the server's own `.env`, never the repository.
+    env_file_store_dir: str | None = None
+    env_file_encryption_key: SecretStr | None = None
 
 
 settings = Settings()

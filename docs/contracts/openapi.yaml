@@ -18,6 +18,13 @@ paths:
       tags:
       - migration scaffold
       summary: Start Migration
+      description: 'Start a migration. `env_file_ref` (from `POST /env-files`) is
+        optional; an unknown,
+
+        changed or deleted reference is 422 `{"detail": {"code": "ENV_FILE_NOT_FOUND"
+        |
+
+        "ENV_FILE_DIGEST_MISMATCH" | "ENV_FILE_EXPIRED"}}` and nothing starts.'
       operationId: start_migration_migrations_post
       requestBody:
         content:
@@ -1362,6 +1369,143 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /env-files:
+    post:
+      tags:
+      - env files
+      summary: Upload Env File
+      description: Store a new `.env`; returns `env_file_ref` (version 1) and the
+        key names.
+      operationId: upload_env_file_env_files_post
+      parameters:
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvFileUploaded'
+        '403':
+          description: Operator key missing or wrong
+        '404':
+          description: '`ENV_FILE_NOT_FOUND`'
+        '410':
+          description: '`ENV_FILE_EXPIRED` (deleted or past retention)'
+        '413':
+          description: '`ENV_FILE_TOO_LARGE`'
+        '422':
+          description: '`ENV_FILE_NOT_UTF8`'
+        '503':
+          description: '`ENV_FILE_STORE_UNCONFIGURED`'
+      requestBody:
+        required: true
+        description: Raw `.env` bytes, UTF-8, at most 64 KiB.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+          text/plain:
+            schema:
+              type: string
+  /env-files/{file_id}:
+    post:
+      tags:
+      - env files
+      summary: Upload Env File Version
+      description: Store a new version of an existing `.env`; earlier versions stay
+        until retention.
+      operationId: upload_env_file_version_env_files__file_id__post
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: File Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvFileUploaded'
+        '403':
+          description: Operator key missing or wrong
+        '404':
+          description: '`ENV_FILE_NOT_FOUND`'
+        '410':
+          description: '`ENV_FILE_EXPIRED` (deleted or past retention)'
+        '413':
+          description: '`ENV_FILE_TOO_LARGE`'
+        '422':
+          description: '`ENV_FILE_NOT_UTF8`'
+        '503':
+          description: '`ENV_FILE_STORE_UNCONFIGURED`'
+      requestBody:
+        required: true
+        description: Raw `.env` bytes, UTF-8, at most 64 KiB.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+          text/plain:
+            schema:
+              type: string
+    delete:
+      tags:
+      - env files
+      summary: Delete Env File
+      description: Delete every version now; later reads of any of its references
+        are `ENV_FILE_EXPIRED`.
+      operationId: delete_env_file_env_files__file_id__delete
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: File Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '204':
+          description: Successful Response
+        '403':
+          description: Operator key missing or wrong
+        '404':
+          description: '`ENV_FILE_NOT_FOUND`'
+        '503':
+          description: '`ENV_FILE_STORE_UNCONFIGURED`'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -2167,6 +2311,39 @@ components:
       - enrollment_token
       - expires_in_seconds
       title: EnrollmentResponse
+    EnvFileUploaded:
+      properties:
+        env_file_ref:
+          $ref: '#/components/schemas/ContentRef'
+        keys:
+          items:
+            type: string
+          type: array
+          title: Keys
+        warnings:
+          items:
+            $ref: '#/components/schemas/EnvFileWarning'
+          type: array
+          title: Warnings
+          default: []
+      type: object
+      required:
+      - env_file_ref
+      - keys
+      title: EnvFileUploaded
+    EnvFileWarning:
+      properties:
+        code:
+          type: string
+          title: Code
+        key:
+          type: string
+          title: Key
+      type: object
+      required:
+      - code
+      - key
+      title: EnvFileWarning
     EnvironmentInputV2:
       properties:
         env_file_ref:
@@ -2472,6 +2649,10 @@ components:
           const: GCP
           title: Target Provider
           default: GCP
+        env_file_ref:
+          anyOf:
+          - $ref: '#/components/schemas/ContentRef'
+          - type: 'null'
       type: object
       required:
       - project_id

@@ -160,3 +160,28 @@ API 설정(`cmp_api.config`):
 ## 이전 이벤트 저장소·SSE (24)
 
 `cmp_contracts.events`가 이벤트 봉투 `MigrationEvent`와 웹 계약(`cloud-migration-web` `contract/events.schema.json`, 사본 `docs/contracts/events.schema.json`)과 같은 타입별 `*Data` 모델, 백엔드→웹 이름 변환 `to_web`, 웹 형식 스키마 `event_json_schema()`를 제공한다. 저장은 `cmp_api.migration_events`(`migration_events`·`migration_logs`, `append_event`·`list_events`·`list_logs`, `EventEmitter`·`InMemoryEmitter`·`DbEventEmitter`), Activity 발행은 `cmp_worker.events`(`emit_event`·`emit_event_async`·`log_event`, Workflow용 `emit_migration_event` Activity)다. 읽기는 `GET /migrations/{id}/events`(SSE·JSON)와 `GET /migrations/{id}/logs`. 기존 모델·Activity 반환값은 바꾸지 않는다. Terraform Apply는 `-json`으로 바뀌었고 결과 계약(`status`·`code`·refs)은 같다. 결정은 [migration-events.md E1~E17](migration-events.md), 담당자 사용법은 [이벤트 발행 안내서](../../docs/engineering/events-guide.md).
+
+## .env 업로드와 env_file_ref (ENV-01·ENV-02)
+
+[명세](../env-file-ref/spec.md), [ENV-01](../../tickets/env-file-ref/01-env-upload-store.md), [ENV-02](../../tickets/env-file-ref/02-migration-request-env-ref.md). 업로드 라우트는 운영자 키 `X-Enrollment-Admin-Key`가 필요하고 웹 BFF가 서버 측에서만 호출한다. 응답·오류에는 값이 없고 오류 본문은 `{"detail": {"code": ...}}`뿐이다.
+
+| 라우트 | 요청 | 응답 |
+| --- | --- | --- |
+| `POST /env-files` | 본문 = `.env` 원본 바이트(`application/octet-stream` 또는 `text/plain`, UTF-8, 64 KiB 이하) | 201 `{env_file_ref: {id: "envf-<32 hex>", version: "1", sha256}, keys: [이름], warnings: [{code: "ENV_KEY_DUPLICATED", key}]}`. `sha256`은 원본 바이트 기준 |
+| `POST /env-files/{id}` | 같은 본문 | 201, 같은 `id`의 다음 `version`. 이전 버전은 보관 기간까지 읽을 수 있다 |
+| `DELETE /env-files/{id}` | — | 204. 모든 버전 삭제, 반복 호출도 204 |
+| `POST /migrations` | 선택 `env_file_ref: ContentRef` | 없으면 지금과 같다. 있으면 저장소에 같은 `version`·`sha256`이 있어야 하고, 아니면 422 `ENV_FILE_NOT_FOUND`·`ENV_FILE_DIGEST_MISMATCH`·`ENV_FILE_EXPIRED`(시작하지 않음) |
+
+오류 코드: `ENV_FILE_NOT_FOUND` 404, `ENV_FILE_EXPIRED` 410(삭제·보관 만료), `ENV_FILE_TOO_LARGE` 413, `ENV_FILE_NOT_UTF8` 422, `ENV_FILE_STORE_UNCONFIGURED`·`ENV_FILE_KEY_INVALID` 503.
+
+저장소 `cmp_providers.env_file_store.EncryptedEnvFileStore(root, key)`:
+- `put(data, file_id=None) -> (ContentRef, names, duplicates)`, `delete(id)`, `bind_migration(ref, migration_id)`, `purge_expired(ended_at, now=None)`, `bound_migrations()`, `check(ref)`(복호화 없이 존재·sha 확인)
+- ENV-03 `EnvFileStore` 프로토콜 메서드: `read_names(ref) -> list[str]`, `read_values(ref, keys) -> dict[str, str]`
+- 오류는 `EnvFileError(code)`(`.code`). ENV-03의 오류 형식이 병합되면 하나로 합친다.
+- 파싱: 이름 규칙은 `cmp_scanners.envfile.parse_env_names`와 같다(`[export ]NAME=`, 그 밖의 줄 무시). 값은 앞뒤 공백과 한 쌍의 같은 따옴표만 벗긴다(이스케이프·인라인 주석 해석 없음). 중복 키는 마지막 값.
+- 암호화: AES-256-GCM(`cryptography`), 버전마다 무작위 96비트 nonce, 연결 데이터 `id|version|sha256`. 파일 `<root>/<id>/v<N>.bin`, 메타 `<root>/<id>/meta.json`(값 없음) 모두 0600, 디렉터리 0700.
+- 보관: 사용한 이전의 Workflow가 끝난 뒤 7일, 이전에 쓰이지 않은 업로드는 마지막 버전 업로드 뒤 7일, 또는 `DELETE` 즉시. 실행은 `scripts/purge_env_files.py`(Temporal `close_time` 기준, cron 등록은 배포 측).
+
+API 설정(`cmp_api.config`): `env_file_store_dir`(`ENV_FILE_STORE_DIR`), `env_file_encryption_key`(`ENV_FILE_ENCRYPTION_KEY`, base64url 32바이트, 서버 `.env`에만).
+
+Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`를 분석 자식 입력 `AnalysisInput.env_file_ref`(추가 선택 필드), Sandbox `SandboxSettings`·`SandboxInput.env_file_ref`(추가 선택 필드), Planning 인계 설정 `PlanningSettings.env_file_ref`(시작 요청 값이 우선)로 복사한다. `status` 쿼리에 `env_file_ref`가 추가됐다. API의 scaffold 시작(`analysis` 없음)은 `{project_id, env_file_ref}` dict로 시작하며 분석·Sandbox 자식은 여전히 scaffold 문자열 입력이다.
