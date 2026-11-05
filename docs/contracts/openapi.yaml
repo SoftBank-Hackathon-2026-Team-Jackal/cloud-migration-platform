@@ -3484,6 +3484,12 @@ components:
         db_connect_ok:
           type: boolean
           title: Db Connect Ok
+        code:
+          anyOf:
+          - type: string
+            pattern: ^[A-Z][A-Z0-9_]{0,63}$
+          - type: 'null'
+          title: Code
       additionalProperties: false
       type: object
       required:

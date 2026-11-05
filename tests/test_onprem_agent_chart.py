@@ -51,18 +51,22 @@ def deployment(docs):
     return next(doc for (kind, _), doc in docs.items() if kind == "Deployment")
 
 
+def container(pod, name="agent"):
+    return next(c for c in pod["containers"] if c["name"] == name)
+
+
 def test_single_agent_runs_in_cluster_with_its_service_account(tmp_path):
     docs = documents(tmp_path, values())
     agent = deployment(docs)
     spec = agent["spec"]
     assert spec["replicas"] == 1 and spec["strategy"] == {"type": "Recreate"}
     pod = spec["template"]["spec"]
-    [container] = pod["containers"]
+    agent_container = container(pod)
     assert (
-        container["image"]
+        agent_container["image"]
         == f"ghcr.io/softbank-hackathon-2026-team-jackal/cmp-onprem-agent@{DIGEST}"
     )
-    assert container["args"][:6] == [
+    assert agent_container["args"][:6] == [
         "--platform-url",
         "https://platform.example.com",
         "--agent-id",
@@ -77,13 +81,13 @@ def test_single_agent_runs_in_cluster_with_its_service_account(tmp_path):
 
 def test_container_is_locked_down(tmp_path):
     pod = deployment(documents(tmp_path, values()))["spec"]["template"]["spec"]
-    [container] = pod["containers"]
-    context = container["securityContext"]
+    agent_container = container(pod)
+    context = agent_container["securityContext"]
     assert context["allowPrivilegeEscalation"] is False
     assert context["readOnlyRootFilesystem"] is True
     assert context["capabilities"] == {"drop": ["ALL"]}
     assert pod["securityContext"]["runAsNonRoot"] is True
-    assert any(mount["mountPath"] == "/tmp" for mount in container["volumeMounts"])
+    assert any(mount["mountPath"] == "/tmp" for mount in agent_container["volumeMounts"])
 
 
 def test_rbac_is_explicit_without_wildcards(tmp_path):
@@ -98,7 +102,7 @@ def test_rbac_is_explicit_without_wildcards(tmp_path):
         for group in rule["apiGroups"]
         for resource in rule["resources"]
     }
-    assert granted[("", "namespaces")] == {"get", "create"}
+    assert granted[("", "namespaces")] == {"get", "list", "create"}  # list: tunnel discovery (17)
     assert granted[("storage.k8s.io", "storageclasses")] == {"get"}
     assert granted[("", "pods/exec")] == {"create"}
     assert granted[("", "services/proxy")] == {"get"}
@@ -126,9 +130,10 @@ def test_private_ca_bundle_is_trusted_via_ssl_cert_file(tmp_path):
     docs = documents(tmp_path, values(platform={"url": "https://p.test", "caBundle": "PEM"}))
     config = next(doc for (kind, _), doc in docs.items() if kind == "ConfigMap")
     assert config["data"] == {"ca.crt": "PEM"}
-    [container] = deployment(docs)["spec"]["template"]["spec"]["containers"]
-    env = {item["name"]: item["value"] for item in container["env"]}
-    assert env["SSL_CERT_FILE"] == "/etc/cmp-agent/ca/ca.crt"
+    pod = deployment(docs)["spec"]["template"]["spec"]
+    for name in ("agent", "tunnel"):  # both talk to the platform
+        env = {item["name"]: item["value"] for item in container(pod, name)["env"]}
+        assert env["SSL_CERT_FILE"] == "/etc/cmp-agent/ca/ca.crt"
     no_ca = documents(tmp_path, values())
     assert not any(kind == "ConfigMap" for kind, _ in no_ca)
 
@@ -151,8 +156,8 @@ def test_schema_rejects_unsafe_or_missing_values(tmp_path, bad):
 
 def test_tag_is_allowed_for_local_builds(tmp_path):
     data = values(image={"repository": "cmp-onprem-agent", "tag": "dev", "digest": ""})
-    [container] = deployment(documents(tmp_path, data))["spec"]["template"]["spec"]["containers"]
-    assert container["image"] == "cmp-onprem-agent:dev"
+    pod = deployment(documents(tmp_path, data))["spec"]["template"]["spec"]
+    assert {c["image"] for c in pod["containers"]} == {"cmp-onprem-agent:dev"}
 
 
 # --- release packaging (H4) ------------------------------------------------------------------
@@ -181,3 +186,57 @@ def test_release_package_pins_version_and_image_digest(tmp_path):
         module.package("0.1.0", "latest", tmp_path / "dist")
     with pytest.raises(ValueError, match="INVALID_VERSION"):
         module.package("v0.1", DIGEST, tmp_path / "dist")
+
+
+# --- ticket 17 (#71): tunnel container -----------------------------------------------------------
+
+
+def test_tunnel_container_has_only_network_admin_and_no_host_network(tmp_path):
+    pod = deployment(documents(tmp_path, values()))["spec"]["template"]["spec"]
+    tunnel = container(pod, "tunnel")
+    assert tunnel["image"] == container(pod)["image"]
+    assert tunnel["command"] == ["python", "-m", "cmp_providers.agent_tunnel"]
+    assert tunnel["args"] == [
+        "--platform-url",
+        "https://platform.example.com",
+        "--agent-id",
+        "agent-a",
+        "--namespace",
+        "cmp-system",
+        "--mode",
+        "auto",
+        "--interval-seconds",
+        "15",
+    ]
+    context = tunnel["securityContext"]
+    assert context["capabilities"] == {"drop": ["ALL"], "add": ["NET_ADMIN", "NET_BIND_SERVICE"]}
+    assert context["allowPrivilegeEscalation"] is False
+    assert context["readOnlyRootFilesystem"] is True
+    assert context.get("privileged") is not True
+    assert pod.get("hostNetwork") is not True
+    assert all("ports" not in c and "hostPort" not in json.dumps(c) for c in pod["containers"])
+    mounts = {m["mountPath"] for m in tunnel["volumeMounts"]}
+    assert {"/tmp", "/var/run/wireguard", "/dev/net/tun"} <= mounts
+    tun = next(v for v in pod["volumes"] if v["name"] == "tun")
+    assert tun["hostPath"] == {"path": "/dev/net/tun", "type": "CharDevice"}
+    # The agent container keeps its own /tmp (generated kubeconfig is owner-only per container).
+    agent_tmp = next(m for m in container(pod)["volumeMounts"] if m["mountPath"] == "/tmp")
+    tunnel_tmp = next(m for m in tunnel["volumeMounts"] if m["mountPath"] == "/tmp")
+    assert agent_tmp["name"] != tunnel_tmp["name"]
+
+
+def test_kernel_mode_does_not_mount_the_tun_device(tmp_path):
+    data = values(tunnel={"mode": "kernel"})
+    pod = deployment(documents(tmp_path, data))["spec"]["template"]["spec"]
+    assert "--mode" in container(pod, "tunnel")["args"]
+    assert all(v["name"] != "tun" for v in pod["volumes"])
+
+
+def test_tunnel_can_be_disabled(tmp_path):
+    pod = deployment(documents(tmp_path, values(tunnel={"enabled": False})))["spec"]["template"]
+    assert [c["name"] for c in pod["spec"]["containers"]] == ["agent"]
+
+
+@pytest.mark.parametrize("bad", [{"mode": "tcp"}, {"intervalSeconds": 0}, {"extra": 1}])
+def test_tunnel_values_are_validated(tmp_path, bad):
+    assert render(tmp_path, values(tunnel=bad)).returncode != 0

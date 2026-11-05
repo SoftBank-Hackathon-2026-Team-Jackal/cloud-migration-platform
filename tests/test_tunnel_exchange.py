@@ -367,6 +367,34 @@ def test_status_for_another_tunnel_ip_is_rejected(client, db):
     assert response.json()["detail"] == "TUNNEL_IP_MISMATCH"
 
 
+def test_status_failure_code_is_stored_and_does_not_unblock_the_handoff(client, db):
+    """Ticket 17 W8: the Agent reports why a tunnel check failed (code only, optional)."""
+    from cmp_api.tunnels import TunnelStatus, tunnel_view
+
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    onprem_ready(db)
+    failed = report(
+        client, headers, app_health_ok=False, db_connect_ok=False, code="HANDSHAKE_MISSING"
+    )
+    assert failed.status_code == 202
+    with db() as s:
+        assert s.get(TunnelStatus, "agent-001").code == "HANDSHAKE_MISSING"
+        assert tunnel_view(s, "agent-001")["code"] == "HANDSHAKE_MISSING"
+    assert handoff(db, "TRAFFIC_MIGRATION")["proceed"] is False
+
+    assert report(client, headers).status_code == 202  # code omitted = success, stays compatible
+    with db() as s:
+        assert s.get(TunnelStatus, "agent-001").code is None
+
+
+@pytest.mark.parametrize("code", ["handshake missing", "X" * 65, "secret=abc"])
+def test_status_code_must_be_a_short_upper_case_code(client, db, code):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    assert report(client, headers, code=code).status_code == 422
+
+
 def test_alembic_migration_matches_tunnel_models(tmp_path, monkeypatch):
     from alembic import command
     from alembic.autogenerate import compare_metadata

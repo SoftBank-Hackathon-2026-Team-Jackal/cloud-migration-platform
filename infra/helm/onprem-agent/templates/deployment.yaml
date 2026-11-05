@@ -65,9 +65,74 @@ spec:
               mountPath: /etc/cmp-agent/ca
               readOnly: true
             {{- end }}
+        {{- if .Values.tunnel.enabled }}
+        # Ticket 17 (W1): WireGuard client in the Pod network namespace (no hostNetwork). Root
+        # only for NET_ADMIN (interface/peer) and NET_BIND_SERVICE (app ports < 1024); every other
+        # capability is dropped. Forwarders bind to the tunnel IP only; no container port is open.
+        - name: tunnel
+          image: {{ include "agent.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "cmp_providers.agent_tunnel"]
+          args:
+            - --platform-url
+            - {{ .Values.platform.url | quote }}
+            - --agent-id
+            - {{ .Values.agentId | quote }}
+            - --namespace
+            - {{ .Release.Namespace | quote }}
+            - --mode
+            - {{ .Values.tunnel.mode | quote }}
+            - --interval-seconds
+            - {{ .Values.tunnel.intervalSeconds | quote }}
+          env:
+            - name: HOME
+              value: /tmp
+            {{- if .Values.platform.caBundle }}
+            - name: SSL_CERT_FILE
+              value: /etc/cmp-agent/ca/ca.crt
+            {{- end }}
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_ADMIN", "NET_BIND_SERVICE"]
+          resources:
+            {{- toYaml .Values.tunnel.resources | nindent 12 }}
+          volumeMounts:
+            - name: tunnel-tmp
+              mountPath: /tmp
+            - name: wireguard-run
+              mountPath: /var/run/wireguard
+            {{- if ne .Values.tunnel.mode "kernel" }}
+            - name: tun
+              mountPath: /dev/net/tun
+            {{- end }}
+            {{- if .Values.platform.caBundle }}
+            - name: platform-ca
+              mountPath: /etc/cmp-agent/ca
+              readOnly: true
+            {{- end }}
+        {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if .Values.tunnel.enabled }}
+        - name: tunnel-tmp
+          emptyDir: {}
+        - name: wireguard-run
+          emptyDir: {}
+        {{- if ne .Values.tunnel.mode "kernel" }}
+        # wireguard-go fallback only (kernel WireGuard needs no device).
+        - name: tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        {{- end }}
+        {{- end }}
         {{- if .Values.platform.caBundle }}
         - name: platform-ca
           configMap:

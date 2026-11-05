@@ -7,8 +7,9 @@
 | 구성 요소 | 위치 |
 | --- | --- |
 | 실행 프로세스 | `python -m cmp_providers.agent_runtime` (`cmp_providers.agent_runtime.AgentDaemon`) |
-| 이미지 | `infra/onprem-agent/Dockerfile` — Agent 코드 + kubectl v1.37.1 + Helm v4.3.1(공식 체크섬 고정), UID 65532 |
-| Chart | `infra/helm/onprem-agent` — ServiceAccount, ClusterRole/Binding, 등록 토큰 Secret, (선택) CA ConfigMap, Deployment |
+| 이미지 | `infra/onprem-agent/Dockerfile` — Agent 코드 + kubectl v1.37.1 + Helm v4.3.1(공식 체크섬 고정) + `wireguard-tools`·`iproute2` + `wireguard-go` 0.0.20250522(커밋 고정, Go checksum DB 검증), 기본 UID 65532 |
+| 터널 프로세스 (17) | 같은 Pod의 `tunnel` 컨테이너, `python -m cmp_providers.agent_tunnel` (`cmp_providers.agent_tunnel.TunnelManager`) |
+| Chart | `infra/helm/onprem-agent` — ServiceAccount, ClusterRole/Binding, 등록 토큰 Secret, (선택) CA ConfigMap, Deployment(`agent` + `tunnel` 컨테이너) |
 | 릴리스 | 태그 `agent-vX.Y.Z` → `.github/workflows/agent-release.yml`: GHCR 이미지(amd64·arm64), OCI Chart(이미지 Digest 고정), GitHub Release |
 
 ## 1. 운영자: 등록 토큰 발급
@@ -50,7 +51,7 @@ kubectl -n cmp-system logs deploy/cmp-onprem-agent
 
 ## 4. 권한 (H2)
 
-ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/create, StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·`--wait`·검사 동사, ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기, `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경하지 않는다(`NAMESPACE_NOT_OWNED`).
+ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create(list는 17 터널 전달 대상 찾기), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·`--wait`·검사 동사, ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기, `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경하지 않는다(`NAMESPACE_NOT_OWNED`).
 
 ## 5. 폐기·제거
 
@@ -60,14 +61,45 @@ helm uninstall cmp-agent -n cmp-system
 kubectl delete namespace cmp-system
 ```
 
-폐기된 Agent는 모든 Agent API에서 403이다. 남은 작업은 지우지 않으며 승인 실행 Activity가 대기 한도 뒤 `UNKNOWN AGENT_OFFLINE`을 반환한다. `cmp-agent-credential` Secret은 Helm이 관리하지 않으므로 Namespace 삭제로 지운다. 배포한 앱·DB Namespace는 그대로 남는다.
+폐기된 Agent는 모든 Agent API에서 403이다. `tunnel` 컨테이너는 터널 인터페이스를 지우고 종료 코드 2로 멈추며, 중계 서버 목록에 `revoked: true`로 남아 중계 서버가 peer를 지운다. 남은 작업은 지우지 않으며 승인 실행 Activity가 대기 한도 뒤 `UNKNOWN AGENT_OFFLINE`을 반환한다. `cmp-agent-credential`·`cmp-agent-wireguard` Secret은 Helm이 관리하지 않으므로 Namespace 삭제로 지운다. 배포한 앱·DB Namespace는 그대로 남는다.
 
 ## 6. 복구가 필요한 경우
 
 - 등록 직후 자격 증명 저장 전에 Agent가 중단되면 토큰은 이미 사용돼 다시 쓸 수 없다. 로그가 `ENROLLMENT_REJECTED`로 멈추면 새 `agent_id`로 토큰을 다시 발급해 설치한다.
 - `cmp-agent-credential`이 지워졌다면 같은 방법으로 새 Agent를 등록하고 이전 Agent는 폐기한다.
 
+## 7. WireGuard 터널 (17)
+
+노트북은 인바운드 포트를 열지 않는다. Agent가 WireGuard **클라이언트**로 중계 서버(Traffic 담당, WireGuard 서버 + Envoy)에 먼저 연결하고, 터널 IP에서만 앱 포트와 5432를 K3s Service로 전달한다. 결정 W1~W9는 [17 티켓](../../tickets/provisioning/17-agent-wireguard-tunnel.md)에 있다.
+
+```text
+중계 서버 10.200.0.1 ──WireGuard(UDP, MTU 1420)── wg0 10.200.0.2 (Agent Pod netns)
+                                                     ├─ 10.200.0.2:<앱포트> → <앱 Service>:<앱포트>
+                                                     └─ 10.200.0.2:5432   → <DB Service>:5432
+```
+
+- **실행:** `tunnel` 컨테이너(UID 0, `NET_ADMIN`·`NET_BIND_SERVICE`만, 권한 상승 금지, 읽기 전용 루트). `hostNetwork`를 쓰지 않아 노드 LAN 인터페이스와 분리된다. `agent` 컨테이너는 15 그대로 비루트·무권한이다.
+- **모드(`tunnel.mode`):** `auto`(기본) = 커널 WireGuard, 없으면 `wireguard-go`(`/dev/net/tun` hostPath 마운트). `kernel`이면 tun을 마운트하지 않는다. `userspace`는 항상 `wireguard-go`.
+- **키:** 첫 실행에 비밀키를 만들어 `cmp-system/cmp-agent-wireguard` Secret(Helm 관리 밖)에만 둔다. 공개키만 `PUT /agents/<id>/tunnel/key`로 등록한다. Secret을 지우면 새 키로 교체 등록된다(터널 IP 유지).
+- **설정:** `tunnel.intervalSeconds`(기본 15초)마다 `GET .../tunnel/config`를 읽어 바뀌면(설정 버전·중계 서버 키·endpoint·노출 포트) 다시 적용한다. 중계 서버 peer의 AllowedIPs는 `10.200.0.1/32`로 좁힌다.
+- **전달 대상:** `cmp.dev/environment-id` 주석이 있는 Namespace의 Service를 포트로 찾는다(5432 = DB, 그 외 노출 포트 = 앱, 헬스 경로는 같은 이름 Deployment의 readinessProbe). 찾지 못하거나 둘 이상이면 그 포트를 열지 않는다.
+- **감시·재연결:** handshake가 180초 넘게 없으면 peer를 다시 설정하고, 그래도 안 되면 인터페이스를 다시 만든다. 상태(handshake 시각, 터널 경유 앱 헬스·DB 확인, 원인 코드)를 매 주기 `POST .../tunnel/status`로 보고한다.
+- **Pod Security:** `NET_ADMIN`과 hostPath는 Pod Security `baseline`에 맞지 않는다. Agent Namespace에 PSA를 강제하는 클러스터라면 그 Namespace만 `privileged`로 둔다(K3s 기본값은 강제하지 않음).
+- **끄기:** `--set tunnel.enabled=false` (터널 없이 15 동작만).
+
+확인:
+
+```bash
+kubectl -n cmp-system logs deploy/cmp-onprem-agent -c tunnel
+kubectl -n cmp-system exec deploy/cmp-onprem-agent -c tunnel -- wg show wg0 latest-handshakes
+```
+
+로그 이벤트: `tunnel_key_created`, `tunnel_applied`(설정 버전·모드), `tunnel`(상태가 바뀔 때, 코드만), `tunnel_recover`, `retry`, `stopped`. 원인 코드: `HANDSHAKE_MISSING`(UDP 차단·중계 서버 peer 미반영·키 불일치), `RELAY_NOT_CONFIGURED`, `INVALID_TUNNEL_CONFIG`, `TUNNEL_INTERFACE_FAILED`, `FORWARDER_BIND_FAILED`, `APP_PORT_NOT_ASSIGNED`, `FORWARD_TARGET_MISSING`, `FORWARD_TARGET_AMBIGUOUS`, `APP_HEALTH_FAILED`, `DB_CONNECT_FAILED`, `KUBERNETES_UNAVAILABLE`.
+
+UDP가 막힌 네트워크(행사장 Wi-Fi 등) 대체 터널은 아직 없다(Traffic 담당과 결정 대기). 그런 곳에서는 `HANDSHAKE_MISSING`이 보고되고 ON_PREM Traffic 인계가 막힌다.
+
 ## 검증과 미검증
 
 - 재현: `scripts/smoke_onprem_agent_install.py`(격리 k3d·전용 kubeconfig·`k3d-cmp-*` context 필수). 결과는 [provisioning-15-k3s.json](../../docs/verification/provisioning-15-k3s.json).
+- 터널(17) 재현: `scripts/smoke_onprem_agent_tunnel.py`(격리 k3d + 테스트용 WireGuard 상대). 결과는 [provisioning-17-k3s.json](../../docs/verification/provisioning-17-k3s.json). 실제 중계 서버 경로는 미검증.
 - 확인하지 않은 것: NAT 뒤 원격 노트북과 실제 공개 플랫폼 주소, GHCR 실제 게시(첫 태그 push는 별도 승인), 다양한 K3s 배포판·macOS VM, 장시간 실행.

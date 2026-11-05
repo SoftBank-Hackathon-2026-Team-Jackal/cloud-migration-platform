@@ -30,3 +30,17 @@ resources:
     memory: 128Mi
   limits:
     memory: 512Mi
+
+# Ticket 17 (#71): WireGuard client + tunnel-IP-only forwarders (decisions W1~W9).
+tunnel:
+  enabled: true
+  # auto: kernel WireGuard, else wireguard-go (needs /dev/net/tun). kernel | userspace to pin.
+  mode: auto
+  # Config poll, health checks and status report interval.
+  intervalSeconds: 15
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

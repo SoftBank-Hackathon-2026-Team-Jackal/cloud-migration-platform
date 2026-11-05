@@ -10,7 +10,8 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["get", "create"]
+    # list: the tunnel finds forward targets in Agent-owned Namespaces (ticket 17 W2).
+    verbs: ["get", "list", "create"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get"]

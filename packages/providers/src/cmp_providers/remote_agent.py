@@ -44,7 +44,13 @@ class AgentControlClient:
         return value
 
     def _request(
-        self, path: str, payload: dict | None, credential: str | None = None, *, raw=False
+        self,
+        path: str,
+        payload: dict | None,
+        credential: str | None = None,
+        *,
+        raw=False,
+        method: str | None = None,
     ):
         headers = {"Accept": "application/octet-stream" if raw else "application/json"}
         body = None
@@ -53,7 +59,7 @@ class AgentControlClient:
             body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         if credential:
             headers["Authorization"] = f"Bearer {credential}"
-        method = "GET" if raw else "POST"
+        method = method or ("GET" if raw else "POST")
         request = Request(self.base_url + path, data=body, headers=headers, method=method)
         try:
             with self.opener.open(request, timeout=30) as response:
@@ -112,6 +118,32 @@ class AgentControlClient:
         return self._request(
             f"/agents/{agent_id}/jobs/{job_id}/artifacts/{sha256}", None, credential, raw=True
         )
+
+    # --- tunnel exchange (ticket 16 API, used by the ticket 17 tunnel manager) ---------------
+    def register_tunnel_key(self, *, agent_id: str, credential: str, public_key: str) -> dict:
+        """Registers the WireGuard *public* key; the private key never leaves the Agent."""
+        self._id(agent_id)
+        response = self._request(
+            f"/agents/{agent_id}/tunnel/key", {"public_key": public_key}, credential, method="PUT"
+        )
+        if not isinstance(response.get("tunnel_ip"), str):
+            raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
+        return response
+
+    def tunnel_config(self, *, agent_id: str, credential: str) -> dict:
+        self._id(agent_id)
+        response = self._request(
+            f"/agents/{agent_id}/tunnel/config", None, credential, method="GET"
+        )
+        if not isinstance(response, dict) or not isinstance(response.get("relays"), list):
+            raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
+        return response
+
+    def report_tunnel_status(self, *, agent_id: str, credential: str, report: dict) -> None:
+        self._id(agent_id)
+        response = self._request(f"/agents/{agent_id}/tunnel/status", report, credential)
+        if response.get("accepted") is not True:
+            raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
 
 
 def _secret_file(path: Path) -> str:

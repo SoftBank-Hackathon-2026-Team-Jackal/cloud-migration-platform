@@ -1,0 +1,202 @@
+{
+  "cluster": {
+    "context": "k3d-cmp-t17"
+  },
+  "steps": {
+    "relay_peer": {
+      "endpoint_port": 51820,
+      "config_version": 1
+    },
+    "rollout_ready": {
+      "activity_code": "READY",
+      "status": "SUCCEEDED"
+    },
+    "tunnel_up": {
+      "status_before_rollout": null,
+      "reported": {
+        "tunnel_ip": "10.200.0.2",
+        "last_handshake_at": 1793863890,
+        "app_health_ok": true,
+        "db_connect_ok": true,
+        "code": null,
+        "reported_at": 1793863981
+      },
+      "tunnel_log_events": [
+        {
+          "event": "waiting",
+          "code": "AGENT_CREDENTIAL_PENDING"
+        },
+        {
+          "event": "tunnel_key_created"
+        },
+        {
+          "event": "tunnel_applied",
+          "mode": "kernel",
+          "config_version": 1
+        },
+        {
+          "event": "tunnel",
+          "code": "HANDSHAKE_MISSING"
+        },
+        {
+          "event": "tunnel",
+          "code": "APP_PORT_NOT_ASSIGNED"
+        },
+        {
+          "event": "tunnel",
+          "code": "APP_PORT_NOT_ASSIGNED"
+        },
+        {
+          "event": "tunnel",
+          "code": "APP_PORT_NOT_ASSIGNED"
+        },
+        {
+          "event": "tunnel",
+          "code": "APP_PORT_NOT_ASSIGNED"
+        },
+        {
+          "event": "tunnel",
+          "code": null
+        }
+      ],
+      "relay_wg_peer_handshakes": 1,
+      "relay_list_versions": [
+        "4f53cda18c2baa0c",
+        "9a4df665dc2bcf63",
+        "d6d75b95880f74c9"
+      ],
+      "traffic_handoff": {
+        "proceed": true,
+        "blocked_by": [],
+        "external_host": "10.200.0.2",
+        "external_port": 8080,
+        "external_endpoint": "http://10.200.0.2:8080",
+        "health_path": "/health"
+      },
+      "data_handoff": {
+        "proceed": true,
+        "tunnel_endpoint": "10.200.0.2:5432"
+      }
+    },
+    "relay_side_over_tunnel": {
+      "app_health_http": "200",
+      "pg_isready": "10.200.0.2:5432 - accepting connections"
+    },
+    "lan_blocked": {
+      "blocked": {
+        "node:8080": true,
+        "node:5432": true,
+        "agent_pod_ip:8080": true,
+        "agent_pod_ip:5432": true,
+        "pod_network_route_works": true
+      },
+      "tunnel_container_listeners": [
+        "10.200.0.2:5432",
+        "10.200.0.2:8080"
+      ],
+      "nodes_checked": 1
+    },
+    "mtu_df": {
+      "agent_wg0_mtu_1420": true,
+      "df_1420_ok": true,
+      "df_1420_summary": [
+        "3 packets transmitted, 3 received, 0% packet loss, time 2010ms"
+      ],
+      "df_1421_rejected": true
+    },
+    "peer_reregistration": {
+      "recovered": true,
+      "seconds": 18
+    },
+    "relay_cut": {
+      "cut_seconds": 201,
+      "status_during_cut": {
+        "tunnel_ip": "10.200.0.2",
+        "last_handshake_at": 1793864010,
+        "app_health_ok": false,
+        "db_connect_ok": false,
+        "code": "HANDSHAKE_MISSING",
+        "reported_at": 1793864211
+      },
+      "traffic_handoff_during_cut": {
+        "proceed": false,
+        "blocked_by": [
+          "EXTERNAL_ENDPOINT_UNAVAILABLE"
+        ]
+      },
+      "recover_actions_during_cut": [
+        "PEER_RESET"
+      ],
+      "status_after": {
+        "tunnel_ip": "10.200.0.2",
+        "last_handshake_at": 1793864219,
+        "app_health_ok": true,
+        "db_connect_ok": true,
+        "code": null,
+        "reported_at": 1793864223
+      },
+      "recovered_after_seconds": 8,
+      "relay_side_over_tunnel": {
+        "app_health_http": "200",
+        "pg_isready": "10.200.0.2:5432 - accepting connections"
+      }
+    },
+    "relay_key_endpoint_change": {
+      "config_version": 2,
+      "agent_applied_versions": [
+        1,
+        2
+      ],
+      "recovered_after_seconds": 5,
+      "relay_side_over_tunnel": {
+        "app_health_http": "200",
+        "pg_isready": "10.200.0.2:5432 - accepting connections"
+      },
+      "relay_public_key_changed": true
+    },
+    "private_key": {
+      "secret_labels": {
+        "cmp.dev/managed": "true"
+      },
+      "helm_managed": false,
+      "absent_from_agent_logs": true,
+      "absent_from_platform_db": true,
+      "absent_from_relay_list": true
+    },
+    "userspace_fallback": {
+      "applied_modes": [
+        "userspace"
+      ],
+      "link_is_tun": true,
+      "status": {
+        "tunnel_ip": "10.200.0.2",
+        "last_handshake_at": 1793864247,
+        "app_health_ok": true,
+        "db_connect_ok": true,
+        "code": null,
+        "reported_at": 1793864251
+      },
+      "relay_side_over_tunnel": {
+        "app_health_http": "200",
+        "pg_isready": "10.200.0.2:5432 - accepting connections"
+      },
+      "same_private_key": true
+    },
+    "revoked": {
+      "tunnel_exit_code": 2,
+      "relay_peers_left": 0,
+      "relay_side_over_tunnel": {
+        "app_health_http": "000",
+        "pg_isready": "10.200.0.2:5432 - no response"
+      }
+    }
+  },
+  "cleanup": {
+    "relay_container_removed": true,
+    "agent_release_uninstalled": true,
+    "namespace_cmp-prod-demo_deleted": true,
+    "namespace_cmp-system_deleted": true
+  },
+  "default_kubeconfig_unchanged": true,
+  "secrets_absent_from_evidence": true
+}
