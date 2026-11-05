@@ -105,13 +105,17 @@ class AgentControlClient:
         status: str,
         code: str,
         observation: dict | None = None,
+        replication: dict | None = None,
     ):
-        """`observation` is sent only for NETWORK_PREFLIGHT jobs (codes/IPs/counters)."""
+        """`observation` is sent only for NETWORK_PREFLIGHT jobs (codes/IPs/counters);
+        `replication` only with a READY rollout (ticket 27: `{capable, code}`)."""
         self._id(agent_id)
         self._id(job_id)
         body = {"status": status, "code": code}
         if observation is not None:
             body["observation"] = observation
+        if replication is not None:
+            body["replication"] = replication
         response = self._request(f"/agents/{agent_id}/jobs/{job_id}/result", body, credential)
         if response.get("job_id") != job_id or response.get("accepted") is not True:
             raise AgentTransportError("INVALID_PLATFORM_RESPONSE")

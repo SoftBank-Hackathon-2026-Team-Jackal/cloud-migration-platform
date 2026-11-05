@@ -66,6 +66,19 @@ spec:
       containers:
         - name: postgres
           image: {{ .Values.image.uri | quote }}
+          {{- with .Values.database.parameters }}
+          args:
+            - "-c"
+            - {{ printf "wal_level=%s" .wal_level | quote }}
+            - "-c"
+            - {{ printf "max_replication_slots=%v" .max_replication_slots | quote }}
+            - "-c"
+            - {{ printf "max_wal_senders=%v" .max_wal_senders | quote }}
+            {{- range $key, $value := .app }}
+            - "-c"
+            - {{ printf "app.%s=%s" $key $value | quote }}
+            {{- end }}
+          {{- end }}
           ports:
             - name: postgres
               containerPort: 5432

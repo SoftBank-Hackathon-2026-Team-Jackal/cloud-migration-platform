@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from cmp_providers import agent_image_pull
 from cmp_providers.artifacts import verify_artifact_bytes
 from cmp_providers.database_url import connection_url
+from cmp_providers.db_replication import DB_PROBE, judge_probe
 from cmp_providers.remote_agent import AgentControlClient, AgentTransportError, _secret_file
 
 MANAGED = "cmp.dev/managed"
@@ -187,6 +188,8 @@ class RolloutRunner:
         self.target, self.fetch = target, fetch
         self.fetch_env_secrets = fetch_env_secrets
         self.fetch_image_pull = fetch_image_pull
+        # Ticket 27: {capable, code} after READY; None = not verified (probe did not run).
+        self.replication: dict | None = None
 
     # --- read-only preflight -------------------------------------------------------------
     def preflight(self, job: ProductionRolloutJob) -> None:
@@ -458,6 +461,22 @@ class RolloutRunner:
             ):
                 raise RolloutAgentError("RELEASE_NOT_DEPLOYED")
 
+    def check_replication(self, job: ProductionRolloutJob) -> dict | None:
+        """Ticket 27: the same SQL check as AWS/GCP, run in the DB container after READY.
+        Output stays in memory; only the judged flag and code leave the Agent."""
+        try:
+            result = self.target.kubectl(
+                "exec", "-n", job.namespace, f"statefulset/{job.database.release}",
+                "-c", "postgres", "--", "sh", "-c", DB_PROBE, "sh", "127.0.0.1",
+                timeout=60,
+            )  # fmt: skip
+        except ClusterUnavailable:
+            return None
+        if result.returncode:
+            return None
+        _, capable, code = judge_probe(result.stdout.decode("utf-8", "replace"))
+        return {"capable": capable, "code": code}
+
     def rollout(self, job: ProductionRolloutJob) -> tuple[str, str]:
         """Returns (SUCCEEDED, READY) or a FAILED/UNKNOWN code. Raises ClusterUnavailable
         before any mutation so the caller can keep the job RUNNING and retry later."""
@@ -493,6 +512,7 @@ class RolloutRunner:
             return "UNKNOWN", "INSPECTION_REQUIRED"
         except RolloutAgentError as exc:
             return exc.status, exc.code
+        self.replication = self.check_replication(job)
         return "SUCCEEDED", "READY"
 
 
@@ -560,17 +580,25 @@ class RolloutAgent:
                 agent_id=self.agent_id, credential=self.credential, job_id=job_id
             )
 
+        runner = RolloutRunner(self.target, fetch, fetch_env_secrets, fetch_image_pull)
         try:
-            status, code = RolloutRunner(
-                self.target, fetch, fetch_env_secrets, fetch_image_pull
-            ).rollout(job)
+            status, code = runner.rollout(job)
         except ClusterUnavailable:
             # Nothing was changed; keep the job RUNNING and re-inspect on the next poll.
             return {"job_id": job_id, "status": "RUNNING", "code": "KUBERNETES_UNAVAILABLE"}
-        return self._report(job_id, status, code)
+        return self._report(job_id, status, code, replication=runner.replication)
 
-    def _report(self, job_id: str, status: str, code: str, observation: dict | None = None):
+    def _report(
+        self,
+        job_id: str,
+        status: str,
+        code: str,
+        observation: dict | None = None,
+        replication: dict | None = None,
+    ):
         extra = {"observation": observation} if observation is not None else {}
+        if replication is not None:
+            extra["replication"] = replication
         self.client.report(
             agent_id=self.agent_id,
             credential=self.credential,

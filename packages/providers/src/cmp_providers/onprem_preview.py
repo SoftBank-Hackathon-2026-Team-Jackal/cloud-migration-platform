@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from cmp_providers.artifacts import verify_artifact_bytes
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
+from cmp_providers.db_replication import parameters_summary
 from cmp_providers.plans import manifest_digest
 
 VALUE_ROLES = ("database_values", "application_values")
@@ -118,6 +119,7 @@ def onprem_preview(
                 f"PostgreSQL {database.database.version} StatefulSet · "
                 f"DB {database.database.name} · "
                 f"{_resources(database.resources.cpu_millicores, database.resources.memory_mib)}"
+                f"{parameters_summary(database)}"
             ),
         ),
         ResourceChange(

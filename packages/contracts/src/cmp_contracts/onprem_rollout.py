@@ -107,6 +107,13 @@ class ProductionRolloutJob(Contract):
         ]
 
 
+class RolloutReplication(Contract):
+    """Ticket 27: the Agent's replication-capable check, reported with a READY rollout."""
+
+    capable: bool
+    code: Annotated[str, Field(pattern=r"^[A-Z0-9_]{1,64}$")] | None = None
+
+
 def rollout_job_id(plan_id: str, revision: int) -> str:
     """One Agent job per immutable Plan Revision; retries reuse the same ID."""
     return "rollout-" + hashlib.sha256(f"{plan_id}:{revision}".encode()).hexdigest()[:24]
