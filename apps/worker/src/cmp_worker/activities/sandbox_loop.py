@@ -102,6 +102,7 @@ def make_proxy_suite_runner(service: SandboxService) -> SuiteRunner:
                 proxy + service.service_path(plan, app["id"]),
                 store=store,
                 actions={"RESTART_DATABASE": lambda: service.restart_database(plan)},
+                variables={"health_path": app["health_path"]},
             )
 
     return run

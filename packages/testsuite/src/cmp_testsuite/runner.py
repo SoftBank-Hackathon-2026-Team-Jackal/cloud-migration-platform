@@ -127,6 +127,7 @@ def run_suite(
     resolve_auth: Callable[[str], dict[str, str]] | None = None,
     actions: Actions | None = None,
     include_external: bool = False,
+    variables: dict[str, str] | None = None,
 ) -> SuiteResult:
     """Refuses to run when the stored bytes no longer match the pinned SHA-256.
 
@@ -150,7 +151,7 @@ def run_suite(
         if resolve_auth is None:
             raise SuiteError("AUTH_UNRESOLVED")
         headers = resolve_auth(auth_ref)
-    variables = {"run_id": uuid.uuid4().hex[:12]}
+    variables = {"run_id": uuid.uuid4().hex[:12], **(variables or {})}
     results = []
     for case in suite.cases:
         if case.external_side_effects and not include_external:
