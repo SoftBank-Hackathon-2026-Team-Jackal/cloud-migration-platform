@@ -28,7 +28,7 @@ async def main(args: argparse.Namespace) -> int:
             manifests_dir=args.manifests_dir, cluster_name=args.cluster_name,
             credential_ref=args.credential_ref, source_access=args.source_access,
             sandbox_json=args.sandbox, planning_json=args.planning,
-            env_file_ref_json=args.env_file_ref,
+            env_file_ref_json=args.env_file_ref, data_migration_json=args.data_migration,
         )  # fmt: skip
     except (ValidationError, ValueError) as exc:
         print(f"Input is invalid: {type(exc).__name__}")
@@ -65,6 +65,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--env-file-ref",
         help='env_file_ref from POST /env-files as JSON {"id", "version", "sha256"} (ENV-02)',
+    )
+    parser.add_argument(
+        "--data-migration",
+        help="DataMigrationInput as JSON (specs/data-migration): source DbEndpoint, app, settings, "
+        "target_peer_host",
     )
     parser.add_argument("--workflow-id")
     sys.exit(asyncio.run(main(parser.parse_args())))

@@ -23,6 +23,7 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.activities import data_migration as dm
 
 MONITOR_ROUNDS_BEFORE_CONTINUE = 200
+PARENT_SIGNAL = "data_migration_state"
 SWITCH_FROM = {"switchover": "source", "rollback": "target"}
 
 
@@ -153,12 +154,32 @@ class DataMigrationWorkflow:
         except ActivityError as exc:
             self.switches.append({"switched": False, "code": _code(exc), "from": self.active})
             self.phase = "streaming" if self.active == "source" else "switched"
+            await self._notify()
             return
         self.switches.append(
             {k: result.get(k) for k in ("switched", "active", "write_pause_ms", "verify_ok")}
         )
         self.active = result["active"]
         self.phase = "switched" if self.active == "target" else "streaming"
+        await self._notify()
+
+    async def _notify(self) -> None:
+        """부모(MigrationWorkflow)에 상태를 알린다. 부모가 없거나 이미 끝났으면 무시한다."""
+        parent = workflow.info().parent
+        if parent is None:
+            return
+        state = {"phase": self.phase, "active": self.active, "failure_code": self.failure_code,
+                 "switches": len(self.switches)}  # fmt: skip
+        try:
+            await workflow.get_external_workflow_handle(parent.workflow_id).signal(
+                PARENT_SIGNAL, state
+            )
+        except Exception:  # noqa: BLE001 - 부모가 끝났어도 데이터 이전은 계속한다
+            workflow.logger.info("parent not signalled")
+
+    async def _finish(self, status: str) -> dict:
+        await self._notify()
+        return self._result(status)
 
     @workflow.run
     async def run(self, args: dict) -> dict:
@@ -173,11 +194,12 @@ class DataMigrationWorkflow:
                 outcome = await self._replicate(args)
             except ActivityError as exc:
                 self.failure_code, self.phase = _code(exc), "failed"
-                return self._result("failed")
+                return await self._finish("failed")
             if outcome:
                 self.phase = outcome
-                return self._result(outcome)
+                return await self._finish(outcome)
             self.phase = "streaming"
+            await self._notify()
 
         interval = args.get("monitor_interval_s", 5)
         for _ in range(MONITOR_ROUNDS_BEFORE_CONTINUE):
@@ -186,10 +208,10 @@ class DataMigrationWorkflow:
             if SWITCH_FROM.get(request or "") == self.active:
                 await self._switch(args)
             elif request == "cancel" and self.active == "source":
-                return self._result(await self._cancel(args))
+                return await self._finish(await self._cancel(args))
             elif request == "finish":
                 self.phase = "done"
-                return self._result("done")
+                return await self._finish("done")
             await self._monitor_once(args)
             try:
                 await workflow.wait_condition(
