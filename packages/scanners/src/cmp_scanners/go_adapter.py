@@ -16,7 +16,7 @@ _IMPORT_LINE = re.compile(r'^\s*(?:import\s+)?(?:([A-Za-z_][A-Za-z0-9_]*|_|\.)\s
 _AWS_SERVICE_IMPORT = re.compile(r"^github\.com/aws/aws-sdk-go(?:-v2)?/service/([a-z0-9]+)")
 _AWS_INPUT = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Z][A-Za-z0-9]*)Input\b")
 _HTTP_CALL = re.compile(
-    r"\bhttp\.(?:Get|Post|Head|PostForm|NewRequest|NewRequestWithContext)\(.*?\"https?://"
+    r"\bhttp\.(?:Get|Post|Head|PostForm|NewRequest|NewRequestWithContext)\(.*?\"(https?)://"
     r"(?:[^\"/?#\s@]*@)?([^\"/?#\s@]+)"
 )
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]", "0.0.0.0")
@@ -88,7 +88,11 @@ class GoAdapter:
                     )
                 )
         for match in _HTTP_CALL.finditer(raw):
-            host = match.group(1)
+            scheme, host = match.group(1), match.group(2)
             if host.split(":")[0].lower() not in _LOCAL_HOSTS:
-                found.append(CallSite(kind="EXTERNAL_HOST", target=host, file=path, line=number))
+                found.append(
+                    CallSite(
+                        kind="EXTERNAL_HOST", target=host, file=path, line=number, detail=scheme
+                    )
+                )
         return found
