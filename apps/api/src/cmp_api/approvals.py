@@ -62,6 +62,22 @@ class PlanRevision(Base):
     published_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class PlanPublication(Base):
+    """Input Digest of a published Revision; same-input re-runs reuse the latest (ticket 18, P3)."""
+
+    __tablename__ = "provisioning_plan_publications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["plan_id", "revision"],
+            ["provisioning_plan_revisions.plan_id", "provisioning_plan_revisions.revision"],
+        ),
+    )
+
+    plan_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 class Approver(Base):
     __tablename__ = "provisioning_approvers"
 
@@ -128,8 +144,14 @@ def latest_revision(session: Session, plan_id: str) -> int | None:
     )
 
 
-def publish_plan_revision(session: Session, manifest: PlanManifest, preview: Preview) -> None:
-    """Store an immutable Plan Revision. Planning integration calls this later; no HTTP route."""
+def publish_plan_revision(
+    session: Session,
+    manifest: PlanManifest,
+    preview: Preview,
+    *,
+    input_digest: str | None = None,
+) -> None:
+    """Store an immutable Plan Revision (ticket 18 Planning calls it with its input Digest)."""
     manifest = PlanManifest.model_validate(manifest.model_dump(mode="json"))
     preview = Preview.model_validate(preview.model_dump(mode="json"))
     current = latest_revision(session, manifest.plan.plan_id)
@@ -145,6 +167,15 @@ def publish_plan_revision(session: Session, manifest: PlanManifest, preview: Pre
             published_at=_now(),
         )
     )
+    if input_digest is not None:
+        session.flush()  # the Revision row first, for the publication foreign key
+        session.add(
+            PlanPublication(
+                plan_id=manifest.plan.plan_id,
+                revision=manifest.plan.revision,
+                input_digest=input_digest,
+            )
+        )
     session.commit()
 
 

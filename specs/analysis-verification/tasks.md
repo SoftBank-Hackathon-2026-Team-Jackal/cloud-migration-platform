@@ -20,8 +20,8 @@
 | [10 Build 모듈 연동과 실패 분류](../../tickets/analysis-verification/10-build-integration.md) | DONE (PR #88 병합) | 09, Provisioning B-01(DONE) | AV-010 | #87 | ☑ |
 | [11 Sandbox 구성·적용·정리](../../tickets/analysis-verification/11-sandbox-apply.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 02B, 07, Provisioning 공통 렌더 v2(#24, DONE) | AV-011, AV-016, AV-020 | #93 | ☐ |
 | [11B Sandbox 제자리 갱신과 테스트 데이터 초기화](../../tickets/analysis-verification/11b-sandbox-update.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 11 | AV-011, AV-015 | #95 | ☐ |
-| [12 테스트 묶음·Tester·`run_suite`](../../tickets/analysis-verification/12-test-suite.md) | DRAFT | 07, 08A, 11 | AV-012, AV-020 | 미생성 | ☐ |
-| [13 통신 규칙·판정·실행 기록](../../tickets/analysis-verification/13-judge-telemetry.md) | DRAFT | 08, 11, 12 | AV-013, AV-014 | 미생성 | ☐ |
+| [12 테스트 묶음·Tester·`run_suite`](../../tickets/analysis-verification/12-test-suite.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 07, 08A, 11 | AV-012, AV-020 | #97 | ☐ |
+| [13 통신 규칙·판정·실행 기록](../../tickets/analysis-verification/13-judge-telemetry.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 08, 11, 12 | AV-013, AV-014 | 미생성 | ☐ |
 | [14 실패 분류·Fixer 루프·최종 발행·Draft PR](../../tickets/analysis-verification/14-fix-loop.md) | DRAFT | 08, 08B, 10, 11B, 13 | AV-015, AV-017, AV-019, AV-020 | 미생성 | ☐ |
 | [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | DRAFT | 14, D-02(저장 경계) | AV-018 | 미생성 | ☐ |
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
@@ -91,6 +91,8 @@ Q-01 ────┴→ 02B ─┐
 - 2026-11-05: 19 구현(가짜 LLM·AWS 미설정 기준): `AnalysisPipeline`과 `AnalysisActivities`가 03~08B·06의 실제 함수를 연결하고 결과를 `ArtifactStore`에 참조로 저장한다. `AnalysisWorkflow`는 문자열 입력이면 scaffold, `AnalysisInput` dict면 실제 경로를 탄다. 부모의 입력 연결과 실제 Claude 연결은 남음.
 - 2026-11-05: 11 구현: `SandboxService`가 네임스페이스·Secret·`helm upgrade --install --wait`·준비 검사·정리를 맡고, 실제 k3d `cmp-sandbox`(D-08 결정: 로컬 Colima + k3d)에서 DB 16과 공개 앱 이미지로 끝까지 검증. Helm 3 설치로 전체 테스트를 로컬에서 통과(937). Workflow Activity 연결은 14에서.
 - 2026-11-05: 11B 구현: `plan_update`가 리소스별 갱신 동작(UNCHANGED/UPGRADED/RESTARTED/RECREATED)을 정하고 `update_sandbox`가 필요한 Release만 갱신한다. env Secret은 내용 해시 어노테이션으로 변경을 감지해 `rollout restart`로 반영, 테스트 데이터는 DB Pod 안 `pg_dump`/`pg_restore` 기준선으로 초기화. 실제 k3d에서 검증, RECREATED 경로는 단위 테스트만.
+- 2026-11-05: 12 구현: `packages/testsuite`(시나리오 형식·결정적 묶음·`run_suite` 해시 거부·표준 테스트·`validate_tests` 네 조건)와 Tester(`generate_tests`, Fixer 입력 없음). 묶음 저장은 D-02 로컬 저장소(S3 후속), 조건 3은 DB scale 0, 원본 실행기는 D-09 대기로 인터페이스+가짜. 실제 k3d에서 검증.
+- 2026-11-05: 13 구현: 기본 차단 NetworkPolicy·DNS·`network_intent` 항목·허용 목록 출구 프록시(`apply_network`, 기록 `egress_records`, 외부 차단 `external_cut`)와 순수 함수 `judge`, `covers` 기반 `coverage_report`. 프록시는 Sandbox 워커 소유로 확정. 실제 k3d에서 검증.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
 - 2026-11-04(리뷰 반영): spec AV-012에 `run_suite`의 `include`, AV-015에 INFRA와 횟수 규칙 반영(AV-013 커버리지는 원문 유지). ADR-004는 작성 예정으로 표시.
 - 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.
