@@ -18,19 +18,20 @@
 | [08B 필수 기능 확정과 손실 승인 게이트](../../tickets/analysis-verification/08b-review-gate.md) | DONE (PR #80 병합) | 02, 08 | AV-022, AV-008 | #78 | ☑ |
 | [09 소스 묶음 생성과 S3 업로드](../../tickets/analysis-verification/09-source-archive.md) | DONE (PR #84 병합) | 03 | AV-009, AV-020 | #83 | ☑ |
 | [10 Build 모듈 연동과 실패 분류](../../tickets/analysis-verification/10-build-integration.md) | DONE (PR #88 병합) | 09, Provisioning B-01(DONE) | AV-010 | #87 | ☑ |
-| [11 Sandbox 구성·적용·정리](../../tickets/analysis-verification/11-sandbox-apply.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 02B, 07, Provisioning 공통 렌더 v2(#24, DONE) | AV-011, AV-016, AV-020 | #93 | ☐ |
-| [11B Sandbox 제자리 갱신과 테스트 데이터 초기화](../../tickets/analysis-verification/11b-sandbox-update.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 11 | AV-011, AV-015 | #95 | ☐ |
-| [12 테스트 묶음·Tester·`run_suite`](../../tickets/analysis-verification/12-test-suite.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 07, 08A, 11 | AV-012, AV-020 | #97 | ☐ |
-| [13 통신 규칙·판정·실행 기록](../../tickets/analysis-verification/13-judge-telemetry.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 08, 11, 12 | AV-013, AV-014 | 미생성 | ☐ |
-| [14A 실패 분류와 Fixer](../../tickets/analysis-verification/14a-classify-fixer.md) | DONE (PR #107 병합) | 08, 10, 11B, 13 | AV-015, AV-017 | 미기록 | ☑ |
+| [11 Sandbox 구성·적용·정리](../../tickets/analysis-verification/11-sandbox-apply.md) | DONE (PR #94 병합) | 02B, 07, Provisioning 공통 렌더 v2(#24, DONE) | AV-011, AV-016, AV-020 | #93 | ☑ |
+| [11B Sandbox 제자리 갱신과 테스트 데이터 초기화](../../tickets/analysis-verification/11b-sandbox-update.md) | DONE (PR #96 병합) | 11 | AV-011, AV-015 | #95 | ☑ |
+| [12 테스트 묶음·Tester·`run_suite`](../../tickets/analysis-verification/12-test-suite.md) | DONE (PR #101 병합) | 07, 08A, 11 | AV-012, AV-020 | #97 | ☑ |
+| [13 통신 규칙·판정·실행 기록](../../tickets/analysis-verification/13-judge-telemetry.md) | DONE (PR #103 병합) | 08, 11, 12 | AV-013, AV-014 | #102 | ☑ |
+| [14A 실패 분류와 Fixer](../../tickets/analysis-verification/14a-classify-fixer.md) | DONE (PR #107 병합) | 08, 10, 11B, 13 | AV-015, AV-017 | #106 | ☑ |
 | [14B 갱신 루프와 부모 종료 상태](../../tickets/analysis-verification/14b-fix-loop.md) | DONE (PR #110 병합) | 14A | AV-015, AV-019, AV-020 | #109 | ☑ |
-| [14C 최종 발행·재승인·수정 패치 산출물](../../tickets/analysis-verification/14c-publish.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14B | AV-017, AV-019, AV-020 | #111 | ☐ |
+| [14C 최종 발행·재승인·수정 패치 산출물](../../tickets/analysis-verification/14c-publish.md) | DONE (PR #112 병합) | 14B | AV-017, AV-019, AV-020 | #111 | ☑ |
 | [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | DRAFT | 14C, D-02(저장 경계) | AV-018 | 미생성 | ☐ |
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
-| [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☐ |
-| [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☐ |
+| [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | DONE (PR #92 병합) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☑ |
+| [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | DONE (PR #114 병합) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☑ |
+| [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | IN_PROGRESS (착수) | 14C, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☐ |
 
 ## 선행 관계
 
@@ -44,26 +45,29 @@ Q-01 ────┴→ 02B ─┐
 03 → 09 → 10           │
 02 + 03 → 18 (공개 GitHub 소스 입력; #56 병합·담당자 계약 확인)
 02B + 07 → 11 → 11B    │
+03~08B + 06 → 19 (분석 Activity 통합)
+08A + 08 + 12 + 14A + ADR-004 → 20 (Claude 연결·비용 상한)
+14C + 19 + 20 → 21 (분석 → Sandbox 루프 → 발행 연결) → 15
 07 + 08A + 11 → 12
 08 + 11 + 12 → 13
-08 + 08B + 10 + 11B + 13 → 14A → 14B → 14C → 15 → 16
+08 + 08B + 10 + 11B + 13 → 14A → 14B → 14C → 21 → 15 → 16
 06 → 16
 05 + 08 → 17 (후순위)
 ```
 
 정확한 선행 조건은 위 표와 각 티켓을 따른다. D-05는 Sandbox 전용 Queue를 추가하기로 결정했다. 외부 의존: 06은 AWS 테스트 계정, 08은 D-01(실제 LLM 연결 시), 10은 B-01(완료)과 D-12, 11은 공통 렌더 v2(완료)와 D-11, 15는 D-02, 16은 데모 앱·Sandbox 기반(D-08).
 
-**추천 순서:** 01 → Q-01 → 02 → 02B → 03 → 04 → 05 → 07 → 08A → 08 → 08B → 09 → 10 → 11 → 11B → 12 → 13 → 14 → (06, 15) → 16 → 17. 외부 의존이 없는 것부터 이어 첫 사이클 뼈대(스캔 → 빌드 → Sandbox 루프)를 먼저 완성한다. 17은 첫 사이클이 끝난 뒤 착수한다. 18은 02·03 구현을 재사용하되 #56 병합과 분석 담당자 계약 확인 후 별도로 진행한다.
+**추천 순서:** 01 → Q-01 → 02 → 02B → 03 → 04 → 05 → 07 → 08A → 08 → 08B → 09 → 10 → 11 → 11B → 12 → 13 → 14A → 14B → 14C → 19 → 20 → 21 → (06, 15) → 16 → 17. 외부 의존이 없는 것부터 이어 첫 사이클 뼈대(스캔 → 빌드 → Sandbox 루프)를 먼저 완성한다. 17은 첫 사이클이 끝난 뒤 착수한다. 18은 02·03 구현을 재사용하되 #56 병합과 분석 담당자 계약 확인 후 별도로 진행한다.
 
 ## 결정 대기
 
 | ID | 내용 | 영향 티켓 | 담당 |
 | --- | --- | --- | --- |
 | D-01 | 결정됨 — Claude, Anthropic SDK(Messages API 도구 호출), 모델 `claude-sonnet-5-5`, 비용 상한은 코드로 강제(ADR-004, 티켓 20) | 08, 12, 14, 17 | 승철·팀 |
-| D-02 | 결정됨(승철) — 첫 사이클의 `*_ref`는 해시 이름 로컬 불변 저장소(`LocalArtifactStore` 관례, S3는 후속). 분석·Build 결과의 저장·정규화는 분석 쪽이 맡음 | 10, 15, 19 | 승철 |
+| D-02 | 결정됨(승철) — 첫 사이클의 `*_ref`는 해시 이름 로컬 불변 저장소(`LocalArtifactStore` 관례, S3는 후속). 분석·Build 결과의 저장·정규화는 분석 쪽이 맡음. **조사 결과(2026-11-05):** Planning(`plan_publish`)은 요구사항 바이트를 자기 저장소(`api_settings.artifact_store_dir`)에서 `<root>/<sha256>`로 읽고 `ArtifactRef`의 필드(id·version·kind·sha256·size_bytes)도 같으므로, `ContentRef`류(요구사항·보고서·검토 기록)는 두 쪽이 같은 디렉터리를 가리키면 된다(단일 호스트). `S3ArchiveRef`류(소스 묶음·테스트 묶음)는 계약이 S3 URI를 요구하므로 실제 S3 업로드가 필요하다 | 10, 15, 19, 21 | 승철 |
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 | 10, 14 | 민서 |
 | D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
-| D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간 | 09, 10, 12 | 민서·승철 |
+| D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간. 실제 빌드(D-12)와 15번 인계 전에 필요. 계정은 `cmp-aws-prod`(운영 이름)라 생성·사용 전에 사용자 승인이 필요하다 | 09, 10, 12, 15 | 민서·승철 |
 | D-07 | 결정됨 — 첫 사이클 지원 언어는 Go(데모 앱 `demo-app`이 Go) | 05, 16, 17 | 승철 |
 | D-08 | 결정됨(승철) — Sandbox 기반은 이 Mac의 로컬 k3d `cmp-sandbox`(Colima, 전용 kubeconfig)로 준비. 설정 방법은 11 티켓의 환경 준비 참조 | 11, 16 | 승철 |
 | D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 12 | 승철·소울 |
