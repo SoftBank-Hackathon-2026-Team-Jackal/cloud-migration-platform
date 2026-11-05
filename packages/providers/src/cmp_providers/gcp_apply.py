@@ -31,6 +31,7 @@ from cmp_providers.aws_apply import (
     template_evidence,
 )
 from cmp_providers.gcp_preview import GcpPlanInput
+from cmp_providers.terraform_events import apply_runner, is_stale
 
 GCP_TEMPLATE_ROOT = Path(__file__).resolve().parents[4] / "infra/terraform/gcp"
 OUTPUT_REFS = {
@@ -133,8 +134,12 @@ def apply_gcp_infrastructure(
     runner: Runner = subprocess_runner,
     adc_email: AdcLookup = default_adc_email,
     template_dir: Path = GCP_TEMPLATE_ROOT,
+    progress=None,
 ) -> dict:
-    """Apply once. Callers must already hold the approval claim for this Plan Revision."""
+    """Apply once. Callers must already hold the approval claim for this Plan Revision.
+
+    `progress` (`terraform_events.ApplyProgress`) receives the `apply -json` stream (ticket 24).
+    """
     del preview
     checked, failure = _checked_inputs(manifest, artifact_dir, template_dir)
     if failure:
@@ -210,8 +215,11 @@ def apply_gcp_infrastructure(
         if init.returncode != 0:
             return _failed("TERRAFORM_INIT_FAILED")
 
-        applied = terraform(
-            ["apply", "-input=false", "-no-color", "-lock=true", "saved.tfplan"],
+        applied = apply_runner(runner, progress)(
+            [terraform_bin, "apply", "-input=false", "-no-color", "-json", "-lock=true"]
+            + ["saved.tfplan"],
+            work,
+            env,
             APPLY_TIMEOUT_SECONDS,
         )
         if applied.returncode != 0:
@@ -221,7 +229,7 @@ def apply_gcp_infrastructure(
                 refs = {"state_resource_count": str(len([line for line in lines if line]))}
             else:
                 refs = {"state_inspection": "UNAVAILABLE"}
-            if b"stale" in applied.stderr.lower():
+            if is_stale(applied, progress):
                 return _result("UNKNOWN", "SAVED_PLAN_STALE", refs)
             if applied.returncode < 0:
                 return _result("UNKNOWN", "TERRAFORM_APPLY_INTERRUPTED", refs)

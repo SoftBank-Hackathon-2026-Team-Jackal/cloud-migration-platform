@@ -113,3 +113,7 @@ identity = approval_target(manifest, preview)
 ## Plan 생성·게시와 Preview 조회 (18)
 
 새 공유 모델은 `cmp_contracts.plan_publish`의 `PlanningInputRegistration`(Planning 입력 v2 + Provider별 대상 설정 + 선택 요구사항 바이트)과 `plan_id_for`(Migration당 Plan ID)뿐이다. 기존 `PlanManifest`·`Preview`·`approval_target`·`onprem_preview`·05/06 Plan 함수는 바꾸지 않고 호출한다. `publish_plan_revision`은 선택 인자 `input_digest`를 받아 같은 트랜잭션에 `provisioning_plan_publications`를 기록한다(기존 호출 동작은 그대로). `ProvisioningApprovalWorkflow` 요청은 선택 필드 `approval_timeout_seconds`를 받아 승인 없이 기간이 지나면 `EXPIRED/APPROVAL_EXPIRED`로 끝난다. 상세는 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05)을 따른다.
+
+## 이전 이벤트 저장소·SSE (24)
+
+`cmp_contracts.events`가 이벤트 봉투 `MigrationEvent`와 웹 계약(`cloud-migration-web` `contract/events.schema.json`, 사본 `docs/contracts/events.schema.json`)과 같은 타입별 `*Data` 모델, 백엔드→웹 이름 변환 `to_web`, 웹 형식 스키마 `event_json_schema()`를 제공한다. 저장은 `cmp_api.migration_events`(`migration_events`·`migration_logs`, `append_event`·`list_events`·`list_logs`, `EventEmitter`·`InMemoryEmitter`·`DbEventEmitter`), Activity 발행은 `cmp_worker.events`(`emit_event`·`emit_event_async`·`log_event`, Workflow용 `emit_migration_event` Activity)다. 읽기는 `GET /migrations/{id}/events`(SSE·JSON)와 `GET /migrations/{id}/logs`. 기존 모델·Activity 반환값은 바꾸지 않는다. Terraform Apply는 `-json`으로 바뀌었고 결과 계약(`status`·`code`·refs)은 같다. 결정은 [migration-events.md E1~E17](migration-events.md), 담당자 사용법은 [이벤트 발행 안내서](../../docs/engineering/events-guide.md).

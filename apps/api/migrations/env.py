@@ -6,6 +6,7 @@ from alembic import context
 from cmp_api import (
     agent_registry,  # noqa: F401  # Register Agent tables in metadata.
     approvals,  # noqa: F401  # Register Plan approval tables in metadata.
+    migration_events,  # noqa: F401  # Register event store/log tables (ticket 24).
     plan_inputs,  # noqa: F401  # Register Planning input tables (ticket 18).
     tunnels,  # noqa: F401  # Register tunnel exchange tables (ticket 16).
 )

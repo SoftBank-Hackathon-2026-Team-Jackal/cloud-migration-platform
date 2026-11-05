@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes, verify_artifact_bytes
 from cmp_providers.aws_preview import AwsPlanInput
+from cmp_providers.terraform_events import apply_runner, is_stale
 
 TEMPLATE_ROOT = Path(__file__).resolve().parents[4] / "infra/terraform/aws"
 APPLY_TIMEOUT_SECONDS = 90 * 60
@@ -163,8 +164,11 @@ def apply_aws_infrastructure(
     terraform_bin: str = "terraform",
     runner: Runner = subprocess_runner,
     template_dir: Path = TEMPLATE_ROOT,
+    progress=None,
 ) -> dict:
     """Apply once. Callers must already hold the approval claim for this Plan Revision.
+
+    `progress` (`terraform_events.ApplyProgress`) receives the `apply -json` stream (ticket 24).
 
     `preview` is accepted for symmetry with the approval contract; approval issues (including
     LOCAL_STATE_* markers) are rejected earlier by the claim, and the Spec is re-checked here.
@@ -225,13 +229,16 @@ def apply_aws_infrastructure(
         if init.returncode != 0:
             return _failed("TERRAFORM_INIT_FAILED")
 
-        applied = terraform(
-            ["apply", "-input=false", "-no-color", "-lock=true", "saved.tfplan"],
+        applied = apply_runner(runner, progress)(
+            [terraform_bin, "apply", "-input=false", "-no-color", "-json", "-lock=true"]
+            + ["saved.tfplan"],
+            work,
+            env,
             APPLY_TIMEOUT_SECONDS,
         )
         if applied.returncode != 0:
             refs = _state_count(lambda args, t: terraform(args, t))
-            if b"stale" in applied.stderr.lower():
+            if is_stale(applied, progress):
                 # The State changed since Planning (possibly our own lost Apply). Inspect only.
                 return _result("UNKNOWN", "SAVED_PLAN_STALE", refs)
             if applied.returncode < 0:

@@ -6,6 +6,7 @@ returned as `delivery_status=FAILED`, never hidden as accepted or executed.
 """
 
 import hmac
+import logging
 from typing import Annotated, Literal
 
 from cmp_contracts.artifact import Digest
@@ -33,8 +34,10 @@ from cmp_api.approvals import (
 )
 from cmp_api.config import settings
 from cmp_api.db import SessionLocal
+from cmp_api.migration_events import append_event
 from cmp_api.provisioning_results import load_result
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/provisioning", tags=["provisioning approval"])
 
 STATUS = {
@@ -143,6 +146,34 @@ async def _deliver(session: Session, delivery, record: PlanApproval, *, force=Fa
         mark_delivery(session, record, error=None)
 
 
+def _emit_decision(session: Session, response: ApprovalResponse) -> None:
+    """Ticket 24: `approval.decision` (ApprovalResponse values without the approver identity).
+
+    DELIVERED is `done`; PENDING/FAILED wait for a re-send (never shown as complete, ADR-002).
+    """
+    row = session.get(PlanRevision, (response.plan_id, response.revision))
+    if row is None:
+        return
+    data = response.model_dump(exclude={"approver_id"})
+    key = ":".join(
+        str(data[k])
+        for k in ("approval_id", "delivery_status", "delivery_attempts", "execution_status")
+    )
+    try:
+        append_event(
+            session,
+            row.migration_id,
+            "approval.decision",
+            "awaiting_approval",
+            "done" if response.delivery_status == "DELIVERED" else "waiting",
+            data,
+            idempotency_key=key,
+        )
+    except Exception:  # noqa: BLE001 - observation must not change the approval response
+        session.rollback()
+        logger.warning("approval.decision event not stored", extra={"plan_id": row.plan_id})
+
+
 async def _response(session: Session, delivery, record: PlanApproval) -> ApprovalResponse:
     return ApprovalResponse(
         approval_id=record.id,
@@ -206,7 +237,9 @@ async def decide_plan(
     if not created:
         response.status_code = 200
     await _deliver(session, delivery, record)
-    return await _response(session, delivery, record)
+    result = await _response(session, delivery, record)
+    _emit_decision(session, result)
+    return result
 
 
 def _visible_record(session, approver, plan_id, revision, approval_id) -> PlanApproval:
@@ -248,7 +281,9 @@ async def redeliver_plan_approval(
 ):
     record = _visible_record(session, approver, plan_id, revision, approval_id)
     await _deliver(session, delivery, record, force=True)  # Explicit, idempotent re-send.
-    return await _response(session, delivery, record)
+    result = await _response(session, delivery, record)
+    _emit_decision(session, result)
+    return result
 
 
 class ResultCluster(BaseModel):

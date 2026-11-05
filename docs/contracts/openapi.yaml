@@ -128,6 +128,8 @@ paths:
       tags:
       - migration scaffold
       summary: Stream Migration
+      description: 'Ticket 24 (E10-E13): SSE with snapshot/`Last-Event-ID`/heartbeat,
+        or a JSON page.'
       operationId: stream_migration_migrations__workflow_id__events_get
       parameters:
       - name: workflow_id
@@ -136,12 +138,94 @@ paths:
         schema:
           type: string
           title: Workflow Id
+      - name: after
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: After
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 500
+          title: Limit
+      - name: legacy
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+          title: Legacy
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last-Event-Id
+      responses:
+        '200':
+          description: SSE (`text/event-stream`, default) or JSON page (`?after=`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrationEventsPage'
+            text/event-stream: {}
+        '404':
+          description: Workflow not found and no stored events
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /migrations/{workflow_id}/logs:
+    get:
+      tags:
+      - migration scaffold
+      summary: Migration Logs
+      description: 'Ticket 24 (E14): masked operational log for the agent and the
+        final report.'
+      operationId: migration_logs_migrations__workflow_id__logs_get
+      parameters:
+      - name: workflow_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workflow Id
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: After
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 500
+          title: Limit
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/MigrationLogsPage'
         '422':
           description: Validation Error
           content:
@@ -1556,6 +1640,102 @@ components:
       - workflow_id
       - run_id
       title: MigrationCreated
+    MigrationEvent:
+      properties:
+        migration_id:
+          type: string
+          title: Migration Id
+        seq:
+          type: integer
+          minimum: 1.0
+          title: Seq
+        at:
+          type: string
+          title: At
+        phase:
+          type: string
+          enum:
+          - analysis
+          - build
+          - planning
+          - awaiting_approval
+          - provisioning
+          - data_copy
+          - traffic
+          - verification
+          title: Phase
+        type:
+          type: string
+          title: Type
+        status:
+          type: string
+          enum:
+          - running
+          - done
+          - failed
+          - waiting
+          title: Status
+        progress:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Progress
+        data:
+          additionalProperties: true
+          type: object
+          title: Data
+      additionalProperties: false
+      type: object
+      required:
+      - migration_id
+      - seq
+      - at
+      - phase
+      - type
+      - status
+      - data
+      title: MigrationEvent
+      description: Stored/JSON envelope. SSE omits `migration_id` (web schema) — see
+        `sse_payload`.
+    MigrationEventsPage:
+      properties:
+        migration_id:
+          type: string
+          title: Migration Id
+        events:
+          items:
+            $ref: '#/components/schemas/MigrationEvent'
+          type: array
+          title: Events
+        next_after:
+          type: integer
+          title: Next After
+      type: object
+      required:
+      - migration_id
+      - events
+      - next_after
+      title: MigrationEventsPage
+    MigrationLogsPage:
+      properties:
+        migration_id:
+          type: string
+          title: Migration Id
+        logs:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Logs
+        next_after:
+          type: integer
+          title: Next After
+      type: object
+      required:
+      - migration_id
+      - logs
+      - next_after
+      title: MigrationLogsPage
     MigrationRequest:
       properties:
         project_id:
