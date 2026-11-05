@@ -1,6 +1,6 @@
 # 대회 데모 플랫폼 단일 EC2 배포 (#27)
 
-이 구성은 `cmp-aws-prod`의 계정 `714066696240`, 서울 리전에 단일 EC2(`t3.large`, 암호화된 80 GiB EBS)와 S3 버킷 두 개를 만든다. 기본 VPC의 공개 Subnet을 사용하되 Security Group에는 인바운드 포트가 없다. SSM으로만 접속한다. S3 버킷은 Terraform State·잠금용과 커밋한 배포 소스 전달용으로 분리한다. **대상 EKS와 앱/DB 마이그레이션 리소스는 만들지 않는다.** EC2, EBS, 공개 IPv4, S3에 비용이 발생한다.
+이 구성은 `cmp-aws-prod`의 계정 `714066696240`, 서울 리전에 단일 EC2(`t3.large`, 암호화된 80 GiB EBS)와 S3 버킷 두 개를 만든다. 기본 VPC의 공개 Subnet을 사용한다. 운영 접속은 SSM으로만 하며, Security Group 인바운드는 Agent용 HTTPS 443뿐이다(#100, 템플릿 반영 후). S3 버킷은 Terraform State·잠금용과 커밋한 배포 소스 전달용으로 분리한다. **대상 EKS와 앱/DB 마이그레이션 리소스는 만들지 않는다.** EC2, EBS, 공개 IPv4, S3에 비용이 발생한다.
 
 ## 배포
 
@@ -20,9 +20,51 @@ bash infra/demo/release.sh HEAD
 
 서버에서는 Docker Compose로 FastAPI, 전체 Worker, Temporal, 업무 PostgreSQL, Temporal PostgreSQL, Temporal UI를 실행한다. DB 비밀번호와 Agent 운영자 키는 처음 기동할 때 `/opt/cmp/.env`에 생성하고 재배포 시 보존한다. DB 데이터는 루트 EBS의 `/opt/cmp/data/`에 있고, Worker에는 향후 Plan 산출물용 `/opt/cmp/data/plans`를 마운트한다. 서비스에는 `restart: unless-stopped`가 설정돼 있다. 이 배포는 대회용 단일 호스트이며 고가용성이나 운영용 Temporal 구성이 아니다. 실제 Terraform Plan/Apply 및 승인 API 연결은 후속 구현이다.
 
+## Provisioning 실행 환경 (#100, ticket 21)
+
+worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1.17.0, kubectl v1.37.1, Helm v4.3.1, AWS CLI 2.35.21, gcloud 588.0.0(+`gke-gcloud-auth-plugin`)을 버전·SHA-256으로 고정한다. API는 도구가 없는 `api` 대상을 쓴다.
+
+| 설정 | 서비스 | 값·출처 |
+| --- | --- | --- |
+| `DATABASE_URL`, `TEMPORAL_ADDRESS` | api, worker | 업무 PostgreSQL·Temporal (compose 내부망) |
+| `ARTIFACT_STORE_DIR=/opt/cmp/artifact-store` | api, worker | 호스트 `/opt/cmp/data/artifact-store` 공유 볼륨 |
+| `PROVISIONING_ARTIFACT_ROOT=/opt/cmp/plans` | api, worker | 호스트 `/opt/cmp/data/plans` 공유 볼륨 |
+| `APPROVAL_ADMIN_KEY`, `AGENT_ENROLLMENT_ADMIN_KEY` | api만 | `/opt/cmp/.env`(0600), 없을 때만 생성 |
+| `AWS_CONFIG_FILE`, `PROVISIONING_AWS_PROFILE=cmp-demo-provisioning` | worker | `/opt/cmp/secrets/aws/config`(읽기 전용). EC2 인스턴스 역할(`credential_source = Ec2InstanceMetadata`), `.env`의 `PROVISIONING_AWS_ROLE_ARN`이 있으면 그 역할을 Assume |
+| `CMP_GCP_PROJECT`, `PROVISIONING_GCLOUD_CONFIGURATION=cmp-demo` | worker | 운영자가 둔 `/opt/cmp/secrets/gcp/key.json`(읽기 전용) → 진입점이 tmpfs gcloud 구성·ADC 생성 |
+| `CMP_PUBLIC_HOST` | edge | 비어 있으면 에지를 띄우지 않는다. 예: `<EIP>.sslip.io` |
+
+`.env`·`/opt/cmp/secrets/`는 서버에만 있고 저장소·이미지·릴리스 아카이브에 들어가지 않는다. 키 값을 터미널이나 로그에 출력하지 않는다.
+
+### 공개 HTTPS 에지
+
+`edge`(Caddy)는 443에서만 듣고 ACME TLS-ALPN-01로 인증서를 받아 `/opt/cmp/data/caddy`에 보관한다. `/agents/*`만 API로 전달하고 나머지는 404다. 승인·운영자·터널 관리 API와 `/docs`는 계속 SSM 포트 포워딩으로만 접근한다. Traffic 중계 서버(별도 호스트, DNS 전환 P0 제외)와 포트·도메인을 공유하지 않는다.
+
+### 원격 반영 순서 (각 단계 사용자 승인 필요)
+
+1. CloudFormation 갱신: `bash infra/demo/deploy.sh` — SG 443 인그레스, IMDS hop limit 2, Elastic IP 추가. EIP 연결로 공인 IP가 바뀐다. 공개 IPv4 비용 발생.
+2. Provisioning 권한: 인스턴스 역할 또는 별도 역할(`PROVISIONING_AWS_ROLE_ARN`)에 대상 EKS/VPC/IAM과 State 버킷 권한을 검토 후 부여.
+3. GCP 키: 서비스 계정 키를 SSM 세션에서 `/opt/cmp/secrets/gcp/key.json`(root, 0600)으로 두고 `.env`에 `CMP_GCP_PROJECT=<project>`를 추가. 키를 S3 배포 버킷이나 저장소로 옮기지 않는다.
+4. `.env`에 `CMP_PUBLIC_HOST=<EIP>.sslip.io`(Stack 출력 `AgentEdgeDefaultHost`) 추가 후 `bash infra/demo/release.sh HEAD`.
+
+### 서버 점검·스모크
+
+```sh
+# SSM 세션에서
+docker exec cmp-demo-worker-1 sh -c 'terraform version; helm version --short; kubectl version --client; aws --version; gcloud --version | head -1'
+docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-provisioning --query Account --output text
+docker exec cmp-demo-worker-1 gcloud config get-value project --configuration cmp-demo
+# 노트북에서 (공개 경로만 열려 있는지)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/agents/x        # 401/404 (API 응답)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/agent-enrollments  # 404 (에지)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/docs              # 404 (에지)
+```
+
+Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰을 발급한 뒤 15의 Chart에 `platform.url=https://<CMP_PUBLIC_HOST>`로 설치한다. 등록·작업 수신이 되면 18의 Plan 게시 → 승인 → ON_PREM 실행 스모크를 진행한다(18 완료 후).
+
 ## 접속과 확인
 
-SSM Session Manager의 포트 포워딩으로 로컬 `8000`을 EC2 `8000`에 연결하면 `/health`와 `/docs`를 볼 수 있다. Temporal UI는 같은 방식으로 `8080`에 접속한다. API/Temporal UI는 EC2의 loopback에만 바인딩되며 공개 URL은 없다.
+SSM Session Manager의 포트 포워딩으로 로컬 `8000`을 EC2 `8000`에 연결하면 `/health`와 `/docs`를 볼 수 있다. Temporal UI는 같은 방식으로 `8080`에 접속한다. API/Temporal UI는 EC2의 loopback에만 바인딩된다. 공개 URL은 Agent 경로(`/agents/*`)만 전달하는 에지뿐이다.
 
 ```sh
 aws ssm start-session --profile cmp-aws-prod --region ap-northeast-2 \

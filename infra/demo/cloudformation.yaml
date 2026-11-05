@@ -185,9 +185,15 @@ Resources:
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: CMP demo host; no inbound ports, access through SSM.
+      GroupDescription: CMP demo host; only HTTPS 443 for the Agent edge, admin access through SSM.
       VpcId: !Ref VpcId
-      SecurityGroupIngress: []
+      # Ticket 21: public HTTPS edge (Caddy) forwards only /agents/*; API/Temporal UI stay on loopback.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: CMP on-premises Agent HTTPS edge
       SecurityGroupEgress:
         - IpProtocol: '-1'
           CidrIp: 0.0.0.0/0
@@ -207,6 +213,8 @@ Resources:
       MetadataOptions:
         HttpTokens: required
         HttpEndpoint: enabled
+        # Ticket 21: the worker container reaches the instance role through the Docker bridge (one extra hop).
+        HttpPutResponseHopLimit: 2
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:
@@ -235,6 +243,18 @@ Resources:
         - Key: Purpose
           Value: hackathon-demo
 
+  # Ticket 21: stable public address for the Agent edge certificate (<ip>.sslip.io by default).
+  PublicAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Instance
+      Tags:
+        - Key: Project
+          Value: cloud-migration-platform
+        - Key: Purpose
+          Value: hackathon-demo-agent-edge
+
 Outputs:
   InstanceId:
     Value: !Ref Instance
@@ -244,3 +264,7 @@ Outputs:
     Value: !Ref DeployBucket
   DeployRoleArn:
     Value: !GetAtt GitHubDeployRole.Arn
+  PublicIp:
+    Value: !Ref PublicAddress
+  AgentEdgeDefaultHost:
+    Value: !Sub '${PublicAddress}.sslip.io'
