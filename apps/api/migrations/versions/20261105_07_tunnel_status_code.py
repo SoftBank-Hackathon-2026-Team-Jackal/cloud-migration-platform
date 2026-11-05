@@ -1,15 +1,15 @@
 """Tunnel status failure code (ticket 17 W8).
 
-Revision ID: 20261105_05
-Revises: 20261105_04
+Revision ID: 20261105_07
+Revises: 20261105_06
 Create Date: 2026-11-05
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20261105_05"
-down_revision = "20261105_04"
+revision = "20261105_07"
+down_revision = "20261105_06"
 branch_labels = None
 depends_on = None
 

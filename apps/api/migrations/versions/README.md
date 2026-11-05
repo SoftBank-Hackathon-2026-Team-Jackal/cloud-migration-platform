@@ -4,3 +4,5 @@ Create a revision after defining an approved SQLAlchemy model: `uv run alembic r
 Revision `20261105_04` (ticket 18) adds `provisioning_planning_inputs` (per-Migration Planning input registration) and `provisioning_plan_publications` (input Digest per published Plan Revision).
 Revision `20261105_05` (ticket 23) adds `environment_connections`: AWS Role ARN, platform-issued External ID and verification metadata, or the GCP project and expected ADC principal. No keys or STS credentials are stored.
 Revision `20261105_06` (ticket 24) adds the append-only `migration_events` (per-Migration `seq`, idempotency key) and `migration_logs`. It chains onto ticket 23's `20261105_05`.
+
+Revision `20261105_07` (ticket 17) adds `agent_tunnel_status.code`, the tunnel failure code the Agent reports. It chains onto `20261105_06`.

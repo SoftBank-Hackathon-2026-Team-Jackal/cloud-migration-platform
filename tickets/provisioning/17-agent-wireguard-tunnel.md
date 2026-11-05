@@ -51,7 +51,7 @@ Blocked by: 15, 16
 | W5 설정 적용 | `intervalSeconds`(기본 15초)마다 `GET .../tunnel/config`를 읽어 원하는 상태(중계 서버·AllowedIPs·MTU·Keepalive·전달 대상)를 계산하고 적용된 상태와 다르면 다시 적용한다. `config_version`이 바뀌면(중계 서버 교체·키 교체) 반드시 이 경로를 탄다. 중계 서버가 여럿이면 `relay_id` 순 첫 번째만 쓴다(같은 AllowedIPs를 두 peer가 가질 수 없음). 플랫폼이 잠시 안 되면 마지막 터널을 그대로 유지한다. |
 | W6 감시·재연결 | `wg show wg0 latest-handshakes`로 마지막 handshake를 읽는다. 180초(WireGuard Reject-After-Time) 넘게 없으면 끊긴 것으로 보고 peer를 다시 설정(endpoint DNS 재해석)하고, 두 번 연속이면 인터페이스를 지우고 다시 만든다. 복구 자체는 PersistentKeepalive 25초로 WireGuard가 다시 handshake 한다. |
 | W7 상태 보고 | 매 주기 `POST .../tunnel/status`. `app_health_ok` = handshake 정상 + 터널 IP의 전달기를 거친 앱 헬스 2xx(모든 앱 포트), `db_connect_ok` = handshake 정상 + 터널 IP:5432 전달기를 거친 PostgreSQL `SSLRequest` 응답(`S`/`N`, `pg_isready`와 같은 수준). Agent 혼자서는 중계 서버 쪽에서 들어오는 경로를 직접 시험할 수 없으므로 "터널 성립(handshake) + 터널 주소 전달기 동작"으로 판정한다. 중계 서버 쪽 실제 경로는 Envoy 헬스 체크(Traffic)와 k3d 시험의 테스트 peer가 확인한다. |
-| W8 원인 코드 (16 API 추가) | 수용 기준 "원인 코드가 보고"를 위해 `TunnelStatusReport`에 선택 필드 `code`(대문자 코드, 성공이면 `null`)를 더하고 `agent_tunnel_status.code` 열(Alembic `20261105_05`)에 저장한다. 하위 호환(생략 가능)이며 인계 조건은 바뀌지 않는다. 코드: `HANDSHAKE_MISSING`, `RELAY_NOT_CONFIGURED`, `TUNNEL_INTERFACE_FAILED`, `APP_PORT_NOT_ASSIGNED`, `FORWARD_TARGET_MISSING`, `FORWARD_TARGET_AMBIGUOUS`, `APP_HEALTH_FAILED`, `DB_CONNECT_FAILED`, `INVALID_TUNNEL_CONFIG`, `FORWARDER_BIND_FAILED`, `KUBERNETES_UNAVAILABLE`. |
+| W8 원인 코드 (16 API 추가) | 수용 기준 "원인 코드가 보고"를 위해 `TunnelStatusReport`에 선택 필드 `code`(대문자 코드, 성공이면 `null`)를 더하고 `agent_tunnel_status.code` 열(Alembic `20261105_07`, 23·24 리비전 다음)에 저장한다. 하위 호환(생략 가능)이며 인계 조건은 바뀌지 않는다. 코드: `HANDSHAKE_MISSING`, `RELAY_NOT_CONFIGURED`, `TUNNEL_INTERFACE_FAILED`, `APP_PORT_NOT_ASSIGNED`, `FORWARD_TARGET_MISSING`, `FORWARD_TARGET_AMBIGUOUS`, `APP_HEALTH_FAILED`, `DB_CONNECT_FAILED`, `INVALID_TUNNEL_CONFIG`, `FORWARDER_BIND_FAILED`, `KUBERNETES_UNAVAILABLE`. |
 | W9 폐기·종료 | 플랫폼이 401/403이면 터널 인터페이스를 지우고 종료 코드 2로 멈춘다(15 H6와 같음). SIGTERM이면 전달기를 닫고 인터페이스를 지운다. |
 
 ## 결정 대기 (답변 기록)
@@ -84,7 +84,7 @@ Agent를 설치한 노트북이 공개 포트 없이 중계 서버와 터널을 
 
 - `cmp_providers.agent_tunnel`: X25519 키 생성·공개키 도출(RFC 7748, 의존성 없음), 키 Secret 저장소, 설정 → 원하는 상태(`plan_from_config`, W3·W5), 전달 대상 찾기(`discover_forwards`, W2), 터널 IP 전용 TCP 전달기(`TcpForwarders`, 출발지 검사), 커널/`wireguard-go` 인터페이스(`WireGuardLink`, W1), 감시·재연결·보고(`TunnelManager`, W6·W7), 실행 루프(`run_tunnel`, W9).
 - `AgentControlClient`: `register_tunnel_key`(PUT)·`tunnel_config`(GET)·`report_tunnel_status`(POST).
-- 16 API(W8): `TunnelStatusReport.code`(선택), `agent_tunnel_status.code` 열, Alembic `20261105_05`. OpenAPI는 이 필드만 추가.
+- 16 API(W8): `TunnelStatusReport.code`(선택), `agent_tunnel_status.code` 열, Alembic `20261105_07`(main 병합 때 `_06` 다음으로 재연결). OpenAPI는 이 필드만 추가.
 - Chart: `tunnel` 컨테이너·`tunnel.*` 값·스키마, Namespace `list` 권한. 이미지: `iproute2`·`wireguard-tools`·`wireguard-go`(0.0.20250522 커밋 고정).
 - 문서: [Agent 설치 §7](../../specs/provisioning/onprem-agent-install.md#7-wireguard-터널-17), [공통 배포 계약](../../specs/provisioning/onprem-shared-deployment.md).
 - 재현 스크립트: `scripts/smoke_onprem_agent_tunnel.py`.
