@@ -269,7 +269,7 @@ outcome = ImageBuilder(context).build(source_uri, source_version_id=None)
 
 - 준비 검사: Pod Ready, `SELECT version()`으로 요구 버전 확인, SQL 접속, 앱 헬스. 공통 준비 검사 함수가 생기면 교체한다.
 - DB Chart의 PVC는 `helm.sh/resource-policy: keep`이라 `helm uninstall`로 지워지지 않는다. 정리는 Namespace 삭제로 한다.
-- 모든 리소스에 `cmp.run-id`, `cmp.expires-at` 라벨. 주기 정리 작업이 만료된 Namespace를 지운다.
+- 모든 리소스에 `cmp.sandbox/run-id`, `cmp.sandbox/expires-at`(epoch 초) 라벨. 주기 정리 작업이 만료된 Namespace를 지운다.
 - 내부 Ingress는 현재 차트에 없어 첫 사이클에서는 Service로 직접 호출한다. Ingress 경로 검증은 차트 지원 후로 미룬다.
 - 개발 환경: 별도 k3d 클러스터(`cmp-sandbox`). minikube는 쓰지 않는다.
 
@@ -321,7 +321,7 @@ NetworkPolicy(Sandbox 워커 생성):
 - 에이전트는 Temporal을 모르는 함수다: `run_agent(role, task, tools, skills, budget) -> 결과 모델`. Activity는 입력을 모아 이 함수를 부르고 결과를 저장만 한다.
 - 내부는 LLM 도구 호출 루프다. 매 턴 모델이 도구를 부르면 실행해 결과를 돌려주고, 모델이 **제출 도구**(`submit_mapping`, `submit_tests`, `submit_patch`)를 부르면 끝난다. 제출 인자를 Pydantic으로 검증하고, 실패하면 오류를 돌려줘 같은 루프 안에서 고치게 한다.
 - 예산: 최대 턴 수, 입력·출력 토큰 상한, 벽시계 시간. 넘으면 지금까지의 기록과 함께 실패를 반환한다(Activity 재시도는 2회까지).
-- LLM 클라이언트는 `cmp_agents.llm.LLMClient` 인터페이스 하나로 감싼다. 공급자·모델은 D-01(Claude Agent SDK는 후보). 테스트는 `FakeLLMClient`(정해진 도구 호출 순서를 재생)로 한다.
+- LLM 클라이언트는 `cmp_agents.llm.LLMClient` 인터페이스 하나로 감싼다. 공급자·모델은 D-01로 결정됨(Claude, Anthropic SDK Messages API, `claude-sonnet-5-5`; ADR-004, `cmp_agents.anthropic_client`와 비용 장부 `cmp_agents.cost`). 테스트는 `FakeLLMClient`(정해진 도구 호출 순서를 재생)로 한다.
 - 재현·감사: 각 실행의 프롬프트 버전, 불러온 Skill 목록, 도구 호출과 결과 요약, 제출 결과를 실행 기록으로 저장한다. 승인 화면과 실패 분석에 쓴다. 비밀·`.env` 값은 들어가지 않는다(입력은 마스킹본).
 - 프롬프트는 `packages/agents/src/cmp_agents/prompts/<role>.md`에 두고 버전을 실행 기록에 남긴다.
 
@@ -463,7 +463,7 @@ class SandboxVerification(Contract):  # 내부 기록. Planning에는 SandboxEvi
 | `package_source` | sandbox | 2분 | 2 | 같은 해시면 업로드 생략 |
 | `request_build` | sandbox (D-12) | D-12 | 1(+분류 규칙) | Heartbeat. 실패는 결과값으로 반환 |
 | `prepare_sandbox` | sandbox | 2분 | 2 | Secret·NetworkPolicy 생성, 기존 Secret 있으면 재사용 |
-| `render_sandbox`, `apply_sandbox` | sandbox | 5분 | 2 | `helm upgrade --install --wait` |
+| `render_sandbox`, `apply_sandbox` | sandbox | 5분 | 2 | `helm upgrade --install --wait`. 실제 구현은 `sbx_*` Activity(`sbx_build`·`sbx_prepare`·`sbx_apply`·`sbx_verify`·`sbx_classify`·`sbx_fix`·`sbx_plan_publish`·`sbx_publish`·`sbx_teardown`, `activities/sandbox_loop.py`)이며 이 표의 이름은 설계 시점의 역할 구분이다 |
 | `readiness_check`, `reset_test_data` | sandbox | 2분 | 2 | |
 | `run_tests` | sandbox | 3분 | 1 | 테스트 실패는 결과값 |
 | `judge`, `classify_failure` | sandbox | 30초 | 2 | 결정적 |
@@ -546,13 +546,13 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 
 | ID | 항목 | 현재 방향 | 담당 |
 | --- | --- | --- | --- |
-| D-01 | LLM 공급자·모델·전송 범위 | ADR-004(작성 예정)로 기록. 근거 주변 코드 조각만 전송 | 승철·팀 |
-| D-02 | `*_ref` 저장 위치, Build 결과 저장·정규화 Activity 담당 | Planning 입력 v2는 #22로 확정. 저장 경계만 남음 | 민서·승철 |
+| D-01 | LLM 공급자·모델·전송 범위·비용 상한 | **결정됨** — ADR-004(Accepted). Sonnet 5.5, 마스킹한 증거 조각만 전송, 마이그레이션당 $3·하루 $20·한 달 $100 기본 상한을 코드로 강제 | 승철·팀 |
+| D-02 | `*_ref` 저장 위치, Build 결과 저장·정규화 Activity 담당 | 첫 사이클은 해시 이름 로컬 불변 저장소로 **결정됨**. Planning 입력 v2의 `S3ArchiveRef`(소스·테스트 묶음)는 S3 URI를 요구하므로 S3 연결 방식이 남음(15번 전) | 민서·승철 |
 | D-04 | Build 실패 상세 | 급하지 않음 | 민서 |
 | D-06 | 소스·테스트 묶음 버킷 소유·정리 규칙 | 플랫폼 소유 버킷, 실행 종료 후 N일 | 민서·승철 |
 | D-07 | 첫 사이클 지원 언어 | 승철이 결정(데모 앱은 그 언어에 맞춤) | 승철 |
-| D-08 | Sandbox 기반 클러스터 준비 주체·시점 | | 민서·승철 |
-| D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | | 승철·소울 |
+| D-08 | Sandbox 기반 클러스터 준비 주체·시점 | **결정됨** — 로컬 k3d `cmp-sandbox`(Colima) | 승철 |
+| D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 미해결. 없으면 `validate_tests`가 `ORIGIN_UNAVAILABLE`로 AI 테스트를 모두 거절하므로 표준 테스트만 쓴다 | 승철·소울 |
 | D-10 | Production 테스트 묶음 실행 시점·데이터 정리 | 데이터 이전 후·트래픽 전환 전 | 민서·소울·상헌 |
 | D-11 | DB 이미지를 고르는 "대상 구성 단계"의 소유자, Sandbox·Production 공유 방식 | 요구사항엔 이미지 없음(#22). 원본 이미지는 분석 결과에 정보로 | 민서 |
 | D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한 | `resource_id`·`source_version_id`는 구현됨. 함수 호출 유지 | 민서 |

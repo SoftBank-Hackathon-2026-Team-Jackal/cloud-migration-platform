@@ -13,6 +13,9 @@ class AppApi(BaseModel):
     health_path: str
     write_path: str | None = None  # POST {id, value}
     read_path: str | None = None  # GET, "{{id}}" is replaced by the written id
+    # The pinned suite stays the same while the health path is part of what a fix may correct:
+    # the runner then supplies the target's current path as `{{health_path}}`.
+    health_from_target: bool = False
 
 
 def standard_cases(api: AppApi) -> list[SuiteCase]:
@@ -22,7 +25,13 @@ def standard_cases(api: AppApi) -> list[SuiteCase]:
             description="The health endpoint answers 200.",
             source="STANDARD",
             effect="READ_ONLY",
-            steps=[HttpStep(path=api.health_path, expect=Expect(status=200))],
+            covers=["environment-config"],  # the app starts and answers with its bindings in place
+            steps=[
+                HttpStep(
+                    path="{{health_path}}" if api.health_from_target else api.health_path,
+                    expect=Expect(status=200),
+                )
+            ],
         )
     ]
     if api.write_path and api.read_path:
@@ -43,6 +52,7 @@ def standard_cases(api: AppApi) -> list[SuiteCase]:
                 description="Data written through the app API is read back unchanged.",
                 source="STANDARD",
                 effect="WRITES_DATA",
+                covers=["postgres"],
                 steps=[write, read],
             )
         )
@@ -52,6 +62,7 @@ def standard_cases(api: AppApi) -> list[SuiteCase]:
                 description="Written data is still there after the database restarts.",
                 source="STANDARD",
                 effect="WRITES_DATA",
+                covers=["postgres"],
                 steps=[write, ActionStep(action="RESTART_DATABASE"), read],
             )
         )

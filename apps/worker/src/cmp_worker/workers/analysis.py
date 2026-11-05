@@ -39,6 +39,7 @@ def build_pipeline(config: Settings = default_settings) -> AnalysisPipeline | No
         workspace_root=config.analysis_workspace_root,
         skills_root=resources / "skills",
         catalog_dir=resources / "catalog",
+        allow_local_repositories=config.analysis_allow_local_repositories,
         llm_factory=build_llm_factory(config),  # None unless Claude is switched on (ADR-004)
         aws_clients_factory=lambda inp: make_clients(
             get_session(inp.credential_ref or "", region=region)

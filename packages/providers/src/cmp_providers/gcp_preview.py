@@ -275,6 +275,19 @@ def _verify_adc(expected_email: str, work: Path, env: dict[str, str]) -> None:
         _reject("ADC_PRINCIPAL_MISMATCH", "adc", "Google ADC principal does not match expectation.")
 
 
+def verify_adc_principal(expected_email: str) -> str:
+    """Public form of the ADC principal check, reused by environment connections (ticket 23).
+
+    Raises `ProvisioningInputError` with the same codes as Planning (`ADC_PRINCIPAL_MISMATCH`, ...).
+    """
+    work = Path(mkdtemp(prefix="cmp-adc-"))
+    try:
+        _verify_adc(expected_email, work, dict(os.environ))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return expected_email
+
+
 def plan_gcp_infrastructure(
     request: GcpPlanInput,
     *,

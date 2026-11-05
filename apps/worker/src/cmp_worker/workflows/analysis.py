@@ -155,7 +155,9 @@ class AnalysisWorkflow:
             },
         )
         report = {**report, "migration_id": inp["migration_id"]}
-        return await self._review(report, built["requirements_ref"])
+        result = await self._review(report, built["requirements_ref"])
+        # The Sandbox input is built from the workspace this worker checked out (ticket 21).
+        return {**result, "source": {"workspace": source["workspace"], "commit": source["commit"]}}
 
     async def _run_scaffold(self, migration_id: str) -> dict:
         async def run_activity(fn, value=migration_id, *, minutes=1, attempts=2):

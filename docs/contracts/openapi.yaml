@@ -844,6 +844,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /relays/{relay_id}/agents:
+    get:
+      tags:
+      - tunnels
+      summary: Get Relay Agents
+      description: 'P1: polled by the relay. Bearer = the relay credential returned
+        at registration (T3).'
+      operationId: get_relay_agents_relays__relay_id__agents_get
+      parameters:
+      - name: relay_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Relay Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayAgentList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/migrations/{migration_id}/planning-input:
     put:
       tags:
@@ -963,6 +999,285 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /connections:
+    post:
+      tags:
+      - environment connections
+      summary: Create
+      operationId: create_connections_post
+      parameters:
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConnectionRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateConnectionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - environment connections
+      summary: Unified List
+      description: Cloud connections plus on-prem Agents and their last tunnel report,
+        in one call.
+      operationId: unified_list_connections_get
+      parameters:
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}:
+    get:
+      tags:
+      - environment connections
+      summary: Detail
+      operationId: detail_connections__connection_id__get
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - environment connections
+      summary: Delete
+      operationId: delete_connections__connection_id__delete
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}/role:
+    put:
+      tags:
+      - environment connections
+      summary: Register Role
+      operationId: register_role_connections__connection_id__role_put
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}/verify:
+    post:
+      tags:
+      - environment connections
+      summary: Verify
+      description: Always 200 with CONNECTED/FAILED and a stable code once the connection
+        exists.
+      operationId: verify_connections__connection_id__verify_post
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}/eks-clusters:
+    get:
+      tags:
+      - environment connections
+      summary: Eks Clusters
+      description: Anchor discovery (regions -> EKS clusters). Following references
+        is Analysis' job.
+      operationId: eks_clusters_connections__connection_id__eks_clusters_get
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: region
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-\d$
+          - type: 'null'
+          title: Region
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/agents:
+    get:
+      tags:
+      - environment connections
+      summary: List Agents
+      operationId: list_agents_agent_admin_agents_get
+      parameters:
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -1007,6 +1322,17 @@ components:
       - last_seen_at
       - revoked
       title: AgentAdminStatus
+    AgentList:
+      properties:
+        agents:
+          items:
+            $ref: '#/components/schemas/AgentSummary'
+          type: array
+          title: Agents
+      type: object
+      required:
+      - agents
+      title: AgentList
     AgentStatus:
       properties:
         agent_id:
@@ -1025,6 +1351,44 @@ components:
       - owner_id
       - cluster_uid
       title: AgentStatus
+    AgentSummary:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        cluster_uid:
+          type: string
+          title: Cluster Uid
+        last_seen_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Seen At
+        online:
+          type: boolean
+          title: Online
+        revoked:
+          type: boolean
+          title: Revoked
+        version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Version
+        tunnel:
+          anyOf:
+          - $ref: '#/components/schemas/TunnelSummary'
+          - type: 'null'
+      type: object
+      required:
+      - agent_id
+      - cluster_uid
+      - last_seen_at
+      - online
+      - revoked
+      - version
+      - tunnel
+      title: AgentSummary
     AnalysisInputV2:
       properties:
         result_ref:
@@ -1216,6 +1580,50 @@ components:
       - sha256
       - size_bytes
       title: ArtifactRef
+    AwsConnectionSummary:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        kind:
+          type: string
+          enum:
+          - AWS_SOURCE
+          - AWS_TARGET
+          title: Kind
+        display_name:
+          type: string
+          title: Display Name
+        account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Id
+        region:
+          type: string
+          title: Region
+        status:
+          type: string
+          enum:
+          - PENDING
+          - CONNECTED
+          - FAILED
+          title: Status
+        last_verified_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Verified At
+      type: object
+      required:
+      - connection_id
+      - kind
+      - display_name
+      - account_id
+      - region
+      - status
+      - last_verified_at
+      title: AwsConnectionSummary
     AwsTargetSettings:
       properties:
         provider:
@@ -1382,6 +1790,137 @@ components:
       title: CloudWorkloadSettings
       description: 'Ticket 22 W3: deployment choices for the 09/11 DB + App workloads
         on the new cluster.'
+    ClusterList:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        region:
+          type: string
+          title: Region
+        eks_clusters:
+          items:
+            type: string
+          type: array
+          title: Eks Clusters
+      type: object
+      required:
+      - connection_id
+      - region
+      - eks_clusters
+      title: ClusterList
+    ConnectionDetail:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        kind:
+          type: string
+          enum:
+          - AWS_SOURCE
+          - AWS_TARGET
+          - GCP_TARGET
+          title: Kind
+        display_name:
+          type: string
+          title: Display Name
+        region:
+          type: string
+          title: Region
+        status:
+          type: string
+          enum:
+          - PENDING
+          - CONNECTED
+          - FAILED
+          title: Status
+        account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Id
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        role_arn:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Role Arn
+        external_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Id
+        expected_principal:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expected Principal
+        principal:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Principal
+        credential_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Credential Ref
+        launch_stack_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Launch Stack Url
+        stack_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stack Name
+        last_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Code
+        last_checked_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Checked At
+        last_verified_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Verified At
+      type: object
+      required:
+      - connection_id
+      - kind
+      - display_name
+      - region
+      - status
+      title: ConnectionDetail
+    ConnectionList:
+      properties:
+        connections:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/AwsConnectionSummary'
+            - $ref: '#/components/schemas/GcpConnectionSummary'
+          type: array
+          title: Connections
+        agents:
+          items:
+            $ref: '#/components/schemas/AgentSummary'
+          type: array
+          title: Agents
+      type: object
+      required:
+      - connections
+      - agents
+      title: ConnectionList
     ContentRef:
       properties:
         id:
@@ -1405,6 +1944,98 @@ components:
       - version
       - sha256
       title: ContentRef
+    CreateConnectionRequest:
+      properties:
+        kind:
+          type: string
+          enum:
+          - AWS_SOURCE
+          - AWS_TARGET
+          - GCP_TARGET
+          title: Kind
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+        region:
+          type: string
+          maxLength: 40
+          title: Region
+        gcp:
+          anyOf:
+          - $ref: '#/components/schemas/GcpTarget'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - display_name
+      - region
+      title: CreateConnectionRequest
+    CreateConnectionResponse:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        kind:
+          type: string
+          enum:
+          - AWS_SOURCE
+          - AWS_TARGET
+          - GCP_TARGET
+          title: Kind
+        display_name:
+          type: string
+          title: Display Name
+        status:
+          type: string
+          enum:
+          - PENDING
+          - CONNECTED
+          - FAILED
+          title: Status
+        external_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Id
+        launch_stack_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Launch Stack Url
+      type: object
+      required:
+      - connection_id
+      - kind
+      - display_name
+      - status
+      title: CreateConnectionResponse
+    DeleteResponse:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        deleted:
+          type: boolean
+          const: true
+          title: Deleted
+        stack_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stack Name
+        notice:
+          type: string
+          title: Notice
+      type: object
+      required:
+      - connection_id
+      - deleted
+      - stack_name
+      - notice
+      title: DeleteResponse
     EnrollmentRequest:
       properties:
         owner_id:
@@ -1492,6 +2123,64 @@ components:
       - code
       - recoverability
       title: Failure
+    GcpConnectionSummary:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        kind:
+          type: string
+          const: GCP_TARGET
+          title: Kind
+        display_name:
+          type: string
+          title: Display Name
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        region:
+          type: string
+          title: Region
+        status:
+          type: string
+          enum:
+          - PENDING
+          - CONNECTED
+          - FAILED
+          title: Status
+        last_verified_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Verified At
+      type: object
+      required:
+      - connection_id
+      - kind
+      - display_name
+      - project_id
+      - region
+      - status
+      - last_verified_at
+      title: GcpConnectionSummary
+    GcpTarget:
+      properties:
+        project_id:
+          type: string
+          pattern: ^[a-z][a-z0-9-]{4,28}[a-z0-9]$
+          title: Project Id
+        expected_principal:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9][a-z0-9.-]{1,190}\.[a-z]{2,}$
+          title: Expected Principal
+      additionalProperties: false
+      type: object
+      required:
+      - project_id
+      - expected_principal
+      title: GcpTarget
     GcpTargetSettings:
       properties:
         provider:
@@ -2055,6 +2744,54 @@ components:
       - agent_id
       - credential
       title: RegistrationResponse
+    RelayAgent:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        public_key:
+          type: string
+          title: Public Key
+        tunnel_ip:
+          type: string
+          title: Tunnel Ip
+        allowed_ips:
+          items:
+            type: string
+          type: array
+          title: Allowed Ips
+        allowed_ports:
+          items:
+            type: integer
+          type: array
+          title: Allowed Ports
+        revoked:
+          type: boolean
+          title: Revoked
+      type: object
+      required:
+      - agent_id
+      - public_key
+      - tunnel_ip
+      - allowed_ips
+      - allowed_ports
+      - revoked
+      title: RelayAgent
+    RelayAgentList:
+      properties:
+        list_version:
+          type: string
+          title: List Version
+        agents:
+          items:
+            $ref: '#/components/schemas/RelayAgent'
+          type: array
+          title: Agents
+      type: object
+      required:
+      - list_version
+      - agents
+      title: RelayAgentList
     RelayPeer:
       properties:
         relay_id:
@@ -2215,6 +2952,18 @@ components:
       - name
       - location
       title: ResultCluster
+    RoleRequest:
+      properties:
+        role_arn:
+          type: string
+          maxLength: 600
+          pattern: ^arn:aws(-cn|-us-gov)?:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$
+          title: Role Arn
+      additionalProperties: false
+      type: object
+      required:
+      - role_arn
+      title: RoleRequest
     RolloutApplication:
       properties:
         release:
@@ -2525,12 +3274,18 @@ components:
         tunnel_ip:
           type: string
           title: Tunnel Ip
+        relays:
+          items:
+            $ref: '#/components/schemas/RelayPeer'
+          type: array
+          title: Relays
         config_version:
           type: integer
           title: Config Version
       type: object
       required:
       - tunnel_ip
+      - relays
       - config_version
       title: TunnelKeyResponse
     TunnelStatusReport:
@@ -2556,6 +3311,29 @@ components:
       - app_health_ok
       - db_connect_ok
       title: TunnelStatusReport
+    TunnelSummary:
+      properties:
+        tunnel_ip:
+          type: string
+          title: Tunnel Ip
+        last_handshake_at:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Last Handshake At
+        app_health_ok:
+          type: boolean
+          title: App Health Ok
+        db_connect_ok:
+          type: boolean
+          title: Db Connect Ok
+      type: object
+      required:
+      - tunnel_ip
+      - last_handshake_at
+      - app_health_ok
+      - db_connect_ok
+      title: TunnelSummary
     ValidatedWorkloadV2:
       properties:
         resource_id:
@@ -2631,6 +3409,50 @@ components:
       - path
       - message
       title: ValidationIssue
+    VerifyResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - CONNECTED
+          - FAILED
+          title: Status
+        code:
+          type: string
+          title: Code
+        checked_at:
+          type: integer
+          title: Checked At
+        account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Id
+        project_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Id
+        principal:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Principal
+        eks_clusters:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Eks Clusters
+      type: object
+      required:
+      - status
+      - code
+      - checked_at
+      title: VerifyResponse
+      description: '`account_id` for AWS, `project_id` for GCP; `eks_clusters` only
+        for a verified source.'
     VersionRef:
       properties:
         id:

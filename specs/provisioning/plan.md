@@ -310,3 +310,14 @@ Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다.
 ### Ticket 22 AWS/GCP 워크로드 Plan 게시와 09·11 실행 연결 (#108)
 
 `PlanPublisher.publish_workloads`가 실행된 AWS/GCP 인프라 Revision(최신·전 단계 `SUCCEEDED`·클러스터 refs 있음)과 등록의 워크로드 설정으로 별도 `WORKLOADS` Plan(`workload_plan_id_for`)을 게시한다. DB Values는 04B 렌더, 앱 Values는 09·11의 v1 템플릿으로 바꾸고 `helm template`으로 확인한다. 입력 Digest에 인프라 Revision·manifest Digest·refs를 넣어 같은 인프라 결과는 재사용, 새 인프라 실행은 새 Revision이 된다. `MigrationWorkflow`는 인프라 실행 뒤 이 Plan을 승인 대기시키고 09·11 결과를 13 `ProvisioningResult`로 남긴다. 결정은 [22 티켓](../../tickets/provisioning/22-cloud-workload-plan.md#착수-결정-2026-11-05).
+
+### Ticket 23 환경 연결 (#118, `PROV-003`, `021`, `022`)
+
+[ADR-005](../../docs/decisions/ADR-005.md)의 방식을 `cmp_api.connections`(도메인)와 `cmp_api.routes.connections`(HTTP)에 구현했다.
+
+- **저장:** 업무 DB `environment_connections`(Alembic `20261105_05`)에 Role ARN·External ID·계정·주체·확인 시각·코드를 둔다.
+- **확인:** verify와 기준점 조회는 API 프로세스에서 코드로 AssumeRole(900초, ExternalId)한다. 받은 임시 자격 증명은 메모리에서만 STS·EKS 클라이언트에 쓴다. Workflow·Activity를 거치지 않으므로 Temporal 이력에 연결 확인이 남지 않는다.
+- **`credential_ref` 해석:** 역할을 등록하거나 연결을 삭제할 때마다 API가 `connection_aws_config_file`을 DB 기준으로 다시 쓴다. 내용은 플랫폼 기본 프로필 파일 + 연결별 `[profile cmp-conn-<hex>]`(`role_arn`, `external_id`, `source_profile`)다. worker·분석은 `AWS_CONFIG_FILE`로 같은 파일을 읽는다. 그러면 분석 `get_session(credential_ref)`, Provisioning `aws_profile`, Terraform·AWS CLI가 코드 변경 없이 SDK의 assume-role로 동작한다.
+- **GCP:** `cmp_providers.gcp_preview.verify_adc_principal`(06의 ADC 검사 공개 함수)을 재사용한다.
+- **템플릿:** `infra/connections/{source,target}-role.yaml`. S3 공개 읽기 객체로 호스팅하고 `connection_template_base_url`로 빠른 생성 링크를 만든다.
+- **제외:** `MigrationRequest` 연결 ID, 다른 계정 Apply의 backend 프로필, 데모 반영은 후속이다([23 티켓](../../tickets/provisioning/23-environment-connections.md)).

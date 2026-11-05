@@ -174,6 +174,10 @@ Agent가 접속하는 대상 K3s는 사용자 측에 있고 Sandbox 클러스터
 - 인증된 Agent 요청마다 `registered_agents.last_seen_at`을 갱신한다. 운영자는 관리자 키로 `GET /agent-admin/agents/{agent_id}`(상태)와 `POST /agent-admin/agents/{agent_id}/revoke`(폐기)를 호출한다. 폐기(`revoked_at`)된 Agent는 claim·결과 보고·산출물 다운로드·자기 상태 조회가 모두 403이고, Agent ID는 재사용하지 않으며 남은 작업은 지우지 않는다. 결과 보고의 인증 실패는 이제 409가 아니라 403이다.
 - 장기 실행 Agent(`cmp_providers.agent_runtime`)는 등록 → 폴링 루프를 하나로 합치고 사용자 K3s 안에서 ServiceAccount로 실행한다(`ClusterTarget.in_cluster`). 설치·운영 절차는 [onprem-agent-install.md](onprem-agent-install.md)를 따른다.
 
+### 터널 설정 교환 (16, #70)
+
+Agent는 기존 Bearer 자격 증명으로 WireGuard **공개키만** 등록한다(`PUT /agents/{agent_id}/tunnel/key`). 응답과 `GET /agents/{agent_id}/tunnel/config`에 배정 터널 IP(`10.200.0.0/24`의 /32, 중계 서버는 `.1`), 중계 서버 목록(`endpoint`·`public_key`), 설정 버전이 있고, 설정 조회에는 MTU 1420, PersistentKeepalive 25, 노출 포트(5432 + READY 앱 포트)도 있다. Agent는 터널 경유 앱 헬스·DB 접속 결과를 `POST /agents/{agent_id}/tunnel/status`로 보고한다. 중계 서버는 `GET /relays/{relay_id}/agents`를 폴링해 peer를 반영하고, 폐기 Agent(`revoked: true`)는 peer를 지운다. 확인이 끝난 ON_PREM 결과만 Data(`tunnel_endpoint = 터널IP:5432`)·Traffic(`external_host = 터널IP`, `external_port = 앱포트`) 인계가 진행된다. 상세는 [16 티켓](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.
+
 ### DB 연결 URL Secret (19, #79)
 
 앱이 `connection_url_secret_ref`를 참조하면 작업 본문 `database.connection_url`에 대상 Secret 참조와 DB 이름·사용자(비밀이 아닌 값)가 들어간다. 이 참조는 사용자가 미리 만들어야 하는 Secret 목록(`secret_refs`)에서 빠진다. Agent는 변경 전에 같은 이름의 Secret이 `cmp.dev/managed=true` 없이 있으면 `SECRET_NAME_CONFLICT`로 멈추고, 비밀번호 Secret을 준비한 뒤 그 값으로 URL을 조립해 매 배포마다 Secret을 갱신한다. READY 검사는 URL Secret 키 존재를 확인한다. URL·비밀번호는 클러스터 밖으로 나가지 않는다. 바인딩이 없으면 필드를 생략해 기존 작업 본문과 같은 바이트를 유지한다.

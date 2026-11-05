@@ -1,8 +1,8 @@
-"""Ticket 16 (#70) seam, reply-independent part: FastAPI TestClient + SQLite business DB.
+"""Ticket 16 (#70) seam: FastAPI TestClient + SQLite business DB.
 
 Covers Agent public key registration, tunnel IP allocation, Agent tunnel config, relay
-registration, tunnel status and the ON_PREM Data handoff (T2~T9). The relay-side Agent list (P1)
-and the ON_PREM external_endpoint (P2) wait for the Traffic owner's reply and are not tested here.
+registration, the relay-side Agent list (P1), tunnel status and the ON_PREM Data/Traffic handoff
+(T2~T13). Real WireGuard (17) and the relay applying the list (Traffic) are out of scope.
 """
 
 import asyncio
@@ -98,6 +98,18 @@ def test_each_agent_gets_a_stable_unique_tunnel_ip(client, db):
     # Re-registration and key rotation keep the same address.
     rotated = put_key(client, "agent-001", a)
     assert rotated.json()["tunnel_ip"] == "10.200.0.2"
+
+
+def test_key_registration_returns_the_relays_to_connect_to(client, db):
+    headers = agent(db)
+    relay_key = wg_key()
+    put_relay(client, key=relay_key)
+    body = put_key(client, "agent-001", headers).json()
+    assert body["relays"] == [
+        {"relay_id": "relay-seoul", "endpoint": "13.124.10.10:51820", "public_key": relay_key}
+    ]
+    assert body["config_version"] == 1
+    assert "credential" not in str(body)
 
 
 def test_only_public_keys_are_accepted(client, db):
@@ -231,15 +243,112 @@ def test_onprem_data_handoff_waits_for_a_tunnel_db_check(client, db):
         assert load_result(s, "plan-001", 1).database.tunnel_endpoint is None
 
 
-def test_onprem_traffic_handoff_stays_blocked_until_the_port_question_is_answered(client, db):
+def test_onprem_traffic_handoff_waits_for_a_tunnel_app_health_check(client, db):
     headers = agent(db)
     put_key(client, "agent-001", headers)
+    relay = put_relay(client).json()
     onprem_ready(db)
+
+    before = handoff(db, "TRAFFIC_MIGRATION")
+    assert before["proceed"] is False
+    assert before["blocked_by"] == ["EXTERNAL_ENDPOINT_UNAVAILABLE"]
+    app = before["application"]
+    assert (app["external_endpoint"], app["external_host"], app["external_port"]) == (None,) * 3
+
+    report(client, headers, app_health_ok=False)
+    assert handoff(db, "TRAFFIC_MIGRATION")["blocked_by"] == ["EXTERNAL_ENDPOINT_UNAVAILABLE"]
+
     report(client, headers)
-    traffic = handoff(db, "TRAFFIC_MIGRATION")
-    assert traffic["proceed"] is False
-    assert traffic["blocked_by"] == ["EXTERNAL_ENDPOINT_UNAVAILABLE"]  # P2 pending
-    assert traffic["application"]["external_endpoint"] is None
+    after = handoff(db, "TRAFFIC_MIGRATION")
+    assert after["proceed"] is True and after["blocked_by"] == []
+    app = after["application"]
+    # P2/P5/T10: the relay forwards to the tunnel side as-is (app port, not 80).
+    assert app["external_endpoint"] == "http://10.200.0.2:8080"
+    assert (app["external_host"], app["external_port"], app["health_path"]) == (
+        "10.200.0.2",
+        8080,
+        "/health",
+    )
+    assert "13.124.10.10" not in str(after)  # the relay public address is never a field value
+    assert relay["credential"] not in str(after)
+    with db() as s:
+        stored = load_result(s, "plan-001", 1).application
+        assert (stored.external_endpoint, stored.external_host) == (None, None)
+
+
+# --- P1: relay-side Agent list ----------------------------------------------------------------
+
+
+def relay_list(client, relay_id="relay-seoul", credential=None):
+    headers = {"Authorization": f"Bearer {credential}"} if credential else {}
+    return client.get(f"/relays/{relay_id}/agents", headers=headers)
+
+
+def test_relay_lists_agents_with_keys_tunnel_ips_and_ports(client, db):
+    credential = put_relay(client).json()["credential"]
+    headers = agent(db)
+    agent_key = wg_key()
+    put_key(client, "agent-001", headers, key=agent_key)
+    onprem_ready(db)
+
+    response = relay_list(client, credential=credential)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["agents"] == [
+        {
+            "agent_id": "agent-001",
+            "public_key": agent_key,
+            "tunnel_ip": "10.200.0.2",
+            "allowed_ips": ["10.200.0.2/32"],
+            "allowed_ports": [5432, 8080],
+            "revoked": False,
+        }
+    ]
+    assert isinstance(body["list_version"], str) and body["list_version"]
+    assert "owner" not in response.text and "cluster_uid" not in response.text
+
+
+def test_relay_list_version_changes_with_the_list(client, db):
+    credential = put_relay(client).json()["credential"]
+    empty = relay_list(client, credential=credential).json()
+    assert empty["agents"] == []
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    first = relay_list(client, credential=credential).json()["list_version"]
+    assert first != empty["list_version"]
+    assert relay_list(client, credential=credential).json()["list_version"] == first  # stable
+    put_key(client, "agent-001", headers)  # key rotation
+    assert relay_list(client, credential=credential).json()["list_version"] != first
+
+
+def test_revoked_agents_stay_listed_with_a_marker_so_the_relay_can_drop_the_peer(client, db):
+    credential = put_relay(client).json()["credential"]
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    before = relay_list(client, credential=credential).json()
+    with db() as s:
+        revoke_agent(s, agent_id="agent-001")
+    after = relay_list(client, credential=credential).json()
+    (entry,) = after["agents"]
+    assert entry["agent_id"] == "agent-001" and entry["revoked"] is True
+    assert entry["allowed_ports"] == []
+    assert after["list_version"] != before["list_version"]
+
+
+def test_only_an_authenticated_relay_reads_the_agent_list(client, db):
+    credential = put_relay(client).json()["credential"]
+    other = put_relay(client, relay_id="relay-tokyo", endpoint="13.124.10.20:51820").json()
+    assert relay_list(client).status_code == 401
+    assert relay_list(client, credential="cmp_relay_wrong").status_code == 403
+    assert relay_list(client, relay_id="relay-tokyo", credential=credential).status_code == 403
+    assert relay_list(client, relay_id="relay-nope", credential=credential).status_code == 403
+    assert (
+        relay_list(client, relay_id="relay-tokyo", credential=other["credential"]).status_code
+        == 200
+    )
+    agent_headers = agent(db)
+    put_key(client, "agent-001", agent_headers)
+    assert relay_list(client, credential=agent_headers["Authorization"][7:]).status_code == 403
 
 
 def test_exposed_ports_include_ready_onprem_app_ports(client, db):

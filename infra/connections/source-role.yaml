@@ -1,0 +1,74 @@
+# Cloud Migration Platform - source (read-only) connection role. Ticket 23, ADR-005.
+# Created by the user in their own AWS account from the platform's quick-create link.
+# The platform principal may assume it only with the platform-issued External ID, and gets
+# exactly the read actions the analysis scan calls (cmp_scanners.aws_infra.ALLOWED_OPERATIONS)
+# plus eks:ListClusters for anchor discovery. No write action is granted.
+# Long-form intrinsics only, so the file is plain YAML (validated by tests/test_connection_templates.py).
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloud Migration Platform read-only source role (cross-account AssumeRole with External ID)
+Parameters:
+  PlatformPrincipalArn:
+    Type: String
+    Description: ARN of the platform principal allowed to assume this role (shown by the platform)
+    AllowedPattern: "^arn:aws(-cn|-us-gov)?:iam::[0-9]{12}:role/.+$"
+  ExternalId:
+    Type: String
+    Description: External ID issued by the platform for this connection (do not change)
+    AllowedPattern: "^cmp-[0-9a-f]{32}$"
+Resources:
+  ConnectionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Cloud Migration Platform read-only scan role
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PlatformWithExternalId
+            Effect: Allow
+            Principal:
+              AWS:
+                Ref: PlatformPrincipalArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId:
+                  Ref: ExternalId
+      Tags:
+        - Key: cmp:managed-by
+          Value: cloud-migration-platform
+        - Key: cmp:connection-role
+          Value: source
+  ReadOnlyScan:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Read actions used by the platform's source analysis scan and anchor discovery
+      Roles:
+        - Ref: ConnectionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AnalysisScanReadOnly
+            Effect: Allow
+            Action:
+              - cloudtrail:LookupEvents
+              - ec2:DescribeRouteTables
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeSubnets
+              - ec2:DescribeVpcs
+              - eks:DescribeCluster
+              - eks:ListClusters
+              - elasticloadbalancing:DescribeListeners
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeTargetGroups
+              - iam:GetPolicy
+              - iam:GetPolicyVersion
+              - iam:GetRolePolicy
+              - iam:ListAttachedRolePolicies
+              - iam:ListRolePolicies
+            Resource: "*"
+Outputs:
+  RoleArn:
+    Description: Register this Role ARN on the platform connection page
+    Value:
+      Fn::GetAtt: [ConnectionRole, Arn]
