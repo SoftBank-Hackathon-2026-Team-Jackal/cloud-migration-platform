@@ -31,7 +31,7 @@
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
 | [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | DONE (PR #92 병합) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☑ |
 | [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | DONE (PR #114 병합) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☑ |
-| [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | IN_PROGRESS (착수) | 14C, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☐ |
+| [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14C, 19, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☐ |
 
 ## 선행 관계
 
@@ -104,6 +104,7 @@ Q-01 ────┴→ 02B ─┐
 - 2026-11-05: 14B 구현(#109): `SandboxVerificationWorkflow`에 실제 갱신 루프 추가(문자열 입력은 scaffold 그대로, dict 입력이 실제 경로, `sbx_*` Activity). 검토 대기는 종료 상태가 아닌 부모 플래그(`review_pending`)로, 실패는 `failed` 하나(원인 `failure_code`)로 정리(`sandbox-terminal-v1` 패치). SPEC 경로는 실제 k3d로 검증, 나머지는 가짜 Activity 이력. 부모→Sandbox 자식 입력 연결과 API SSE 종료 조건(`failed`) 반영은 남음.
 - 2026-11-05: 14C 구현: 통과 시 최종 분석 버전 발행(`SANDBOX_VERIFIED`, 새 버전 해시), 처리가 바뀐 행만 `ReapprovalGate`로 재승인, 코드 수정은 실제 git 패치 산출물(적용 결과 해시 검증, 전송 없음)로 반환. 재승인 Signal·Query(`approve_changed_rows`, `reapproval_state`)를 API에 연결하는 일은 남음.
 - 2026-11-05: ADR-004와 티켓 20: Claude Sonnet 5.5 연결(`AnthropicLLMClient`)과 비용 상한(호출 전 예약·정산, 마이그레이션 $3 / 하루 $20 / 한 달 $100 기본, 차단 스위치, fallbacks 미사용). 기본은 꺼짐이며 키·장부·설정이 모두 있어야 켜진다. 실제 호출 1회 확인은 승인 후.
+- 2026-11-05: 21 구현: 부모가 dict 입력이면 분석 결과로 Sandbox 입력을 조립(`assemble_sandbox_input`)해 실제 루프를 시작하고 통과 결과를 Query `pipeline`에 둔다(문자열 입력·기존 이력 그대로). 고정된 표준 헬스 테스트는 대상의 헬스 경로를 실행 시 받도록 보정. 실제 k3d에서 분석 → 검토 → 루프(SPEC 실패 후 정정) → 발행을 한 Workflow로 검증. 병합된 11~20 티켓의 상태·이슈 번호와 spec·plan·agent-brief의 낡은 내용(AV-019 패치 산출물, 저장소, 라벨 이름 등)도 함께 정리.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
 - 2026-11-04(리뷰 반영): spec AV-012에 `run_suite`의 `include`, AV-015에 INFRA와 횟수 규칙 반영(AV-013 커버리지는 원문 유지). ADR-004는 작성 예정으로 표시.
 - 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.

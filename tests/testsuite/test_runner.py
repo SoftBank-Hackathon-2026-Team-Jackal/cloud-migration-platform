@@ -163,3 +163,25 @@ def test_an_action_step_needs_an_implementation(base_url, store):
         ref, base_url, store=store, actions={"RESTART_DATABASE": lambda: calls.append(1)}
     )
     assert ok.passed and calls == [1]
+
+
+def test_a_pinned_health_test_follows_the_targets_current_health_path(base_url, store):
+    from cmp_testsuite.standard import AppApi, standard_cases
+
+    cases = standard_cases(AppApi(health_path="/wrong", health_from_target=True))
+    ref = pinned(store, *cases)  # the same bytes whatever the target's path is
+    assert cases[0].steps[0].path == "{{health_path}}"
+    assert not run_suite(ref, base_url, store=store, variables={"health_path": "/nowhere"}).passed
+    assert run_suite(ref, base_url, store=store, variables={"health_path": "/healthz"}).passed
+    assert (
+        pinned(store, *standard_cases(AppApi(health_path="/other", health_from_target=True))).sha256
+        == ref.sha256
+    )
+
+
+def test_a_literal_health_path_still_works_without_variables(base_url, store):
+    from cmp_testsuite.standard import AppApi, standard_cases
+
+    assert run_suite(
+        pinned(store, *standard_cases(AppApi(health_path="/healthz"))), base_url, store=store
+    ).passed
