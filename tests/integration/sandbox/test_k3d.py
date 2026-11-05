@@ -319,3 +319,94 @@ def test_a_pinned_suite_runs_in_the_sandbox_and_dependency_checks_use_the_real_d
         service.check_sandbox(plan)  # the database is back after the cut
     finally:
         service.teardown_sandbox(plan.namespace)
+
+
+CURL = (
+    "docker.io/curlimages/curl@sha256:"
+    "d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
+)
+
+
+class Probe:
+    """A long-lived pod that carries a resource's labels, so the policies treat it as that
+    resource. It must already be running when traffic starts: the policy engine learns about a
+    brand-new pod a moment after it starts, and a throwaway pod would race that."""
+
+    def __init__(self, plan, release, name):
+        self.plan, self.name = plan, name
+        kubectl(
+            "run", name, "-n", plan.namespace, "--restart=Never", f"--image={CURL}",
+            f"--labels=app.kubernetes.io/instance={release}", "--command", "--", "sleep", "900",
+        )  # fmt: skip
+        kubectl(
+            "wait", "--for=condition=Ready", f"pod/{name}", "-n", plan.namespace, "--timeout=90s"
+        )
+
+    def sh(self, script):
+        done = kubectl("exec", "-n", self.plan.namespace, self.name, "--", "sh", "-c", script)
+        return done.stdout
+
+
+def test_network_rules_block_unlisted_traffic_and_record_what_leaves_the_sandbox(service, tmp_path):
+    from cmp_contracts.provisioning_v2 import RequirementsV2
+    from cmp_testsuite import CaseResult, SuiteResult
+    from cmp_worker.sandbox_judge import judge
+
+    base = requirements().model_dump(mode="json")
+    base["network_intent"] = [
+        {"source_resource_id": "demo-api", "destination_resource_id": "demo-db", "port": 5432},
+        {"source_resource_id": "demo-api", "external_host": "example.com", "port": 80},
+    ]
+    run_id = "nw-" + uuid.uuid4().hex[:8]
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"FEATURE_X={ENV_VALUE}\n")
+    plan = service.prepare_sandbox(
+        RequirementsV2.model_validate(base),
+        migration_id="it-mig",
+        run_id=run_id,
+        images=SandboxImages(database=POSTGRES, applications={"demo-api": PODINFO}),
+        capabilities=SandboxCapabilities(storage_class="local-path"),
+        env_names=["FEATURE_X"],
+        env_file=env_file,
+        network=True,
+    )
+    api, db = plan.releases["demo-api"], plan.releases["demo-db"]
+    via_proxy = (
+        "curl -sS -m 10 -x http://cmp-egress-proxy:3128 -o /dev/null -w 'HTTP:%{http_code}' "
+    )
+    try:
+        service.apply_sandbox(plan)
+        service.apply_network(plan)
+        app_probe = Probe(plan, api, "probe-app")
+        # The runner still reaches the application, so the entry rule works.
+        assert service.check_sandbox(plan)["health"] == "OK"
+
+        # Through the proxy: the listed host passes, an unlisted one is refused.
+        assert "HTTP:200" in app_probe.sh(via_proxy + "http://example.com/")
+        assert "HTTP:403" in app_probe.sh(via_proxy + "http://www.iana.org/")
+        # Without the proxy the application cannot leave at all.
+        direct = app_probe.sh("curl -sS -m 6 -o /dev/null http://example.com/; echo EXIT:$?")
+        assert "EXIT:0" not in direct
+        # The application may reach the database (intent), the database may not reach the application.
+        to_db = app_probe.sh(f"curl -sv -m 6 telnet://{db}:5432 2>&1 | grep -c Connected; true")
+        assert to_db.strip().splitlines()[0] != "0"
+        to_app = kubectl(
+            "exec", "-n", plan.namespace, f"statefulset/{db}", "--", "bash", "-c",
+            f"timeout 5 bash -c '</dev/tcp/{api}/9898'",
+        )  # fmt: skip
+        assert to_app.returncode != 0
+
+        records = {(r.decision, r.host, r.port) for r in service.egress_records(plan)}
+        assert ("ALLOW", "example.com", 80) in records and ("BLOCK", "www.iana.org", 80) in records
+        ok = SuiteResult(
+            suite_sha256="a" * 64, results=[CaseResult(id="std-health", status="PASSED")]
+        )
+        verdict = judge(results=ok, egress=service.egress_records(plan), source_hosts={"iana.org"})
+        assert not verdict.passed and verdict.reasons == ["MIGRATE_SOURCE_CALLED:www.iana.org:80"]
+
+        # Taking the proxy away makes even listed hosts fail, and it comes back afterwards.
+        with service.external_cut(plan):
+            assert "HTTP:200" not in app_probe.sh(via_proxy + "http://example.com/")
+        assert "HTTP:200" in app_probe.sh(via_proxy + "http://example.com/")
+    finally:
+        service.teardown_sandbox(plan.namespace)
