@@ -20,7 +20,8 @@ Temporal에서 트래픽 전환을 Activity로 실행하고 `traffic.snapshot`�
 
 - [x] Activity가 Temporal에서 실행되고 단계마다 snapshot 필드가 만들어진다(가짜 Activity 시험).
 - [x] 롤백 Activity가 원본 100%로 되돌린다.
-- [ ] 상위 Workflow 연결과 실제 중계 서버(WireGuard) 시험은 인계값 형식 확정과 클라우드 환경 이후.
+- [x] 실제 중계 서버(EC2) + WireGuard 터널 + 온프레 역할 VM에서 정상 전환·롤백 시험(ADR-004 기록).
+- [ ] 상위 Workflow 연결(인계값 형식 확정 후), 컨트롤러와 중계 서버가 다른 호스트일 때의 설정 배포(에이전트 또는 xDS).
 
 ## 관련 문서
 
