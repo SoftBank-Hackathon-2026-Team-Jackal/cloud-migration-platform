@@ -183,26 +183,41 @@ class SandboxVerificationWorkflow:
         fix_reasons: list[str] = []
         last_results: list[dict] = []
         built_sha: str | None = None
+        builds_ref: dict | None = None
+        suite_ref = data["suite_ref"]
         try:
             self.phase = "sbx_build"
             built = await act(
                 "sbx_build",
-                {"requirements_ref": requirements_ref, "source": source},
+                {
+                    "requirements_ref": requirements_ref,
+                    "source": source,
+                    "migration_id": data["migration_id"],
+                    "run_id": data["run_id"],
+                    "attempt": 1,
+                },
                 minutes=30,
             )
-            images, built_sha = built["images"], built.get("source_sha256")
-            self.phase = "sbx_prepare"
-            prepared = True
-            prep = await act(
-                "sbx_prepare",
-                {"input": data, "requirements_ref": requirements_ref, "images": images},
-            )
-            plan, previous = prep["plan"], None
-            if plan is None:
-                reasons = [f"SANDBOX:{prep['sandbox_error']}"]
+            builds_ref = built.get("builds_ref")
+            plan, previous = None, None
+            if built.get("build_error"):
+                # The real build path produced no image: a person looks at it, no Sandbox exists.
+                reasons = [f"BUILD:{built['build_error']}"]
                 outcome = "NEEDS_REVIEW"
+            else:
+                images, built_sha = built["images"], built.get("source_sha256")
+                self.phase = "sbx_prepare"
+                prepared = True
+                prep = await act(
+                    "sbx_prepare",
+                    {"input": data, "requirements_ref": requirements_ref, "images": images},
+                )
+                plan = prep["plan"]
+                if plan is None:
+                    reasons = [f"SANDBOX:{prep['sandbox_error']}"]
+                    outcome = "NEEDS_REVIEW"
             infra_streak, tests_ran, baseline_ok = 0, False, False
-            suite_ref, ai_pending = data["suite_ref"], True
+            ai_pending = True
             self.attempt = 1
             while plan is not None:
                 self.phase = "sbx_apply"
@@ -321,10 +336,21 @@ class SandboxVerificationWorkflow:
                     self.phase = "sbx_build"
                     rebuilt = await act(
                         "sbx_build",
-                        {"requirements_ref": requirements_ref, "source": source},
+                        {
+                            "requirements_ref": requirements_ref,
+                            "source": source,
+                            "migration_id": data["migration_id"],
+                            "run_id": data["run_id"],
+                            "attempt": self.attempt,
+                        },
                         minutes=30,
                     )
+                    if rebuilt.get("build_error"):
+                        reasons = [f"BUILD:{rebuilt['build_error']}"]
+                        outcome = "NEEDS_REVIEW"
+                        break
                     images, built_sha = rebuilt["images"], rebuilt.get("source_sha256")
+                    builds_ref = rebuilt.get("builds_ref") or builds_ref
                 prep = await act(
                     "sbx_prepare",
                     {
@@ -407,4 +433,6 @@ class SandboxVerificationWorkflow:
             "source": source,
             "published": published,
             **({"ai_tests": self.ai_tests} if self.ai_tests is not None else {}),
+            **({"builds_ref": builds_ref} if builds_ref is not None else {}),
+            **({"suite_ref": suite_ref} if suite_ref != data["suite_ref"] else {}),
         }

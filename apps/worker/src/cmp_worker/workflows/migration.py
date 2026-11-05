@@ -17,6 +17,7 @@ with workflow.unsafe.imports_passed_through():
         BUILD_QUEUE,
         MIGRATION_QUEUE,
         PROVISIONING_QUEUE,
+        SANDBOX_QUEUE,
         WORKFLOW_QUEUE,
         approval_workflow_id,
     )
@@ -76,6 +77,41 @@ class MigrationWorkflow:
             "failure_code": self.failure_code,
             "pipeline": self.pipeline,
         }
+
+    async def _hand_off(
+        self, planning: dict, analysis: dict, sandbox: dict, sandbox_input: dict
+    ) -> str | None:
+        """Assemble and register the Planning input. Returns a refusal code, or None when done."""
+        self.phase = "planning_handoff"
+        assembled = await workflow.execute_activity(
+            "sbx_plan_assemble",
+            {
+                "migration_id": workflow.info().workflow_id,
+                "settings": planning,
+                "analysis": analysis,
+                "sandbox": sandbox,
+                "suite_ref": sandbox.get("suite_ref") or sandbox_input["suite_ref"],
+            },
+            task_queue=SANDBOX_QUEUE,
+            schedule_to_start_timeout=timedelta(minutes=5),
+            start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+        if assembled["status"] != "READY":
+            return assembled["code"]
+        registered = await workflow.execute_activity(
+            "register_planning_input",
+            {
+                "migration_id": workflow.info().workflow_id,
+                "registration_ref": assembled["registration_ref"],
+            },
+            **PUBLISH_ACTIVITY,
+        )
+        if registered["status"] != "REGISTERED":
+            return registered["code"]
+        if self.pipeline is not None:
+            self.pipeline = {**self.pipeline, "planning_input_digest": registered["input_digest"]}
+        return None
 
     async def _plan_and_provision(self) -> str | None:
         """Ticket 18 P7: publish the Plan, wait for its Revision approval child, return the outcome.
@@ -277,6 +313,20 @@ class MigrationWorkflow:
                             return "failed"
                         self.phase = result["status"].lower()
                         return self.phase
+                    if (
+                        pipeline_input is not None
+                        and analysis_result is not None
+                        and pipeline_input.get("planning")
+                        and workflow.patched("planning-handoff-v1")
+                    ):
+                        # Ticket 15: the passed run becomes the Planning input before planning.
+                        refused = await self._hand_off(
+                            pipeline_input["planning"], analysis_result, result, sandbox_arg
+                        )
+                        if refused is not None:
+                            self.failure_code = refused
+                            self.phase = "failed"
+                            return "failed"
                 except asyncio.CancelledError:
                     if not child_cancel_requested:
                         child.cancel()

@@ -1,7 +1,7 @@
 """Worker for the Sandbox activity queue."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from cmp_contracts.queues import SANDBOX_QUEUE
 from temporalio.client import Client
@@ -11,8 +11,11 @@ from cmp_worker.activities import sandbox
 from cmp_worker.activities.k8s_workloads_cli import CommandRunner
 from cmp_worker.activities.sandbox_loop import SandboxLoopActivities, make_proxy_suite_runner
 from cmp_worker.artifact_store import LocalArtifactStore
+from cmp_worker.build_request import InMemoryBuildStore
+from cmp_worker.build_wiring import BuildSettings, ImageBuildAdapter, upload_suite
 from cmp_worker.prebuilt_builder import PrebuiltImages
 from cmp_worker.sandbox_deploy import SANDBOX_CONTEXT, SandboxCluster, SandboxService
+from cmp_worker.source_archive import AwsCliArchiveStore
 
 if TYPE_CHECKING:
     from cmp_worker.config import Settings
@@ -48,11 +51,31 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
         application_chart_dir=resources / "infra/helm/application",
         helm_timeout=config.sandbox_helm_timeout,
     )
+    build_settings = BuildSettings.from_values(
+        config.build_source_bucket,
+        config.build_ecr_repository,
+        config.build_log_bucket,
+        config.build_platform,
+        config.build_aws_profile,
+    )
+    build: Any = PrebuiltImages.from_json(config.sandbox_prebuilt_images)
+    if build_settings is not None:
+        build = ImageBuildAdapter(
+            build_settings,
+            archive_store=AwsCliArchiveStore(profile=build_settings.aws_profile),
+            build_store=InMemoryBuildStore(),
+        )
+    uploader = None
+    if build_settings is not None:
+        archives = build.archive_store
+        bucket = build_settings.source_bucket
+        uploader = lambda bundle: upload_suite(archives, bucket, bundle)
     return SandboxLoopActivities(
+        suite_uploader=uploader,
         service=service,
         store=LocalArtifactStore(config.analysis_artifact_store_dir),
         workspace_root=workspace_root,
-        build=PrebuiltImages.from_json(config.sandbox_prebuilt_images),
+        build=build,
         suite_runner=make_proxy_suite_runner(service),
         llm_factory=build_llm_factory(config),
     )

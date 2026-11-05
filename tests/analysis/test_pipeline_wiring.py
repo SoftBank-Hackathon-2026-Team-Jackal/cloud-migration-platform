@@ -24,8 +24,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sandbox.test_fix_loop import Script
 
 
-def pipeline_input(repo, **sandbox):
-    return {"project_id": "proj-1", "analysis": analysis_input(repo), "sandbox": sandbox or None}
+def pipeline_input(repo, planning=None, **sandbox):
+    data = {"project_id": "proj-1", "analysis": analysis_input(repo), "sandbox": sandbox or None}
+    return {**data, "planning": planning} if planning else data
 
 
 async def until(handle, query, predicate, tries=300):
@@ -62,7 +63,7 @@ async def review(env, workflow_id):
     return rows
 
 
-async def run_pipeline(repo, script, *, settings=None, name="a"):
+async def run_pipeline(repo, script, *, settings=None, name="a", planning=None):
     pipeline = make(repo, name, llm_factory=mapping_llm(*ROWS))
     async with (
         await WorkflowEnvironment.start_time_skipping(
@@ -78,7 +79,7 @@ async def run_pipeline(repo, script, *, settings=None, name="a"):
         create_workflow_worker(env.client),
     ):
         handle = await env.client.start_workflow(
-            MigrationWorkflow.run, pipeline_input(repo, **(settings or {})), id="migration-w",
+            MigrationWorkflow.run, pipeline_input(repo, planning, **(settings or {})), id="migration-w",
             task_queue=WORKFLOW_QUEUE,
         )  # fmt: skip
         rows = await review(env, "migration-w")
@@ -198,3 +199,106 @@ async def test_a_string_start_still_runs_the_scaffold_and_never_asks_for_a_sandb
                 if e.HasField("activity_task_scheduled_event_attributes")
             ]
     assert "assemble_sandbox_input" not in names
+
+
+# ------------------------------------------------------------------ ticket 15: hand-off
+
+
+class HandoffScript(Script):
+    def __init__(self, *a, refuse=None, **kw):
+        super().__init__(*a, **kw)
+        self.refuse = refuse
+
+    def activities(self):
+        from temporalio import activity
+
+        script = self
+
+        @activity.defn(name="sbx_plan_assemble")
+        async def assemble(payload: dict) -> dict:
+            script.record("sbx_plan_assemble", payload)
+            if script.refuse:
+                return {"status": "REFUSED", "code": script.refuse}
+            return {
+                "status": "READY",
+                "registration_ref": {"id": "planning-input", "sha256": "a" * 64},
+            }
+
+        return [*super().activities(), assemble]
+
+
+class FakeRegister:
+    def __init__(self):
+        self.calls = []
+        from temporalio import activity
+
+        outer = self
+
+        @activity.defn(name="register_planning_input")
+        async def register(payload: dict) -> dict:
+            outer.calls.append(payload)
+            return {"status": "REGISTERED", "input_digest": "d" * 64}
+
+        self.register_planning_input = register
+
+
+def planning_settings():
+    from sandbox.test_handoff import evidence
+
+    return evidence()[0]["settings"].model_dump(mode="json")
+
+
+@pytest.mark.asyncio
+async def test_a_passed_run_is_handed_to_planning_before_planning_starts(repo, monkeypatch):
+    fake = FakeRegister()
+    monkeypatch.setattr(
+        "cmp_worker.workers.provisioning.build_planning_register_activities", lambda _db: fake
+    )
+    script = HandoffScript([None])
+    result, status, *_ = await run_pipeline(repo, script, name="p", planning=planning_settings())
+    assert result == "scaffold_complete"
+    assert status["pipeline"]["planning_input_digest"] == "d" * 64
+    assemble = next(p for n, p in script.calls if n == "sbx_plan_assemble")
+    assert (
+        assemble["suite_ref"]["kind"] == "test-suite" and assemble["migration_id"] == "migration-w"
+    )
+    assert assemble["sandbox"]["published"]["status"] == "PUBLISHED"
+    assert fake.calls and fake.calls[0]["migration_id"] == "migration-w"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_hand_off_ends_the_parent_as_failed_with_the_code(repo, monkeypatch):
+    fake = FakeRegister()
+    monkeypatch.setattr(
+        "cmp_worker.workers.provisioning.build_planning_register_activities", lambda _db: fake
+    )
+    script = HandoffScript([None], refuse="BUILD_EVIDENCE_MISSING")
+    pipeline = make(repo, "r", llm_factory=mapping_llm(*ROWS))
+    async with (
+        await WorkflowEnvironment.start_time_skipping(
+            test_server_existing_path=os.environ.get("CMP_TEST_SERVER_PATH")
+        ) as env,
+        Worker(
+            env.client, task_queue=ANALYSIS_QUEUE, activities=AnalysisActivities(pipeline).all()
+        ),
+        Worker(env.client, task_queue=SANDBOX_QUEUE, activities=script.activities()),
+        build_worker(env.client),
+        provisioning_worker(env.client),
+        create_activity_worker(env.client),
+        create_workflow_worker(env.client),
+    ):
+        handle = await env.client.start_workflow(
+            MigrationWorkflow.run, pipeline_input(repo, planning_settings()),
+            id="migration-r", task_queue=WORKFLOW_QUEUE,
+        )  # fmt: skip
+        await review(env, "migration-r")
+        assert await asyncio.wait_for(handle.result(), timeout=30) == "failed"
+        status = await handle.query("status")
+    assert status["failure_code"] == "BUILD_EVIDENCE_MISSING" and fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_without_planning_settings_nothing_is_handed_over(repo):
+    script = HandoffScript([None])
+    result, *_ = await run_pipeline(repo, script, name="n")
+    assert result == "scaffold_complete" and "sbx_plan_assemble" not in script.names()
