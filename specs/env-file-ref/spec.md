@@ -48,7 +48,7 @@
 
 위 표는 합의된 최소 목록이다. 현재 분석 코드(`cmp_scanners.assembly._BINDING_PATTERNS`)는 접두사 `DB|DATABASE|POSTGRES(QL)|PG`(밑줄 선택)의 변형도 같은 바인딩으로 본다. 구현은 이 패턴을 그대로 쓰고, 표와 다르게 잡히는 키가 있으면 ENV-05에서 박승철님과 확인한다.
 
-바인딩된 변수는 값을 주입하지 않고 `secretKeyRef` 같은 참조로만 연결한다. `host`·`port`·`name`·`username`도 DB 출력 Secret의 키로 참조한다(평문 env 값으로 넣지 않는다).
+바인딩된 변수는 값을 주입하지 않고 `secretKeyRef` 같은 참조로만 연결한다. `host`·`port`·`name`·`username`도 DB 출력 Secret의 키로 참조한다(평문 env 값으로 넣지 않는다). 이 키들은 DB 연결 Secret `<DB release>-conn`(키 `host`·`port`·`name`·`username`)에 둔다. 비밀번호는 `password_secret_ref`(샌드박스 `<DB release>-auth`/`password`), URL은 `<DB release>-url`/`url`이다(ENV-03 D3).
 
 ## Requirements
 
@@ -83,7 +83,8 @@ ENV-007 렌더(공통 함수)
   - `PASS`: 원본 값을 그 환경의 앱 env Secret(`<release>-env`)에 넣고 `secretKeyRef`로 연결
   - `REPLACED`: 그 환경 DB 출력 Secret의 키(`binding`)에 `secretKeyRef`로 연결
   - `EXCLUDED`: 넣지 않음
-  - `UNREPRESENTABLE`, 기본값 없는 `MISSING`: 렌더를 진행하지 않고 `decisions`(결정 필요)로 돌려줌
+  - `UNREPRESENTABLE`, 기본값 없는 `MISSING`(P0에는 기본값 필드가 없어 `MISSING` 전부): 렌더를 진행하지 않고 `decisions`로 돌려줌. `env`·`secrets`는 비운다
+  - 실제 시그니처는 `render_env(store, env_plan, env_file_ref, db_outputs, *, app_release)`이고 앱마다 부른다. 사용법: [env-file-guide](../../docs/engineering/env-file-guide.md)
 - 같은 입력이면 결과 바이트가 같다(Digest 고정). Secret 값은 결과 객체 안에만 있고, 직렬화·로그용 표현에는 값이 없다.
 
 ENV-008 같은 규칙, 다른 DB 출력
@@ -100,7 +101,7 @@ ENV-008 같은 규칙, 다른 DB 출력
 
 ## Open questions
 
-1. `UNREPRESENTABLE`(`DB_DSN`)과 기본값 없는 `MISSING`을 승인 전에 막을지(승인 차단), 사람이 값을 넣게 할지(Preview의 `pending_decisions`로 입력 받기).
+1. ~~`UNREPRESENTABLE`(`DB_DSN`)과 기본값 없는 `MISSING`을 승인 전에 막을지, 사람이 값을 넣게 할지.~~ 결정(2026-11-05): 승인 전에 막는다. `render_env`는 `decisions`만 돌려주고 호출하는 쪽이 구조화 코드로 실패한다(ENV-03 D1).
 2. ~~원본 `.env` 보관 기간~~ → 확정(2026-11-05): 이전 종료 7일 뒤 삭제 + 명시적 `DELETE`. [ENV-01](../../tickets/env-file-ref/01-env-upload-store.md).
 3. ~~저장 위치~~ → 확정(2026-11-05): 플랫폼 디렉터리의 파일 저장(0600) + AES-256-GCM, 키는 플랫폼 설정 `ENV_FILE_ENCRYPTION_KEY`. [ENV-01](../../tickets/env-file-ref/01-env-upload-store.md).
 4. Fixer가 새 변수를 추가할 때 EnvPlan에 `ADDED`로 넣을지, 담당은 누구인지(ENV-07).

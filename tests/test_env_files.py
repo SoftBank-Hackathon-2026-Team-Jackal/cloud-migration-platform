@@ -310,3 +310,21 @@ def test_start_with_reference_but_no_store_is_503(temporal, monkeypatch):
     response = TestClient(app).post("/migrations", json={"project_id": "demo", "env_file_ref": ref})
     assert response.status_code == 503
     assert response.json() == {"detail": {"code": "ENV_FILE_STORE_UNCONFIGURED"}}
+
+
+def test_store_satisfies_env03_protocol_and_error_type(tmp_path):
+    """ENV-01's encrypted store is a structural `EnvFileStore` and raises ENV-03's error type."""
+    import inspect
+
+    from cmp_providers.env_file import EnvFileError as Env03Error
+    from cmp_providers.env_file import EnvFileStore
+    from cmp_providers.env_file_store import EncryptedEnvFileStore
+    from cmp_providers.env_file_store import EnvFileError as StoreError
+
+    assert StoreError is Env03Error
+    for name in ("read_names", "read_values"):
+        assert callable(getattr(EncryptedEnvFileStore, name))
+        assert (
+            list(inspect.signature(getattr(EnvFileStore, name)).parameters)[1:]
+            == list(inspect.signature(getattr(EncryptedEnvFileStore, name)).parameters)[1:]
+        )

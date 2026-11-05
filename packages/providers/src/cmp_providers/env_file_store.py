@@ -17,7 +17,7 @@ after deletion is `ENV_FILE_EXPIRED`.
 
 Nothing here logs, returns or puts a value in an exception; errors carry a stable `.code` only.
 The read methods structurally satisfy ENV-03's `EnvFileStore` Protocol (`read_names`,
-`read_values`). `EnvFileError` is defined here until ENV-03's error type lands; unify at merge.
+`read_values`). `EnvFileError` is ENV-03's `cmp_providers.env_file.EnvFileError`.
 """
 
 import base64
@@ -34,20 +34,14 @@ from cmp_contracts.provisioning import ContentRef
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from cmp_providers.env_file import EnvFileError
+
 MAX_ENV_FILE_BYTES = 64 * 1024
 RETENTION = timedelta(days=7)
 NONCE_BYTES = 12
 
 _ID = re.compile(r"^envf-[a-f0-9]{32}$")
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
-
-
-class EnvFileError(Exception):
-    """`code` is stable and safe to show; the message is the code and never a value."""
-
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
 
 
 def parse_env(text: str) -> tuple[dict[str, str], list[str]]:
