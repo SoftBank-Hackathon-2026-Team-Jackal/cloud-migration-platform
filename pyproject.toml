@@ -44,6 +44,7 @@ cmp_agents = ["prompts/*.md"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = ["k3d: needs the dedicated local cmp-sandbox k3d cluster (set CMP_SANDBOX_KUBECONFIG)"]
 
 [tool.ruff]
 line-length = 100

@@ -18,7 +18,7 @@
 | [08B 필수 기능 확정과 손실 승인 게이트](../../tickets/analysis-verification/08b-review-gate.md) | DONE (PR #80 병합) | 02, 08 | AV-022, AV-008 | #78 | ☑ |
 | [09 소스 묶음 생성과 S3 업로드](../../tickets/analysis-verification/09-source-archive.md) | DONE (PR #84 병합) | 03 | AV-009, AV-020 | #83 | ☑ |
 | [10 Build 모듈 연동과 실패 분류](../../tickets/analysis-verification/10-build-integration.md) | DONE (PR #88 병합) | 09, Provisioning B-01(DONE) | AV-010 | #87 | ☑ |
-| [11 Sandbox 구성·적용·정리](../../tickets/analysis-verification/11-sandbox-apply.md) | DRAFT | 02B, 07, Provisioning 공통 렌더 v2(#24, DONE) | AV-011, AV-016, AV-020 | 미생성 | ☐ |
+| [11 Sandbox 구성·적용·정리](../../tickets/analysis-verification/11-sandbox-apply.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 02B, 07, Provisioning 공통 렌더 v2(#24, DONE) | AV-011, AV-016, AV-020 | #93 | ☐ |
 | [11B Sandbox 제자리 갱신과 테스트 데이터 초기화](../../tickets/analysis-verification/11b-sandbox-update.md) | DRAFT | 11 | AV-011, AV-015 | 미생성 | ☐ |
 | [12 테스트 묶음·Tester·`run_suite`](../../tickets/analysis-verification/12-test-suite.md) | DRAFT | 07, 08A, 11 | AV-012, AV-020 | 미생성 | ☐ |
 | [13 통신 규칙·판정·실행 기록](../../tickets/analysis-verification/13-judge-telemetry.md) | DRAFT | 08, 11, 12 | AV-013, AV-014 | 미생성 | ☐ |
@@ -62,7 +62,7 @@ Q-01 ────┴→ 02B ─┐
 | D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
 | D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간 | 09, 10, 12 | 민서·승철 |
 | D-07 | 결정됨 — 첫 사이클 지원 언어는 Go(데모 앱 `demo-app`이 Go) | 05, 16, 17 | 승철 |
-| D-08 | Sandbox 기반 클러스터 준비 주체·시점 | 11, 16 | 민서·승철 |
+| D-08 | 결정됨(승철) — Sandbox 기반은 이 Mac의 로컬 k3d `cmp-sandbox`(Colima, 전용 kubeconfig)로 준비. 설정 방법은 11 티켓의 환경 준비 참조 | 11, 16 | 승철 |
 | D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 12 | 승철·소울 |
 | D-10 | Production 테스트 묶음 실행 시점(데이터 이전 후·트래픽 전환 전)·데이터 정리 | 15 | 민서·소울·상헌 |
 | D-11 | DB 이미지를 고르는 "대상 구성 단계"의 소유자, Sandbox·Production 공유 방식(요구사항엔 이미지 없음, #22) | 11 | 민서 |
@@ -89,6 +89,7 @@ Q-01 ────┴→ 02B ─┐
 - 2026-11-05: 06 구현(가짜 AWS 응답 기준): `scan_aws_infra`가 허용 목록의 읽기 전용 호출만으로 EKS·VPC·보안 그룹·ELBv2·IRSA 정책·CloudTrail 요약을 읽고, `build_network`가 보안 그룹·코드 외부 호스트를 `network_intent`로, 로드 밸런서를 외부 진입·VPC CIDR로 바꾼다. `boto3`를 런타임 의존성으로 추가. 실제 계정 1회 실행(승인 필요)은 남음.
 - 2026-11-05: D-02 결정: 분석·Build 결과의 `*_ref` 저장은 해시 이름 로컬 불변 저장소(민서님의 `LocalArtifactStore`와 같은 관례, S3는 후속)로 하고 저장·정규화는 분석 쪽이 맡는다. 02~08B·06의 "Activity 연결은 후속"을 모아 Ticket 19(분석 Activity 통합)를 추가.
 - 2026-11-05: 19 구현(가짜 LLM·AWS 미설정 기준): `AnalysisPipeline`과 `AnalysisActivities`가 03~08B·06의 실제 함수를 연결하고 결과를 `ArtifactStore`에 참조로 저장한다. `AnalysisWorkflow`는 문자열 입력이면 scaffold, `AnalysisInput` dict면 실제 경로를 탄다. 부모의 입력 연결과 실제 Claude 연결은 남음.
+- 2026-11-05: 11 구현: `SandboxService`가 네임스페이스·Secret·`helm upgrade --install --wait`·준비 검사·정리를 맡고, 실제 k3d `cmp-sandbox`(D-08 결정: 로컬 Colima + k3d)에서 DB 16과 공개 앱 이미지로 끝까지 검증. Helm 3 설치로 전체 테스트를 로컬에서 통과(937). Workflow Activity 연결은 14에서.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
 - 2026-11-04(리뷰 반영): spec AV-012에 `run_suite`의 `include`, AV-015에 INFRA와 횟수 규칙 반영(AV-013 커버리지는 원문 유지). ADR-004는 작성 예정으로 표시.
 - 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.
