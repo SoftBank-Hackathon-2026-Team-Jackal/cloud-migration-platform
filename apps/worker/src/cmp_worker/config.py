@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # Application images that already exist, as JSON {"<resource id>": "<repo>@sha256:<digest>"}.
     # Until the real Build is placed (D-12) this is how the loop gets its application images.
     sandbox_prebuilt_images: str | None = None
+    # Ticket 25: the real build path. All four (profile is optional) switch it on; none keeps the
+    # pre-built images above; some is refused at start-up. Only names, never a credential.
+    build_source_bucket: str | None = None
+    build_ecr_repository: str | None = None
+    build_log_bucket: str | None = None
+    build_platform: str | None = None
+    build_aws_profile: str | None = None
     # Ticket 10: gcloud configuration and the expected Google ADC principal for GCP Apply.
     provisioning_gcloud_configuration: str | None = None
     provisioning_gcp_adc_email: str | None = None

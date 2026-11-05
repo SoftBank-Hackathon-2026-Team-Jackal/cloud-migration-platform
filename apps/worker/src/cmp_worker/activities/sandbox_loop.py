@@ -5,6 +5,7 @@ Payloads and results are small JSON: references, names, codes. Secrets, source t
 never enter Workflow history; logs are masked and stored by reference.
 """
 
+import json
 import re
 import shutil
 from collections.abc import Callable, Iterator
@@ -16,10 +17,10 @@ from typing import Any
 from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, propose_fix
 from cmp_agents.llm import LLMClient
 from cmp_agents.tester import SuiteRequest, generate_tests
-from cmp_contracts.analysis import AnalysisReport, ReviewRecord
-from cmp_contracts.provisioning import Image
-from cmp_contracts.provisioning_v2 import RequirementsV2
-from cmp_contracts.verification import canonical_requirements
+from cmp_contracts.analysis import AnalysisReport, EnvExceptions, ReviewRecord
+from cmp_contracts.provisioning import ContentRef, Image, VersionRef
+from cmp_contracts.provisioning_v2 import RequirementsV2, S3ArchiveRef
+from cmp_contracts.verification import BuildAttempt, canonical_requirements
 from cmp_scanners.masking import mask_text
 from cmp_testsuite import SuiteResult, load_bundle, run_suite
 from cmp_testsuite.model import HttpStep
@@ -30,6 +31,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from cmp_worker.artifact_store import ArtifactRef, LocalArtifactStore
+from cmp_worker.build_wiring import BuildFailed, to_build_attempt
 from cmp_worker.failure_classifier import (
     AttemptSignals,
     classify_failure,
@@ -49,6 +51,12 @@ from cmp_worker.fix_patch import (
     PreparedOnlyPublisher,
     build_patch_artifact,
     tree_sha256,
+)
+from cmp_worker.planning_handoff import (
+    HandoffError,
+    PlanningSettings,
+    assemble_registration,
+    check_with_planning,
 )
 from cmp_worker.prebuilt_builder import BuildUnavailable
 from cmp_worker.sandbox_deploy import (
@@ -148,7 +156,9 @@ class SandboxLoopActivities:
         | None = None,
         origin_case_runner: Callable[[], AbstractContextManager[CaseRunner]] | None = None,
         cut_dependency: Callable[[SandboxPlan], AbstractContextManager[None]] | None = None,
+        suite_uploader: Callable[[bytes], S3ArchiveRef] | None = None,
     ) -> None:
+        self.suite_uploader = suite_uploader
         # The origin test resource (D-09) has no default: without it AI tests are never requested.
         self.origin_case_runner = origin_case_runner
         self.target_case_runner = target_case_runner or make_proxy_case_runner(service)
@@ -172,6 +182,9 @@ class SandboxLoopActivities:
     async def sbx_build(self, payload: dict) -> dict:
         """Build every application image from the current source."""
         requirements = self._requirements(payload["requirements_ref"])
+        with_evidence = getattr(self.build, "build_with_evidence", None)
+        if with_evidence is not None:
+            return self._build_with_evidence(payload, requirements, with_evidence)
         try:
             images = {
                 r.id: self.build(r.id, payload["source"]).model_dump(mode="json")
@@ -185,6 +198,42 @@ class SandboxLoopActivities:
         workspace = payload["source"].get("workspace")
         source_sha256 = tree_sha256(workspace) if workspace and Path(workspace).is_dir() else None
         return {"images": images, "source_sha256": source_sha256}
+
+    def _build_with_evidence(self, payload: dict, requirements: RequirementsV2, build) -> dict:
+        """The real build path: images plus the `BuildAttempt` records Planning needs (ticket 25)."""
+        migration_id, run_id = payload.get("migration_id"), payload.get("run_id")
+        if not migration_id or not run_id:
+            raise ApplicationError(
+                "Build context is missing", type="BUILD_CONTEXT_MISSING", non_retryable=True
+            )
+        images: dict[str, Any] = {}
+        attempts = []
+        try:
+            for resource in requirements.resources:
+                if resource.kind != "APPLICATION":
+                    continue
+                image, result = build(
+                    resource.id,
+                    payload["source"],
+                    migration_id=migration_id,
+                    run_id=run_id,
+                    attempt=payload.get("attempt", 1),
+                )
+                images[resource.id] = image.model_dump(mode="json")
+                attempts.append(to_build_attempt(result, migration_id=migration_id))
+        except BuildFailed as exc:
+            return {"images": None, "build_error": exc.code, "failure_class": exc.failure_class}
+        data = json.dumps(
+            [a.model_dump(mode="json") for a in attempts], sort_keys=True, separators=(",", ":")
+        )
+        builds_ref = self.store.put(data.encode(), ref_id="build-attempts", kind="build-attempts")
+        workspace = payload["source"].get("workspace")
+        source_sha256 = tree_sha256(workspace) if workspace and Path(workspace).is_dir() else None
+        return {
+            "images": images,
+            "source_sha256": source_sha256,
+            "builds_ref": builds_ref.model_dump(mode="json"),
+        }
 
     @activity.defn(name="sbx_prepare")
     async def sbx_prepare(self, payload: dict) -> dict:
@@ -542,6 +591,65 @@ class SandboxLoopActivities:
                 }
         return result
 
+    @activity.defn(name="sbx_plan_assemble")
+    async def sbx_plan_assemble(self, payload: dict) -> dict:
+        """Build the Planning input from the passed run's recorded evidence (ticket 15)."""
+        try:
+            return {"status": "READY", **self._assemble(payload)}
+        except HandoffError as exc:
+            return {"status": "REFUSED", "code": exc.code}
+
+    def _assemble(self, payload: dict) -> dict:
+        settings = PlanningSettings.model_validate(payload["settings"])
+        sandbox, analysis = payload["sandbox"], payload["analysis"]
+        published = sandbox.get("published") or {}
+        if sandbox.get("status") != "PASSED" or published.get("status") != "PUBLISHED":
+            raise HandoffError("SANDBOX_NOT_PASSED")
+        if not sandbox.get("builds_ref"):
+            raise HandoffError("BUILD_EVIDENCE_MISSING")
+        if self.suite_uploader is None:
+            raise HandoffError("TEST_SUITE_UPLOAD_NOT_CONFIGURED")
+
+        def content(ref: dict) -> ContentRef:
+            return ContentRef(id=ref["id"], version=ref["version"], sha256=ref["sha256"])
+
+        report_ref = ArtifactRef.model_validate(published["report_ref"])
+        report = AnalysisReport.model_validate_json(self.store.get(report_ref))
+        requirements_ref = ArtifactRef.model_validate(published["requirements_ref"])
+        requirements_bytes = self.store.get(requirements_ref)
+        builds = [
+            BuildAttempt.model_validate(item)
+            for item in json.loads(
+                self.store.get(ArtifactRef.model_validate(sandbox["builds_ref"]))
+            )
+        ]
+        suite_bundle = self.store.get(ArtifactRef.model_validate(payload["suite_ref"]))
+        assembly = json.loads(self.store.get(ArtifactRef.model_validate(analysis["assembly_ref"])))
+        exceptions = EnvExceptions.model_validate(assembly["env_exceptions"])
+        mapping = self.store.put_json(
+            exceptions, ref_id=f"env-exceptions-{report.migration_id}", kind="env-exceptions"
+        )
+        registration = assemble_registration(
+            report=report,
+            requirements_ref=content(requirements_ref.model_dump()),
+            report_ref=content(report_ref.model_dump()),
+            builds=builds,
+            attempts=sandbox["attempts"],
+            suite_ref=self.suite_uploader(suite_bundle),
+            mapping_ref=content(mapping.model_dump()),
+            settings=settings,
+            expected_target_ref=(
+                VersionRef.model_validate(payload["target_selection_ref"])
+                if payload.get("target_selection_ref")
+                else None
+            ),
+        )
+        check_with_planning(registration, requirements_bytes)
+        stored = self.store.put_json(
+            registration, ref_id=f"planning-input-{report.migration_id}", kind="planning-input"
+        )
+        return {"registration_ref": stored.model_dump(mode="json")}
+
     @activity.defn(name="sbx_teardown")
     async def sbx_teardown(self, payload: dict) -> dict:
         self.service.teardown_sandbox(payload["namespace"])
@@ -550,6 +658,6 @@ class SandboxLoopActivities:
     def all(self) -> list[Callable]:
         return [
             self.sbx_build, self.sbx_prepare, self.sbx_apply, self.sbx_verify,
-            self.sbx_classify, self.sbx_fix, self.sbx_ai_tests, self.sbx_plan_publish, self.sbx_publish,
+            self.sbx_classify, self.sbx_fix, self.sbx_ai_tests, self.sbx_plan_assemble, self.sbx_plan_publish, self.sbx_publish,
             self.sbx_teardown,
         ]  # fmt: skip

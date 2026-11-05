@@ -171,3 +171,15 @@ def test_start_input_carries_the_dev_reference_and_never_a_token():
         ]
         is None
     )
+
+
+def test_build_settings_are_off_complete_or_refused(tmp_path):
+    assert check(settings(tmp_path))["build"].status == WARN
+    full = {
+        "build_source_bucket": "cmp-sources",
+        "build_ecr_repository": "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/shop",
+        "build_log_bucket": "cmp-build-logs",
+        "build_platform": "linux/amd64",
+    }
+    assert check(settings(tmp_path, **full))["build"].status == OK
+    assert check(settings(tmp_path, build_source_bucket="cmp-sources"))["build"].status == FAIL

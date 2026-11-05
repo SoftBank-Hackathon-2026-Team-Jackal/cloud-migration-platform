@@ -10,6 +10,7 @@ from cmp_worker.activities.gcp_infra import GcpInfraActivities
 from cmp_worker.activities.gcp_workloads_cli import build_gcp_workloads_activities
 from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
 from cmp_worker.activities.plan_publish import build_plan_publish_activities
+from cmp_worker.activities.planning_register import build_planning_register_activities
 from cmp_worker.activities.provisioning import prepare_plan, provision_target
 from cmp_worker.config import settings
 from cmp_worker.events import emit_migration_event
@@ -38,6 +39,7 @@ def create_worker(client: Client) -> Worker:
         activities=[
             prepare_plan,
             provision_target,
+            build_planning_register_activities(SessionLocal).register_planning_input,  # ticket 15
             plans.publish_migration_plan,  # ticket 18
             plans.publish_workload_plan,  # ticket 22
             approval.claim_approved_execution,

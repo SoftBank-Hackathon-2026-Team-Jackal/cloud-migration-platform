@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from cmp_worker.build_wiring import BuildSettings
 from cmp_worker.config import Settings
 from cmp_worker.prebuilt_builder import BuildUnavailable, PrebuiltImages
 from cmp_worker.sandbox_deploy import SANDBOX_CONTEXT
@@ -147,6 +148,22 @@ def run_checks(
         del images
     except BuildUnavailable as exc:
         out.append(Check("sandbox:images", FAIL, exc.code))
+
+    try:
+        build = BuildSettings.from_values(
+            config.build_source_bucket,
+            config.build_ecr_repository,
+            config.build_log_bucket,
+            config.build_platform,
+            config.build_aws_profile,
+        )
+        out.append(
+            Check("build", OK, "real build path (source to S3, Build module)")
+            if build
+            else Check("build", WARN, "BUILD_* unset: pre-built images only, no build evidence")
+        )
+    except ValueError:
+        out.append(Check("build", FAIL, "BUILD_SETTINGS_INCOMPLETE"))
 
     if not config.llm_enabled:
         out.append(Check("llm", WARN, "LLM_ENABLED is off: mapping and fixing will not run"))

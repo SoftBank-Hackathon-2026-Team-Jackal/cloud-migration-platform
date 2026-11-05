@@ -106,3 +106,29 @@ async def test_a_missing_image_fails_the_step_without_retries_and_names_the_reas
     with pytest.raises(ApplicationError) as exc:
         await activities.sbx_build({"requirements_ref": ref.model_dump(), "source": {}})
     assert exc.value.type == "BUILD_NOT_CONFIGURED" and exc.value.non_retryable
+
+
+FULL_BUILD = {
+    "build_source_bucket": "cmp-sources",
+    "build_ecr_repository": "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/shop",
+    "build_log_bucket": "cmp-build-logs",
+    "build_platform": "linux/amd64",
+}
+
+
+def test_complete_build_settings_switch_the_real_build_path_on(tmp_path):
+    from cmp_worker.build_wiring import ImageBuildAdapter
+
+    loop = build_sandbox_loop(config(tmp_path, build_aws_profile="build", **FULL_BUILD))
+    assert isinstance(loop.build, ImageBuildAdapter)
+    assert loop.build.settings.aws_profile == "build"
+
+
+def test_partial_build_settings_stop_the_worker_at_start_up(tmp_path):
+    with pytest.raises(ValueError, match="BUILD_SETTINGS_INCOMPLETE"):
+        build_sandbox_loop(config(tmp_path, build_source_bucket="cmp-sources"))
+
+
+def test_without_build_settings_the_prebuilt_images_stay(tmp_path):
+    loop = build_sandbox_loop(config(tmp_path))
+    assert isinstance(loop.build, PrebuiltImages)

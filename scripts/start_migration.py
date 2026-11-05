@@ -27,7 +27,7 @@ async def main(args: argparse.Namespace) -> int:
             project_id=args.project_id, repository=args.repository, commit=args.commit,
             manifests_dir=args.manifests_dir, cluster_name=args.cluster_name,
             credential_ref=args.credential_ref, source_access=args.source_access,
-            sandbox_json=args.sandbox,
+            sandbox_json=args.sandbox, planning_json=args.planning,
         )  # fmt: skip
     except (ValidationError, ValueError) as exc:
         print(f"Input is invalid: {type(exc).__name__}")
@@ -57,5 +57,9 @@ if __name__ == "__main__":
         help="read a private repository with CMP_GITHUB_TOKEN from the worker's environment",
     )
     parser.add_argument("--sandbox", help="SandboxSettings as JSON")
+    parser.add_argument(
+        "--planning",
+        help="PlanningSettings as JSON (target selection, target settings, env file reference)",
+    )
     parser.add_argument("--workflow-id")
     sys.exit(asyncio.run(main(parser.parse_args())))

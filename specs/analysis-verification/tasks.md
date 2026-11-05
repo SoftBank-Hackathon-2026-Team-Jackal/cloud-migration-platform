@@ -25,7 +25,7 @@
 | [14A 실패 분류와 Fixer](../../tickets/analysis-verification/14a-classify-fixer.md) | DONE (PR #107 병합) | 08, 10, 11B, 13 | AV-015, AV-017 | #106 | ☑ |
 | [14B 갱신 루프와 부모 종료 상태](../../tickets/analysis-verification/14b-fix-loop.md) | DONE (PR #110 병합) | 14A | AV-015, AV-019, AV-020 | #109 | ☑ |
 | [14C 최종 발행·재승인·수정 패치 산출물](../../tickets/analysis-verification/14c-publish.md) | DONE (PR #112 병합) | 14B | AV-017, AV-019, AV-020 | #111 | ☑ |
-| [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | DRAFT | 14C, D-02(저장 경계) | AV-018 | 미생성 | ☐ |
+| [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14C, 21, 22, 25 |  AV-018 | #141 | ☐ |
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
@@ -34,7 +34,8 @@
 | [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | DONE (PR #119 병합) | 14C, 19, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☑ |
 | [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | DONE (PR #121 병합) | 14B, 20, 21 | AV-001, AV-015, AV-021 | #120 | ☑ |
 | [23 비공개 소스 접근(토큰 참조·교체 가능한 해석기)](../../tickets/analysis-verification/23-source-access.md) | DONE (PR #132 병합) | 03, 19, 21 | AV-001, AV-002, AV-020 | #131 | ☑ |
-| [24 실행 도구·입력 검증·만료 Sandbox 정리·Tester 연결](../../tickets/analysis-verification/24-ops-and-tester.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 12, 14B, 22 (D-09는 인터페이스만) | AV-011, AV-012, AV-020 | #136 | ☐ |
+| [24 실행 도구·입력 검증·만료 Sandbox 정리·Tester 연결](../../tickets/analysis-verification/24-ops-and-tester.md) | DONE | 12, 14B, 22 (D-09는 인터페이스만) | AV-011, AV-012, AV-020 | #136 | ☑ |
+| [25 빌드 연결(소스 S3 업로드 → Build 모듈 → 빌드 증거)](../../tickets/analysis-verification/25-build-wiring.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 09, 10, 22 (실제 AWS는 D-06·D-12·승인) | AV-009, AV-010, AV-018 | #140 | ☐ |
 
 ## 선행 관계
 
@@ -84,6 +85,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: 25(#140)·15(#141) 구현: 빌드 설정 네 항목이 모두 있으면 소스 S3 업로드 → 민서님 Build 모듈 → `BuildAttempt` 증거(`builds_ref`)를 쓰는 실제 빌드 경로(없으면 미리 빌드한 이미지 유지, 빌드 실패는 `BUILD:<코드>`로 사람 검토), 테스트 묶음 S3 아카이브. 통과한 실행은 `sbx_plan_assemble`로 Planning 입력을 조립·검증하고 `register_planning_input`(민서님 등록 함수 호출)으로 등록한 뒤 계획 단계로 간다(`planning-handoff-v1` patched, `--planning` 설정이 있을 때만). 실제 AWS 실행은 D-06·D-12·승인 대기. 부모 Workflow 변경은 호출 1곳과 헬퍼 1개.
 - 2026-11-05: 24 구현(#136): `scripts/sandbox_ctl.py`(`status`/`cleanup`, 전용 컨텍스트만)와 소스 입력 검증(`-` 시작·공백·제어 문자 거절, git 호출 전), 만료 Sandbox 정리 진입점(주기 실행은 cron·launchd 안내), Tester 연결(`sbx_ai_tests`, 설정 `ai_tests`, 원본 실행기가 없으면 모델 미호출, Workflow는 `ai-tests-v1` patched). 원본 쪽 테스트 자원은 D-09 대기.
 - 2026-11-05: 정리. 23을 DONE(PR #132)으로 맞춤. 코드 수정 후 push·PR 생성(`DraftPrPublisher`의 GitHub 구현)은 후순위로 확정: 지금은 패치 산출물만 반환하고 쓰기 토큰은 쓰지 않는다. `.env` 단일 참조 작업(`specs/env-file-ref`)의 ENV-05(분석)는 분석 담당, ENV-06(Sandbox)은 Sandbox 담당 몫이다. 그 전까지 Sandbox의 `env_names`·`env_file` 설정은 임시 경로다.
 - 2026-11-05: 10 구현: `request_build`가 B-01 Build 모듈을 `builder_factory`로 감싸 호출하고(D-12 대비), `(resource_id, source_sha256, platform)`으로 성공 결과를 재사용하며, 실패 코드를 분류하고 `BuildEvidenceV2`로 정규화한다.

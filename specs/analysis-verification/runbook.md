@@ -98,6 +98,47 @@ uv run python scripts/sandbox_ctl.py cleanup --all --confirm DELETE-ALL  # 전�
 - `AWS_*`는 복사하지 않는다. 그 밖의 변수(`APP_PORT`, 토큰 등)는 시작할 때 `--sandbox`의 `env_names`와 `env_file`로 이름과 값을 줘야 앱에 들어간다. `.env` 단일 참조 전환(`specs/env-file-ref`) 전까지의 임시 경로다.
 - 코드에 직접 적힌 주소는 바꿀 수 없다. 이 경우 실패로 분류되어 Fixer가 코드를 고친다(파일 20개·파일당 200KB 이하, 테스트·`.env`·`.git`은 수정 불가, 최대 3회).
 
+### 실제 빌드 켜기 (티켓 25)
+
+`.env`에 아래 네 항목이 모두 있으면 앱 이미지를 사람이 적은 Digest 대신 실제 경로로 만든다: 소스 묶음을 `BUILD_SOURCE_BUCKET`에 올리고, 민서님의 Build 모듈로 `BUILD_ECR_REPOSITORY`에 빌드하고, 결과를 `BuildAttempt` 증거로 남긴다. 하나도 없으면 `SANDBOX_PREBUILT_IMAGES`를 쓰고(빌드 증거 없음), 일부만 있으면 워커가 시작하지 못한다(`BUILD_SETTINGS_INCOMPLETE`).
+
+```bash
+BUILD_SOURCE_BUCKET=<소스·테스트 묶음 버킷>
+BUILD_ECR_REPOSITORY=<계정>.dkr.ecr.<리전>.amazonaws.com/<저장소>
+BUILD_LOG_BUCKET=<빌드 로그 버킷>
+BUILD_PLATFORM=linux/amd64
+BUILD_AWS_PROFILE=<이름 있는 프로필, 승인된 것만>   # 선택
+```
+
+- 실제 AWS 호출이므로 버킷·ECR·프로필 사용 승인과 D-06·D-12 결정이 먼저다. 사전 점검(`scripts/preflight.py`)은 설정 유무만 보고 계정을 호출하지 않는다.
+- 빌드가 이미지를 못 만들면 Sandbox 없이 `NEEDS_REVIEW`(이유 `BUILD:<코드>`)로 사람에게 넘어간다.
+
+### Planning 인계 (티켓 15)
+
+시작할 때 `--planning`에 대상 선택, 대상 설정, `.env` 참조를 JSON으로 주면, Sandbox가 통과한 직후 Planning 입력을 조립해 등록한 뒤 계획 단계로 간다.
+
+```bash
+uv run python scripts/start_migration.py ... --planning '{"target_selection": {...}, "target": {...}, "env_file_ref": {"id": "...", "version": "1", "sha256": "..."}}'
+```
+
+- 등록은 민서님의 Planning 입력 등록 함수를 워커가 호출하는 방식이다(관리자 토큰 불필요). 분석 저장소와 Planning 저장소(`ARTIFACT_STORE_DIR`)는 같은 디렉터리여야 한다.
+- 거절은 부모 `failed`와 `failure_code`로 나온다: `BUILD_EVIDENCE_MISSING`(빌드 증거 없음 — 미리 빌드한 이미지 경로), `TEST_SUITE_UPLOAD_NOT_CONFIGURED`, `SANDBOX_NOT_PASSED`, `PROJECTION_REJECTED`, `PLANNING_INPUT_INVALID`, `TARGET_SELECTION_CHANGED`, 등록 쪽 코드(`MIGRATION_MISMATCH` 등).
+- `.env` 참조는 플랫폼이 `.env`를 저장하고 시작 요청에 참조를 넣는 작업(`specs/env-file-ref`의 ENV-02)이 끝나면 그쪽 값으로 바뀐다.
+
+### 같은 테스트 묶음을 Production에서 다시 돌리기
+
+Sandbox에서 통과한 묶음은 해시로 고정되어 있고(S3 `tests/<sha256>.tar.gz`), 대상 주소와 인증 참조만 바꿔 같은 `run_suite`로 돌린다.
+
+```python
+from cmp_testsuite import run_suite
+
+result = run_suite(
+    suite_ref, "https://<Production 앱 주소>", auth_ref=None, include="ALL", store=store
+)
+```
+
+순서: 배포 직후에는 준비 검사(Pod 준비, DB 연결, 헬스)만 하고, 데이터 이전이 끝난 뒤에 테스트 묶음을 실행한다. 묶음이 바뀌었으면(`SUITE_HASH_MISMATCH`) 실행하지 않는다. 실행 시점과 데이터 정리 규칙은 D-10에서 정한다.
+
 ## 9. 아직 없는 것
 
 실제 Build(S3·ECR·Docker, D-12), Planning 인계(티켓 15), 승인 API·화면, 수정 패치의 push·PR 자동 생성(후순위), 원본 쪽 테스트 자원(AI 테스트 실제 사용, D-09). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.
