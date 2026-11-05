@@ -9,6 +9,20 @@ from cmp_contracts.provisioning import ContentRef, Contract, Text, VersionRef
 from cmp_contracts.provisioning_v2 import ResourceId, TargetSelectionV2
 
 
+class AnalysisInput(Contract):
+    """Input of the analysis child Workflow. Only `migration_id` is required so a scaffold run
+    (no source yet) keeps working; everything else describes where the real analysis reads from.
+    Credentials never belong here."""
+
+    migration_id: Text
+    repository: Text | None = None
+    requested_commit: Text | None = None
+    manifests_dir: Text | None = None  # relative to the checked-out workspace
+    cluster_name: Text | None = None  # source EKS cluster, read-only AWS scan when set
+    credential_ref: Text | None = None  # named local profile, never a key
+    role_arns: list[Text] = Field(default_factory=list)
+
+
 class AnalysisRequest(Contract):
     migration_id: Text
     repository: Text

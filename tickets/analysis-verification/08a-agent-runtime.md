@@ -1,7 +1,7 @@
 # Ticket 08A — 에이전트 실행 기반과 Skill 형식
 
 ## 상태
-IN_PROGRESS — 구현 완료, 리뷰 대기. Issue 번호는 발행 후 기입
+DONE — PR #68 병합, Issue #67
 
 ## 목적
 Mapper·Tester·Fixer가 공통으로 쓰는 LLM 도구 호출 루프, 도구 허용 목록, Skill 로더를 Temporal과 무관한 패키지로 만든다.
@@ -59,5 +59,5 @@ Blocked by: 01
 - [x] 수용 기준과 Test Seam 확인
 - [x] 관련 테스트 통과와 회귀 확인
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
+- [x] 구현·계약 정합성 및 최종 리뷰
 - [x] 미검증 항목과 결과 증거 기록

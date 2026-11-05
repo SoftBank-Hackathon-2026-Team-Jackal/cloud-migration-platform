@@ -223,3 +223,10 @@ def test_merging_intent_groups_removes_duplicates_and_keeps_order():
 def test_without_applications_there_are_no_external_host_intents(apps):
     result = build(infra(), infra_dump_code(), apps=apps)
     assert (len(result.intents) == 1) is bool(apps)
+
+
+def test_without_an_aws_scan_only_code_based_external_hosts_are_derived():
+    result = build_network(None, infra_dump_code(), application_ids=APPS, database_ids=DBS)
+    assert [(i.external_host, i.port) for i in result.intents] == [("api.pay.example.com", 443)]
+    assert result.external_entries == [] and result.source_cidrs == []
+    assert any("INFRA_NOT_COLLECTED" in n for n in result.notes)

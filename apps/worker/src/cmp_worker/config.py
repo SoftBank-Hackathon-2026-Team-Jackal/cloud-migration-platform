@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     terraform_bin: str = "terraform"
     # Ticket 03: directory for analysis source workspaces; must be outside the service directory.
     analysis_workspace_root: str | None = None
+    # Ticket 19: immutable store for analysis results (hash-named files) and where the catalog and
+    # skills live (defaults to the repository checkout), plus the region for the AWS scan.
+    analysis_artifact_store_dir: str | None = None
+    analysis_resources_dir: str | None = None
+    analysis_aws_region: str | None = "ap-northeast-2"
     # Ticket 10: gcloud configuration and the expected Google ADC principal for GCP Apply.
     provisioning_gcloud_configuration: str | None = None
     provisioning_gcp_adc_email: str | None = None
