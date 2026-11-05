@@ -10,7 +10,7 @@
 | 이미지 | `infra/onprem-agent/Dockerfile` — Agent 코드 + kubectl v1.37.1 + Helm v4.3.1(공식 체크섬 고정) + `wireguard-tools`·`iproute2` + `wireguard-go` 0.0.20250522(커밋 고정, Go checksum DB 검증), 기본 UID 65532 |
 | 터널 프로세스 (17) | 같은 Pod의 `tunnel` 컨테이너, `python -m cmp_providers.agent_tunnel` (`cmp_providers.agent_tunnel.TunnelManager`) |
 | Chart | `infra/helm/onprem-agent` — ServiceAccount, ClusterRole/Binding, 등록 토큰 Secret, (선택) CA ConfigMap, Deployment(`agent` + `tunnel` 컨테이너) |
-| 릴리스 | 태그 `agent-vX.Y.Z` → `.github/workflows/agent-release.yml`: GHCR 이미지(amd64·arm64), OCI Chart(이미지 Digest 고정), GitHub Release |
+| 릴리스 | 태그 `agent-vX.Y.Z` → `.github/workflows/agent-release.yml`: GHCR 이미지(amd64·arm64), OCI Chart(이미지 Digest 고정), GitHub Release, 익명 pull 점검(비공개면 경고, 42) |
 
 ## 1. 운영자: 등록 토큰 발급
 
@@ -24,9 +24,25 @@ curl -sS -X POST https://<platform>/agent-enrollments -H "X-Enrollment-Admin-Key
 
 ## 2. 사용자: 설치
 
+GHCR 패키지(이미지 `cmp-onprem-agent`, Chart `charts/onprem-agent`)가 공개면 로그인 없이 설치한다(기본, H4).
+
 ```bash
 helm install cmp-agent oci://ghcr.io/softbank-hackathon-2026-team-jackal/charts/onprem-agent --version <X.Y.Z> -n cmp-system --create-namespace --set agentId=<agent-id> --set platform.url=https://<platform> --set enrollmentToken=<token>
 ```
+
+**패키지가 비공개일 때(인증 pull, 42 #177):** `helm install`이 401/403으로 실패하거나 Pod가 `ErrImagePull`이면 두 패키지를 읽을 수 있는 GitHub 토큰(`read:packages`)으로 Chart를 받고, 같은 Namespace에 pull Secret을 만들어 `imagePullSecrets`로 넘긴다. 토큰은 셸 기록에 남지 않게 입력받는다. Chart는 Secret 이름만 참조하고 레지스트리 자격 증명을 값으로 받지 않는다.
+
+```bash
+read -rs GHCR_TOKEN
+echo "$GHCR_TOKEN" | helm registry login ghcr.io -u <github-user> --password-stdin
+kubectl create namespace cmp-system
+kubectl -n cmp-system create secret docker-registry cmp-agent-ghcr --docker-server=ghcr.io --docker-username=<github-user> --docker-password="$GHCR_TOKEN"
+helm install cmp-agent oci://ghcr.io/softbank-hackathon-2026-team-jackal/charts/onprem-agent --version <X.Y.Z> -n cmp-system --set agentId=<agent-id> --set platform.url=https://<platform> --set enrollmentToken=<token> --set 'imagePullSecrets[0].name=cmp-agent-ghcr'
+```
+
+- `imagePullSecrets`는 Agent Pod(`agent`·`tunnel` 컨테이너) 하나에 붙는다. Agent가 실행 중 만드는 Network Preflight 검사 Pod와 배포한 앱·DB Pod에는 적용되지 않는다(검사 이미지는 `networkPreflight.image`, 앱 이미지는 [29](../../tickets/provisioning/29-image-pull-strategy.md)의 `cmp-ecr-pull`).
+- 토큰을 바꾸면 Secret을 다시 만든다(`kubectl -n cmp-system create secret ... --dry-run=client -o yaml | kubectl apply -f -`). 이미 받은 이미지는 노드 캐시에 남아 있어 재시작에는 영향이 없을 수 있다.
+- 공개 여부 확인(로그인 없이 토큰·manifest 조회): `uv run python scripts/check_agent_package_access.py --version <X.Y.Z>` — 둘 다 `PUBLIC`이면 종료 코드 0, 비공개면 `PRIVATE`와 1. 수동으로는 `curl -s "https://ghcr.io/token?scope=repository:softbank-hackathon-2026-team-jackal/cmp-onprem-agent:pull"`가 토큰을 주고 그 토큰으로 `GET https://ghcr.io/v2/softbank-hackathon-2026-team-jackal/cmp-onprem-agent/manifests/<X.Y.Z>`가 200이어야 한다.
 
 - 플랫폼 인증서가 사설 CA로 서명됐다면 `--set-file platform.caBundle=ca.crt`를 더한다(Agent는 `SSL_CERT_FILE`로 신뢰한다). HTTP는 허용하지 않는다(H7).
 - 첫 실행에서 Agent가 등록하고 자격 증명을 `cmp-system/cmp-agent-credential` Secret(Helm 관리 밖)에 저장한 뒤 `cmp-agent-enrollment` Secret을 지운다(H5).
@@ -111,4 +127,5 @@ UDP가 막힌 네트워크(행사장 Wi-Fi 등) 대체 터널은 아직 없다(T
 
 - 재현: `scripts/smoke_onprem_agent_install.py`(격리 k3d·전용 kubeconfig·`k3d-cmp-*` context 필수). 결과는 [provisioning-15-k3s.json](../../docs/verification/provisioning-15-k3s.json).
 - 터널(17) 재현: `scripts/smoke_onprem_agent_tunnel.py`(격리 k3d + 테스트용 WireGuard 상대). 결과는 [provisioning-17-k3s.json](../../docs/verification/provisioning-17-k3s.json). 실제 중계 서버 경로는 미검증.
-- 확인하지 않은 것: NAT 뒤 원격 노트북과 실제 공개 플랫폼 주소, GHCR 실제 게시(첫 태그 push는 별도 승인), 다양한 K3s 배포판·macOS VM, 장시간 실행.
+- GHCR 게시(42): `agent-v0.3.0`은 게시됐지만 2026-11-06 기준 두 패키지 모두 익명 `PRIVATE`이다(점검 C-01). 공개 전환은 조직 패키지 설정에서 소유자가 한 번 한다(승인 대기, [42 티켓](../../tickets/provisioning/42-agent-package-access.md)). 그전에는 위 인증 pull 경로를 쓴다.
+- 확인하지 않은 것: NAT 뒤 원격 노트북과 실제 공개 플랫폼 주소, 공개 전환 뒤 익명 설치, 다양한 K3s 배포판·macOS VM, 장시간 실행.
