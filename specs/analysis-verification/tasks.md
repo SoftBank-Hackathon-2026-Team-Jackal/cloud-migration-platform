@@ -86,6 +86,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: `make smoke-temporal` 통과(로컬 Temporal 1.29.1, `scaffold_complete`). 스크립트가 Sandbox 자식 Workflow 도입(02B) 이후 `sandbox` 워커를 띄우지 않아 승인 대기에 못 닿던 문제를 고쳤다. 이 컴퓨터에는 `docker compose` 플러그인이 없어 `make infra-up` 대신 같은 이미지(Temporal 자동 설정 서버와 전용 DB)를 `docker run`으로 띄워 확인했다. 이 확인은 문자열(scaffold) 경로만 다루며, 새 인계 경로(`--planning`)와 실제 빌드는 시간 건너뛰기 환경의 Workflow 테스트로 확인했다.
 - 2026-11-05: 25(#140)·15(#141) 구현: 빌드 설정 네 항목이 모두 있으면 소스 S3 업로드 → 민서님 Build 모듈 → `BuildAttempt` 증거(`builds_ref`)를 쓰는 실제 빌드 경로(없으면 미리 빌드한 이미지 유지, 빌드 실패는 `BUILD:<코드>`로 사람 검토), 테스트 묶음 S3 아카이브. 통과한 실행은 `sbx_plan_assemble`로 Planning 입력을 조립·검증하고 `register_planning_input`(민서님 등록 함수 호출)으로 등록한 뒤 계획 단계로 간다(`planning-handoff-v1` patched, `--planning` 설정이 있을 때만). 실제 AWS 실행은 D-06·D-12·승인 대기. 부모 Workflow 변경은 호출 1곳과 헬퍼 1개.
 - 2026-11-05: 24 구현(#136): `scripts/sandbox_ctl.py`(`status`/`cleanup`, 전용 컨텍스트만)와 소스 입력 검증(`-` 시작·공백·제어 문자 거절, git 호출 전), 만료 Sandbox 정리 진입점(주기 실행은 cron·launchd 안내), Tester 연결(`sbx_ai_tests`, 설정 `ai_tests`, 원본 실행기가 없으면 모델 미호출, Workflow는 `ai-tests-v1` patched). 원본 쪽 테스트 자원은 D-09 대기.
 - 2026-11-05: 정리. 23을 DONE(PR #132)으로 맞춤. 코드 수정 후 push·PR 생성(`DraftPrPublisher`의 GitHub 구현)은 후순위로 확정: 지금은 패치 산출물만 반환하고 쓰기 토큰은 쓰지 않는다. `.env` 단일 참조 작업(`specs/env-file-ref`)의 ENV-05(분석)는 분석 담당, ENV-06(Sandbox)은 Sandbox 담당 몫이다. 그 전까지 Sandbox의 `env_names`·`env_file` 설정은 임시 경로다.
