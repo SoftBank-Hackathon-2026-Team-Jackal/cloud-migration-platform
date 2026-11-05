@@ -6,24 +6,38 @@ job per Plan Revision. The Agent claim/download path re-checks the approval agai
 Only codes and references leave this module; no Values bodies or Secret values.
 """
 
+import json
 import re
 from pathlib import Path
 from typing import Protocol
 
 from cmp_contracts.artifact import ArtifactRef
 from cmp_contracts.chart import PostgresChartValues
+from cmp_contracts.env_plan import EnvPlan, RenderedSecret
 from cmp_contracts.onprem_rollout import (
     ROLLOUT_MODE,
     ProductionRolloutJob,
     RolloutApplication,
     RolloutConnectionUrl,
     RolloutDatabase,
+    RolloutEnvSecret,
     rollout_job_id,
 )
 from cmp_contracts.plan import PlanManifest
+from cmp_contracts.provisioning import ContentRef
 from cmp_contracts.shared_deployment_v2 import ApplicationValuesV2, SecretRefV2
 from cmp_providers.artifacts import sha256_bytes, verify_artifact_bytes
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
+from cmp_providers.env_file import (
+    DbOutputRefs,
+    EnvFileError,
+    EnvFileStore,
+    app_env_secret_name,
+    connection_secret_name,
+    database_outputs,
+    deployment_secrets,
+    render_env,
+)
 from cmp_providers.plans import manifest_digest
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -143,6 +157,40 @@ def _values(store: ArtifactStore, manifest: PlanManifest):
     return database, application
 
 
+def _env_plan(store: ArtifactStore, manifest: PlanManifest) -> tuple[EnvPlan, ContentRef] | None:
+    """ENV-04: the EnvPlan and `.env` reference pinned in the approved SPEC artifact."""
+    ref = manifest.artifacts.get("spec")
+    if ref is None:
+        return None
+    try:
+        document = json.loads(store.read(ref))
+    except ValueError:
+        return None
+    if not isinstance(document, dict) or "env_plan" not in document:
+        return None
+    try:
+        plan = EnvPlan.model_validate(document["env_plan"])
+        env_file_ref = ContentRef.model_validate(document["spec"]["environment"]["env_file_ref"])
+    except (ValidationError, KeyError, TypeError):
+        raise RolloutError("INVALID_ENV_PLAN") from None
+    return plan, env_file_ref
+
+
+def _platform_env_secrets(
+    database: PostgresChartValues, application: ApplicationValuesV2, sources: set
+) -> list[RolloutEnvSecret]:
+    """Names/keys of the EnvPlan Secrets the App Values refer to (`-env`, `-conn`)."""
+    names = {
+        app_env_secret_name(application.release_name),
+        connection_secret_name(database.release_name),
+    }
+    keys: dict[str, set[str]] = {}
+    for name, key in sources:
+        if name in names:
+            keys.setdefault(name, set()).add(key)
+    return [RolloutEnvSecret(name=n, keys=sorted(k)) for n, k in sorted(keys.items())]
+
+
 def build_rollout_job(
     session: Session, request: dict, store: ArtifactStore
 ) -> tuple[ProductionRolloutJob, str]:
@@ -169,11 +217,17 @@ def build_rollout_job(
     secret_sources = {
         (env.source.name, env.source.key) for env in application.env if env.source.kind == "SECRET"
     }
+    env_secrets = (
+        _platform_env_secrets(database, application, secret_sources)
+        if _env_plan(store, manifest) is not None
+        else []
+    )
+    platform = {secret.name for secret in env_secrets}
     secret_refs = {
         ref
         for ref in secret_sources
-        # DB password and URL Secrets are prepared by the Agent; the rest must already exist.
-        if ref[0] != database.database.secret_name and ref != url_secret
+        # DB password, URL and EnvPlan Secrets are prepared by the Agent; the rest must exist.
+        if ref[0] != database.database.secret_name and ref != url_secret and ref[0] not in platform
     }
     connection_url = (
         RolloutConnectionUrl(
@@ -212,6 +266,7 @@ def build_rollout_job(
             port=application.application.port,
             health_path=application.application.health_path,
             secret_refs=[SecretRefV2(name=n, key=k) for n, k in sorted(secret_refs)],
+            env_secrets=env_secrets,
         ),
     )
     return job, agent.owner_id
@@ -274,6 +329,66 @@ def job_artifact(session: Session, job: AgentJob, sha256: str, store: ArtifactSt
     if check_dispatchable(session, job.payload) is not None:
         raise RolloutError("ARTIFACT_NOT_FOUND")
     return store.read(refs[0])
+
+
+def job_env_secrets(
+    session: Session, job: AgentJob, store: ArtifactStore, env_store: EnvFileStore
+) -> list[RenderedSecret]:
+    """ENV-04: the rendered EnvPlan Secrets for this RUNNING rollout job, re-derived from the
+    approved Revision (never from the job body). Values live only in the returned objects; the
+    caller sends them to the authenticated Agent and nowhere else. Raises code-only errors."""
+    if job.status != "RUNNING" or not is_rollout(job.payload):
+        raise RolloutError("ENV_SECRETS_NOT_FOUND")
+    rollout = ProductionRolloutJob.model_validate(job.payload)
+    if not rollout.application.env_secrets:
+        raise RolloutError("ENV_SECRETS_NOT_FOUND")
+    if check_dispatchable(session, job.payload) is not None:
+        raise RolloutError("ENV_SECRETS_NOT_FOUND")
+    manifest = PlanManifest.model_validate(
+        session.get(PlanRevision, (rollout.plan_id, rollout.revision)).manifest
+    )
+    database, application = _values(store, manifest)
+    found = _env_plan(store, manifest)
+    if found is None:
+        raise RolloutError("ENV_SECRETS_NOT_FOUND")
+    plan, env_file_ref = found
+    outputs = database_outputs(
+        release=database.release_name,
+        namespace=database.namespace,
+        name=database.database.name,
+        username=database.database.username,
+        password_secret_ref=SecretRefV2(
+            name=database.database.secret_name, key=database.database.secret_key
+        ),
+    )
+    try:
+        rendered = render_env(
+            env_store,
+            plan,
+            env_file_ref,
+            DbOutputRefs.from_outputs(outputs, database_release=database.release_name),
+            app_release=application.release_name,
+        )
+    except EnvFileError as error:
+        raise RolloutError(error.code) from None
+    if rendered.decisions:
+        raise RolloutError(rendered.decisions[0].code)
+    approved = {
+        (env.name, env.source.name, env.source.key)
+        for env in application.env
+        if env.source.kind == "SECRET"
+    }
+    if not {(i.name, i.secret_ref.name, i.secret_ref.key) for i in rendered.env} <= approved:
+        raise RolloutError("ENV_BINDING_MISMATCH")
+    secrets = deployment_secrets(rendered, outputs, database_release=database.release_name)
+    expected = {s.name: set(s.keys) for s in rollout.application.env_secrets}
+    by_name = {s.name: s for s in secrets}
+    if any(
+        name not in by_name or not keys <= set(by_name[name].data)
+        for name, keys in expected.items()
+    ):
+        raise RolloutError("ENV_BINDING_MISMATCH")
+    return [by_name[name] for name in sorted(expected)]
 
 
 _STATE = {

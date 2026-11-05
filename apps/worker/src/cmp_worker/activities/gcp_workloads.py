@@ -53,7 +53,8 @@ class Timeouts(k8s_workloads.Timeouts):
 
 
 class GkeClusterSession(ClusterSession, Protocol):
-    def apply_secret(self, namespace: str, name: str, secret_type: str, data: dict) -> None: ...
+    # `(namespace, name, secret_type, data)`; the shared 3-argument form means Opaque.
+    def apply_secret(self, namespace: str, name: str, *args) -> None: ...
     def ingress_address(self, namespace: str, name: str) -> str | None: ...
 
 

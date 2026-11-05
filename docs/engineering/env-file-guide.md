@@ -64,9 +64,23 @@ for item in rendered.env:
 - 새로 만들 Secret: `<db release>-conn`. 데이터는 `connection_secret_data(outputs)`(DB 출력 `host`·`port`·`name`·`username`)로 만든다. `-auth`·`-url`은 지금처럼 만든다.
 - `REPLACED` 키는 이제 `ResourceOutputBinding`(평문 LITERAL) 대신 `-conn` Secret 키를 참조한다.
 
-## 구축 (ENV-04, 참고)
+## 구축 (ENV-04)
 
-`DbOutputRefs.from_outputs(outputs, database_release=release)`로 대상 DB 출력을 넘긴다. 비밀번호·URL 참조는 `DatabaseOutputsV2`의 것을 쓰고, `<db release>-conn` Secret은 ENV-04가 만든다. 샌드박스와 구축의 `render_env` 결과는 `REPLACED` 참조만 다르다(테스트로 확인).
+결정 전체는 [ENV-04 착수 결정](../../tickets/env-file-ref/04-provisioning-render-env.md#착수-결정-2026-11-06).
+
+- EnvPlan 입력: ENV-05 전까지 Planning 입력 등록 `PUT /provisioning/migrations/{id}/planning-input`의 선택 필드 `env_plan`(키 이름·처리 결과만). `env_plan.env_file_ref`는 `planning_request.environment.env_file_ref`와 같아야 한다. 없으면 지금처럼 사람이 만든 ConfigMap·Secret을 참조한다.
+- Plan 게시: `preview_env(store, plan, ref, db_outputs, app_release=...)`로 키 이름만 읽어 `render_env`와 같은 `env`·`decisions`를 얻는다. `decisions`는 Preview `pending_decisions`(승인 불가)가 된다. EnvPlan은 SPEC 산출물에 들어가 Digest로 고정된다.
+- 실행: 대상 DB 출력 `database_outputs(release, namespace, name, username, password_secret_ref)` → `DbOutputRefs.from_outputs(outputs, database_release=release)` → `render_env` → `deployment_secrets(rendered, outputs, database_release=release)`(`<app>-env`, 참조될 때 `<db>-conn`). AWS/GCP는 배포 Activity가 stdin으로, ON_PREM은 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/env-secrets`로 받아 클러스터 안에서 적용한다. 둘 다 플랫폼 관리 라벨이 없는 같은 이름 Secret은 덮어쓰지 않는다(`SECRET_NAME_CONFLICT`).
+- 샌드박스와 구축의 `render_env` 결과는 `REPLACED` 참조만 다르다(테스트로 확인). `-auth`·`-url`은 기존 단계가 그대로 만든다.
+
+| 코드(구축) | 뜻 |
+| --- | --- |
+| `ENV_PLAN_REF_MISMATCH` | 등록·실행 시 EnvPlan 참조가 Planning `env_file_ref`·Values `config_ref`와 다름 |
+| `ENV_PLAN_BINDING_MISMATCH` | 요구사항 `env_bindings`가 EnvPlan의 REPLACED·binding과 다름(게시 안 함) |
+| `ENV_FILE_STORE_UNCONFIGURED` | 워커·API에 `.env` 저장소 설정 없음 |
+| `ENV_FILE_UNAVAILABLE` | 게시 시 저장소 오류(이슈에 `ENV_FILE_EXPIRED` 등) |
+| `ENV_BINDING_MISMATCH` | 실행 시 렌더 결과가 승인된 Values 참조와 다름 |
+| `ENV_SECRETS_UNAVAILABLE`·`ENV_SECRETS_INVALID`·`ENV_SECRETS_NOT_CONFIGURED` | Agent가 Secret을 받지 못함·이름/키 불일치·이전 실행기 |
 
 ## 결정(decisions)과 오류
 

@@ -151,9 +151,12 @@ def _marker(job: ProductionRolloutJob, chart: ArtifactRef, values: ArtifactRef) 
 
 
 class RolloutRunner:
-    def __init__(self, target: ClusterTarget, fetch):
-        """`fetch(ref) -> bytes` downloads one artifact of the current job."""
+    def __init__(self, target: ClusterTarget, fetch, fetch_env_secrets=None):
+        """`fetch(ref) -> bytes` downloads one artifact of the current job.
+        `fetch_env_secrets() -> [{name, data}]` (ENV-04) returns the job's rendered EnvPlan
+        Secrets; values stay in memory and are applied only inside this cluster."""
         self.target, self.fetch = target, fetch
+        self.fetch_env_secrets = fetch_env_secrets
 
     # --- read-only preflight -------------------------------------------------------------
     def preflight(self, job: ProductionRolloutJob) -> None:
@@ -180,11 +183,30 @@ class RolloutRunner:
         ):
             raise RolloutAgentError("SECRET_REFERENCE_MISSING")
         url = job.database.connection_url
-        if url is not None:
-            existing = self.target.get("secret", url.secret.name, job.namespace)
+        managed = [url.secret.name] if url is not None else []
+        managed += [secret.name for secret in job.application.env_secrets]  # ENV-04
+        for name in managed:
+            existing = self.target.get("secret", name, job.namespace)
             labels = ((existing or {}).get("metadata") or {}).get("labels") or {}
             if existing is not None and labels.get(MANAGED) != "true":
                 raise RolloutAgentError("SECRET_NAME_CONFLICT")  # never overwrite a user Secret
+
+    def _env_secrets(self, job: ProductionRolloutJob) -> list[dict]:
+        """ENV-04: fetch before any mutation; the names and keys must be the job's."""
+        if not job.application.env_secrets:
+            return []
+        if self.fetch_env_secrets is None:
+            raise RolloutAgentError("ENV_SECRETS_NOT_CONFIGURED")
+        try:
+            secrets = self.fetch_env_secrets()
+        except AgentTransportError:
+            raise RolloutAgentError("ENV_SECRETS_UNAVAILABLE", "UNKNOWN") from None
+        by_name = {secret["name"]: secret["data"] for secret in secrets}
+        if set(by_name) != {s.name for s in job.application.env_secrets} or any(
+            not set(s.keys) <= set(by_name[s.name]) for s in job.application.env_secrets
+        ):
+            raise RolloutAgentError("ENV_SECRETS_INVALID")
+        return secrets
 
     def _download(self, job: ProductionRolloutJob, workdir: Path) -> dict[str, Path]:
         paths = {}
@@ -200,7 +222,7 @@ class RolloutRunner:
         return paths
 
     # --- mutation --------------------------------------------------------------------------
-    def _prepare_namespace(self, job: ProductionRolloutJob) -> None:
+    def _prepare_namespace(self, job: ProductionRolloutJob, env_secrets=()) -> None:
         if self.target.get("namespace", job.namespace) is None:
             self.target.apply(
                 {
@@ -232,6 +254,23 @@ class RolloutRunner:
             )
         if job.database.connection_url is not None:
             self._write_connection_url(job)
+        for secret in env_secrets:  # ENV-04: create or refresh; stdin only, never logged
+            self.target.apply(
+                {
+                    "apiVersion": "v1",
+                    "kind": "Secret",
+                    "type": "Opaque",
+                    "metadata": {
+                        "name": secret["name"],
+                        "namespace": job.namespace,
+                        "labels": {MANAGED: "true"},
+                    },
+                    "data": {
+                        key: base64.b64encode(value.encode()).decode()
+                        for key, value in secret["data"].items()
+                    },
+                }
+            )
 
     def _write_connection_url(self, job: ProductionRolloutJob) -> None:
         """Ticket 19 (U2–U5): rebuilt from the current password on every rollout so it never
@@ -378,7 +417,9 @@ class RolloutRunner:
         try:
             with tempfile.TemporaryDirectory(prefix="cmp-rollout-") as directory:
                 paths = self._download(job, Path(directory))
-                self._prepare_namespace(job)
+                env_secrets = self._env_secrets(job)
+                self._prepare_namespace(job, env_secrets)
+                del env_secrets
                 db, app = job.database, job.application
                 self._install(job, db.release, db.chart, db.values, paths)
                 self._install(job, app.release, app.chart, app.values, paths)
@@ -451,8 +492,13 @@ class RolloutAgent:
                 agent_id=self.agent_id, credential=self.credential, job_id=job_id, sha256=ref.sha256
             )
 
+        def fetch_env_secrets() -> list[dict]:
+            return self.client.env_secrets(
+                agent_id=self.agent_id, credential=self.credential, job_id=job_id
+            )
+
         try:
-            status, code = RolloutRunner(self.target, fetch).rollout(job)
+            status, code = RolloutRunner(self.target, fetch, fetch_env_secrets).rollout(job)
         except ClusterUnavailable:
             # Nothing was changed; keep the job RUNNING and re-inspect on the next poll.
             return {"job_id": job_id, "status": "RUNNING", "code": "KUBERNETES_UNAVAILABLE"}

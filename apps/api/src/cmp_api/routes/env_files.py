@@ -12,12 +12,11 @@ from cmp_providers.env_file_store import (
     MAX_ENV_FILE_BYTES,
     EncryptedEnvFileStore,
     EnvFileError,
-    load_key,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from cmp_api.config import settings
+from cmp_api.env_store import configured_env_file_store
 from cmp_api.routes.agents import require_admin
 from cmp_api.routes.connections import InputHidingRoute
 
@@ -34,12 +33,7 @@ STATUS = {
 
 def get_env_file_store() -> EncryptedEnvFileStore:
     try:
-        if not settings.env_file_store_dir:
-            raise EnvFileError("ENV_FILE_STORE_UNCONFIGURED")
-        key = settings.env_file_encryption_key
-        return EncryptedEnvFileStore(
-            settings.env_file_store_dir, load_key(key.get_secret_value() if key else None)
-        )
+        return configured_env_file_store()
     except EnvFileError as exc:
         raise env_file_http_error(exc) from None
 

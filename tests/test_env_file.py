@@ -19,7 +19,10 @@ from cmp_providers.env_file import (
     InMemoryEnvFileStore,
     connection_secret_data,
     connection_secret_name,
+    database_outputs,
     db_output_refs,
+    deployment_secrets,
+    preview_env,
     render_env,
     resolve_env_names,
 )
@@ -398,3 +401,61 @@ def test_connection_secret_shape():
         "password",
     )
     assert (refs.host.name, refs.host.key) == ("db-shop-conn", "host")
+
+
+# ------------------------------------------------- ENV-04: Plan-time twin and deploy Secrets
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        [],
+        [entry("DB_DSN", "UNREPRESENTABLE", reason="DSN_FORMAT")],
+        [entry("FEATURE_FLAG", "MISSING")],
+        [entry("NOT_IN_FILE", "PASS")],
+    ],
+)
+def test_preview_env_matches_render_env_without_reading_values(store, ref, extra):
+    plan = full_plan(ref).model_copy(update={"entries": [*full_plan(ref).entries, *extra]})
+    previewed = preview_env(store, plan, ref, target_outputs(), app_release="app-shop")
+    assert store.read_values_calls == 0
+    rendered = render_env(store, plan, ref, target_outputs(), app_release="app-shop")
+    assert (previewed.env, previewed.decisions) == (rendered.env, rendered.decisions)
+    assert previewed.secrets == []
+
+
+def test_preview_env_checks_the_reference(store, ref):
+    other = store.put(b"X=1\n")
+    with pytest.raises(EnvFileError) as caught:
+        preview_env(store, full_plan(ref), other, target_outputs(), app_release="app-shop")
+    assert caught.value.code == "ENV_PLAN_REF_MISMATCH"
+
+
+def test_deployment_secrets_add_conn_only_when_referenced(store, ref):
+    outputs = database_outputs(
+        release="db-shop",
+        namespace="prod",
+        name="shop",
+        username="shopuser",
+        password_secret_ref=SecretRefV2(name="db-shop-auth", key="password"),
+    )
+    assert (outputs.host, outputs.connection_url_secret_ref.name) == (
+        "db-shop.prod.svc",
+        "db-shop-url",
+    )
+    refs = DbOutputRefs.from_outputs(outputs, database_release="db-shop")
+    rendered = render_env(store, full_plan(ref), ref, refs, app_release="app-shop")
+    secrets = deployment_secrets(rendered, outputs, database_release="db-shop")
+    assert [s.name for s in secrets] == ["app-shop-env", "db-shop-conn"]
+    assert secrets[1].reveal() == {
+        "host": "db-shop.prod.svc",
+        "port": "5432",
+        "name": "shop",
+        "username": "shopuser",
+    }
+    assert no_values_in(repr(secrets))
+    only_pass = EnvPlan(env_file_ref=ref, entries=[entry("APP_MODE", "PASS")])
+    rendered = render_env(store, only_pass, ref, refs, app_release="app-shop")
+    assert [s.name for s in deployment_secrets(rendered, outputs, database_release="db-shop")] == [
+        "app-shop-env"
+    ]

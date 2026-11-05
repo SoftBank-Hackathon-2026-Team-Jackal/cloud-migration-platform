@@ -3,6 +3,8 @@
 ## 상태
 TODO — [Issue #99](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/99). 착수 전 검토 필요. 2026-11-05 Provisioning 공백 점검에서 발견했다.
 
+2026-11-06: ENV-04 구현 진행 중(IN_PROGRESS). 결정·검증은 [ENV-04 착수 결정](../env-file-ref/04-provisioning-render-env.md#착수-결정-2026-11-06). 일반 설정을 ConfigMap으로 나누지 않고 PASS 키를 모두 `<앱 release>-env` Secret에 넣는다(명세 합의 규칙).
+
 2026-11-05: 분석 담당과 `.env` 규칙을 합의해 [.env 단일 참조 명세](../../specs/env-file-ref/spec.md)로 구체화했다. 구축 쪽 구현은 [ENV-04](../env-file-ref/04-provisioning-render-env.md)로 진행하고 이 Issue(#99)를 그대로 쓴다. 업로드·공통 함수·시작 요청은 ENV-01~03이다.
 
 ## 목적

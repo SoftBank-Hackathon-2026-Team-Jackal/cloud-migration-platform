@@ -128,6 +128,25 @@ class AgentControlClient:
             f"/agents/{agent_id}/jobs/{job_id}/artifacts/{sha256}", None, credential, raw=True
         )
 
+    def env_secrets(self, *, agent_id: str, credential: str, job_id: str) -> list[dict]:
+        """ENV-04: `[{name, data}]` for the caller's own RUNNING job. The caller applies them in
+        the cluster and never logs or reports them."""
+        self._id(agent_id)
+        self._id(job_id)
+        response = self._request(
+            f"/agents/{agent_id}/jobs/{job_id}/env-secrets", None, credential, method="GET"
+        )
+        secrets = response.get("secrets") if isinstance(response, dict) else None
+        if not isinstance(secrets, list) or not all(
+            isinstance(s, dict)
+            and isinstance(s.get("name"), str)
+            and isinstance(s.get("data"), dict)
+            and all(isinstance(v, str) for v in s["data"].values())
+            for s in secrets
+        ):
+            raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
+        return secrets
+
     # --- tunnel exchange (ticket 16 API, used by the ticket 17 tunnel manager) ---------------
     def register_tunnel_key(self, *, agent_id: str, credential: str, public_key: str) -> dict:
         """Registers the WireGuard *public* key; the private key never leaves the Agent."""

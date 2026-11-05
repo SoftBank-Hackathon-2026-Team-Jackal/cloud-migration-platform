@@ -50,6 +50,7 @@ def build_plan_publish_activities(session_factory) -> PlanPublishActivities:
     from pathlib import Path
 
     from cmp_api.config import settings as api_settings
+    from cmp_api.env_store import optional_env_file_store
     from cmp_api.onprem_rollout import LocalArtifactStore
 
     from cmp_worker.config import settings
@@ -69,6 +70,7 @@ def build_plan_publish_activities(session_factory) -> PlanPublishActivities:
                 gcloud_configuration=settings.provisioning_gcloud_configuration,
                 gcp_adc_email=settings.provisioning_gcp_adc_email,
                 terraform_bin=settings.terraform_bin,
+                env_store=optional_env_file_store(),  # ENV-04: names only at Plan time
             )
         )
     )
