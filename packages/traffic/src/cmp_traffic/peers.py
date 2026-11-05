@@ -1,6 +1,7 @@
 """중계 서버 WireGuard peer 동기화(#63).
 
-플랫폼 조회 API(Agent 목록)를 주기적으로 읽어 `wg` peer를 맞춘다. 판단은 순수 함수이고
+플랫폼 조회 API(`GET /relays/{relay_id}/agents`, docs/contracts/openapi.yaml의 RelayAgentList)를
+주기적으로 읽어 `wg` peer를 맞춘다. 판단은 순수 함수이고
 외부 호출(조회 API, wg 실행)은 포트(source, wg)로 분리했다. 비밀값(개인키)은 다루지 않는다.
 
 안전 규칙: 잘못된 목록(범위 밖·예약 주소·중복·형식 오류)은 통째로 거부하고 현재 상태를 유지한다.
@@ -13,23 +14,30 @@ import base64
 import binascii
 import ipaddress
 import json
+import os
+import re
 import subprocess
+import sys
+import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
-from typing import Literal, Protocol
+from collections.abc import Callable, Mapping
+from typing import Protocol
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 KEEPALIVE = 25  # NAT 뒤 Agent가 터널을 유지하도록 고정(실측·합의 값)
 
 
 class AgentPeer(BaseModel):
+    """플랫폼 RelayAgent. 폐기된 Agent도 목록에 남아(`revoked: true`) 중계 서버가 peer를 지운다."""
+
     agent_id: str = Field(min_length=1)
     public_key: str
     tunnel_ip: str
+    allowed_ips: list[str]
     allowed_ports: list[int] = Field(default_factory=list)
-    status: Literal["ACTIVE", "REVOKED"] = "ACTIVE"
+    revoked: bool
 
     @field_validator("public_key")
     @classmethod
@@ -49,9 +57,16 @@ class AgentPeer(BaseModel):
             raise ValueError("허용 포트는 1~65535여야 합니다.")
         return value
 
+    @model_validator(mode="after")
+    def _only_its_own_tunnel_address(self) -> AgentPeer:
+        # Agent가 받을 수 있는 주소는 자기 터널 IP(/32) 하나뿐이다. 넓은 대역은 목록 전체를 거부한다.
+        if self.allowed_ips != [f"{self.tunnel_ip}/32"]:
+            raise ValueError("allowed_ips는 터널 IP의 /32 하나여야 합니다.")
+        return self
+
 
 class AgentList(BaseModel):
-    version: str
+    list_version: str
     agents: list[AgentPeer]
 
 
@@ -93,7 +108,7 @@ def plan_peer_changes(
             raise ValueError(f"공개키 또는 터널 IP가 중복됩니다: {agent.agent_id}")
         keys.add(agent.public_key)
         ips.add(str(ip))
-        if agent.status == "ACTIVE":
+        if not agent.revoked:
             wanted[agent.public_key] = agent
 
     add = [
@@ -152,33 +167,47 @@ class PeerSyncer:
         )
         for argv in wg_commands(plan, self.interface):
             self.wg.run(argv)
-        self.version = listing.version  # 모두 적용된 뒤에만 버전을 올린다
+        self.version = listing.list_version  # 모두 적용된 뒤에만 버전을 올린다
         return plan
 
 
-class HttpAgentSource:
-    """플랫폼 조회 API에서 Agent 목록을 읽는다. 버전이 같으면 304로 받아 None을 돌려준다.
+RELAY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 
-    token은 설정(환경변수 등)으로만 받고 로그나 예외 메시지에 쓰지 않는다.
+
+def relay_agents_url(base_url: str, relay_id: str) -> str:
+    """플랫폼 기본 주소와 중계 서버 ID로 조회 주소를 만든다. ID는 경로를 바꾸지 못하게 검사한다."""
+    if not RELAY_ID.fullmatch(relay_id):
+        raise ValueError("relay_id 형식이 아닙니다.")
+    return f"{base_url.rstrip('/')}/relays/{relay_id}/agents"
+
+
+class HttpAgentSource:
+    """플랫폼 조회 API에서 Agent 목록을 읽는다.
+
+    서버는 조건부 요청(304)을 주지 않으므로 매번 받아 `list_version`이 같으면 None(변경 없음)으로 본다.
+    token(중계 서버 자격증명)은 설정으로만 받고 로그나 예외 메시지에 쓰지 않는다.
     """
 
-    def __init__(self, url: str, token: str | None = None, timeout: float = 5.0) -> None:
-        self.url, self.token, self.timeout = url, token, timeout
+    def __init__(
+        self,
+        url: str,
+        token: str | None = None,
+        timeout: float = 5.0,
+        opener: Callable[..., object] = urllib.request.urlopen,
+    ) -> None:
+        self.url, self.token, self.timeout, self.opener = url, token, timeout, opener
 
     def fetch(self, known_version: str | None) -> AgentList | None:
         headers = {"Accept": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        if known_version:
-            headers["If-None-Match"] = known_version
         request = urllib.request.Request(self.url, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return AgentList.model_validate(json.loads(response.read()))
+            with self.opener(request, timeout=self.timeout) as response:
+                listing = AgentList.model_validate(json.loads(response.read()))
         except urllib.error.HTTPError as exc:
-            if exc.code == 304:
-                return None
             raise RuntimeError(f"agent list request failed: HTTP {exc.code}") from exc
+        return None if listing.list_version == known_version else listing
 
 
 class WgCli:
@@ -208,3 +237,55 @@ class WgCli:
 
     def run(self, argv: list[str]) -> None:
         self.runner(argv, check=True)
+
+
+def run_sync_loop(
+    syncer: PeerSyncer,
+    interval: float,
+    *,
+    sleep: Callable[[float], object] = time.sleep,
+    log: Callable[[str], object] = print,
+    should_stop: Callable[[], bool] = lambda: False,
+) -> None:
+    """주기적으로 동기화한다. 한 번 실패해도(조회 오류·잘못된 목록) 현재 peer를 그대로 두고 계속한다."""
+    while not should_stop():
+        try:
+            plan = syncer.sync_once()
+            if plan and (plan.add or plan.remove):
+                log(f"peer sync: +{len(plan.add)} -{len(plan.remove)} (version {syncer.version})")
+        except Exception as exc:  # noqa: BLE001 - 상시 루프는 어떤 실패에도 죽지 않고 현재 peer를 유지한다
+            log(f"peer sync failed, keeping current peers: {type(exc).__name__}: {exc}")
+        sleep(interval)
+
+
+def config_from_env(env: Mapping[str, str]) -> dict:
+    missing = [k for k in ("PLATFORM_URL", "RELAY_ID", "RELAY_CREDENTIAL") if not env.get(k)]
+    if missing:
+        raise ValueError("필요한 환경변수가 없습니다: " + ", ".join(missing))
+    return {
+        "url": relay_agents_url(env["PLATFORM_URL"], env["RELAY_ID"]),
+        "token": env["RELAY_CREDENTIAL"],
+        "tunnel_cidr": env.get("TUNNEL_CIDR", "10.200.0.0/24"),
+        "interface": env.get("WG_INTERFACE", "wg0"),
+        "interval": float(env.get("SYNC_INTERVAL", "30")),
+    }
+
+
+def main() -> int:
+    try:
+        config = config_from_env(os.environ)
+    except ValueError as exc:
+        print(f"설정 오류: {exc}", file=sys.stderr)
+        return 2
+    syncer = PeerSyncer(
+        HttpAgentSource(config["url"], token=config["token"]),
+        WgCli(config["interface"]),
+        config["tunnel_cidr"],
+        config["interface"],
+    )
+    run_sync_loop(syncer, config["interval"])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
