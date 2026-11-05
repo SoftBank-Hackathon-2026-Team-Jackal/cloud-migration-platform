@@ -65,6 +65,8 @@ from cmp_providers.env_file import (
     preview_env,
 )
 from cmp_providers.gcp_preview import plan_gcp_infrastructure
+from cmp_providers.network_policy import TEMPLATE_VERSION as NETWORK_POLICY_TEMPLATE
+from cmp_providers.network_policy import describe, production_policies, with_connections
 from cmp_providers.onprem_preview import onprem_preview
 from cmp_providers.plans import manifest_digest
 from cmp_providers.shared_deployment_v2 import render_shared_deployment_v2
@@ -96,6 +98,7 @@ ARTIFACT_KINDS = {
     "application_chart": "CHART",
     "application_values": "VALUES",
     "bindings": "BINDINGS",
+    "network_policies": "MANIFEST",
 }
 
 
@@ -454,6 +457,7 @@ class PlanPublisher:
             raise PublishFailure("RENDER_FAILED", _codes(error)) from None
         db = next(r for r in rendered.resources if r.kind == "POSTGRESQL")
         app = next(r for r in rendered.resources if r.kind == "APPLICATION")
+        network = network_policies(spec, deployment)
         spec_document = {
             "spec": spec.model_dump(mode="json"),
             "target": target.model_dump(mode="json"),
@@ -473,6 +477,7 @@ class PlanPublisher:
                 canonical_json_bytes(app.helm_values.model_dump(mode="json")),
             ),
             "bindings": ("BINDINGS", canonical_json_bytes({"bindings": []})),
+            "network_policies": ("MANIFEST", network.content),
         }
         prefix = f"{plan['plan_id']}-r{plan['revision']}"
         artifacts = {
@@ -503,7 +508,7 @@ class PlanPublisher:
             )
         except ProvisioningInputError as error:
             raise PublishFailure("PREVIEW_FAILED", _codes(error)) from None
-        return manifest, preview
+        return manifest, network.preview(preview)
 
     # -- AWS / GCP -------------------------------------------------------------------------
 
@@ -591,6 +596,7 @@ class PlanPublisher:
                         "resource_refs": refs,
                     },
                     "template_version": WORKLOAD_TEMPLATE,
+                    "network_policy": NETWORK_POLICY_TEMPLATE,  # ticket 26
                     **env_plan_digest(registration),
                 }
             )
@@ -635,6 +641,7 @@ class PlanPublisher:
         except (ProvisioningInputError, ApplicationRenderError) as error:
             codes = _codes(error) if isinstance(error, ProvisioningInputError) else []
             raise PublishFailure("RENDER_FAILED", codes or ["RENDER_FAILED"]) from None
+        network = network_policies(spec, deployment)
         spec_document = {
             "spec": spec.model_dump(mode="json"),
             "target": registration.target.model_dump(mode="json"),
@@ -654,6 +661,7 @@ class PlanPublisher:
             "application_chart": app_chart,
             "application_values": canonical_json_bytes(values),
             "bindings": canonical_json_bytes(bindings),
+            "network_policies": network.content,
         }
         prefix = f"{plan['plan_id']}-r{plan['revision']}"
         _write_artifacts(self._cloud_root / prefix, contents.values())
@@ -688,7 +696,54 @@ class PlanPublisher:
             )
         except ProvisioningInputError as error:
             raise PublishFailure("PREVIEW_FAILED", _codes(error)) from None
-        return manifest, preview
+        return manifest, network.preview(preview)
+
+
+@dataclass(frozen=True)
+class NetworkRendering:
+    """Ticket 26: the approved NetworkPolicy artifact bytes and their Preview lines."""
+
+    content: bytes
+    changes: tuple[ResourceChange, ...]
+    defaults: tuple[ResourceChange, ...]
+
+    def preview(self, preview: Preview) -> Preview:
+        return preview.model_copy(
+            update={
+                "changes": [*preview.changes, *self.changes],
+                "applied_defaults": [*preview.applied_defaults, *self.defaults],
+            }
+        )
+
+
+def network_policies(spec: ProvisioningSpecV2, deployment: dict) -> NetworkRendering:
+    """Approved `network_intent` (+ the app → DB binding) → production NetworkPolicies."""
+    database, app = deployment["resources"]
+    releases = {r["id"]: r["release_name"] for r in deployment["resources"]}
+    intents = with_connections(
+        [i.model_dump(mode="json") for i in spec.requirements.network_intent],
+        [(app["id"], database["id"])],
+    )
+    shape = {
+        "provider": deployment["provider"],
+        "releases": releases,
+        "applications": {app["release_name"]: app["port"]},
+        "databases": [database["release_name"]],
+        "intents": intents,
+    }
+    policies = production_policies(namespace=deployment["namespace"], **shape)
+    lines, defaults = describe(**shape)
+
+    def change(text: str) -> ResourceChange:
+        return ResourceChange(
+            resource_type="NETWORK", action="CREATE", name=f"NetworkPolicy {text}"
+        )
+
+    return NetworkRendering(
+        canonical_json_bytes({"policies": policies}),
+        tuple(change(line) for line in lines),
+        tuple(change(line) for line in defaults),
+    )
 
 
 def _env_plan_document(registration: PlanningInputRegistration) -> dict:

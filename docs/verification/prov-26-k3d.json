@@ -1,0 +1,55 @@
+{
+  "after_policies": {
+    "api_server_proxy_to_app": true,
+    "app_to_db_5432": true,
+    "app_to_debug_pod_8080": false,
+    "app_to_kubernetes_api_443": false,
+    "db_to_own_service_5432": true,
+    "debug_pod_to_db_5432": false,
+    "other_namespace_to_app_8080": true,
+    "other_namespace_to_db_5432": false,
+    "traefik_ingress_to_app": true
+  },
+  "applied_policies": [
+    "cmp-allow-0367d9e7a6",
+    "cmp-allow-26fba0256f",
+    "cmp-allow-bae223ef60",
+    "cmp-allow-bae223ef60-in",
+    "cmp-allow-dns",
+    "cmp-allow-fb46319539",
+    "cmp-allow-preflight",
+    "cmp-default-deny"
+  ],
+  "before_policies": {
+    "api_server_proxy_to_app": true,
+    "app_to_db_5432": true,
+    "app_to_debug_pod_8080": true,
+    "app_to_kubernetes_api_443": true,
+    "db_to_own_service_5432": true,
+    "debug_pod_to_db_5432": true,
+    "other_namespace_to_app_8080": true,
+    "other_namespace_to_db_5432": true,
+    "traefik_ingress_to_app": true
+  },
+  "cluster_uid": "2a757bd7-d714-402e-915a-8dc55c4bd03f",
+  "conflict_namespace_untouched": true,
+  "context": "k3d-cmp-t26",
+  "date": "2026-11-06",
+  "enforcement": "k3s built-in network policy controller (kube-router)",
+  "expected_after": {
+    "api_server_proxy_to_app": true,
+    "app_to_db_5432": true,
+    "app_to_debug_pod_8080": false,
+    "app_to_kubernetes_api_443": false,
+    "db_to_own_service_5432": true,
+    "debug_pod_to_db_5432": false,
+    "other_namespace_to_app_8080": true,
+    "other_namespace_to_db_5432": false,
+    "traefik_ingress_to_app": true
+  },
+  "k3s_version": "v1.31.5+k3s1",
+  "passed": true,
+  "stale_managed_policy_pruned": true,
+  "ticket": "26",
+  "unmanaged_same_name_conflict": "NETWORK_POLICY_CONFLICT"
+}

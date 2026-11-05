@@ -24,7 +24,7 @@ PLAN_BYTES = b"saved gcp terraform plan (fake)"
 def spec(**override):
     data = {
         "migration_id": "migration-001",
-        "plan": {"plan_id": "plan-gcp", "revision": 1, "template_version": "gcp-gke-v2"},
+        "plan": {"plan_id": "plan-gcp", "revision": 1, "template_version": "gcp-gke-v3"},
         "environment_id": "target-gcp",
         "project_id": PROJECT,
         "region": "asia-northeast3",
@@ -67,7 +67,7 @@ def artifacts(tmp_path, request=None, *, state_ref=None, mode="S3", project=None
         contract_version="1",
         digest_format="cmp-json-v1",
         migration_id=request.migration_id,
-        plan=PlanRef(plan_id="plan-gcp", revision=1, template_version="gcp-gke-v2"),
+        plan=PlanRef(plan_id="plan-gcp", revision=1, template_version="gcp-gke-v3"),
         target=CloudIdentity(
             provider="GCP",
             environment_id=request.environment_id,

@@ -35,6 +35,8 @@ terraform validate -no-color
 
 `aws-eks-v2`부터 템플릿에 IAM OIDC Provider, EBS CSI 관리형 Add-on과 IRSA 역할, AWS Load Balancer Controller IRSA 역할·정책(공식 v3.6.2 `iam_policy.json`을 `controllers.tf`에 포함)과 비밀이 아닌 Output을 둔다. Controller Helm 설치, StorageClass, Ingress는 티켓 09에서 한다.
 
+`aws-eks-v3`(티켓 26)는 VPC CNI 관리형 Add-on(`enableNetworkPolicy = "true"`)을 더해 Kubernetes NetworkPolicy를 노드에서 강제한다. 기본 설치된 자체 관리 VPC CNI를 `OVERWRITE`로 넘겨받는다. 09는 배포 전에 `aws-node`의 `aws-eks-nodeagent`가 정책 강제로 실행 중인지 확인한다.
+
 Apply는 07 승인 게이트를 통과한 Plan만 대상으로 한다. `claim_approved_execution` 이후 `execute_aws_plan` Activity(`cmp_providers.aws_apply.apply_aws_infrastructure`)가 다음을 처리한다.
 
 - `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/`의 `spec.json`·`saved.tfplan`을 manifest의 ArtifactRef(SHA-256·크기)와 대조한다.

@@ -35,6 +35,7 @@
 | [22 AWS/GCP 앱·DB 배포 Plan 게시와 09·11 실행 연결](../../tickets/provisioning/22-cloud-workload-plan.md) | DONE | 05, 06, 08, 09, 10, 11, 18 | PROV-007, 008, 010, 011, 012, 013, 015, 018 | [#108](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/108) | ☑ |
 | [23 환경 연결 관리 API (AWS 역할 위임·GCP·Agent 목록)](../../tickets/provisioning/23-environment-connections.md) | DONE (로컬 범위, 실제 계정·데모 반영 승인 대기) | 15, 16, 21 | PROV-003, 021, 022 | [#118](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/118) | ☑ |
 | [24 이전 이벤트 저장소·SSE·운영 로그 공통 모듈](../../tickets/provisioning/24-migration-events.md) | IN_PROGRESS (로컬 완료, 리뷰·push 대기) | 07, 13, 18 | PROV-014, 015, 018, 021 | [#122](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/122) | ☐ |
+| [26 운영 구축 NetworkPolicy 생성과 대상 정책 강제](../../tickets/provisioning/26-production-network-policy.md) | DONE (로컬 범위, EKS·GKE 실검증·Agent 릴리스 승인 대기, 리뷰·push 대기) | 08, 09, 10, 11, 12, 18, 22 | PROV-010, 011, 013, 014, 015, 016, 021 | [#150](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/150) | ☐ |
 | [25 터널 상태 만료(신선도) 처리](../../tickets/provisioning/25-tunnel-status-freshness.md) | DONE (로컬 범위, 리뷰·push 대기) | 13, 16, 17, 23 | PROV-009, 019, 020, 021 | [#135](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/135) | ☑ |
 
 ## 선행 관계

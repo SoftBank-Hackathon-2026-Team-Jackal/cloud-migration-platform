@@ -3343,6 +3343,10 @@ components:
           $ref: '#/components/schemas/RolloutDatabase'
         application:
           $ref: '#/components/schemas/RolloutApplication'
+        network_policies:
+          anyOf:
+          - $ref: '#/components/schemas/ArtifactRef'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:

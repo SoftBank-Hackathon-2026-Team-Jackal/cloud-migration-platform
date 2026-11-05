@@ -17,6 +17,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
+from cmp_providers.network_policy import gke_dataplane_v2
 from temporalio import activity
 
 from cmp_worker.activities import k8s_workloads
@@ -183,6 +184,11 @@ class GcpWorkloadsActivities(ApprovedWorkloads):
             "gke_cluster_name": target.cluster_name,
             "gke_location": target.location,
         }
+
+    def policy_enforcement(self, cluster) -> str | None:
+        """Ticket 26: GKE Dataplane V2."""
+        anetd = cluster.get_object("daemonset", "anetd", "kube-system")
+        return "gke-dataplane-v2" if gke_dataplane_v2(anetd) else None
 
     def storage_class_manifest(self, name: str) -> dict:
         return storage_class_manifest(name)
