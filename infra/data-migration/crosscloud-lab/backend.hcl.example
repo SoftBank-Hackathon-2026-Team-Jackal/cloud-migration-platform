@@ -1,0 +1,6 @@
+bucket       = "<state bucket>"
+key          = "data-migration/crosscloud-lab/terraform.tfstate"
+region       = "ap-northeast-2"
+profile      = "<aws profile>"
+encrypt      = true
+use_lockfile = true

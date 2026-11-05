@@ -50,4 +50,4 @@ PoC `05_switchover_fast.py` 순서로 DB 쓰기 주체를 원본에서 대상으
 - [x] 전환 거절·PAUSE 안 실패 시 원래 DB로 계속 서비스한다.
 - [ ] 두 번째 승인(`approval.required gate: cutover`) 연결(Q5)
 - [x] 실제 클라우드 시험: EKS 안 시험용 Namespace 간(원본·대상 같은 클러스터)
-- [ ] 크로스 클라우드(EKS → GKE) + WireGuard 시험
+- [x] 크로스 클라우드(EKS → GKE) + WireGuard 시험: 전환 110ms·롤백 56ms, 체크섬 일치, 누락 0, 앱 오류 0

@@ -2,7 +2,7 @@
 
 ## 상태
 
-PgBouncer: DONE(로컬 k3d 검증, PR 전). WireGuard: TODO(실습은 NodePort로 대신함)
+PgBouncer: DONE. WireGuard: DONE(실습 — EKS ↔ GKE, `infra/data-migration/crosscloud-lab`)
 
 ## PgBouncer (DM-010)
 
@@ -14,8 +14,11 @@ PgBouncer: DONE(로컬 k3d 검증, PR 전). WireGuard: TODO(실습은 NodePort�
 
 실습: 초당 약 50건 쓰기 중 설치·앱 연결 변경에서 오류 0건(앱 재시작은 롤링).
 
-## WireGuard (DM-011) — 남은 일
+## WireGuard (DM-011)
 
-- 실습에서는 두 k3d 클러스터를 같은 docker 네트워크에 두고 NodePort(30432)로 `peer_host`를 대신했다.
-- 실제 환경: 정방향(대상 DB → 원본 DB), 역방향·PgBouncer(원본 → 대상 DB) 모두 터널을 지난다. `peer_host`에 터널 쪽 주소를 넣으면 코드 변경 없이 동작한다.
+실습 구성: 각 클러스터에 게이트웨이 Pod(커널 WireGuard, 없으면 wireguard-go)와 `wg-peer-db` Service. GKE 쪽 UDP 입구는 LoadBalancer + EKS NAT IP만 허용. `peer_host`에 상대 클러스터의 `wg-peer-db` 주소를 넣으면 플랫폼 코드는 바꾸지 않아도 된다. EKS → GKE 전환 110ms·롤백 56ms, 누락 0(자세한 값은 crosscloud-lab README).
+
+남은 일:
+
+- 게이트웨이 배치를 플랫폼 Activity로 옮기기(지금은 실습 스크립트 `up.sh`). 게이트웨이는 privileged라 운영 환경 정책 확인 필요.
 - 미정: AWS·GCP 대상에서 터널 양 끝 위치(노드, 게이트웨이 Pod, 별도 VM), 터널 생명주기 소유(Provisioning 또는 Data). ON_PREM은 Agent 터널(#71, `tunnel_endpoint`)을 쓴다.
