@@ -79,6 +79,7 @@ class FakeCluster:
     def __init__(self):
         self.cluster_uid = "cluster-a"
         self.helm_timeout = "1m"
+        self.clock = 0.0  # ticket 51: settle waits run on this fake clock, never real time
         self.available = True
         self.db_probe = "160004|true|logical|10|10"
         self.broken = set()
@@ -90,6 +91,12 @@ class FakeCluster:
             ("namespace", "demo"): {"metadata": {"annotations": {ENVIRONMENT: "onprem-prod-001"}}},
             ("secret", "demo-app-env"): {"data": {"API_KEY": "c2VjcmV0"}},
         }
+
+    def now(self):
+        return self.clock
+
+    def pause(self, seconds):
+        self.clock += seconds
 
     def get(self, kind, name, namespace=None):
         if not self.available:

@@ -21,9 +21,10 @@ from pydantic import ValidationError
 
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes, verify_artifact_bytes
 from cmp_providers.aws_preview import AwsPlanInput
+from cmp_providers.resources import resource_root
 from cmp_providers.terraform_events import apply_runner, is_stale
 
-TEMPLATE_ROOT = Path(__file__).resolve().parents[4] / "infra/terraform/aws"
+TEMPLATE_ROOT = resource_root() / "infra/terraform/aws"
 APPLY_TIMEOUT_SECONDS = 90 * 60
 QUERY_TIMEOUT_SECONDS = 10 * 60
 # Terraform output name -> result reference name. Anything else (and anything sensitive) is

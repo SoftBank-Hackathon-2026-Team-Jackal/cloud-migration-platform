@@ -24,6 +24,7 @@ from pydantic import Field
 
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes
 from cmp_providers.plans import manifest_digest
+from cmp_providers.resources import resource_root
 
 _NAME = r"^[a-z][a-z0-9-]{0,38}[a-z0-9]$"
 _RESOURCE_TYPES = {
@@ -311,7 +312,7 @@ def plan_aws_infrastructure(
         )
     if not aws_profile or aws_profile == "default":
         _reject("MISSING_PROFILE", "aws_profile", "이름이 지정된 AWS 프로필이 필요합니다.")
-    root = template_dir or Path(__file__).resolve().parents[4] / "infra/terraform/aws"
+    root = template_dir or resource_root() / "infra/terraform/aws"
     output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(output_dir, 0o700)
     target = output_dir / f"{request.plan.plan_id}-r{request.plan.revision}"

@@ -28,6 +28,21 @@
         {"properties": {"tag": {"minLength": 1}}, "required": ["tag"]}
       ]
     },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+            "maxLength": 253
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "helmTimeout": {"type": "string", "pattern": "^[0-9]+(s|m)$"},
     "idleSeconds": {"type": "number", "minimum": 1},
     "terminationGracePeriodSeconds": {"type": "integer", "minimum": 960},
