@@ -72,7 +72,8 @@ def evaluate_step(
         if p99_streak is not None and p99_streak < policy.p99_breach_windows:
             return StepOutcome(**base, decision="hold", reason="p99 일시 초과, 다음 창 확인")
         reason = (
-            f"p99 {observed.p99_ms:.0f}ms > 원본 {baseline.p99_ms:.0f}ms x {policy.max_p99_ratio}"
+            f"p99 {observed.p99_ms:.0f}ms > 기준 {limit:.0f}ms "
+            f"(원본 {baseline.p99_ms:.0f}ms x {policy.max_p99_ratio}, 하한 {policy.p99_floor_ms:.0f}ms)"
         )
         return StepOutcome(**base, decision="rollback", reason=reason)
     if observed.requests < policy.min_requests:

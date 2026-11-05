@@ -252,3 +252,17 @@ def test_evaluate_step_without_streak_still_judges_immediately() -> None:
     assert evaluate_step(TrafficPolicy(), GOOD, slow, 1).decision == "rollback"
     assert evaluate_step(TrafficPolicy(), GOOD, slow, 1, p99_streak=1).decision == "hold"
     assert evaluate_step(TrafficPolicy(), GOOD, slow, 1, p99_streak=2).decision == "rollback"
+
+
+def test_p99_rollback_reason_shows_the_limit_that_was_actually_applied() -> None:
+    """원본 p99가 작아도 적용되는 기준은 하한(floor)이다. 사유에 실제 기준이 보여야 한다."""
+    policy = TrafficPolicy(p99_floor_ms=200, p99_breach_windows=1)
+    outcome = evaluate_step(
+        policy,
+        Sample(requests=100, failed=0, p99_ms=5),
+        Sample(requests=100, failed=0, p99_ms=2500),
+        elapsed_s=10,
+        p99_streak=1,
+    )
+    assert outcome.decision == "rollback"
+    assert "기준 200ms" in outcome.reason and "하한 200ms" in outcome.reason
