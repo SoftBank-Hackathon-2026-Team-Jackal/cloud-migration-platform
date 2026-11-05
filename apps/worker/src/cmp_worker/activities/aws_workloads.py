@@ -12,6 +12,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
+from cmp_providers.network_policy import aws_vpc_cni_enforces
 from temporalio import activity
 
 from cmp_worker.activities import k8s_workloads
@@ -161,6 +162,11 @@ class AwsWorkloadsActivities(ApprovedWorkloads):
         except Exception:  # noqa: BLE001 - CLI output is never surfaced
             raise WorkloadFailure("LB_CONTROLLER_NOT_READY") from None
         refs["lb_controller"] = "kube-system/aws-load-balancer-controller"
+
+    def policy_enforcement(self, cluster) -> str | None:
+        """Ticket 26: VPC CNI network policy agent on the nodes."""
+        node = cluster.get_object("daemonset", "aws-node", "kube-system")
+        return "aws-vpc-cni" if aws_vpc_cni_enforces(node) else None
 
     def storage_class_manifest(self, name: str) -> dict:
         return storage_class_manifest(name)

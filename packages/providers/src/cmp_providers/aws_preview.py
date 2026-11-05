@@ -43,7 +43,7 @@ _RESOURCE_TYPES = {
     "aws_eks_node_group": ("NODE", "관리형 노드 그룹"),
     # Ticket 08 (E6): IRSA prerequisites for EBS CSI and AWS Load Balancer Controller.
     "aws_iam_openid_connect_provider": ("CLUSTER", "IAM OIDC 공급자"),
-    "aws_eks_addon": ("CLUSTER", "EKS EBS CSI 애드온"),
+    "aws_eks_addon": ("CLUSTER", "EKS 애드온(EBS CSI·VPC CNI)"),
     "aws_iam_policy": ("CLUSTER", "Load Balancer Controller IAM 정책"),
 }
 _ACTIONS = {
@@ -108,7 +108,7 @@ def validate_aws_input(request: AwsPlanInput) -> None:
     vpc = _network(request.vpc_cidr, "vpc_cidr")
     if not 16 <= vpc.prefixlen <= 24:
         _reject("INVALID_TOPOLOGY", "vpc_cidr", "VPC CIDR는 /16에서 /24 사이여야 합니다.")
-    if request.plan.template_version != "aws-eks-v2":
+    if request.plan.template_version != "aws-eks-v3":
         _reject(
             "UNSUPPORTED_TEMPLATE", "plan.template_version", "지원하지 않는 AWS 템플릿 버전입니다."
         )
@@ -228,6 +228,11 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
         ),
         ResourceChange(
             resource_type="CLUSTER", action="CREATE", name="EKS 사설 API Endpoint 활성화"
+        ),
+        ResourceChange(  # ticket 26
+            resource_type="NETWORK",
+            action="CREATE",
+            name="VPC CNI NetworkPolicy 강제(enableNetworkPolicy=true)",
         ),
         ResourceChange(
             resource_type="INGRESS",

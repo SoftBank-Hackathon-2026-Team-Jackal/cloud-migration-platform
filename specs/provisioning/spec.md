@@ -213,6 +213,7 @@ Sandbox를 통과한 정확히 동일한 이미지 Digest를 재빌드 없이 �
 - 필요한 Service와 Ingress 또는 대상별 외부 접근 구성을 확인할 수 있다.
 - 앱과 DB의 내부 통신이 가능하고 DB가 불필요하게 외부에 공개되지 않는다.
 - Provider별 네트워크 정책·Ingress·Load Balancer 차이를 반영한다.
+- 승인된 `network_intent`를 대상 Namespace의 NetworkPolicy(기본 차단 + 의도 경로 + 앱 → DB + 외부 진입 포트)로 만들고, 대상이 정책을 실제로 강제해야 한다(EKS VPC CNI, GKE Dataplane V2, K3s 내장). 결정은 티켓 26.
 - 실제 대상에서 적용된 연결 경로를 검증할 수 있다.
 
 ### Preview와 사용자 승인

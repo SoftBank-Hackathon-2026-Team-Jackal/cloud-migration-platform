@@ -8,6 +8,7 @@ from cmp_contracts.chart import KubernetesName
 from cmp_contracts.network_preflight import NetworkPreflightJob, ProbeObservation
 from cmp_contracts.onprem_rollout import ProductionRolloutJob, RolloutReplication
 from cmp_contracts.provisioning import Text
+from cmp_providers.ecr_pull import EcrPullError, EcrTokenMinter, boto3_minter
 from cmp_providers.env_file import EnvFileError, EnvFileStore
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,6 +35,7 @@ from cmp_api.onprem_rollout import (
     RolloutError,
     job_artifact,
     job_env_secrets,
+    job_image_pull,
 )
 
 router = APIRouter(tags=["on-premises agents"])
@@ -303,6 +305,62 @@ def job_env_secrets_route(
     body = EnvSecretsResponse(secrets=[EnvSecret(name=s.name, data=s.reveal()) for s in secrets])
     return Response(
         content=body.model_dump_json(),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def get_ecr_minter() -> EcrTokenMinter:
+    """Ticket 29 (I2): the platform principal mints; the Agent never holds AWS credentials."""
+    return boto3_minter(settings.connection_platform_aws_profile)
+
+
+class ImagePullCredential(Request):
+    registry: str
+    username: str
+    password: str
+    expires_at: int
+
+
+@router.get(
+    "/agents/{agent_id}/jobs/{job_id}/image-pull",
+    response_model=ImagePullCredential,
+    responses={
+        404: {"description": "`IMAGE_PULL_NOT_FOUND`: not this Agent's current ECR rollout job"},
+        409: {"description": "Approved image outside the platform registry (code only)"},
+        503: {"description": "Registry not configured or token unavailable (code only)"},
+    },
+)
+def job_image_pull_route(
+    agent_id: str,
+    job_id: str,
+    session: SessionDep,
+    credential: CredentialDep,
+    store: Annotated[ArtifactStore, Depends(get_artifact_store)],
+    minter: Annotated[EcrTokenMinter, Depends(get_ecr_minter)],
+):
+    """Ticket 29: a short-lived ECR pull token for the caller's own rollout job (RUNNING, or
+    SUCCEEDED and still the latest approved Revision so the Agent can refresh the pull Secret).
+    The token is only in this response (never in the job body, results, events or logs)."""
+    try:
+        agent = authenticate_agent(session, agent_id=agent_id, credential=credential)
+    except AgentRegistrationError:
+        raise HTTPException(status_code=403, detail="Agent unauthorized") from None
+    job = session.get(AgentJob, job_id)
+    if job is None or job.agent_id != agent.id or job.owner_id != agent.owner_id:
+        raise HTTPException(status_code=404, detail="IMAGE_PULL_NOT_FOUND")
+    try:
+        registry = job_image_pull(session, job, store)
+        pull = minter.mint(registry)
+    except RolloutError as exc:
+        status = 404 if exc.code == "IMAGE_PULL_NOT_FOUND" else 409
+        if exc.code == "PLATFORM_REGISTRY_INVALID":
+            status = 503
+        raise HTTPException(status_code=status, detail=exc.code) from None
+    except EcrPullError as exc:
+        raise HTTPException(status_code=503, detail=exc.code) from None
+    return Response(
+        content=ImagePullCredential(**pull.response()).model_dump_json(),
         media_type="application/json",
         headers={"Cache-Control": "no-store"},
     )

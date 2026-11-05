@@ -62,6 +62,15 @@ class RolloutApplication(Contract):
     )
 
 
+class RolloutImagePull(Contract):
+    """Ticket 29 (I4): the approved images are in the platform ECR. The Agent fetches a
+    short-lived credential for its job from `GET /agents/{id}/jobs/{job}/image-pull` and keeps
+    the docker-registry Secret `secret` refreshed; no token crosses this boundary."""
+
+    secret: KubernetesName
+    registry: Annotated[str, Field(pattern=r"^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com$")]
+
+
 class ProductionRolloutJob(Contract):
     mode: Literal["PRODUCTION_ROLLOUT"]
     job_id: KubernetesName
@@ -76,21 +85,34 @@ class ProductionRolloutJob(Contract):
     storage_class: KubernetesName
     database: RolloutDatabase
     application: RolloutApplication
+    # Ticket 26: the approved NetworkPolicy objects. Omitted when absent so jobs from Plans
+    # published before ticket 26 keep identical payloads; an older Agent rejects a job with it.
+    network_policies: ArtifactRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    # Ticket 29: omitted when no image needs ECR auth so earlier jobs keep identical payloads;
+    # an Agent older than ticket 29 rejects a job that carries it (UNSUPPORTED_JOB).
+    image_pull: RolloutImagePull | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def artifact_kinds(self):
         for part in (self.database, self.application):
             if part.chart.kind != "CHART" or part.values.kind != "VALUES":
                 raise ValueError("Chart and Values artifacts required")
+        if self.network_policies is not None and self.network_policies.kind != "MANIFEST":
+            raise ValueError("NetworkPolicy artifact must be a MANIFEST")
         return self
 
     def artifact_refs(self) -> list[ArtifactRef]:
-        return [
+        refs = [
             self.database.chart,
             self.database.values,
             self.application.chart,
             self.application.values,
         ]
+        return refs + ([self.network_policies] if self.network_policies is not None else [])
 
 
 class RolloutReplication(Contract):

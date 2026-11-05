@@ -30,6 +30,7 @@ from cmp_worker.activities.gcp_workloads import (
     GkeTarget,
     Timeouts,
 )
+from network_policy_support import NetworkPolicyFake
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from temporalio.testing import ActivityEnvironment
@@ -213,7 +214,7 @@ class Plan:
         }
 
 
-class FakeCluster:
+class FakeCluster(NetworkPolicyFake):
     """Stateful stand-in for kubectl/Helm on one GKE cluster. Records every argument."""
 
     def __init__(self):

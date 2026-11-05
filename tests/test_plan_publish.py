@@ -54,6 +54,17 @@ def store(tmp_path):
     return LocalArtifactStore(tmp_path / "store")
 
 
+@pytest.fixture(autouse=True)
+def platform_registry(monkeypatch):
+    """Ticket 29 (I1): the planning image is in ECR, so ON_PREM jobs need it configured."""
+    from cmp_api.config import settings
+
+    monkeypatch.setattr(
+        settings, "platform_ecr_registry", "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com"
+    )
+    monkeypatch.setattr(settings, "platform_ecr_repositories", "demo")
+
+
 def onprem_target(**override):
     return {
         "provider": "ON_PREM",
@@ -330,7 +341,7 @@ def test_aws_input_publishes_infrastructure_plan_for_08(db, store, tmp_path, mon
     assert result["status"] == "PUBLISHED", result
     assert (result["provider"], result["scope"]) == ("AWS", "INFRASTRUCTURE")
     manifest, preview = stored(db, result)
-    assert manifest.plan.template_version == "aws-eks-v2"
+    assert manifest.plan.template_version == "aws-eks-v3"
     assert approval_issues(manifest, preview) == []
     folder = tmp_path / "plans" / f"{result['plan_id']}-r1"
     assert (folder / "saved.tfplan").exists()  # 08 reads the saved Plan from here

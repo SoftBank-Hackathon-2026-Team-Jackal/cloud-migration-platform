@@ -14,13 +14,13 @@
 | `.env` | 워커가 `.env`와 예외 목록을 처리해 변수별 `env_bindings`·Secret 생성. 렌더러에는 Secret 이름·키 또는 리소스 출력 참조만 | 수용 |
 | `config_ref` | 별도 수정 설정 파일 산출물이 있을 때만 | 수용 |
 | `source_ref` | 리소스별 S3 URI·SHA-256 | 수용 |
-| `network_intent` | 분석이 기록, 각 워커가 환경 정책으로 변환. Sandbox 전용 규칙은 별도 | 수용 |
+| `network_intent` | 분석이 기록, 각 워커가 환경 정책으로 변환. Sandbox 전용 규칙은 별도. 변환 함수는 `cmp_providers.network_policy`로 공유하고 운영 변환은 [Provisioning 26](../../tickets/provisioning/26-production-network-policy.md#착수-결정-2026-11-06) | 수용 |
 | 배포 후 테스트 | 배포 직후 준비 검사만, 테스트 묶음은 데이터 이전 후 | 수용 |
 | `test_suite_ref` | S3 SHA-256(`S3ArchiveRef`), `run_suite` 제공 | 계약 구현됨, `run_suite`는 승철 |
 | PostgreSQL 확장 | 비어 있지 않으면 Planning이 거절 | 구현됨. 지원은 D-14 |
 | DB 이미지 | 요구사항에 넣지 않음. 대상 구성 단계에서 선택·검증. 원본 이미지는 분석 결과에 정보로 | 방향 확정, 단계 소유자 **D-11** |
 | Build 모듈 | `BuildContext`에 `resource_id`, `build(source_uri, source_version_id=...)`, 반환 `image_digest`·`source_ref`·`log` | 구현됨. Worker 권한 배치·전체 시간 상한은 **D-12** |
-| 외부 진입 표현 | v2 `network_intent`는 출발지가 리소스여야 해서 인터넷 → 앱을 표현할 수 없음 | **결정 대기 D-15** |
+| 외부 진입 표현 | v2 `network_intent`는 출발지가 리소스여야 해서 인터넷 → 앱을 표현할 수 없음 | D-15 결정([Provisioning 26](../../tickets/provisioning/26-production-network-policy.md#착수-결정-2026-11-06) N3): intent로 옮기지 않고 구축 노출(LB/Ingress)에서 파생해 앱 포트만 연다. `external_entries` → 노출 반영은 Provisioning 32(#156) |
 
 ## 1. Affected modules and contracts
 
@@ -561,4 +561,4 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 | D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한 | `resource_id`·`source_version_id`는 구현됨. 함수 호출 유지 | 민서 |
 | D-13 | DB 내부 상태 사전 점검 담당(기본 키·시퀀스·복제 설정) | Data Migration 쪽 제안 | 소울 |
 | D-14 | PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체 | 현재 확장 요구는 Planning이 거절 | 민서 |
-| D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법 | 그 전까지 `AnalysisReport.external_entries`에 기록 | 민서 |
+| D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법 | **결정(2026-11-06, [Provisioning 26](../../tickets/provisioning/26-production-network-policy.md#착수-결정-2026-11-06) N3)**: intent로 표현하지 않는다. 운영 NetworkPolicy는 구축 노출(LB/Ingress)에서 파생해 앱 포트를 출발지 제한 없이 연다. `external_entries`는 계속 `AnalysisReport`에 두고 노출 반영은 Provisioning 32(#156) | 민서 |

@@ -168,7 +168,7 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 `infra/helm/`에 DB와 App의 별도 Chart/Release를 둔다. DB Chart는 Sandbox/Production에서 공유하고 StorageClass 및 Secret 이름·키를 명시적으로 입력받는다. 공통 Values에는 이미지 Digest, Pod resources, replicas, ports, health, DB, 일반 설정과 Secret 참조를 넣고 Provider별 Values에는 StorageClass, Ingress/LB·Controller, 필요한 네트워크 설정을 둔다. Sandbox는 동일 Chart에 격리된 Namespace·테스트 Values를 적용한다. Chart는 환경별 Secret 원문을 Git에 넣지 않는다.
 
-실행 순서는 Namespace/StorageClass·Controller 준비 → DB 인증 Secret 준비 → PostgreSQL Helm 설치/업그레이드 → PVC Bound·Pod Ready·DB 접속 확인 → 대상 DB Service와 비밀 참조로 앱 Values 완성 → App Helm 설치/업그레이드 → Pod Ready·Service·Ingress/LB 주소 확인이다. 데이터 이전용 복제 역할·설정 적용 가능 여부도 확인하되 실제 복제는 Data Migration에 맡긴다. Registry Pull 인증·CPU 아키텍처를 배포 전에 검증한다. NetworkPolicy는 대상 지원성과 필수 경로를 검토한 뒤 렌더한다. Pod Ready나 PVC 객체 존재만으로 DB 접근·실제 Volume 사용 가능성을 선언하지 않는다.
+실행 순서는 Namespace/StorageClass·Controller 준비 → DB 인증 Secret 준비 → PostgreSQL Helm 설치/업그레이드 → PVC Bound·Pod Ready·DB 접속 확인 → 대상 DB Service와 비밀 참조로 앱 Values 완성 → App Helm 설치/업그레이드 → Pod Ready·Service·Ingress/LB 주소 확인이다. 데이터 이전용 복제 역할·설정 적용 가능 여부도 확인하되 실제 복제는 Data Migration에 맡긴다. Registry Pull 인증·CPU 아키텍처를 배포 전에 검증한다. NetworkPolicy는 승인된 `network_intent`로 렌더해 Plan 산출물 `network_policies`에 고정하고, Namespace 준비 직후·Helm 전에 적용한다(티켓 26). Pod Ready나 PVC 객체 존재만으로 DB 접근·실제 Volume 사용 가능성을 선언하지 않는다.
 
 재시도 시 Release 이름·Namespace·Chart/Values Digest와 실제 Helm Release 상태를 조회한다. 성공 응답 유실이면 적용 상태를 결과로 복구하고, 실패/미완료이면 충돌·기존 Revision·Kubernetes 객체를 조사한다. 승인된 Values와 다른 내용으로 임의 업그레이드하지 않는다. Helm 자동 rollback·atomic 사용 여부는 PVC/DB 데이터 보존과 부분 배포 처리 정책이 정해진 뒤 선택한다.
 
@@ -207,6 +207,10 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 ### 11 GCP 워크로드 (#43)
 
 `execute_gcp_workloads`(`cmp_worker.activities.gcp_workloads`)는 09의 승인 워크로드 흐름을 공통 기반(`k8s_workloads`·`k8s_workloads_cli`)으로 재사용하고 GCP 고유 부분만 더한다: gcloud 설정 프로젝트·클러스터 `RUNNING` 확인, PD CSI StorageClass(`pd-balanced`·Retain), 승인된 ECR Digest를 위한 단기 Pull Secret(`cmp-ecr-pull`, default ServiceAccount 연결, 토큰은 stdin만), GCE Ingress(외부 HTTP LB, NEG)와 외부 헬스 200. AWS LB Controller는 쓰지 않는다. 대상 클러스터는 10 G4 refs(`gcp_project_id`·`gke_cluster_name`·`gke_location`)로 찾는다. 결정 K1~K12와 실검증은 [티켓 11](../../tickets/provisioning/11-gcp-workloads.md)에 있다.
+
+### 29 이미지 pull 전략 (#153)
+
+플랫폼만 AWS 권한을 갖는다. EKS는 노드 역할(`AmazonEC2ContainerRegistryPullOnly`)로 받는다. K3s는 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/image-pull`로 플랫폼이 발급한 단기 ECR 토큰을 받아 `cmp-ecr-pull`을 만들고, TTL 절반이 지나면 갱신한다. GKE는 실행마다 Secret을 새 토큰으로 다시 쓰고, 플랫폼 측 6시간 Schedule이 승인된 배포의 Secret만 다시 쓴다. 플랫폼 레지스트리·저장소는 `PLATFORM_ECR_REGISTRY`·`PLATFORM_ECR_REPOSITORIES`로 정한다. ON_PREM pull 실패는 `IMAGE_PULL_FAILED`. 결정 I1~I11은 [티켓 29](../../tickets/provisioning/29-image-pull-strategy.md)에 있다.
 
 ### 12A 온프레미스 Preview (#41)
 
@@ -310,6 +314,10 @@ Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다.
 ### Ticket 22 AWS/GCP 워크로드 Plan 게시와 09·11 실행 연결 (#108)
 
 `PlanPublisher.publish_workloads`가 실행된 AWS/GCP 인프라 Revision(최신·전 단계 `SUCCEEDED`·클러스터 refs 있음)과 등록의 워크로드 설정으로 별도 `WORKLOADS` Plan(`workload_plan_id_for`)을 게시한다. DB Values는 04B 렌더, 앱 Values는 09·11의 v1 템플릿으로 바꾸고 `helm template`으로 확인한다. 입력 Digest에 인프라 Revision·manifest Digest·refs를 넣어 같은 인프라 결과는 재사용, 새 인프라 실행은 새 Revision이 된다. `MigrationWorkflow`는 인프라 실행 뒤 이 Plan을 승인 대기시키고 09·11 결과를 13 `ProvisioningResult`로 남긴다. 결정은 [22 티켓](../../tickets/provisioning/22-cloud-workload-plan.md#착수-결정-2026-11-05).
+
+### Ticket 26 운영 NetworkPolicy (#150, `PROV-013`)
+
+샌드박스의 의도 변환(기본 차단·DNS·의도 간선·앱 진입)을 `cmp_providers.network_policy`로 옮겨 샌드박스와 운영이 함께 쓴다. 운영은 앱 → DB, 앱 포트 외부 진입(D-15: 노출에서 파생, 출발지 제한 없음), `external_host` 의도 포트의 사설 대역 제외 송신, 플랫폼 운영 경로(DB 자기 점검·복제 송신, ON_PREM Agent 터널·Preflight)를 더한다. 정책은 Plan 산출물(`MANIFEST`)로 manifest Digest에 들어가고 Preview에 보인다. 09·11은 강제 엔진(VPC CNI node agent, Dataplane V2)을 확인한 뒤 적용하고, Agent는 job 참조로 받아 적용한다. 관리 라벨 없는 같은 이름 정책은 충돌, 승인에서 빠진 관리 정책은 제거한다. 결정은 [26](../../tickets/provisioning/26-production-network-policy.md#착수-결정-2026-11-06).
 
 ### Ticket 23 환경 연결 (#118, `PROV-003`, `021`, `022`)
 

@@ -89,7 +89,7 @@ def _network(value: str, path: str, *, rfc1918: bool) -> IPv4Network:
 
 def terraform_variables(request: GcpPlanInput) -> dict:
     """Map the reviewed GCP topology to fixed Terraform inputs, without I/O."""
-    if request.plan.template_version != "gcp-gke-v2":
+    if request.plan.template_version != "gcp-gke-v3":
         _reject(
             "UNSUPPORTED_TEMPLATE", "plan.template_version", "Unsupported GCP template version."
         )
@@ -179,7 +179,7 @@ def preview_from_plan(plan_json: dict, request: GcpPlanInput, digest: str) -> Pr
         "GKE cluster": (
             f"Regional Standard; {request.release_channel} channel; private nodes; "
             f"control plane {request.master_cidr}; public API restricted to "
-            f"{', '.join(request.api_access_cidrs)}"
+            f"{', '.join(request.api_access_cidrs)}; Dataplane V2 (NetworkPolicy enforced)"
         ),
         "GKE node pool": (
             f"{request.node_machine_type}; {request.node_count} nodes; "

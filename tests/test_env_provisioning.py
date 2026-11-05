@@ -46,6 +46,7 @@ from test_onprem_agent import CONTENT, FakeClient, fetch, job
 from test_plan_publish import MIGRATION, publisher, register, registration, revisions, stored
 
 db, store = test_plan_publish.db, test_plan_publish.store
+platform_registry = test_plan_publish.platform_registry  # ticket 29: autouse here too
 
 NAMESPACE = WORKLOADS["namespace"]  # "cmp-prod-demo" for both ON_PREM and cloud targets
 ENV_TEXT = (

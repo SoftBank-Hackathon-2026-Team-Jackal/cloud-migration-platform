@@ -33,6 +33,7 @@ def create_worker(client: Client) -> Worker:
         terraform_bin=settings.terraform_bin,
     )
     plans = build_plan_publish_activities(SessionLocal)
+    gcp_workloads = build_gcp_workloads_activities(SessionLocal)
     return Worker(
         client,
         task_queue=PROVISIONING_QUEUE,
@@ -47,7 +48,8 @@ def create_worker(client: Client) -> Worker:
             approval.get_migration_handoff,  # ticket 13
             aws_infra.execute_aws_plan,
             build_aws_workloads_activities(SessionLocal).execute_aws_workloads,
-            build_gcp_workloads_activities(SessionLocal).execute_gcp_workloads,  # ticket 11
+            gcp_workloads.execute_gcp_workloads,  # ticket 11
+            gcp_workloads.refresh_gcp_pull_secrets,  # ticket 29: Schedule-driven refresh
             execute_on_prem_plan_activity(),  # ticket 12
             gcp_infra.execute_gcp_plan,  # ticket 10
             emit_migration_event,  # ticket 24: Workflow-side event emission

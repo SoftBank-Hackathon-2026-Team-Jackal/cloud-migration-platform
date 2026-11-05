@@ -19,6 +19,11 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Ticket 29 (I8): link the platform ECR pull Secret to the Namespace `default`
+  # ServiceAccount (create only when the controller has not made it yet).
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "create", "patch"]
   - apiGroups: [""]
     resources: ["services", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -34,6 +39,10 @@ rules:
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]
+  # Ticket 26: approved NetworkPolicies in Agent-owned Namespaces (managed label only).
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # READY checks: pg_isready inside the DB Pod and the app health path via the API proxy.
   - apiGroups: [""]
     resources: ["pods/exec"]

@@ -511,6 +511,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/jobs/{job_id}/image-pull:
+    get:
+      tags:
+      - on-premises agents
+      summary: Job Image Pull Route
+      description: 'Ticket 29: a short-lived ECR pull token for the caller''s own
+        rollout job (RUNNING, or
+
+        SUCCEEDED and still the latest approved Revision so the Agent can refresh
+        the pull Secret).
+
+        The token is only in this response (never in the job body, results, events
+        or logs).'
+      operationId: job_image_pull_route_agents__agent_id__jobs__job_id__image_pull_get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImagePullCredential'
+        '404':
+          description: '`IMAGE_PULL_NOT_FOUND`: not this Agent''s current ECR rollout
+            job'
+        '409':
+          description: Approved image outside the platform registry (code only)
+        '503':
+          description: Registry not configured or token unavailable (code only)
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agent-admin/agents/{agent_id}:
     get:
       tags:
@@ -2633,6 +2688,28 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    ImagePullCredential:
+      properties:
+        registry:
+          type: string
+          title: Registry
+        username:
+          type: string
+          title: Username
+        password:
+          type: string
+          title: Password
+        expires_at:
+          type: integer
+          title: Expires At
+      additionalProperties: false
+      type: object
+      required:
+      - registry
+      - username
+      - password
+      - expires_at
+      title: ImagePullCredential
     JobReport:
       properties:
         status:
@@ -3347,6 +3424,14 @@ components:
           $ref: '#/components/schemas/RolloutDatabase'
         application:
           $ref: '#/components/schemas/RolloutApplication'
+        network_policies:
+          anyOf:
+          - $ref: '#/components/schemas/ArtifactRef'
+          - type: 'null'
+        image_pull:
+          anyOf:
+          - $ref: '#/components/schemas/RolloutImagePull'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -3835,6 +3920,31 @@ components:
 
         own RUNNING job from `GET /agents/{id}/jobs/{job}/env-secrets` and applies
         it in the cluster.'
+    RolloutImagePull:
+      properties:
+        secret:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Secret
+        registry:
+          type: string
+          pattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com$
+          title: Registry
+      additionalProperties: false
+      type: object
+      required:
+      - secret
+      - registry
+      title: RolloutImagePull
+      description: 'Ticket 29 (I4): the approved images are in the platform ECR. The
+        Agent fetches a
+
+        short-lived credential for its job from `GET /agents/{id}/jobs/{job}/image-pull`
+        and keeps
+
+        the docker-registry Secret `secret` refreshed; no token crosses this boundary.'
     RolloutReplication:
       properties:
         capable:

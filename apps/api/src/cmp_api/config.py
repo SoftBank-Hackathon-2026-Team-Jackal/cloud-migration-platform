@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # The key is a base64url 32-byte value from the server's own `.env`, never the repository.
     env_file_store_dir: str | None = None
     env_file_encryption_key: SecretStr | None = None
+    # Ticket 29 (I1): the platform's own ECR registry host and the repositories approved images
+    # may come from (ticket 28 builds into `cmp-platform-builds`). The platform principal
+    # (`connection_platform_aws_profile`, the instance role on the demo host) mints pull tokens.
+    platform_ecr_registry: str | None = None
+    platform_ecr_repositories: str = "cmp-platform-builds"
 
 
 settings = Settings()
