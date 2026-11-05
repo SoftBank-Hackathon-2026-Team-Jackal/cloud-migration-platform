@@ -1,15 +1,14 @@
-"""Tunnel configuration exchange between on-prem Agents and relay servers (ticket 16, T2~T9).
+"""Tunnel configuration exchange between on-prem Agents and relay servers (ticket 16).
 
-The platform only relays *public* WireGuard material: Agent public keys and tunnel IPs one way,
-relay endpoints and public keys the other way. Private keys never reach any API. Results stay
-immutable (13 R3); tunnel checks are merged into the handoff view at read time (T6).
-
-Not here yet (waiting for the Traffic owner, ticket 16 "답변 대기"): the relay-side Agent list (P1)
-and filling the ON_PREM `external_endpoint` (P2).
+The platform only relays *public* WireGuard material: Agent public keys and tunnel IPs one way
+(relay polling, P1/T12), relay endpoints and public keys the other way. Private keys never reach
+any API. Results stay immutable (13 R3); tunnel checks are merged into the handoff view at read
+time (T6).
 """
 
 import hashlib
 import hmac
+import json
 import secrets
 from datetime import UTC, datetime
 from ipaddress import IPv4Network
@@ -17,10 +16,11 @@ from ipaddress import IPv4Network
 from sqlalchemy import Boolean, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
+from cmp_api.agent_registry import RegisteredAgent
 from cmp_api.db import Base
 from cmp_api.provisioning_results import ProvisioningResultRecord
 
-TUNNEL_CIDR = "10.200.0.0/24"  # T4 default; P3 may change it (config only)
+TUNNEL_CIDR = "10.200.0.0/24"  # T4, confirmed by the Traffic owner (P3)
 RELAY_HOST_OFFSET = 1  # .1 is reserved for the relay server side
 MTU = 1420
 PERSISTENT_KEEPALIVE = 25
@@ -127,39 +127,76 @@ def upsert_relay(session: Session, relay_id: str, endpoint: str, public_key: str
 
 
 def authenticate_relay(session: Session, relay_id: str, credential: str) -> RelayServer:
-    """For the relay-side Agent list (P1, pending). Constant-time digest comparison."""
+    """Relay credential check (T3) for the relay-side Agent list. Constant-time comparison."""
     relay = session.get(RelayServer, relay_id)
     if relay is None or not hmac.compare_digest(relay.credential_digest, _digest(credential)):
         raise TunnelError("RELAY_AUTH_FAILED")
     return relay
 
 
-def exposed_ports(session: Session, agent_id: str) -> list[int]:
-    """T5: PostgreSQL plus the app ports of this Agent's READY ON_PREM results."""
-    ports = {DB_PORT}
+def _app_ports(session: Session) -> dict[str, set[int]]:
+    """App ports of READY ON_PREM results, grouped by the Agent that runs them."""
+    ports: dict[str, set[int]] = {}
     rows = session.scalars(
         select(ProvisioningResultRecord).where(ProvisioningResultRecord.status == "READY")
     )
     for row in rows:
         result = row.result
-        cluster = result.get("cluster") or {}
+        agent_id = (result.get("cluster") or {}).get("agent_id")
         app = result.get("application") or {}
-        mine = result.get("provider") == "ON_PREM" and cluster.get("agent_id") == agent_id
-        if mine and app.get("port"):
-            ports.add(int(app["port"]))
-    return sorted(ports)
+        if result.get("provider") == "ON_PREM" and agent_id and app.get("port"):
+            ports.setdefault(agent_id, set()).add(int(app["port"]))
+    return ports
+
+
+def exposed_ports(session: Session, agent_id: str) -> list[int]:
+    """T5: PostgreSQL plus the app ports of this Agent's READY ON_PREM results."""
+    return sorted({DB_PORT} | _app_ports(session).get(agent_id, set()))
+
+
+def relay_peers(session: Session) -> list[dict]:
+    relays = session.scalars(select(RelayServer).order_by(RelayServer.id))
+    return [{"relay_id": r.id, "endpoint": r.endpoint, "public_key": r.public_key} for r in relays]
+
+
+def relay_agent_list(session: Session) -> dict:
+    """P1/T12: every Agent with a tunnel key, for relay polling.
+
+    Revoked Agents stay listed with `revoked: true` and no ports so the relay can remove the peer.
+    `list_version` is a digest of the list itself, so any change (new Agent, key rotation,
+    revocation, port change) yields a new value without extra bookkeeping.
+    """
+    app_ports = _app_ports(session)
+    rows = session.execute(
+        select(AgentTunnel, RegisteredAgent.revoked_at)
+        .outerjoin(RegisteredAgent, RegisteredAgent.id == AgentTunnel.agent_id)
+        .order_by(AgentTunnel.agent_id)
+    )
+    agents = []
+    for tunnel, revoked_at in rows:
+        revoked = revoked_at is not None
+        ports = [] if revoked else sorted({DB_PORT} | app_ports.get(tunnel.agent_id, set()))
+        agents.append(
+            {
+                "agent_id": tunnel.agent_id,
+                "public_key": tunnel.public_key,
+                "tunnel_ip": tunnel.tunnel_ip,
+                "allowed_ips": [f"{tunnel.tunnel_ip}/32"],
+                "allowed_ports": ports,
+                "revoked": revoked,
+            }
+        )
+    canonical = json.dumps(agents, sort_keys=True, separators=(",", ":"))
+    return {"list_version": _digest(canonical)[:16], "agents": agents}
 
 
 def agent_config(session: Session, agent_id: str) -> dict:
     tunnel = session.get(AgentTunnel, agent_id)
     if tunnel is None:
         raise TunnelError("TUNNEL_KEY_NOT_REGISTERED")
-    relays = session.scalars(select(RelayServer).order_by(RelayServer.id))
     return {
         "tunnel_ip": tunnel.tunnel_ip,
-        "relays": [
-            {"relay_id": r.id, "endpoint": r.endpoint, "public_key": r.public_key} for r in relays
-        ],
+        "relays": relay_peers(session),
         "allowed_ips": [TUNNEL_CIDR],
         "mtu": MTU,
         "persistent_keepalive": PERSISTENT_KEEPALIVE,

@@ -26,7 +26,7 @@
 | [13 실제 검증 결과와 Migration 인계](../../tickets/provisioning/13-result-handoff.md) | DONE | 12 | PROV-018, 019, 020, 021 | [#53](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/53) | ☑ |
 | [14 실패 복구와 세 대상 통합 검증](../../tickets/provisioning/14-recovery-integration.md) | DONE | 08, 09, 10, 11, 12, 13 | PROV-015, 016, 017, 018, 019, 021 | [#56](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/56) | ☑ |
 | [15 온프레미스 Agent 상시 실행과 설치 패키지](../../tickets/provisioning/15-agent-runtime-install.md) | DONE | 04A, 12 | PROV-009, 016, 017, 021 | [#69](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/69) | ☑ |
-| [16 터널 설정 교환 API와 결과 계약](../../tickets/provisioning/16-tunnel-config-exchange.md) | IN_PROGRESS (답변 대기 P1·P2 포함) | 13, 15 (중계 서버 조회 형식은 Traffic 확인) | PROV-009, 019, 020, 021 | [#70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70) | ☐ |
+| [16 터널 설정 교환 API와 결과 계약](../../tickets/provisioning/16-tunnel-config-exchange.md) | DONE | 13, 15 | PROV-009, 019, 020, 021 | [#70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70) | ☑ |
 | [17 Agent WireGuard 연결과 터널 노출 검증](../../tickets/provisioning/17-agent-wireguard-tunnel.md) | TODO | 15, 16 | PROV-009, 013, 017, 018, 021 | [#71](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/71) | ☐ |
 | [18 Plan 생성·게시와 Preview 조회 연결 (세 대상)](../../tickets/provisioning/18-onprem-plan-publish.md) | DONE | 01A, 04B, 05, 06, 07, 12, 12A, 15 | PROV-004, 005, 007, 008, 009, 014, 015, 021 | [#98](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/98) | ☑ |
 | [19 DB 연결 URL Secret 출력 (D-16)](../../tickets/provisioning/19-db-connection-url.md) | DONE | 01A, 04B, 09, 11, 12 | PROV-004, 005, 010, 012, 021 | [#79](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/79) | ☑ |
@@ -60,7 +60,7 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 
 ## 온프레미스 외부 연결 (2026-11-05, 15~17)
 
-사용자 결정: 중계 서버안(Route 53 → AWS 중계 서버의 Envoy → WireGuard → 온프레미스 K3s)을 전제로, Provisioning 범위는 외부 연결이 가능한 온프레미스 Agent까지다. 15는 Agent 상시 실행·설치, 16은 Agent·중계 서버 사이 키·설정·상태를 전달하는 플랫폼 API와 ON_PREM 결과 계약(터널 목적지), 17은 Agent 쪽 WireGuard 연결과 터널 주소 노출·검증이다. 중계 서버 내부(Envoy 라우팅·가중치, WireGuard 서버 peer 반영), DNS, 사용자 공인 주소, TLS, 롤백은 Traffic 담당이다. Traffic 담당과 확인할 것: 중계 서버의 Agent 목록 조회 형식, 터널 CIDR·주소 배정, 중계 서버 EC2의 Terraform 생성 주체, UDP 차단 환경 대응. Planning의 Plan 게시 연결(`onprem_preview`·`publish_plan_revision` 운영 호출)은 18(#98)이 세 대상으로 넓혀 구현했다. 웹 Agent 등록 화면은 범위 밖이다.
+사용자 결정: 중계 서버안(Route 53 → AWS 중계 서버의 Envoy → WireGuard → 온프레미스 K3s)을 전제로, Provisioning 범위는 외부 연결이 가능한 온프레미스 Agent까지다. 15는 Agent 상시 실행·설치, 16은 Agent·중계 서버 사이 키·설정·상태를 전달하는 플랫폼 API와 ON_PREM 결과 계약(터널 목적지), 17은 Agent 쪽 WireGuard 연결과 터널 주소 노출·검증이다. 중계 서버 내부(Envoy 라우팅·가중치, WireGuard 서버 peer 반영), DNS, 사용자 공인 주소, TLS, 롤백은 Traffic 담당이다. Traffic 담당 답변(2026-11-05): 중계 서버는 Agent 목록을 폴링, 터널 `10.200.0.0/24`·중계 서버 `.1`·MTU 1420, 중계 서버 EC2는 Traffic 담당이 생성, 온프레미스 앱 포트는 그대로 전달(16 T10~T13). UDP 차단 환경 대응은 아직 남은 확인 사항이다. Planning의 Plan 게시 연결(`onprem_preview`·`publish_plan_revision` 운영 호출)은 18(#98)이 세 대상으로 넓혀 구현했다. 웹 Agent 등록 화면은 범위 밖이다.
 
 ## 현재 진행 방식
 

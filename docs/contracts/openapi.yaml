@@ -844,6 +844,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /relays/{relay_id}/agents:
+    get:
+      tags:
+      - tunnels
+      summary: Get Relay Agents
+      description: 'P1: polled by the relay. Bearer = the relay credential returned
+        at registration (T3).'
+      operationId: get_relay_agents_relays__relay_id__agents_get
+      parameters:
+      - name: relay_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Relay Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelayAgentList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/migrations/{migration_id}/planning-input:
     put:
       tags:
@@ -2017,6 +2053,54 @@ components:
       - agent_id
       - credential
       title: RegistrationResponse
+    RelayAgent:
+      properties:
+        agent_id:
+          type: string
+          title: Agent Id
+        public_key:
+          type: string
+          title: Public Key
+        tunnel_ip:
+          type: string
+          title: Tunnel Ip
+        allowed_ips:
+          items:
+            type: string
+          type: array
+          title: Allowed Ips
+        allowed_ports:
+          items:
+            type: integer
+          type: array
+          title: Allowed Ports
+        revoked:
+          type: boolean
+          title: Revoked
+      type: object
+      required:
+      - agent_id
+      - public_key
+      - tunnel_ip
+      - allowed_ips
+      - allowed_ports
+      - revoked
+      title: RelayAgent
+    RelayAgentList:
+      properties:
+        list_version:
+          type: string
+          title: List Version
+        agents:
+          items:
+            $ref: '#/components/schemas/RelayAgent'
+          type: array
+          title: Agents
+      type: object
+      required:
+      - list_version
+      - agents
+      title: RelayAgentList
     RelayPeer:
       properties:
         relay_id:
@@ -2487,12 +2571,18 @@ components:
         tunnel_ip:
           type: string
           title: Tunnel Ip
+        relays:
+          items:
+            $ref: '#/components/schemas/RelayPeer'
+          type: array
+          title: Relays
         config_version:
           type: integer
           title: Config Version
       type: object
       required:
       - tunnel_ip
+      - relays
       - config_version
       title: TunnelKeyResponse
     TunnelStatusReport:

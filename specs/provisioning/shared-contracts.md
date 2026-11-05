@@ -106,9 +106,9 @@ identity = approval_target(manifest, preview)
 
 `cmp_contracts.provisioning_result.ProvisioningResult` v1이 Provisioning → Data/Traffic Migration 인계 계약이다. `cmp_providers.provisioning_result`의 `build_provisioning_result`(실행 상태·코드·단계·refs → 결과), `handoff`(소비자별 뷰·`proceed`/`blocked_by`), `public_summary`(사용자 요약)는 순수 함수다. 저장·조회는 `cmp_api.provisioning_results`(`add_result`/`load_result`, 테이블 `provisioning_results`), Worker 진입점은 Activity `get_migration_handoff`, 사용자 조회는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`다. 필드·판정 규칙은 [티켓 13 결정 R1~R10](../../tickets/provisioning/13-result-handoff.md#착수-결정-2026-11-05)을 따른다. Provider 실행 refs의 표준 키(R4)는 이 결과의 입력이며 기존 키는 유지한다.
 
-## 터널 설정 교환 (16, 진행 중)
+## 터널 설정 교환 (16)
 
-`cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`가 추가됐다. `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합치며, Data 인계는 터널 경유 DB 접속 확인 뒤에만 진행한다. 중계 서버용 Agent 목록과 ON_PREM `external_endpoint`는 Traffic 담당 답변을 기다린다([티켓 16 답변 대기](../../tickets/provisioning/16-tunnel-config-exchange.md)).
+`cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록(응답에 중계 서버 목록 포함)·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록·중계 서버용 Agent 목록(`GET /relays/{relay_id}/agents`, 중계 서버 자격 증명, 폐기 Agent는 `revoked: true`로 남음, 내용 digest인 `list_version`)을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`와 `ApplicationHandoff.external_host`·`external_port`가 추가됐다. `external_endpoint`는 "중계 서버가 전달할 목적지"이며 호환을 위해 유지하고, 같은 목적지를 host·port로도 준다(AWS/GCP는 LB 주소·80). `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합친다. Data 인계는 터널 경유 DB 접속 확인 뒤, Traffic 인계는 터널 경유 앱 헬스 확인 뒤(`http://터널IP:앱포트`)에만 진행한다. 중계 서버 공인 주소는 어느 인계 필드에도 없다. 상세는 [티켓 16 T1~T13](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.
 
 ## Plan 생성·게시와 Preview 조회 (18)
 

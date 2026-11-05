@@ -7,6 +7,7 @@ order and stops at the first failure, so the check list is inferred from that or
 """
 
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from cmp_contracts.plan import PlanManifest
 from cmp_contracts.provisioning_result import (
@@ -24,6 +25,7 @@ from cmp_contracts.provisioning_result import (
 DEPLOY, VERIFY = "WORKLOAD_DEPLOY", "POST_DEPLOY_VERIFICATION"
 
 # (layer, name, stage when it fails, failure codes) in execution order.
+DEFAULT_HEALTH_PATH = "/health"  # P2: relay health check path when the Plan has none
 INFRA_CHECKS = [
     (
         "INFRASTRUCTURE",
@@ -262,6 +264,14 @@ def _database(provider, namespace, refs, ready) -> DatabaseHandoff:
     )
 
 
+def forward_target(endpoint: str | None) -> tuple[str | None, int | None]:
+    """T10: split an `http://host[:port]` forward destination into host and port."""
+    if not endpoint:
+        return None, None
+    parts = urlsplit(endpoint)
+    return parts.hostname, parts.port or 80
+
+
 def _application(provider, refs, ready) -> ApplicationHandoff:
     ingress = None
     if provider == "AWS" and (refs.get("ingress") or refs.get("alb_hostname")):
@@ -270,11 +280,15 @@ def _application(provider, refs, ready) -> ApplicationHandoff:
         ingress = IngressRef(
             kind="GKE_INGRESS", name=refs.get("ingress"), address=refs.get("ingress_ip")
         )
+    external = refs.get("app_external_endpoint")
+    host, port = forward_target(external)
     return ApplicationHandoff(
         release=refs.get("app_release"),
         image=refs.get("app_image"),
         internal_endpoint=refs.get("app_internal_endpoint"),
-        external_endpoint=refs.get("app_external_endpoint"),
+        external_endpoint=external,
+        external_host=host,
+        external_port=port,
         ingress=ingress,
         port=_int(refs.get("app_port")),
         health_path=refs.get("app_health_path"),
@@ -407,12 +421,24 @@ def handoff(
         view["database"] = database
     else:
         app = result.application
+        application = app.model_dump(mode="json") if app else None
+        # Ticket 16 T11 (P2): ON_PREM forwards to the tunnel-side app port as-is, but only once
+        # the Agent reported a healthy app over the tunnel.
+        onprem_ready = result.status == "READY" and result.provider == "ON_PREM"
+        if onprem_ready and app and app.ready and app.port and tunnel and tunnel["app_health_ok"]:
+            host = tunnel["tunnel_ip"]
+            application |= {
+                "external_endpoint": f"http://{host}:{app.port}",
+                "external_host": host,
+                "external_port": app.port,
+                "health_path": app.health_path or DEFAULT_HEALTH_PATH,
+            }
         if result.status == "READY":
             if not (app and app.ready):
                 blocked.append("APPLICATION_NOT_READY")
-            elif not app.external_endpoint:
+            elif not application["external_endpoint"]:
                 blocked.append("EXTERNAL_ENDPOINT_UNAVAILABLE")
-        view["application"] = app.model_dump(mode="json") if app else None
+        view["application"] = application
     return {**view, "proceed": not blocked, "blocked_by": blocked}
 
 
