@@ -147,8 +147,21 @@ class EnvoyProxy:
             if "name" in item
         }
 
+    def _next_version(self) -> int:
+        """직전 번호보다 큰 번호. Activity마다 새 인스턴스가 만들어져도 1부터 다시 시작하지 않는다.
+
+        번호가 겹치면 Envoy의 version_text가 이미 그 값이라 "적용됐다"는 확인이 무의미해진다.
+        기존 파일의 번호와 현재 시각(초)보다도 크게 잡아, 파일이 없는 새 중계 서버에서도 안전하다.
+        """
+        floor = self.version
+        try:
+            floor = max(floor, int(json.loads(self.rds_path.read_text())["version_info"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        return max(floor + 1, int(time.time()))
+
     def apply(self, weights: dict[str, int]) -> None:
-        version = self.version + 1
+        version = self._next_version()
         doc = build_route_config(weights, version, self.target_host)
         try:
             before = self._rds_stats()

@@ -79,10 +79,22 @@ def make_proxy(tmp_path: Path, mode: str = "accept") -> tuple[EnvoyProxy, Path]:
 def test_apply_writes_the_config_and_returns_once_envoy_reports_that_version(tmp_path) -> None:
     proxy, rds = make_proxy(tmp_path)
     proxy.apply({"origin": 90, "target": 10})
-    assert json.loads(rds.read_text())["version_info"] == "1"
+    first = int(json.loads(rds.read_text())["version_info"])
     proxy.apply({"origin": 50, "target": 50})
-    assert json.loads(rds.read_text())["version_info"] == "2"
+    assert int(json.loads(rds.read_text())["version_info"]) > first
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_a_new_proxy_instance_never_reuses_the_version_envoy_already_reported(tmp_path) -> None:
+    """Activity마다 EnvoyProxy를 새로 만든다. 번호가 1부터 다시 시작하면 확인이 무의미해진다."""
+    rds = tmp_path / "rds.json"
+    admin = FakeAdmin(rds)
+    seen: list[str] = []
+    for weights in ({"origin": 100, "target": 0}, {"origin": 90, "target": 10}):
+        proxy = EnvoyProxy(rds_path=rds, fetch=admin, confirm_timeout=0.05, poll_interval=0.01)
+        proxy.apply(weights)
+        seen.append(json.loads(rds.read_text())["version_info"])
+    assert seen[0] != seen[1]
 
 
 def test_apply_raises_when_envoy_rejects_the_config(tmp_path) -> None:
