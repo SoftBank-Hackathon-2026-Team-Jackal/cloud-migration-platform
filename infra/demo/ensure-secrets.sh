@@ -22,6 +22,7 @@ ensure_key PLATFORM_DB_PASSWORD 24
 ensure_key TEMPORAL_DB_PASSWORD 24
 ensure_key AGENT_ENROLLMENT_ADMIN_KEY 32
 ensure_key APPROVAL_ADMIN_KEY 32
+ensure_key WEB_AUTH_SECRET 32
 
 env_value() {
   sed -n "s/^$1=//p" "$env_file" | tail -n 1

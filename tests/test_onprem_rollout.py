@@ -314,3 +314,50 @@ async def test_approval_workflow_dispatches_on_prem_and_records_ready(db, store,
             "demo-db.cmp-prod-demo.svc:5432"
         )
     assert len(jobs(db)) == 1
+
+
+@pytest.mark.parametrize(
+    ("replication", "capable", "code"),
+    [
+        ({"capable": True, "code": None}, "true", None),
+        ({"capable": False, "code": "WAL_LEVEL_NOT_LOGICAL"}, "false", "WAL_LEVEL_NOT_LOGICAL"),
+        (None, None, None),  # older Agent: not verified
+    ],
+)
+async def test_agent_replication_check_becomes_handoff_refs(
+    db, store, setup, replication, capable, code
+):
+    """Ticket 27: the Agent reports its replication check with READY; refs carry it."""
+    await run(db, store, setup["request"], wait=0.05)
+    with db() as session:
+        claimed = poll_job(session, agent_id="agent-a", credential=setup["credential"])
+        report_job(
+            session,
+            agent_id="agent-a",
+            credential=setup["credential"],
+            job_id=claimed["job_id"],
+            status="SUCCEEDED",
+            result={"code": "READY"} | ({"replication": replication} if replication else {}),
+        )
+    outcome = await run(db, store, setup["request"])
+    assert outcome["code"] == "READY"
+    refs = outcome["resource_refs"]
+    assert refs.get("db_replication_capable") == capable
+    assert refs.get("db_replication_code") == code
+
+
+async def test_replication_is_accepted_only_with_a_ready_report(db, store, setup):
+    from cmp_api.agent_registry import AgentRegistrationError
+
+    await run(db, store, setup["request"], wait=0.05)
+    with db() as session:
+        claimed = poll_job(session, agent_id="agent-a", credential=setup["credential"])
+        with pytest.raises(AgentRegistrationError, match="INVALID_JOB_RESULT"):
+            report_job(
+                session,
+                agent_id="agent-a",
+                credential=setup["credential"],
+                job_id=claimed["job_id"],
+                status="FAILED",
+                result={"code": "PVC_NOT_BOUND", "replication": {"capable": True}},
+            )

@@ -15,13 +15,9 @@ import urllib.request
 from pathlib import Path
 
 from cmp_providers.artifacts import canonical_json_bytes
+from cmp_providers.db_replication import DB_PROBE
 
 FIELD_MANAGER = "cmp-provisioning"
-DB_PROBE = (
-    'PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB" '
-    "-v ON_ERROR_STOP=1 -tAc \"select current_setting('server_version_num') || '|' || "
-    '(select (rolreplication or rolsuper)::text from pg_roles where rolname = current_user)"'
-)
 
 
 class CommandError(RuntimeError):

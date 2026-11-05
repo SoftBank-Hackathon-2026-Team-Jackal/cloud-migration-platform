@@ -31,6 +31,7 @@ from cmp_contracts.shared_deployment_v2 import SecretRefV2
 from cmp_providers.application import prepare_application, resolve_application, verify_application
 from cmp_providers.artifacts import canonical_json_bytes, verify_artifact_bytes
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url, connection_url_secret_name
+from cmp_providers.db_replication import judge_probe
 from cmp_providers.env_file import (
     DbOutputRefs,
     EnvFileError,
@@ -627,7 +628,7 @@ class ApprovedWorkloads:
                     )
                 except Exception:  # noqa: BLE001 - psql output is never surfaced
                     raise WorkloadFailure("DB_CONNECT_FAILED") from None
-                version, _, replication = probe.strip().partition("|")
+                version, replication, replication_code = judge_probe(probe)
                 if not version.startswith("16") or len(version) != 6:
                     raise WorkloadFailure("DB_VERSION_MISMATCH")
             refs.update(
@@ -635,10 +636,12 @@ class ApprovedWorkloads:
                 db_port="5432",
                 db_name=db.database.name,
                 db_user=db.database.username,
-                db_replication_capable="true" if replication == "true" else "false",
+                db_replication_capable="true" if replication else "false",
                 db_version=db.database.version,  # ticket 13 R4
                 db_storage_size_gib=str(db.storage.size_gib),
             )
+            if replication_code:  # ticket 27: why the target cannot publish yet
+                refs["db_replication_code"] = replication_code
 
             name = app["release_name"]
             await self._release(

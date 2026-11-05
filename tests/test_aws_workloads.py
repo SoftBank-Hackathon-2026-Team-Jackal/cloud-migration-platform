@@ -253,7 +253,7 @@ class FakeCluster(NetworkPolicyFake):
         self.lb_controller_calls: list[ClusterTarget] = []
         self.pvc_phase = "Bound"
         self.waiting_reason: str | None = None
-        self.db_probe = "160004|true"
+        self.db_probe = "160004|true|logical|10|10"
         self.internal_health = True
         self.alb_host: str | None = ALB
         self.trace: list[str] = []
@@ -855,3 +855,24 @@ async def test_approval_workflow_records_failed_readiness_without_ready(
     status, refs = _marker(db, plan)
     assert status == "FAILED"
     assert "app_external_endpoint" not in refs
+
+
+@pytest.mark.parametrize(
+    ("probe", "capable", "code"),
+    [
+        ("160004|true|logical|10|10", "true", None),
+        ("160004|true|replica|10|10", "false", "WAL_LEVEL_NOT_LOGICAL"),
+        ("160004|false|logical|10|10", "false", "REPLICATION_ROLE_MISSING"),
+    ],
+)
+async def test_replication_capable_checks_role_and_server_settings(
+    tmp_path, db, cluster, runtime, probe, capable, code
+):
+    """Ticket 27: a superuser on `wal_level=replica` is READY but not replication capable."""
+    cluster.db_probe = probe
+    plan = Plan(tmp_path / "artifacts", db)
+    result = await run(activity_for(db, tmp_path / "artifacts", runtime), plan.request())
+    assert (result["status"], result["code"]) == ("SUCCEEDED", "WORKLOADS_READY")
+    refs = result["resource_refs"]
+    assert refs["db_replication_capable"] == capable
+    assert refs.get("db_replication_code") == code

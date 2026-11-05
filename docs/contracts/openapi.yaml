@@ -2650,6 +2650,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/ProbeObservation'
           - type: 'null'
+        replication:
+          anyOf:
+          - $ref: '#/components/schemas/RolloutReplication'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -3835,6 +3839,24 @@ components:
 
         own RUNNING job from `GET /agents/{id}/jobs/{job}/env-secrets` and applies
         it in the cluster.'
+    RolloutReplication:
+      properties:
+        capable:
+          type: boolean
+          title: Capable
+        code:
+          anyOf:
+          - type: string
+            pattern: ^[A-Z0-9_]{1,64}$
+          - type: 'null'
+          title: Code
+      additionalProperties: false
+      type: object
+      required:
+      - capable
+      title: RolloutReplication
+      description: 'Ticket 27: the Agent''s replication-capable check, reported with
+        a READY rollout.'
     RolloutStatusResponse:
       properties:
         plan_id:

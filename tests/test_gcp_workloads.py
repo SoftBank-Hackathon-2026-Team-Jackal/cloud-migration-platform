@@ -230,7 +230,7 @@ class FakeCluster(NetworkPolicyFake):
         self.applied: list[dict] = []
         self.pvc_phase = "Bound"
         self.waiting_reason: str | None = None
-        self.db_probe = "160004|true"
+        self.db_probe = "160004|true|logical|10|10"
         self.internal_health = True
         self.ingress_ip: str | None = INGRESS_IP
         self.trace: list[str] = []
