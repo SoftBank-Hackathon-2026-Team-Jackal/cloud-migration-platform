@@ -11,6 +11,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from cmp_contracts.events import TERMINAL_STATUSES, MigrationEvent, utc_now
+from cmp_contracts.migration import WEB_PHASE
 from sqlalchemy.orm import Session
 
 from cmp_api.migration_events import list_events
@@ -23,19 +24,9 @@ PAGE = 500
 
 StatusReader = Callable[[str], Awaitable[dict | None]]
 
-# MigrationWorkflow phase -> web BackendPhase (E17)
-WEB_PHASE = {
-    "analysis": "analysis",
-    "sandbox": "build",
-    "build": "build",
-    "planning": "planning",
-    "awaiting_approval": "awaiting_approval",
-    "provisioning": "provisioning",
-    "data_copy": "data_copy",
-    "traffic": "traffic",
-    "verification": "verification",
-}
-RUNNING_PHASES = {"created", *WEB_PHASE} - {"awaiting_approval"}
+# MigrationWorkflow phase -> web BackendPhase (E17): one table, `cmp_contracts.migration.WEB_PHASE`
+# (ticket 49 N3: `planning_handoff`/`workload_planning` are in progress, not failures).
+RUNNING_PHASES = set(WEB_PHASE) - {"awaiting_approval"}
 
 
 class StatusUnavailable(Exception):
@@ -105,7 +96,8 @@ def snapshot(
     if events:
         phase = events[-1].phase
     else:
-        phase = WEB_PHASE.get((state or {}).get("phase"), "analysis")
+        state = state or {}  # ticket 49 F9: a failure snapshot shows the failed phase
+        phase = WEB_PHASE.get(state.get("phase")) or state.get("failure_phase") or "analysis"
     return {
         "seq": seq,
         "at": utc_now(),

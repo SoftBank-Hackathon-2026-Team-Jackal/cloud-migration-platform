@@ -26,6 +26,15 @@ DB_ACTIVITY = {
     "start_to_close_timeout": timedelta(minutes=2),
     "retry_policy": RetryPolicy(maximum_attempts=3),
 }
+# Ticket 49 F11: recording the result is idempotent (a finished marker is never rewritten), so a
+# database outage is retried for hours instead of leaving the RUNNING marker behind.
+COMPLETE_ACTIVITY = {
+    "task_queue": PROVISIONING_QUEUE,
+    "start_to_close_timeout": timedelta(minutes=2),
+    "schedule_to_close_timeout": timedelta(hours=6),
+    "retry_policy": RetryPolicy(maximum_interval=timedelta(minutes=5)),
+}
+EXECUTION_RECORD_PATCH = "execution-record-v1"
 PROVIDER_ACTIVITY = {
     "task_queue": PROVISIONING_QUEUE,
     "start_to_close_timeout": timedelta(hours=2),
@@ -58,9 +67,9 @@ class ProvisioningApprovalWorkflow:
         self.code = outcome["code"]
         return outcome
 
-    async def _shielded(self, name: str, arg) -> tuple[dict, bool]:
+    async def _shielded(self, name: str, arg, options: dict = DB_ACTIVITY) -> tuple[dict, bool]:
         """Run a DB Activity to completion even if the Workflow is cancelled meanwhile."""
-        task = asyncio.ensure_future(workflow.execute_activity(name, arg, **DB_ACTIVITY))
+        task = asyncio.ensure_future(workflow.execute_activity(name, arg, **options))
         cancelled = False
         while True:
             try:
@@ -117,16 +126,21 @@ class ProvisioningApprovalWorkflow:
                 break
             code = result["code"]
 
-        await self._shielded(
-            "complete_approved_execution",
-            {
-                "approval_id": self.approval_id,
-                "status": status,
-                "code": code,
-                "resource_refs": refs,
-                "step": step,
-            },
-        )
+        record = {
+            "approval_id": self.approval_id,
+            "status": status,
+            "code": code,
+            "resource_refs": refs,
+            "step": step,
+        }
+        if workflow.patched(EXECUTION_RECORD_PATCH):
+            try:
+                await self._shielded("complete_approved_execution", record, COMPLETE_ACTIVITY)
+            except ActivityError:
+                # The marker stays RUNNING ("may have run, inspect"); the parent gets a code.
+                status, code = "UNKNOWN", "EXECUTION_RECORD_FAILED"
+        else:
+            await self._shielded("complete_approved_execution", record)
         final = "EXECUTED" if status == "SUCCEEDED" else status
         return self._finish(
             {

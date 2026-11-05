@@ -107,7 +107,19 @@ def log_event(
 @activity.defn(name="emit_migration_event")
 async def emit_migration_event(request: dict) -> int | None:
     """For Workflow code that must emit: `{migration_id, type, phase, status, data, progress?,
-    idempotency_key?}` → stored `seq` (None when rejected). Registered on the Provisioning queue."""
+    idempotency_key?, log?: {level, code, fields}}` → stored `seq` (None when rejected).
+    Registered on the Provisioning queue. `log` also writes an operational log (ticket 49)."""
+    entry = request.get("log")
+    if entry is not None:
+        actor = _actor()
+        await asyncio.to_thread(
+            _emitter.log,
+            request["migration_id"],
+            entry["level"],
+            entry["code"],
+            entry.get("fields"),
+            actor=actor,
+        )
     event = await emit_event_async(
         request["migration_id"],
         request["type"],

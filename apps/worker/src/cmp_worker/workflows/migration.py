@@ -3,9 +3,16 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import CancelledError, ChildWorkflowError, WorkflowAlreadyStartedError
+from temporalio.exceptions import (
+    ActivityError,
+    CancelledError,
+    ChildWorkflowError,
+    WorkflowAlreadyStartedError,
+    is_cancelled_exception,
+)
 
 with workflow.unsafe.imports_passed_through():
+    from cmp_contracts.migration import FAILURE_OUTCOMES, OUTCOME_PHASE, WEB_PHASE
     from cmp_contracts.plan_publish import (
         DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         PLAN_PATCH,
@@ -33,6 +40,16 @@ with workflow.unsafe.imports_passed_through():
 # Planning inputs. Only the reference travels; values stay in the encrypted store.
 ENV_FILE_REF_PATCH = "env-file-ref-v1"
 
+# Ticket 49 F6: a failed run reports one `error` event and a `MIGRATION_FAILED` log.
+FAILURE_EVENT_PATCH = "failure-event-v1"
+# F7: reporting is observation; it never changes the outcome (events E9).
+REPORT_ACTIVITY = {
+    "task_queue": WORKFLOW_QUEUE,  # the Workflow worker also hosts `emit_migration_event`
+    "start_to_close_timeout": timedelta(seconds=30),
+    "schedule_to_close_timeout": timedelta(minutes=2),
+    "retry_policy": RetryPolicy(maximum_attempts=3),
+}
+
 PUBLISH_ACTIVITY = {
     "task_queue": PROVISIONING_QUEUE,
     "start_to_close_timeout": timedelta(hours=1),
@@ -44,6 +61,7 @@ PUBLISH_ACTIVITY = {
 @workflow.defn
 class MigrationWorkflow:
     def __init__(self) -> None:
+        self.stage = "created"  # ticket 49 F4: last in-progress phase (where a failure happened)
         self.phase = "created"
         self.approved = False
         self.cancel_requested = False
@@ -54,6 +72,18 @@ class MigrationWorkflow:
         self.failure_code: str | None = None
         self.pipeline: dict | None = None  # ticket 21: references the real pipeline produced
         self.env_file_ref: dict | None = None  # ENV-02: {id, version, sha256}, never values
+        self.failure_phase: str | None = None  # ticket 49: web phase of the failure
+        self.failure_issues: list[str] = []  # ticket 49 F3: detailed codes (Plan issues)
+
+    @property
+    def phase(self) -> str:
+        return self._phase
+
+    @phase.setter
+    def phase(self, value: str) -> None:
+        if value in WEB_PHASE:
+            self.stage = value
+        self._phase = value
 
     @workflow.signal
     def sandbox_review_pending(self, pending: bool) -> None:
@@ -80,6 +110,8 @@ class MigrationWorkflow:
             "infrastructure_plan": self.infrastructure_plan,
             "review_pending": self.review_pending,  # ticket 14B: in progress, not terminal
             "failure_code": self.failure_code,
+            "failure_phase": self.failure_phase,
+            "failure_issues": self.failure_issues,
             "pipeline": self.pipeline,
             "env_file_ref": self.env_file_ref,
         }
@@ -155,6 +187,7 @@ class MigrationWorkflow:
         """Wait for the published Revision's approval child; return a terminal phase/"executed"."""
         self.plan_code = published["code"]
         if published["status"] != "PUBLISHED":
+            self.failure_issues = list(published.get("issues") or [])  # ticket 49 F3
             return "plan_failed"
         self.plan = {"plan_id": published["plan_id"], "revision": published["revision"]}
         if self.cancel_requested:
@@ -211,6 +244,56 @@ class MigrationWorkflow:
 
     @workflow.run
     async def run(self, data: str | dict) -> str:
+        """Ticket 49: `_run` plus failure reporting. The result string is unchanged (F5)."""
+        try:
+            outcome = await self._run(data)
+        except Exception as exc:
+            if is_cancelled_exception(exc) or not workflow.patched(FAILURE_EVENT_PATCH):
+                raise
+            self._record_failure("failed", _exception_code(exc))
+            self.phase = "failed"
+            await self._report_failure("failed")
+            raise  # the Temporal execution stays Failed
+        if outcome in FAILURE_OUTCOMES and workflow.patched(FAILURE_EVENT_PATCH):
+            self._record_failure(outcome, self.plan_code)
+            await self._report_failure(outcome)
+        return outcome
+
+    def _record_failure(self, outcome: str, code: str | None) -> None:
+        """F2/F4: keep the first known code; the phase is where the run stopped."""
+        self.failure_code = self.failure_code or code or outcome.upper()
+        self.failure_phase = OUTCOME_PHASE.get(outcome) or WEB_PHASE[self.stage]
+
+    async def _report_failure(self, outcome: str) -> None:
+        """F1/F3/F7: one web `error` event and an operational log; never raises."""
+        code, phase = self.failure_code, self.failure_phase
+        try:
+            await workflow.execute_activity(
+                "emit_migration_event",
+                {
+                    "migration_id": workflow.info().workflow_id,
+                    "type": "error",
+                    "phase": phase,
+                    "status": "failed",
+                    "data": {"code": code, "message": "", "phase": phase, "retryable": False},
+                    "idempotency_key": f"failure:{code}",
+                    "log": {
+                        "level": "error",
+                        "code": "MIGRATION_FAILED",
+                        "fields": {
+                            "outcome": outcome,
+                            "code": code,
+                            "phase": phase,
+                            "issues": self.failure_issues,
+                        },
+                    },
+                },
+                **REPORT_ACTIVITY,
+            )
+        except ActivityError:
+            workflow.logger.warning("failure event not stored", extra={"code": code})
+
+    async def _run(self, data: str | dict) -> str:
         # A string is the project ID of the scaffold run. A dict with "analysis" is the real
         # pipeline input: {"project_id", "analysis": AnalysisInput, "sandbox": SandboxSettings,
         # "planning"?, "env_file_ref"?} (tickets 21, 15, ENV-02). A dict without "analysis" is
@@ -394,3 +477,12 @@ class MigrationWorkflow:
 
         self.phase = "scaffold_complete"
         return "scaffold_complete"
+
+
+def _exception_code(exc: BaseException) -> str:
+    """F2: a code for an unhandled failure. Exception messages may hold secrets: never kept."""
+    if isinstance(exc, ChildWorkflowError):
+        return "CHILD_WORKFLOW_FAILED"
+    if isinstance(exc, ActivityError):
+        return "ACTIVITY_FAILED"
+    return "WORKFLOW_FAILED"

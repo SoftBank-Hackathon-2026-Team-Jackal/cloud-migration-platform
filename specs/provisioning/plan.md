@@ -242,6 +242,8 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 | PostgreSQL PVC Pending | StorageClass·CSI·용량·Pod 이벤트 확인, READY 금지 |
 | Agent 연결 끊김 | 작업 ID·Agent 상태 유지, 재연결 후 조회. 중복 제출 억제 |
 | 헬스·DB·외부 접근 실패 | 실패 검사와 실제 리소스 상태 반환, Data/Traffic 진행 차단 |
+| Migration 실패 종료·강제 종료 | 실패 코드·단계·세부 코드 보존, 웹 `error` 이벤트, 상태 API·SSE는 Temporal 실행 상태 반영(티켓 49) |
+| claim 응답 유실·complete 실패 | 같은 승인 Workflow 실행의 claim 재시도는 다시 `CLAIMED`(`claimed_by`), complete는 6시간까지 재시도 뒤 `UNKNOWN`/`EXECUTION_RECORD_FAILED`(티켓 49) |
 
 **14 구현 (#56):** 복구는 같은 Revision 재실행이 아니라 실제 상태 확인 후 새 Revision 승인으로만 한다. 인프라 복구 Plan은 같은 환경 State의 기존 자원을 NO_CHANGE로 유지하고 부족한 자원만 만든다(`RECOVERY_CONTINUATION`). Workflow 취소는 `UNKNOWN`/`EXECUTION_CANCELLED`로 기록하며 삭제로 표시하지 않는다. 결정 F1~F9와 실측 증거는 [티켓 14](../../tickets/provisioning/14-recovery-integration.md)에 있다.
 

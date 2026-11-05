@@ -42,4 +42,5 @@ Blocked by: 07, 13, 18 (DONE). 22(PR #117)·23(#123)은 main에 반영됐고 이
 - PoC 브리지: `cmp_worker.poc_bridge`(패널 `/api/state`·switchover 결과·실패 stderr).
 - 안내서: `docs/engineering/events-guide.md`(파트별 발행표, PoC 브리지, "아직 없음").
 - 결정 필요: `Evidence.kind` ↔ 웹 `via` 대응(승철님), 롤백 기준 #61 vs #63(상헌님). 웹 쪽 후속(민서): `event: status` 블록 건너뛰기 또는 `?legacy=false`, PoC fast 순서(3·4·6 동시) 표시.
+- 후속: [49](49-failure-visibility.md)(#184)가 Workflow 실패 종료 `error` 이벤트, 실행 상태 반영(E18~E20), `planning_handoff`·`workload_planning` 대응(N3)을 더했다.
 - 미검증: PostgreSQL 대상 Alembic·동시성, Temporal 서버 스모크, 실제 Terraform `-json` 스트리밍(가짜 runner로만 확인).

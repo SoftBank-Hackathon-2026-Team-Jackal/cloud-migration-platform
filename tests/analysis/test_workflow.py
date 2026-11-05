@@ -256,7 +256,8 @@ async def test_child_failure_or_parent_cancel(fail):
             if fail:
                 with pytest.raises(WorkflowFailureError):
                     await handle.result()
-                assert (await handle.query("status"))["phase"] == "analysis"
+                state = await handle.query("status")  # ticket 49: failed, not "analysis"
+                assert (state["phase"], state["failure_phase"]) == ("failed", "analysis")
             else:
                 await handle.signal(MigrationWorkflow.request_cancel)
                 assert await handle.result() == "cancelled"

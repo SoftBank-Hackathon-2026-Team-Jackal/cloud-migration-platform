@@ -21,9 +21,9 @@ class ApprovalActivities:
         # Ticket 25 F4: tunnel freshness is judged at read time; tests inject the clock.
         self._clock = clock
 
-    def _claim(self, approval_id: str) -> dict:
+    def _claim(self, approval_id: str, claimant: str) -> dict:
         with self._session_factory() as session:
-            return claim_execution(session, approval_id)
+            return claim_execution(session, approval_id, claimant=claimant)
 
     def _complete(self, result: dict) -> dict:
         with self._session_factory() as session:
@@ -51,7 +51,9 @@ class ApprovalActivities:
 
     @activity.defn(name="claim_approved_execution")
     async def claim_approved_execution(self, approval_id: str) -> dict:
-        return await asyncio.to_thread(self._claim, approval_id)
+        info = activity.info()  # ticket 49 F10: a retried claim of this run is not a second run
+        claimant = f"{info.workflow_id}/{info.workflow_run_id}"
+        return await asyncio.to_thread(self._claim, approval_id, claimant)
 
     @activity.defn(name="complete_approved_execution")
     async def complete_approved_execution(self, result: dict) -> dict:
