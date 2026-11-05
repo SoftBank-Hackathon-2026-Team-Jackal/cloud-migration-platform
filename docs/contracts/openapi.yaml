@@ -2917,6 +2917,12 @@ components:
           - type: string
           - type: 'null'
           title: Failure Code
+        data_migration:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Data Migration
         failure_phase:
           anyOf:
           - type: string
