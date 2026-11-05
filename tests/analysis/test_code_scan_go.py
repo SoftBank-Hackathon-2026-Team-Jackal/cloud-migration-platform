@@ -68,3 +68,12 @@ def test_credentials_inside_a_literal_url_never_reach_the_result(tmp_path):
     scan = scan_code(tmp_path, {}, [GoAdapter()])
     assert [s.target for s in scan.call_sites] == ["vault.example.org:8200"]
     assert "p4ssw0rd" not in scan.model_dump_json()
+
+
+def test_external_host_sites_record_the_url_scheme_so_the_port_can_be_inferred():
+    scan = scan_code(APP, {}, [GoAdapter()])
+    schemes = {s.target: s.detail for s in scan.call_sites if s.kind == "EXTERNAL_HOST"}
+    assert schemes == {
+        "api.payments.example.com": "https",
+        "internal-billing.example.net:8443": "http",
+    }
