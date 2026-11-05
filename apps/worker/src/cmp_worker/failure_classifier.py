@@ -46,15 +46,18 @@ class Classification:
 
 def classify_failure(signals: AttemptSignals) -> Classification:
     code = signals.sandbox_error
+    # A command that failed while the pods show an application cause (readiness failing, crash
+    # loop) is the application's problem, not the environment's.
+    app_failed_to_start = code == "CLUSTER_COMMAND_FAILED" and signals.app_cause_in_pod
     # (0) The environment itself failed.
-    if code in INFRA_SANDBOX_CODES:
+    if code in INFRA_SANDBOX_CODES and not app_failed_to_start:
         return Classification("INFRA", [f"SANDBOX:{code}"])
     pulls = sorted(set(signals.pod_events) & INFRA_POD_EVENTS)
     if pulls:
         return Classification("INFRA", [f"POD_EVENT:{e}" for e in pulls])
     if signals.build_failure_class == "INFRA":
         return Classification("INFRA", ["BUILD:INFRA"])
-    if signals.infra_timeout and not signals.app_cause_in_pod:
+    if signals.infra_timeout and not signals.app_cause_in_pod and not app_failed_to_start:
         return Classification("INFRA", ["TIMEOUT_WITHOUT_APP_CAUSE"])
     # (1) The render differs from the requirements field by field.
     if signals.render_mismatches or code in RENDER_SANDBOX_CODES:
@@ -70,9 +73,9 @@ def classify_failure(signals: AttemptSignals) -> Classification:
         return Classification("SPEC", blocked)
     # (4) A failing test whose stack points at application code.
     failed = [r for r in verdict_reasons if r.startswith("TEST_FAILED:")]
-    health = code == "HEALTH_CHECK_FAILED"
+    health = code == "HEALTH_CHECK_FAILED" or app_failed_to_start
     if (failed or health) and signals.stack_in_app_code:
-        return Classification("CODE", failed or ["HEALTH_CHECK_FAILED"])
+        return Classification("CODE", failed or [f"SANDBOX:{code}"])
     # (5) Everything else is treated as a specification problem.
     return Classification(
         "SPEC", failed or verdict_reasons or [f"SANDBOX:{code}" if code else "UNKNOWN"]
