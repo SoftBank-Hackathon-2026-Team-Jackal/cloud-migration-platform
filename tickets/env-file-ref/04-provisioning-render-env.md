@@ -22,6 +22,7 @@ ENV-02, ENV-03, ENV-05(EnvPlan). Provisioning 09·11·12·18·19·22 (DONE).
 - 포함
   - Plan 게시: EnvPlan을 Plan 입력 Digest에 넣고, Preview에는 키 이름·처리 결과만 표시한다. `decisions`가 있으면 결정 필요 1번 정책대로 처리한다.
   - AWS/GCP 배포 Activity: `render_env(EnvPlan, env_file_ref, 대상 DB 출력)` 결과로 `<앱 release>-env` Secret을 만들거나 갱신하고(플랫폼 관리 라벨, 관리 밖 같은 이름은 `SECRET_NAME_CONFLICT`), 앱 Values env를 `secretKeyRef`로 연결한다.
+  - DB 연결 Secret `<DB release>-conn`(키 `host`·`port`·`name`·`username`, 데이터는 `connection_secret_data(outputs)`)을 만들고 `DbOutputRefs.from_outputs(...)`로 `render_env`에 넘긴다(ENV-03 D3).
   - ON_PREM: Agent가 클러스터 안에서 같은 결과를 적용한다. 값은 작업 본문에 넣지 않고 Agent 인증 API로 작업별로 받는다.
   - 승인 뒤 `env_file_ref` 버전이 바뀌면 실행하지 않는다(Digest 불일치).
   - 티켓 20 문서를 이 티켓으로 연결, SDD 갱신
