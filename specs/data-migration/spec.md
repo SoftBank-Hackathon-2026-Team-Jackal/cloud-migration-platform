@@ -53,5 +53,5 @@
 - Q1 (해결 2026-11-05) 쓰기 중단 장치 → PgBouncer(DM-010).
 - Q2 (해결 2026-11-05) 복제 경로 → WireGuard(DM-011). 남은 세부: AWS·GCP 대상에서 터널 양 끝을 노드·Pod·별도 VM 중 어디에 둘지, 터널 생명주기를 Provisioning과 Data 중 누가 소유할지(ticket 06).
 - Q3 (해결 2026-11-05, 담당 판단) 원본·대상 DB 접근은 `DbEndpoint`(비밀값 없음)로 받는다: 접근 방식(`AWS_EKS` 이름·리전, `GCP_GKE` 프로젝트·이름·위치, `KUBECONFIG` 참조 이름), Namespace, Pod, 컨테이너, 상대가 접속할 주소(`peer_host`), DB 이름. 자격 증명은 Worker 설정(`DATA_MIGRATION_AWS_PROFILE`, `DATA_MIGRATION_GCLOUD_CONFIGURATION`, `DATA_MIGRATION_KUBECONFIG_DIR`)에만 있다. 원본 값은 분석 결과에서, 대상 값은 Provisioning `DATA_MIGRATION` 보기에서 채운다(ticket 05).
-- Q4 웹 계약 버전: 웹 저장소 main의 `contract/events.schema.json`에는 `data.progress`·`data.verify`만 있다. 플랫폼 사본에는 `data.preflight`·`data.phase`·`data.lsn`·`data.table`·`data.readiness`가 있고, 그 뒤 웹 2cf5f5b(미반영, 브랜치 `claude/provisioning-24-events-6a89a0`의 a800978)에 `cutover.plan`·`cutover.ready`·`cutover.outcome`·`cutover.verify`가 추가됐다. 웹 화면이 `data.*`를 그리려면 웹 저장소 반영이 필요하다.
+- Q4 (해결 2026-11-06) 웹 계약: 웹 저장소 main의 이벤트 정의·reducer가 `data.phase`·`data.lsn`·`data.table`·`data.readiness`를 처리한다. Data 쪽 이벤트는 `validate_data`로 같은 계약을 지킨다.
 - Q5 DB 전환 승인: 웹 안내서는 두 번째 승인(`approval.required gate: cutover`)을 요구 항목으로 둔다. 승인 기록·Signal 경로(ADR-002)를 그대로 쓸지, 전환 담당(상헌·소울)과 정한다.
