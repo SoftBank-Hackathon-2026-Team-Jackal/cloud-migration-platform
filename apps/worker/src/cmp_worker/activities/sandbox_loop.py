@@ -45,6 +45,7 @@ from cmp_worker.fix_patch import (
     build_patch_artifact,
     tree_sha256,
 )
+from cmp_worker.prebuilt_builder import BuildUnavailable
 from cmp_worker.sandbox_deploy import (
     SandboxCapabilities,
     SandboxError,
@@ -139,11 +140,16 @@ class SandboxLoopActivities:
     async def sbx_build(self, payload: dict) -> dict:
         """Build every application image from the current source."""
         requirements = self._requirements(payload["requirements_ref"])
-        images = {
-            r.id: self.build(r.id, payload["source"]).model_dump(mode="json")
-            for r in requirements.resources
-            if r.kind == "APPLICATION"
-        }
+        try:
+            images = {
+                r.id: self.build(r.id, payload["source"]).model_dump(mode="json")
+                for r in requirements.resources
+                if r.kind == "APPLICATION"
+            }
+        except BuildUnavailable as exc:
+            raise ApplicationError(
+                "No application image could be provided", type=exc.code, non_retryable=True
+            ) from None
         workspace = payload["source"].get("workspace")
         source_sha256 = tree_sha256(workspace) if workspace and Path(workspace).is_dir() else None
         return {"images": images, "source_sha256": source_sha256}
