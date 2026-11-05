@@ -19,8 +19,9 @@ MigrationWorkflow
 | 구성 | 위치(제안) | 담당 |
 | --- | --- | --- |
 | 계약: `EnvPlanEntry`, `EnvPlan`, `RenderedEnv`, `EnvDecision` | `packages/contracts` (`cmp_contracts.env_plan`) | 민서 |
-| 저장소 인터페이스 `EnvFileStore`(put·read_names·read_values·delete)와 InMemory 구현 | `packages/providers` (`cmp_providers.env_file`) | 민서 |
-| `resolve_env_names`, `render_env` | `cmp_providers.env_file` | 민서 |
+| 저장소 읽기 인터페이스 `EnvFileStore`(read_names·read_values)와 InMemory 구현. 쓰기·삭제는 ENV-01 구현 몫 | `packages/providers` (`cmp_providers.env_file`) | 민서 |
+| `resolve_env_names`, `render_env`, DB 연결 Secret 이름·데이터 | `cmp_providers.env_file` | 민서 |
+| 분석용 EnvPlan 빌더 `build_env_plan`(편의 함수, 분석 모듈 미수정) | `cmp_providers.env_plan_builder` | 민서(최종 규칙은 박승철님) |
 | 업로드·삭제 API, 암호화 저장 구현 | `apps/api` | 민서 |
 | `MigrationRequest.env_file_ref`와 Workflow 전달 | `cmp_contracts.migration`, `apps/worker` Migration Workflow | 민서(#60과 조율) |
 | 구축 렌더 전환 | `cmp_worker.plan_publish`, `k8s_workloads`, ON_PREM 작업 | 민서 |
@@ -32,7 +33,7 @@ MigrationWorkflow
 - 값을 읽는 함수는 `render_env` 하나다. 분석은 `resolve_env_names`만 쓴다(값을 읽을 권한이 필요 없다).
 - `render_env`는 순수 함수에 가깝게 둔다. 저장소에서 값을 읽는 부분만 주입한다(`EnvFileStore`). 실제 클러스터에 Secret을 만드는 것은 호출하는 실행 주체(샌드박스 Activity, 구축 Activity, ON_PREM Agent)의 몫이다.
 - ON_PREM은 Agent가 클러스터 안에서 Secret을 만든다. 값은 작업 본문에 넣지 않고 Agent 인증 API로 작업별로 받는다(구체 경로는 ENV-04에서 결정).
-- Secret 이름 규칙: 앱 env는 `<앱 release>-env`, DB 출력은 기존 `<DB release>-auth`(비밀번호)·`<DB release>-url`(19번 URL)을 쓴다. `host`·`port`·`name`·`username`을 Secret 키로 참조하려면 DB 출력 Secret에 해당 키를 둔다(ENV-03에서 확정).
+- Secret 이름 규칙: 앱 env는 `<앱 release>-env`, DB 출력은 기존 `<DB release>-auth`(비밀번호)·`<DB release>-url`(19번 URL)을 쓴다. `host`·`port`·`name`·`username`은 새 DB 연결 Secret `<DB release>-conn`의 같은 이름 키로 참조한다(ENV-03 D3 확정). 이 Secret은 ENV-04·ENV-06이 `connection_secret_data(outputs)`로 만든다.
 - EnvPlan은 분석 결과 산출물로 저장하고, 승인 대상 Plan의 입력 Digest에 포함한다(승인 후 변경 감지).
 
 ## 검증
