@@ -264,6 +264,24 @@ class KubectlSession:
             return False
         return True
 
+    # --- NetworkPolicy (ticket 26) ---
+
+    def get_object(self, kind: str, name: str, namespace: str | None = None) -> dict | None:
+        return self._get(kind, name, namespace)
+
+    def network_policies(self, namespace: str) -> dict[str, bool]:
+        listed = json.loads(self._kubectl("get", "networkpolicy", "-n", namespace, "-o", "json"))
+        found = {}
+        for item in listed.get("items", []):
+            labels = item["metadata"].get("labels") or {}
+            found[item["metadata"]["name"]] = (
+                labels.get("app.kubernetes.io/managed-by") == FIELD_MANAGER
+            )
+        return found
+
+    def delete_network_policy(self, namespace: str, name: str) -> None:
+        self._kubectl("delete", "networkpolicy", name, "-n", namespace, "--ignore-not-found")
+
     def ingress_status(self, namespace: str, name: str) -> dict | None:
         """First `status.loadBalancer.ingress` entry (`hostname` on AWS, `ip` on GKE)."""
         item = self._get("ingress", name, namespace)

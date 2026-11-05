@@ -60,6 +60,9 @@ resource "google_container_cluster" "target" {
   remove_default_node_pool = true
   initial_node_count       = 1
   deletion_protection      = var.deletion_protection
+  # Ticket 26: Dataplane V2 (eBPF) enforces Kubernetes NetworkPolicy natively. New clusters only:
+  # changing the datapath replaces an existing cluster.
+  datapath_provider = "ADVANCED_DATAPATH"
 
   release_channel { channel = var.release_channel }
   ip_allocation_policy {

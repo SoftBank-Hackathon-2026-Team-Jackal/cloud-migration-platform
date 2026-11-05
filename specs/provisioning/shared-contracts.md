@@ -123,6 +123,10 @@ identity = approval_target(manifest, preview)
 
 22(#108)는 공유 모델에 하위 호환 필드만 더한다. `AwsTargetSettings`·`GcpTargetSettings`의 선택 필드 `workloads: CloudWorkloadSettings{namespace, storage_class, database_image}`와 `workload_plan_id_for`(Migration당 워크로드 Plan ID)다. 18 입력 Digest는 `workloads`를 빼고 계산해 기존 등록의 Digest가 바뀌지 않는다. 인프라 Revision 실행 결과(업무 DB refs)로 별도 `WORKLOADS` Plan을 게시하며, manifest `target`은 인프라 manifest와 같아 09·11이 그 인프라 실행의 클러스터를 찾는다. 앱 Values는 09·11의 v1 `ApplicationValues` 템플릿이고 산출물은 `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/<sha256>`에 둔다. Preview는 `cmp_providers.cloud_workload_preview`(순수 함수). `PlanManifest`·`Preview`·`ProvisioningResult`·승인·실행 계약은 바꾸지 않는다. 상세는 [22 티켓](../../tickets/provisioning/22-cloud-workload-plan.md#착수-결정-2026-11-05).
 
+## 운영 NetworkPolicy (26)
+
+추가 공개 모듈 `cmp_providers.network_policy`: `base_policies`·`entry`(샌드박스 공용), `production_policies`·`with_connections`·`describe`, `aws_vpc_cni_enforces`·`gke_dataplane_v2`, 상수 `PRODUCTION_LABELS`·`TEMPLATE_VERSION`. 계약 추가(모두 선택, 없으면 이전 바이트 그대로): `ArtifactRole` `network_policies`(kind `MANIFEST`, 내용 `{"policies": [NetworkPolicy...]}`), `ProductionRolloutJob.network_policies: ArtifactRef`(Agent는 `artifact_refs()`로 받음). 입력 Digest에 `network_policy` 표식(ON_PREM 18, AWS/GCP 22 워크로드). 09·11 결과 refs `network_policy_enforcement`·`network_policies`, 실패 코드 `NETWORK_POLICY_NOT_ENFORCED`·`NETWORK_POLICY_CONFLICT`·`INVALID_NETWORK_POLICIES`(Agent는 `NETWORK_POLICY_MISSING`도). `ClusterSession`에 `get_object`·`network_policies`·`delete_network_policy`. 상세는 [26](../../tickets/provisioning/26-production-network-policy.md#착수-결정-2026-11-06).
+
 ## 환경 연결 (23)
 
 [ADR-005](../../docs/decisions/ADR-005.md), [23 티켓](../../tickets/provisioning/23-environment-connections.md). 모든 라우트는 운영자 키 `X-Enrollment-Admin-Key`가 필요하고, 웹 BFF가 서버 측에서만 호출한다(CORS 없음). 시각은 epoch 초 정수다. 422 응답에는 입력값이 없다.

@@ -66,6 +66,8 @@ must be reviewed before any operational approval. Ticket 06 never runs Apply.
 
 ## Approved Plan Apply (ticket 10)
 
+`gcp-gke-v3` (ticket 26) sets `datapath_provider = "ADVANCED_DATAPATH"` (Dataplane V2), which enforces Kubernetes NetworkPolicy without an add-on. Changing the datapath replaces a cluster, so it applies to new clusters only; 11 refuses a cluster without `anetd`.
+
 `gcp-gke-v2` adds non-sensitive outputs (project, network, subnetwork, cluster name/location, node
 pool) and turns `deletion_protection` into a variable (default `true`; it can only be lifted by a
 new reviewed Plan before cleanup).

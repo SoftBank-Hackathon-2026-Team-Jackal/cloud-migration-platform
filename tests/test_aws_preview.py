@@ -22,7 +22,7 @@ def request() -> AwsPlanInput:
     return AwsPlanInput.model_validate(
         {
             "migration_id": "migration-001",
-            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "aws-eks-v2"},
+            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "aws-eks-v3"},
             "environment_id": "demo-001",
             "account_id": "123456789012",
             "region": "ap-northeast-2",
@@ -109,7 +109,7 @@ def test_saved_plan_and_redacted_preview_agree(tmp_path, monkeypatch):
     assert preview.manifest_digest == manifest_digest(manifest)
     assert not approval_issues(manifest, preview)
     assert manifest.scope == "INFRASTRUCTURE"
-    assert manifest.plan.template_version == "aws-eks-v2"
+    assert manifest.plan.template_version == "aws-eks-v3"
     assert {change.resource_type for change in preview.changes} == {"NETWORK", "CLUSTER", "NODE"}
     shown = " ".join(change.size or "" for change in preview.changes)
     assert "10.20.1.0/24" in shown and "t3.large" in shown
@@ -239,7 +239,11 @@ def test_controller_and_csi_prerequisites_are_reviewed_resources():
         )
     preview = preview_from_plan(payload, request(), "a" * 64)
     names = {change.name for change in preview.changes}
-    assert {"IAM OIDC 공급자", "EKS EBS CSI 애드온", "Load Balancer Controller IAM 정책"} <= names
+    assert {
+        "IAM OIDC 공급자",
+        "EKS 애드온(EBS CSI·VPC CNI)",
+        "Load Balancer Controller IAM 정책",
+    } <= names
     assert "ALB_NOT_DEPLOYED" in {issue.code for issue in preview.warnings}
 
 

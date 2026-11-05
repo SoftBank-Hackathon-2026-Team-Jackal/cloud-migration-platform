@@ -61,7 +61,8 @@ WORKLOAD_ROLES = (
     "application_values",
     "bindings",
 )
-MANAGED_BY = {"app.kubernetes.io/managed-by": "cmp-provisioning"}
+MANAGED_LABEL = "app.kubernetes.io/managed-by"
+MANAGED_BY = {MANAGED_LABEL: "cmp-provisioning"}
 PULL_FAILURES = {"ErrImagePull", "ImagePullBackOff", "InvalidImageName", "ErrImageNeverPull"}
 CONFIG_FAILURES = {"CreateContainerConfigError", "CreateContainerError"}
 
@@ -92,6 +93,10 @@ class ClusterSession(Protocol):
     def waiting_reasons(self, namespace: str, instance: str) -> set[str]: ...
     def database_probe(self, namespace: str, pod: str, host: str) -> str: ...
     def service_health(self, namespace: str, service: str, path: str) -> bool: ...
+    # Ticket 26. `get_object` is None when absent; `network_policies` maps name → managed.
+    def get_object(self, kind: str, name: str, namespace: str | None = None) -> dict | None: ...
+    def network_policies(self, namespace: str) -> dict[str, bool]: ...
+    def delete_network_policy(self, namespace: str, name: str) -> None: ...
 
 
 class WorkloadRuntime(Protocol):
@@ -159,6 +164,7 @@ class Approved:
     app_values: dict
     files: dict[str, bytes]
     env_plan: EnvPlan | None = None  # ENV-04: from the approved SPEC artifact
+    network_policies: list[dict] | None = None  # ticket 26; None on Plans published before it
 
 
 def outcome(status: str, code: str, refs: dict[str, str]) -> dict:
@@ -256,6 +262,10 @@ class ApprovedWorkloads:
         """Create the external path and verify it from outside the cluster."""
         raise NotImplementedError
 
+    def policy_enforcement(self, cluster) -> str | None:
+        """Ticket 26: the engine that enforces NetworkPolicy on this cluster, or None."""
+        return None
+
     # ---- approval + artifact verification (no cluster access) ----
 
     def _load(self, request: dict) -> Approved:
@@ -287,11 +297,41 @@ class ApprovedWorkloads:
             files = self._read_artifacts(manifest)
             db_values, app_values = self._verify_values(manifest, files)
             env_plan = self._env_plan(manifest, app_values)
+            policies = self._network_policies(manifest, db_values.namespace)
             target = self._resolver.resolve(session, manifest, request)
         if target is None:
             raise WorkloadFailure("CLUSTER_TARGET_UNAVAILABLE")
         self.check_target(manifest, target)
-        return Approved(manifest, target, db_values, app_values, files, env_plan)
+        return Approved(manifest, target, db_values, app_values, files, env_plan, policies)
+
+    def _network_policies(self, manifest: PlanManifest, namespace: str) -> list[dict] | None:
+        """Ticket 26: the approved NetworkPolicy objects; each must be a platform-managed
+        NetworkPolicy in the approved Namespace (bytes are applied as approved)."""
+        ref = manifest.artifacts.get("network_policies")
+        if ref is None:
+            return None
+        folder = self._root / f"{manifest.plan.plan_id}-r{manifest.plan.revision}"
+        try:
+            content = (folder / ref.sha256).read_bytes()
+        except OSError:
+            raise WorkloadFailure("ARTIFACT_MISSING") from None
+        try:
+            verify_artifact_bytes(ref, content)
+        except ValueError:
+            raise WorkloadFailure("ARTIFACT_DIGEST_MISMATCH") from None
+        try:
+            policies = json.loads(content)["policies"]
+            for item in policies:
+                meta = item["metadata"]
+                if (
+                    item["kind"] != "NetworkPolicy"
+                    or meta["namespace"] != namespace
+                    or meta["labels"].get(MANAGED_LABEL) != MANAGED_BY[MANAGED_LABEL]
+                ):
+                    raise ValueError
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise WorkloadFailure("INVALID_NETWORK_POLICIES") from None
+        return policies
 
     def _env_plan(self, manifest: PlanManifest, app_values: dict) -> EnvPlan | None:
         """ENV-04: the EnvPlan pinned in the approved SPEC artifact, or None (old Plans)."""
@@ -495,6 +535,8 @@ class ApprovedWorkloads:
         await self._call(cluster.ensure_namespace, namespace)
         refs["namespace"] = namespace
         await self.prepare_namespace(cluster, approved, refs)
+        if approved.network_policies is not None:
+            await self._apply_network_policies(cluster, approved, refs)
 
         if approved.env_plan is not None:
             await self._apply_env(cluster, approved, refs)
@@ -622,6 +664,27 @@ class ApprovedWorkloads:
             app_replicas=str(app["application"]["replicas"]),
         )
         await self.expose(cluster, approved, refs)
+
+    async def _apply_network_policies(self, cluster, approved: Approved, refs) -> None:
+        """Ticket 26: refuse a cluster that would not enforce the rules, never overwrite an
+        unmanaged same-name policy, apply before Helm, then drop managed policies the approved
+        Revision no longer has. Names and the engine reach the result; no rule details."""
+        namespace, policies = approved.db_values.namespace, approved.network_policies
+        with resource_step(f"networkpolicy:{namespace}", "network", namespace):
+            engine = await self._call(self.policy_enforcement, cluster)
+            if engine is None:
+                raise WorkloadFailure("NETWORK_POLICY_NOT_ENFORCED")
+            existing = await self._call(cluster.network_policies, namespace)
+            wanted = {item["metadata"]["name"] for item in policies}
+            if any(existing.get(name) is False for name in wanted):
+                raise WorkloadFailure("NETWORK_POLICY_CONFLICT")
+            for item in policies:
+                await self._call(cluster.apply, item)
+            for name in sorted(n for n, managed in existing.items() if managed):
+                if name not in wanted:
+                    await self._call(cluster.delete_network_policy, namespace, name)
+        refs["network_policy_enforcement"] = engine
+        refs["network_policies"] = ",".join(sorted(wanted))
 
     async def _apply_env(self, cluster, approved: Approved, refs: dict[str, str]) -> None:
         """ENV-04: `render_env` with the target DB outputs → `<app>-env` and `<db>-conn`.

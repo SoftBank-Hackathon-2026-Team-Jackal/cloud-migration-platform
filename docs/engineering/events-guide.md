@@ -85,7 +85,7 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 | --- | --- | --- |
 | `plan.ready` | `publish_migration_plan`·`publish_workload_plan` Activity(게시 성공 시, `PlanReadyEvents` 래퍼). AWS/GCP는 인프라 Plan과 워크로드 Plan에서 한 번씩 나오며, 화면은 마지막 값을 승인 대상으로 쓴다 | `{plan_id, revision, manifest_digest, preview_digest}` — 승인 API에 그대로 되돌려 보낸다 |
 | `approval.decision` | 승인 API `POST …/approvals`, 재전달 `POST …/delivery` | `ApprovalResponse`와 같은 값(승인자 ID 제외). `DELIVERED`면 `done`, `PENDING`·`FAILED`면 `waiting` |
-| `provision.resource` | `execute_aws_plan`·`execute_gcp_plan`(Terraform `apply -json`: 리소스마다 시작·완료·오류, `key` = `network`/`cluster`/`iam`/`other`, `name` = 주소), `execute_aws_workloads`·`execute_gcp_workloads`(Helm release `db`·`app`, 외부 LB `lb`) | `{"id":"aws_vpc.target","key":"network","state":"done","progress":50,"name":"aws_vpc.target"}`. 진행률은 n/m(Terraform: `planned_change` 수 또는 Preview 변경 수, 워크로드: 7단계) |
+| `provision.resource` | `execute_aws_plan`·`execute_gcp_plan`(Terraform `apply -json`: 리소스마다 시작·완료·오류, `key` = `network`/`cluster`/`iam`/`other`, `name` = 주소), `execute_aws_workloads`·`execute_gcp_workloads`(Helm release `db`·`app`, 외부 LB `lb`, NetworkPolicy 적용 `network`) | `{"id":"aws_vpc.target","key":"network","state":"done","progress":50,"name":"aws_vpc.target"}`. 진행률은 n/m(Terraform: `planned_change` 수 또는 Preview 변경 수, 워크로드: 7단계) |
 | `provision.check` | 워크로드 Activity 검사마다 | `pods_ready`(DB·앱 각각), `db_connect`, `app_health` → `{"name":"db_connect","state":"done"}` |
 
 Helm heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`)은 Temporal 생존 신호(명령줄 값)로 그대로 두고, 이벤트는 위처럼 단계 경계에서 따로 낸다.

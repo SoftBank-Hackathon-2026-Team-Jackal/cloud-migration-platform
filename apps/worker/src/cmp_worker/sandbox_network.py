@@ -1,8 +1,9 @@
 """Sandbox network rules: default-deny NetworkPolicies, DNS, intent edges, allow-list egress proxy.
 
-The Sandbox worker owns these (plan 2.7); Production policy conversion belongs to Provisioning.
-Intent edges between resources are the only pod-to-pod traffic allowed. Everything leaving the
-cluster must go through the egress proxy, whose allow list is the intent's `external_host`
+The Sandbox worker owns these (plan 2.7). The intent conversion itself (default-deny, DNS, intent
+edges, app entry) is shared with Production in `cmp_providers.network_policy` (ticket 26); the
+proxy rules below are Sandbox-only. Intent edges between resources are the only pod-to-pod
+traffic allowed. Everything leaving the cluster must go through the egress proxy, whose allow list is the intent's `external_host`
 entries plus the services kept at the source (`KEEP`). Every proxy decision is logged and read
 back with `egress_records`.
 """
@@ -12,6 +13,11 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
+from cmp_providers import network_policy
+from cmp_providers.network_policy import INSTANCE as _INSTANCE
+from cmp_providers.network_policy import PRIVATE as _PRIVATE
+from cmp_providers.network_policy import policy as _policy
+from cmp_providers.network_policy import selector as _selector
 from pydantic import BaseModel, ConfigDict
 
 PROXY_NAME = "cmp-egress-proxy"
@@ -19,8 +25,6 @@ PROXY_PORT = 3128
 # python:3.12.7-slim index digest (resolved from Docker Hub on 2026-11-05).
 PROXY_IMAGE = "docker.io/library/python@sha256:60d9996b6a8a3689d36db740b49f4327be3be09a21122bd02fb8895abb38b50d"
 ALLOW_ANNOTATION = "cmp.sandbox/allow-sha256"
-_INSTANCE = "app.kubernetes.io/instance"
-_PRIVATE = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 
 
 class EgressRecord(BaseModel):
@@ -51,24 +55,6 @@ def allowlist(
     return [{"host": host, "port": port} for host, port in sorted(entries)]
 
 
-def _selector(release: str) -> dict[str, Any]:
-    return {"matchLabels": {_INSTANCE: release}}
-
-
-def _policy(namespace: str, name: str, labels: dict[str, str], spec: dict[str, Any]) -> dict:
-    return {
-        "apiVersion": "networking.k8s.io/v1",
-        "kind": "NetworkPolicy",
-        "metadata": {"name": name, "namespace": namespace, "labels": labels},
-        "spec": spec,
-    }
-
-
-def _policy_name(*parts: str) -> str:
-    digest = hashlib.sha256("|".join(parts).encode()).hexdigest()[:10]
-    return f"cmp-allow-{digest}"
-
-
 def build_manifests(
     *,
     namespace: str,
@@ -80,43 +66,12 @@ def build_manifests(
     proxy_script: str,
 ) -> list[dict[str, Any]]:
     apps = [r for r in resources if r["kind"] == "APPLICATION"]
-    manifests: list[dict[str, Any]] = [
-        _policy(namespace, "cmp-default-deny", labels,
-                {"podSelector": {}, "policyTypes": ["Ingress", "Egress"]}),
-        _policy(namespace, "cmp-allow-dns", labels, {
-            "podSelector": {}, "policyTypes": ["Egress"],
-            "egress": [{
-                "to": [{
-                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
-                    "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
-                }],
-                "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}],
-            }],
-        }),
-    ]  # fmt: skip
-
-    for intent in intents:
-        if not intent.get("destination_resource_id"):
-            continue
-        source = releases[intent["source_resource_id"]]
-        destination = releases[intent["destination_resource_id"]]
-        ports = [{"protocol": intent.get("protocol", "TCP"), "port": intent["port"]}]
-        name = _policy_name(source, destination, str(intent["port"]), ports[0]["protocol"])
-        manifests.append(_policy(namespace, name, labels, {
-            "podSelector": _selector(source), "policyTypes": ["Egress"],
-            "egress": [{"to": [{"podSelector": _selector(destination)}], "ports": ports}],
-        }))  # fmt: skip
-        manifests.append(_policy(namespace, name + "-in", labels, {
-            "podSelector": _selector(destination), "policyTypes": ["Ingress"],
-            "ingress": [{"from": [{"podSelector": _selector(source)}], "ports": ports}],
-        }))  # fmt: skip
-
+    # Shared with Production (ticket 26): default-deny, DNS and resource → resource edges.
+    manifests = network_policy.base_policies(namespace, labels, releases, intents)
     # Test runners and ingress reach only the application port.
-    for app in apps:
-        manifests.append(_policy(namespace, _policy_name("entry", app["release_name"]), labels, {
-            "podSelector": _selector(app["release_name"]), "policyTypes": ["Ingress"],
-            "ingress": [{"ports": [{"protocol": "TCP", "port": app["port"]}]}],
-        }))  # fmt: skip
+    manifests += [
+        network_policy.entry(namespace, labels, a["release_name"], a["port"]) for a in apps
+    ]
 
     # Applications may only leave through the proxy; the proxy keeps the allow list.
     app_selector = {"matchExpressions": [{"key": _INSTANCE, "operator": "In",

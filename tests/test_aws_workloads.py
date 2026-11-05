@@ -29,6 +29,7 @@ from cmp_worker.activities.aws_workloads import (
     ClusterTarget,
     Timeouts,
 )
+from network_policy_support import NetworkPolicyFake
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from temporalio.testing import ActivityEnvironment
@@ -234,7 +235,7 @@ class Plan:
         (self.root / "plan-009-r1" / digest).write_bytes(content)
 
 
-class FakeCluster:
+class FakeCluster(NetworkPolicyFake):
     """Stateful stand-in for kubectl/Helm on one EKS cluster. Records every argument."""
 
     def __init__(self):

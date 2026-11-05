@@ -46,6 +46,17 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
 
+# Ticket 26: VPC CNI network policy agent enforces Kubernetes NetworkPolicy on every node. The
+# managed add-on adopts the default self-managed VPC CNI (OVERWRITE) and is in place for updates.
+resource "aws_eks_addon" "vpc_cni" {
+  cluster_name                = aws_eks_cluster.target.name
+  addon_name                  = "vpc-cni"
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+  configuration_values        = jsonencode({ enableNetworkPolicy = "true" })
+  tags                        = local.tags
+}
+
 resource "aws_eks_addon" "ebs_csi" {
   cluster_name             = aws_eks_cluster.target.name
   addon_name               = "aws-ebs-csi-driver"
