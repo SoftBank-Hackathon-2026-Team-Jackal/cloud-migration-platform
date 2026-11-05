@@ -1,0 +1,73 @@
+# WireGuard 게이트웨이(DM-011 실습). 각 클러스터에 하나씩 두고, 터널로 상대 DB를 잇는다.
+#   - 상대 → 나: 터널 주소 __WG_IP__:5432 로 오면 이 클러스터의 DB(__LOCAL_DB__)로 넘긴다
+#   - 나 → 상대: 이 클러스터의 Service wg-peer-db:5432 로 오면 터널 너머 __PEER_IP__:5432 로 넘긴다
+# 키는 Secret wg-key(private)에만 있다. 커널 모듈이 없으면 wireguard-go(사용자 공간)를 쓴다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wg-gateway
+data:
+  start.sh: |
+    set -eu
+    apk add --no-cache wireguard-tools wireguard-go socat iproute2 >/dev/null
+    if ! ip link add wg0 type wireguard 2>/dev/null; then
+      mkdir -p /dev/net; [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
+      WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1 wireguard-go wg0
+      echo "wireguard: userspace"
+    else
+      echo "wireguard: kernel"
+    fi
+    wg set wg0 private-key /etc/wg/private listen-port 51820 \
+      peer "$PEER_PUBLIC_KEY" allowed-ips "$PEER_IP/32" persistent-keepalive 15 \
+      ${PEER_ENDPOINT:+endpoint "$PEER_ENDPOINT"}
+    ip addr add "$WG_IP/24" dev wg0
+    ip link set mtu 1420 up dev wg0
+    socat TCP-LISTEN:5432,bind="$WG_IP",fork,reuseaddr TCP:"$LOCAL_DB":5432 &
+    socat TCP-LISTEN:5433,fork,reuseaddr TCP:"$PEER_IP":5432 &
+    touch /tmp/started
+    wait
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wg-gateway
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: wg-gateway}}
+  template:
+    metadata: {labels: {app: wg-gateway}}
+    spec:
+      containers:
+        - name: wg
+          image: alpine:3.22
+          command: [sh, /opt/start.sh]
+          env:
+            - {name: WG_IP, value: "__WG_IP__"}
+            - {name: PEER_IP, value: "__PEER_IP__"}
+            - {name: PEER_PUBLIC_KEY, value: "__PEER_PUBLIC_KEY__"}
+            - {name: PEER_ENDPOINT, value: "__PEER_ENDPOINT__"}
+            - {name: LOCAL_DB, value: "__LOCAL_DB__"}
+          ports:
+            - {name: wg, containerPort: 51820, protocol: UDP}
+            - {name: peer-db, containerPort: 5433}
+          securityContext: {privileged: true}
+          readinessProbe:
+            # 핸드셰이크를 조건으로 두면 LB가 이 Pod로 UDP를 보내지 않아 터널이 영영 서지 않는다
+            exec: {command: [test, -f, /tmp/started]}
+            periodSeconds: 3
+          resources: {requests: {cpu: 20m, memory: 32Mi}}
+          volumeMounts:
+            - {name: start, mountPath: /opt}
+            - {name: key, mountPath: /etc/wg, readOnly: true}
+      volumes:
+        - {name: start, configMap: {name: wg-gateway}}
+        - {name: key, secret: {secretName: wg-key}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wg-peer-db
+spec:
+  selector: {app: wg-gateway}
+  ports: [{name: postgres, port: 5432, targetPort: 5433}]

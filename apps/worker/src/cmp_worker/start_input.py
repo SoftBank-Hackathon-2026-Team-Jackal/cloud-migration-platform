@@ -5,6 +5,7 @@ from typing import Any
 
 from cmp_contracts.analysis import AnalysisInput
 from cmp_contracts.provisioning import ContentRef
+from cmp_data.handoff import DataMigrationInput
 from cmp_scanners.source import SourceFetchError, check_source_input
 
 from cmp_worker.planning_handoff import PlanningSettings
@@ -24,6 +25,7 @@ def build_start_input(
     sandbox_json: str | None = None,
     planning_json: str | None = None,
     env_file_ref_json: str | None = None,
+    data_migration_json: str | None = None,
 ) -> dict[str, Any]:
     """`{"project_id", "analysis": AnalysisInput, "sandbox": SandboxSettings}` as MigrationWorkflow expects.
 
@@ -48,6 +50,12 @@ def build_start_input(
     env_ref = (
         ContentRef.model_validate(json.loads(env_file_ref_json)) if env_file_ref_json else None
     )
+    # specs/data-migration: 원본 DB·앱과 대상 터널 주소. 없으면 data_copy는 scaffold로 남는다.
+    data_migration = (
+        DataMigrationInput.model_validate_json(data_migration_json).model_dump(mode="json")
+        if data_migration_json
+        else None
+    )
     return {
         "project_id": project_id,
         "analysis": analysis.model_dump(mode="json"),
@@ -55,4 +63,5 @@ def build_start_input(
         or None,
         **({"planning": planning.model_dump(mode="json")} if planning else {}),
         **({"env_file_ref": env_ref.model_dump(mode="json")} if env_ref else {}),
+        **({"data_migration": data_migration} if data_migration else {}),
     }

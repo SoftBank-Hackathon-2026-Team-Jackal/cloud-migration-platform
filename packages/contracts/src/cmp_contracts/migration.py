@@ -38,13 +38,23 @@ WEB_PHASE: dict[str, str] = {
 # Terminal outcomes that are failures (cancelled and scaffold_complete are not), and the web phase
 # an outcome belongs to when it is not the last in-progress phase (ticket 49 F4).
 FAILURE_OUTCOMES = frozenset(
-    {"failed", "plan_failed", "plan_rejected", "approval_expired", "provisioning_failed"}
+    {
+        "failed",
+        "plan_failed",
+        "plan_rejected",
+        "approval_expired",
+        "provisioning_failed",
+        "data_blocked",
+        "data_failed",
+    }
 )
 OUTCOME_PHASE: dict[str, str] = {
     "plan_failed": "planning",
     "provisioning_failed": "provisioning",
     "plan_rejected": "awaiting_approval",
     "approval_expired": "awaiting_approval",
+    "data_blocked": "data_copy",  # specs/data-migration: handoff/precheck blocked the copy
+    "data_failed": "data_copy",
 }
 
 
@@ -58,6 +68,8 @@ class MigrationStatus(BaseModel):
     plan: dict[str, str | int] | None = None
     plan_code: str | None = None
     failure_code: str | None = None
+    # specs/data-migration: DataMigrationWorkflow state {phase, active, failure_code, switches}
+    data_migration: dict[str, object] | None = None
     failure_phase: str | None = None
     failure_issues: list[str] = Field(default_factory=list)
     # Temporal execution status (RUNNING, COMPLETED, FAILED, TERMINATED, TIMED_OUT, CANCELED, ...)

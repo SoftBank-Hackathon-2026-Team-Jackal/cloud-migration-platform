@@ -28,12 +28,14 @@ with workflow.unsafe.imports_passed_through():
         WORKFLOW_QUEUE,
         approval_workflow_id,
     )
+    from cmp_data.handoff import DataMigrationInput, target_endpoint
 
     from cmp_worker.activities.analysis import analyze_project
     from cmp_worker.activities.build import prepare_image
     from cmp_worker.activities.migration import copy_data, shift_traffic, verify_target
     from cmp_worker.activities.provisioning import prepare_plan, provision_target
     from cmp_worker.workflows.analysis import AnalysisWorkflow
+    from cmp_worker.workflows.data_migration import DataMigrationWorkflow
     from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
 
 # ENV-02: the start input may carry `env_file_ref`; it is copied into the analysis, Sandbox and
@@ -49,6 +51,10 @@ REPORT_ACTIVITY = {
     "schedule_to_close_timeout": timedelta(minutes=2),
     "retry_policy": RetryPolicy(maximum_attempts=3),
 }
+DATA_PATCH = "data-migration-v1"
+# 데이터 이전 자식이 이 상태가 되면 부모가 다음 단계(트래픽)로 간다. DB를 먼저 전환한다(DM-007).
+DATA_DONE = {"switched": None, "blocked": "data_blocked", "failed": "data_failed",
+             "cancelled": "cancelled", "done": None}  # fmt: skip
 
 PUBLISH_ACTIVITY = {
     "task_queue": PROVISIONING_QUEUE,
@@ -84,6 +90,20 @@ class MigrationWorkflow:
         if value in WEB_PHASE:
             self.stage = value
         self._phase = value
+        self.data_migration: dict | None = None  # specs/data-migration: child state (no secrets)
+
+    def db_gate_ok(self) -> bool | None:
+        """Traffic(#128) `require_db_gate`용(DM-007): DB 쓰기 주체가 대상이고 역방향 복제가 정상이면
+        True. 데이터 이전을 이 실행에서 하지 않았으면 None(판단할 근거 없음)."""
+        state = self.data_migration
+        if state is None or "writer" not in state:
+            return None
+        return state["writer"] == "target" and bool(state.get("reverse_replication_ok"))
+
+    @workflow.signal
+    def data_migration_state(self, state: dict) -> None:
+        """DataMigrationWorkflow가 단계가 바뀔 때 보낸다."""
+        self.data_migration = state
 
     @workflow.signal
     def sandbox_review_pending(self, pending: bool) -> None:
@@ -114,6 +134,7 @@ class MigrationWorkflow:
             "failure_issues": self.failure_issues,
             "pipeline": self.pipeline,
             "env_file_ref": self.env_file_ref,
+            "data_migration": self.data_migration,
         }
 
     async def _hand_off(
@@ -228,6 +249,70 @@ class MigrationWorkflow:
         return {"REJECTED": "plan_rejected", "EXPIRED": "approval_expired"}.get(
             status, "provisioning_failed"
         )
+
+    async def _data_migration(self, given: dict) -> str | None:
+        """specs/data-migration ticket 05: 인계값으로 대상 DB를 정하고 DataMigrationWorkflow를 시작한 뒤,
+        DB가 대상으로 전환될 때까지 기다린다. None이면 다음 단계로 간다.
+
+        전환 신호(`switchover`)는 자식 Workflow(`data-<migration_id>`)에 운영자가 보낸다. 자식은 부모가
+        끝나도 남아 역방향 복제(롤백 대비)를 유지한다(ABANDON).
+        """
+        self.phase = "data_copy"
+        parsed = DataMigrationInput.model_validate(given)
+        view = await workflow.execute_activity(
+            "get_migration_handoff",
+            {**(self.plan or {}), "consumer": "DATA_MIGRATION"},
+            task_queue=PROVISIONING_QUEUE,
+            start_to_close_timeout=timedelta(minutes=1),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+        target, code = target_endpoint(view, parsed)
+        if target is None:
+            self.failure_code = code
+            self.data_migration = {"phase": "blocked", "failure_code": code}
+            return "data_blocked"
+        migration_id = workflow.info().workflow_id
+        child = await workflow.start_child_workflow(
+            DataMigrationWorkflow.run,
+            {
+                "request": {
+                    "migration_id": migration_id,
+                    "source": parsed.source.model_dump(mode="json"),
+                    "target": target.model_dump(mode="json"),
+                },
+                "app": parsed.app,
+                "settings": parsed.settings,
+                "sample_interval_s": parsed.sample_interval_s,
+                "monitor_interval_s": parsed.monitor_interval_s,
+            },
+            id=f"data-{migration_id}",
+            task_queue=WORKFLOW_QUEUE,
+            parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+        )
+
+        def settled() -> bool:
+            return self.cancel_requested or (self.data_migration or {}).get("phase") in DATA_DONE
+
+        waiting = asyncio.create_task(workflow.wait_condition(settled))
+        try:
+            await workflow.wait([child, waiting], return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            waiting.cancel()
+        if self.cancel_requested:
+            await child.signal(DataMigrationWorkflow.request_cancel)
+            return "cancelled"
+        if child.done():
+            try:
+                result = child.result()
+            except ChildWorkflowError:
+                self.failure_code = "DATA_MIGRATION_FAILED"
+                return "data_failed"
+            self.data_migration = {**(self.data_migration or {}), "phase": result["status"]}
+        phase = (self.data_migration or {}).get("phase")
+        if DATA_DONE.get(phase):
+            self.failure_code = (self.data_migration or {}).get("failure_code") or phase.upper()
+            return DATA_DONE[phase]
+        return None
 
     async def _step(self, name: str, fn: object, project_id: str, queue: str) -> None:
         if self.cancel_requested:
@@ -471,6 +556,21 @@ class MigrationWorkflow:
         ):
             if name == "provisioning" and provisioned == "executed":
                 continue  # the approved provider execution already ran in the approval child
+            if (
+                name == "data_copy"
+                and pipeline_input is not None
+                and pipeline_input.get("data_migration")
+                and provisioned == "executed"
+                and workflow.patched(DATA_PATCH)
+            ):
+                if self.cancel_requested:
+                    self.phase = "cancelled"
+                    return "cancelled"
+                stopped = await self._data_migration(pipeline_input["data_migration"])
+                if stopped:
+                    self.phase = stopped
+                    return stopped
+                continue
             await self._step(name, fn, project_id, queue)
             if self.cancel_requested:
                 return "cancelled"
