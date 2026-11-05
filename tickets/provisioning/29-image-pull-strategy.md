@@ -49,7 +49,7 @@ Blocked by: 11, 12, 15, ENV-04 (DONE). 28(플랫폼 저장소 `cmp-platform-buil
 | I8 Agent RBAC | ClusterRole에 `serviceaccounts`: `get`, `create`, `patch`만 추가(기본 SA 연결). Secret은 이미 15 H2 권한(get·list·create·update·patch)으로 충분하다 | 최소 권한. 새 Namespace의 기본 SA가 아직 없을 때만 create가 필요하다 |
 | I9 GKE 재실행 | 11 K4의 `prepare_namespace`는 실행마다 Secret을 새 토큰으로 server-side apply한다(재실행 = 갱신, 테스트로 고정). 토큰 출처는 Worker의 플랫폼 AWS 프로필(`PROVISIONING_AWS_PROFILE`)과 STS 계정 일치 검사 그대로다 | 26이 같은 배포 Activity를 바꾸므로 변경을 새 함수에 둔다 |
 | I10 GKE 주기 갱신 | 플랫폼 측 Temporal Schedule `cmp-gcp-ecr-pull-refresh`(6시간, 겹침 건너뜀) → `GcpPullSecretRefreshWorkflow` → Activity `refresh_gcp_pull_secrets`. Activity는 `SUCCEEDED`이고 refs에 `image_pull_secret`이 있는 GCP 워크로드 실행을 찾아 실행 때와 같은 승인 재검증(`_load`, 최신 승인 Revision만)·GCP/AWS 계정 확인 뒤 pull Secret만 다시 apply한다(Helm·Values 변경 없음). 결과는 개수·코드만. Schedule은 Provisioning Worker 시작 때 없으면 만든다 | CronJob은 클러스터에 AWS 자격이 필요해 금지. 6시간은 12시간 TTL의 절반이다. MigrationWorkflow를 바꾸지 않아 기존 이력 재생에 영향이 없다 |
-| I11 후속 | 고객 계정 EKS의 교차 계정 ECR 저장소 정책, GKE 경로의 저장소 허용 목록(I1) 적용, 실제 환경 검증, Agent 릴리스 | 범위 밖 기록 |
+| I11 후속 | 고객 계정 EKS의 교차 계정 ECR 저장소 정책, GKE 경로의 저장소 허용 목록(I1) 적용, 실제 환경 검증, Agent 릴리스. Agent 자체 이미지(GHCR) pull은 이 티켓이 아니라 [42](42-agent-package-access.md)(Chart `imagePullSecrets`)가 다룬다. `cmp-ecr-pull`은 배포한 앱·DB Pod에만 붙는다 | 범위 밖 기록 |
 
 ## 구현 위치
 - 토큰: `packages/providers/src/cmp_providers/ecr_pull.py`

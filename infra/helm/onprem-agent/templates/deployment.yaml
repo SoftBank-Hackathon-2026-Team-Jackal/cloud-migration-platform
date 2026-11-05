@@ -20,6 +20,11 @@ spec:
         {{- include "agent.labels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "agent.name" . }}
+      {{- with .Values.imagePullSecrets }}
+      # Ticket 42: private GHCR pull (agent and tunnel share this Pod and image).
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: true

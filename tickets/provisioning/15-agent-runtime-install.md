@@ -54,7 +54,7 @@ Blocked by: 04A, 12 (DONE). 16·17의 터널 기능이 이 실행 기반 위에 
 | H1 실행 위치 | 사용자 K3s의 `cmp-system` Namespace(`helm install -n cmp-system --create-namespace`)에 Deployment replica 1, `strategy: Recreate`로 실행한다. 호스트 실행(kubeconfig + context) CLI도 유지한다 | 호스트 OS와 무관. Recreate로 교체 중 두 Agent가 동시에 작업을 처리하지 않는다. 17의 WireGuard도 같은 Pod에 둔다 |
 | H2 권한 | ClusterRole에 필요한 자원·동사만 명시한다(와일드카드 금지): Namespace get/create, StorageClass get, 관리 대상 자원(Secret·Service·PVC·Pod·Endpoints·StatefulSet·Deployment·ReplicaSet·Event)의 Helm 설치·`--wait`·검사에 필요한 동사, `pods/exec` create, `services/proxy` get. 대상 Namespace가 동적으로 생기므로 ClusterRole이 필요하고, 다른 Namespace 침범은 12의 `NAMESPACE_NOT_OWNED` 코드 검사로 막는다 | 대안: 관리 Namespace마다 RoleBinding을 Agent가 만드는 방식은 RoleBinding 생성 권한으로 결국 같은 범위를 얻어 이점이 작다. 클러스터 전체 Secret 접근 권한이 남는 점을 설치 문서에 명시한다 |
 | H3 클러스터 바인딩 | 발급 시 `cluster_uid`는 선택. 비우면 최초 등록 때 Agent가 조회해 보고한 kube-system UID로 고정한다. 지정했다면 기존처럼 일치 검사 | 사용자가 UID를 조회해 운영자에게 전달하는 단계를 없앤다. 04A 계약 변경 → `onprem-shared-deployment.md` 갱신 |
-| H4 배포 방식 (**확정 2026-11-05**) | GitHub Release로 버전 배포. 태그 `agent-v*` push 시 Actions가 amd64·arm64 이미지를 GHCR에 push하고, Chart를 OCI(`oci://ghcr.io/<org>/charts/onprem-agent`)로 올리며 Release에 `.tgz`·이미지 Digest·설치 명령을 남긴다. Chart는 이미지를 Digest로 고정한다. 저장소는 공개될 예정이므로 공개 패키지를 전제로 한다(인증 없는 설치). 검증은 k3d 이미지 import와 워크플로 dry-run, 첫 태그 push·공개 전환은 별도 승인 | 사용자 결정. 사용자 클러스터가 플랫폼 ECR 인증 없이 받을 수 있어야 하고, 배포한 Agent 버전을 Digest로 추적한다 |
+| H4 배포 방식 (**확정 2026-11-05**) | GitHub Release로 버전 배포. 태그 `agent-v*` push 시 Actions가 amd64·arm64 이미지를 GHCR에 push하고, Chart를 OCI(`oci://ghcr.io/<org>/charts/onprem-agent`)로 올리며 Release에 `.tgz`·이미지 Digest·설치 명령을 남긴다. Chart는 이미지를 Digest로 고정한다. 저장소는 공개될 예정이므로 공개 패키지를 전제로 한다(인증 없는 설치). 검증은 k3d 이미지 import와 워크플로 dry-run, 첫 태그 push·공개 전환은 별도 승인 | 사용자 결정. 사용자 클러스터가 플랫폼 ECR 인증 없이 받을 수 있어야 하고, 배포한 Agent 버전을 Digest로 추적한다. **후속 42(#177, 2026-11-06):** `agent-v0.3.0` 패키지가 비공개(익명 403)로 확인돼, 공개 전환(소유자 승인 대기) 전까지 쓸 인증 pull 경로(Chart `imagePullSecrets`, `helm registry login`)와 릴리스 익명 pull 점검을 더했다. 공개 패키지 전제는 그대로다 |
 | H5 자격 증명 보관 | Chart는 등록 토큰만 Secret `cmp-agent-enrollment`로 만든다. Agent는 등록 성공 후 자격 증명을 Helm이 관리하지 않는 Secret `cmp-agent-credential`에 쓰고 토큰 Secret을 지운다. 자격 증명이 있으면 토큰은 무시한다. 호스트 CLI는 기존 0600 파일 방식 | `helm upgrade`가 자격 증명을 덮어쓰지 않는다. 등록 직후 저장 전 중단되면 토큰은 이미 사용됐으므로 새 토큰 발급이 필요하다(문서화) |
 | H6 실행 루프 | 작업이 없으면 10초 대기, 작업을 처리하면 즉시 다시 폴링, 플랫폼 요청 실패는 지수 백오프(최대 60초), 401/403은 `AGENT_UNAUTHORIZED`로 종료(비정상 종료 코드). SIGTERM은 진행 중 작업을 마친 뒤 종료하고 `terminationGracePeriodSeconds`를 Helm 대기 시간보다 길게 둔다 | 폐기된 Agent가 계속 요청하지 않게 한다. 강제 종료로 Release가 `pending-*`에 남으면 12 규칙대로 `UNKNOWN INSPECTION_REQUIRED` |
 | H7 플랫폼 TLS | localhost가 아니면 HTTPS 필수(기존 규칙 유지). 사설 CA는 Chart 값 `platform.caBundle`로 받아 `SSL_CERT_FILE`로 신뢰한다. HTTP 예외 옵션은 만들지 않는다 | k3d 검증은 자체 서명 CA로 실제 TLS 경로를 확인한다 |
@@ -94,7 +94,7 @@ TDD 메모: API·실행 루프·Chart는 실패 테스트를 먼저 작성했다
 
 ### 미검증·제한 사항
 
-- 릴리스 워크플로(`agent-release.yml`)는 실행하지 않았다. 로컬에 actionlint/act가 없어 YAML 구문과, 워크플로가 호출하는 `scripts/package_agent_chart.py`(테스트 포함)만 확인했다. 첫 `agent-v*` 태그 push와 GHCR 패키지 공개는 외부 공개이므로 별도 승인 후 진행한다. 저장소 공개 전에는 패키지가 비공개라 인증 없이 받을 수 없다.
+- 릴리스 워크플로(`agent-release.yml`)는 실행하지 않았다. 로컬에 actionlint/act가 없어 YAML 구문과, 워크플로가 호출하는 `scripts/package_agent_chart.py`(테스트 포함)만 확인했다. 첫 `agent-v*` 태그 push와 GHCR 패키지 공개는 외부 공개이므로 별도 승인 후 진행한다. 저장소 공개 전에는 패키지가 비공개라 인증 없이 받을 수 없다(42에서 인증 pull 경로를 더함).
 - amd64 이미지는 빌드하지 않았다(검증은 arm64). 워크플로가 두 아키텍처를 빌드한다.
 - NAT 뒤 원격 노트북, 실제 공개 플랫폼 주소·공인 인증서, 다양한 K3s 배포판·macOS VM, 장시간 실행은 확인하지 않았다.
 - ClusterRole에 클러스터 전체 Secret 읽기·쓰기가 포함된다(H2). 다른 Namespace 보호는 코드 검사(`NAMESPACE_NOT_OWNED`)에 의존한다.

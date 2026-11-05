@@ -47,7 +47,7 @@ uv run python -m cmp_providers.remote_agent poll-once \
 
 현재 CLI의 `poll-once`는 자신에게 할당된 작업 참조를 조회한다. 이 명령만으로 앱/DB가 배포되지는 않는다.
 
-사용자 K3s에 계속 실행되는 Agent를 설치하려면 Helm Chart(`infra/helm/onprem-agent`)를 쓴다. 등록 토큰 발급 시 클러스터 UID는 생략할 수 있고, Agent가 최초 등록 때 직접 조회한다. 승인된 ON_PREM 배포 작업을 받아 처리하며, 운영자는 `GET /agent-admin/agents/{agent_id}`로 마지막 접속 시각을 보고 `POST .../revoke`로 폐기한다. 설치·권한·폐기 절차는 [Agent 설치·운영](specs/provisioning/onprem-agent-install.md)을 따른다.
+사용자 K3s에 계속 실행되는 Agent를 설치하려면 Helm Chart(`infra/helm/onprem-agent`)를 쓴다. 등록 토큰 발급 시 클러스터 UID는 생략할 수 있고, Agent가 최초 등록 때 직접 조회한다. 승인된 ON_PREM 배포 작업을 받아 처리하며, 운영자는 `GET /agent-admin/agents/{agent_id}`로 마지막 접속 시각을 보고 `POST .../revoke`로 폐기한다. 릴리스 패키지(GHCR)가 공개면 로그인 없이 `helm install oci://ghcr.io/.../charts/onprem-agent`로 설치하고, 비공개면 `helm registry login`과 `imagePullSecrets`로 설치한다(`scripts/check_agent_package_access.py`로 익명 pull 확인). 설치·권한·폐기 절차는 [Agent 설치·운영](specs/provisioning/onprem-agent-install.md)을 따른다.
 
 ## 프로젝트 구조와 파일별 역할
 

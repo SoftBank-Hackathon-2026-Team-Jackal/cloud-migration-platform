@@ -3,7 +3,9 @@
 #   - ghcr.io/<owner>/cmp-onprem-agent (linux/amd64 + linux/arm64)
 #   - oci://ghcr.io/<owner>/charts/onprem-agent:X.Y.Z with image.digest pinned
 #   - a GitHub Release with the Chart .tgz, the image digest and install commands
-# The packages are meant to be public once the repository is public (H4).
+# The packages are meant to be public (H4): GHCR packages start private, so after the first
+# release an org owner sets both packages to public once (ticket 42, #177). The last step checks
+# anonymous pull and warns while a package is still private; the notes carry both install paths.
 name: Agent release
 on:
   push:
@@ -88,13 +90,37 @@ jobs:
           - Image: \`$IMAGE@$DIGEST\` (linux/amd64, linux/arm64)
           - Chart: \`$CHARTS/onprem-agent\` version \`$VERSION\` (image digest pinned)
 
-          Install (first time; the token is issued by the platform operator):
+          Install (first time; the token is issued by the platform operator). Public packages need
+          no login:
 
           \`\`\`bash
           helm install cmp-agent $CHARTS/onprem-agent --version $VERSION -n cmp-system --create-namespace --set agentId=<agent-id> --set platform.url=https://<platform> --set enrollmentToken=<token>
           \`\`\`
 
+          If the packages are private (\`helm install\` fails with 401/403 or the Pod shows
+          \`ErrImagePull\`), use a GitHub token with \`read:packages\` that can read them:
+
+          \`\`\`bash
+          read -rs GHCR_TOKEN
+          echo "\$GHCR_TOKEN" | helm registry login ghcr.io -u <github-user> --password-stdin
+          kubectl create namespace cmp-system
+          kubectl -n cmp-system create secret docker-registry cmp-agent-ghcr --docker-server=ghcr.io --docker-username=<github-user> --docker-password="\$GHCR_TOKEN"
+          helm install cmp-agent $CHARTS/onprem-agent --version $VERSION -n cmp-system --set agentId=<agent-id> --set platform.url=https://<platform> --set enrollmentToken=<token> --set 'imagePullSecrets[0].name=cmp-agent-ghcr'
+          \`\`\`
+
+          Check anonymous access: \`uv run python scripts/check_agent_package_access.py --version $VERSION\`
+
           See docs: specs/provisioning/onprem-agent-install.md
           NOTES
           gh release create "$GITHUB_REF_NAME" "dist/onprem-agent-$VERSION.tgz" \
             --title "On-premises Agent $VERSION" --notes-file notes.md
+
+      # Ticket 42: user clusters pull anonymously. A private package does not fail the release
+      # (visibility is an org setting, changed once by an owner), but it must not go unnoticed.
+      - name: Check anonymous pull
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if ! uv run python scripts/check_agent_package_access.py --version "$VERSION" --owner "${GITHUB_REPOSITORY_OWNER}"; then
+            echo "::warning::Agent packages are not anonymously pullable. Set cmp-onprem-agent and charts/onprem-agent to public (org Packages settings), or install with imagePullSecrets (see release notes)."
+          fi
