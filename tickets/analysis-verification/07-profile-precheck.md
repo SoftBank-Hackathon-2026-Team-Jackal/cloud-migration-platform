@@ -37,7 +37,7 @@ Blocked by: 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로
 - 실제 데모 앱 확인: `demo-app`의 Dockerfile·Go 소스·`db/schema.sql`을 임시 폴더에 받아 점검했다(저장소에는 복사하지 않음). Dockerfile은 루트에서 찾았고 누락된 `COPY` 경로는 없었으며 확장 생성은 없었다. 이 저장소에는 k8s 매니페스트가 없어 요구사항 조립은 `NO_APPLICATION_WORKLOAD`로 보고됐다.
 
 ## 계약 공백 (민서님 확인 필요)
-- `RequirementsV2`의 `env_bindings`는 `host`·`port`·`name`·`username`·`password_secret_ref` 필드별 출력만 표현한다. 데모 앱은 `DATABASE_URL` 단일 변수로 연결하므로 바인딩으로 표현할 수 없다. 구현은 이 경우 바인딩을 만들지 않고 `unmapped_items`에 `DB_CONNECTION_URL_VARIABLE`로 보고한다. URL 조립을 Sandbox 워커(11)가 맡을지, 계약에 URL 출력을 추가할지는 정하지 않았다.
+- (해소됨) 당시 `RequirementsV2`의 `env_bindings`는 `host`·`port`·`name`·`username`·`password_secret_ref` 필드별 출력만 표현했다. 데모 앱은 `DATABASE_URL` 단일 변수로 연결하므로 바인딩으로 표현할 수 없다. 구현은 이 경우 바인딩을 만들지 않고 `unmapped_items`에 `DB_CONNECTION_URL_VARIABLE`로 보고한다. URL 조립을 Sandbox 워커(11)가 맡을지, 계약에 URL 출력을 추가할지는 정하지 않았다.
 
 ## 한계와 미검증
 - 선언되지 않은 값(replica·CPU·메모리·포트·헬스 경로·DB 이름·사용자·저장 용량)은 이름 있는 기본값을 쓰고 `assumptions`에 기록한다. 기본값 자체가 정책적으로 맞는지는 검토가 필요하다.
@@ -52,8 +52,9 @@ Blocked by: 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로
 - 앱 코드에 DB 드라이버가 있는데 클러스터 안 PostgreSQL Pod가 없으면 `DB_NOT_IN_CLUSTER`로 지원 범위 밖임을 보고한다(첫 사이클은 RDS 없이 Pod로 결정).
 - 실제 원본 매니페스트로 확인했다: 앱 → DB 5432 의도가 나오고 DB 변수 5개가 바인딩으로 대체되며 누락은 없다.
 
-## 후속 (D-16, 민서님 구현 대기)
-- 단일 URL 연결 변수(`DATABASE_URL` 등)는 V2에 `connection_url_secret_ref` 출력이 추가된 뒤 그 출력으로 바인딩한다. 지금은 `DB_CONNECTION_URL_VARIABLE`로 표현 불가를 보고한다. 병합 후 `_bindings`가 `*_URL`·`*_URI` 변수를 새 출력으로 바인딩하고 `replaced`에 넣으며, DSN 형식은 계속 보고만 한다. Sandbox(11)는 같은 방식으로 URL Secret을 만들어 앱 연결을 검증한다.
+## 후속 (D-16, 반영 완료)
+- 민서님이 V2에 `connection_url_secret_ref` 출력을 추가했다(#81). 07은 `*_URL`·`*_URI` 단일 연결 변수를 `{resource_id: <DB id>, output: connection_url_secret_ref}`로 바인딩하고 `replaced`에 넣는다(`DATABASE_URL` → `<DB id>.connection_url_secret_ref`). key=value DSN은 형식이 달라 계속 `DB_CONNECTION_DSN_VARIABLE`로 보고한다. 테스트: `test_requirements.py`의 URL 바인딩·다른 URL 이름·DSN 보고.
+- Sandbox(11)는 같은 방식으로 URL Secret을 만들어 앱 연결을 검증한다(아래 11 티켓 참조).
 
 ## 결정 대기
 - 확장 지원(D-14)

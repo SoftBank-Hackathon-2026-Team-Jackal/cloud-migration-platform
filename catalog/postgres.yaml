@@ -35,7 +35,7 @@ grade_rules:
     loses: [자동 백업, 다중 AZ 장애 조치, 파라미터 그룹]
 known_differences:
   - DB 이미지는 요구사항이 아니라 대상 구성 단계에서 정한다(D-11). 원본 이미지 Digest는 참고 정보다.
-  - 연결이 단일 URL 변수(DATABASE_URL)이면 현재 계약의 env_bindings로 표현할 수 없다.
+  - 연결이 단일 URL 변수(DATABASE_URL 등)이면 env_bindings의 connection_url_secret_ref 출력으로 바인딩한다. key=value DSN은 표현할 수 없다.
 standard_tests:
   - 쓰기 후 읽기가 일치한다.
   - DB Pod 재시작 후 데이터가 유지된다.

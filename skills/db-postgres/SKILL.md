@@ -6,7 +6,7 @@ PostgreSQL 사용 방식을 매핑할 때 쓴다: 버전, 확장, 연결 변수,
 ## 조사 절차
 1. 매니페스트의 PostgreSQL 이미지와 태그에서 주 버전을 확인한다. 요구사항은 16만 지원한다.
 2. `CREATE EXTENSION` 탐지 결과를 확인한다. 하나라도 있으면 해당 기능은 `NONE`이고 필수면 차단이다.
-3. 연결 설정이 필드별 변수인지 단일 URL 변수인지 확인한다. 단일 URL은 현재 계약으로 바인딩할 수 없다.
+3. 연결 설정이 필드별 변수인지 단일 URL 변수인지 확인한다. 단일 URL은 `connection_url_secret_ref`로 바인딩하고(플랫폼이 URL을 Secret에 만든다), key=value DSN은 바인딩할 수 없어 보고한다.
 4. 코드에서 advisory lock, LISTEN/NOTIFY, 커넥션 풀러(PgBouncer) 가정을 찾는다.
 
 ## 판단 기준

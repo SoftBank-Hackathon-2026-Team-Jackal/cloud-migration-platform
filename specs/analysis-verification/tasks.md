@@ -69,11 +69,12 @@ Q-01 ────┴→ 02B ─┐
 | D-13 | DB 내부 상태 사전 점검 담당(기본 키·시퀀스·복제 설정) | 07 | 소울 |
 | D-14 | PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체(현재 확장 요구는 Planning이 거절) | 07 | 민서 |
 | D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법(그 전까지 `AnalysisReport`에 기록) | 01, 06, 13 | 민서 |
-| D-16 | 결정됨(민서님 구현 대기) — DB 연결을 단일 URL 변수로 받는 앱은 `env_bindings`에 `connection_url_secret_ref` 출력으로 바인딩. Sandbox와 운영이 각각 URL을 만들어 Secret에 저장하고 앱에는 Secret 이름·키만 주입. 형식(URL 인코딩, Secret 키 이름)은 민서님과 확정 | 07, 11 | 민서(V2·공통 렌더러·Secret 주입)·승철(07 바인딩, 11 검증) |
+| D-16 | 결정됨, V2·렌더러 구현 완료(#79, #81), 07 바인딩 반영 — DB 연결을 단일 URL 변수로 받는 앱은 `env_bindings`에 `connection_url_secret_ref` 출력으로 바인딩. Sandbox와 운영이 각각 URL을 만들어 Secret에 저장하고 앱에는 Secret 이름·키만 주입. 형식(URL 인코딩, Secret 키 이름)은 민서님과 확정 | 07, 11 | 민서(V2·공통 렌더러·Secret 주입)·승철(07 바인딩, 11 검증) |
 
 ## 변경 기록
 
 - 2026-11-05: 10 구현: `request_build`가 B-01 Build 모듈을 `builder_factory`로 감싸 호출하고(D-12 대비), `(resource_id, source_sha256, platform)`으로 성공 결과를 재사용하며, 실패 코드를 분류하고 `BuildEvidenceV2`로 정규화한다.
+- 2026-11-05: D-16 구현 반영: 민서님이 V2에 `connection_url_secret_ref`를 추가(#81, Secret `<DB release>-url`의 키 `url`)했고, 07이 `*_URL`·`*_URI` 변수를 이 출력으로 바인딩한다(`DATABASE_URL`은 `replaced`). key=value DSN은 계속 보고만 한다. 11은 `cmp_providers.database_url`의 두 함수로 같은 형식의 URL Secret을 만든다.
 - 2026-11-05: 09 구현: `package_source`로 원본 작업 공간에서 재현 가능한 소스 아카이브를 만들어 `sources/<sha256>.tar.gz`로 올린다(같은 키는 업로드 생략). B-01 아카이브 검사를 통과한다.
 - 2026-11-05: 08B 구현: `AnalysisWorkflow`에 확정·승인 Signal과 검토 Query를 두고 `ReviewGate`로 처리 표를 적용. 차단은 자식 실패(`ANALYSIS_BLOCKED`)로 멈춘다.
 - 2026-11-05: D-16 결정: 단일 URL 연결 변수는 `connection_url_secret_ref` 출력으로 바인딩한다(민서님이 V2·공통 렌더러·Secret 주입을 구현한 뒤 07이 바인딩을 만들고 11이 같은 방식으로 검증). 그 전까지 07은 `DB_CONNECTION_URL_VARIABLE`로 표현 불가 보고만 한다. DSN(key=value) 형식은 이번에 지원하지 않는다.

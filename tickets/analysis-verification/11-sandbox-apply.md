@@ -41,7 +41,7 @@ fixture 요구사항·이미지로 Sandbox가 뜨고 준비 검사 후 정리까
 
 ## 설계 변경 기록
 - 2026-11-04: 호출부 결정 방식(구체 값·Secret 생성은 Sandbox 워커)과 계약 v2 반영. 갱신·초기화는 11B로 분할. v2 동기화로 `render_shared_deployment_v2` 사용.
-- 2026-11-05(D-16): 앱이 DB 연결을 단일 URL 변수로 받으면 `env_bindings`가 `connection_url_secret_ref` 출력을 가리킨다. Sandbox 워커는 접속 URL(`postgresql://사용자:비밀번호@호스트:포트/DB이름`, 비밀번호 URL 인코딩)을 만들어 Secret에 저장하고 앱에는 Secret 이름·키만 주입한다. 운영 배포와 같은 형식·키 이름을 쓴다(형식은 민서님과 확정). V2 반영 전에는 이 경로를 구현하지 않는다.
+- 2026-11-05(D-16): 앱이 DB 연결을 단일 URL 변수로 받으면 `env_bindings`가 `connection_url_secret_ref` 출력을 가리킨다. Sandbox 워커는 접속 URL(`postgresql://사용자:비밀번호@호스트:포트/DB이름`, 비밀번호 URL 인코딩)을 만들어 Secret에 저장하고 앱에는 Secret 이름·키만 주입한다. 운영 배포와 같은 형식·키 이름을 쓴다(형식은 민서님과 확정). V2에는 반영됐다(#81). Sandbox 워커는 `cmp_providers.database_url`의 `connection_url_secret_name(db_release)`(Secret `<DB release>-url`), `connection_url(username=, password=, host=, port=5432, database=)`(URL 값), `URL_SECRET_KEY`(`"url"`)를 써서 운영과 같은 형식으로 만든다. URL에는 비밀번호가 들어가므로 Values·로그·이력에는 남기지 않고 Secret 참조만 쓴다. 비밀번호·사용자 Secret 이름이 `<DB release>-url`과 같으면 렌더가 `SECRET_NAME_CONFLICT`로 거절한다.
 
 ## 완료 체크리스트
 - [ ] 수용 기준과 Test Seam 확인

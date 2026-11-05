@@ -101,13 +101,34 @@ def test_extension_requirement_empties_requirements_and_reports_a_block(tmp_path
     ]
 
 
-def test_single_url_connection_variable_cannot_be_bound_and_is_reported(tmp_path):
-    workspace = go_workspace(tmp_path, ["DATABASE_URL"])
-    code = scan_code(workspace, {".env": ["DATABASE_URL"]}, [GoAdapter()])
-    result = build_requirements(scan_manifests(MANIFESTS), code, {".env": ["DATABASE_URL"]})
+def test_single_url_connection_variable_is_bound_to_the_connection_url_secret(tmp_path):
+    workspace = go_workspace(tmp_path, ["DATABASE_URL", "DB_HOST"])
+    names = {".env": ["DATABASE_URL"]}
+    code = scan_code(workspace, names, [GoAdapter()])
+    result = build_requirements(scan_manifests(MANIFESTS), code, names)
+    RequirementsV2.model_validate(result.requirements.model_dump(mode="json"))
+    app = by_kind(result.requirements, "APPLICATION")[0]
+    binding = app.env_bindings["DATABASE_URL"]
+    assert (binding.resource_id, binding.output) == ("shop-db", "connection_url_secret_ref")
+    assert result.env_exceptions.replaced["DATABASE_URL"] == "shop-db.connection_url_secret_ref"
+    assert not any("DATABASE_URL" in item for item in result.unmapped_items)
+    assert "DATABASE_URL" not in result.env_exceptions.missing
+
+
+@pytest.mark.parametrize("name", ["DB_URL", "POSTGRES_URL", "POSTGRESQL_URI", "PG_URL"])
+def test_other_url_style_names_are_bound_the_same_way(tmp_path, name):
+    code = scan_code(go_workspace(tmp_path, [name]), {}, [GoAdapter()])
+    result = build_requirements(scan_manifests(MANIFESTS), code, {})
+    app = by_kind(result.requirements, "APPLICATION")[0]
+    assert app.env_bindings[name].output == "connection_url_secret_ref"
+
+
+def test_key_value_dsn_variables_are_still_reported_not_bound(tmp_path):
+    code = scan_code(go_workspace(tmp_path, ["DATABASE_DSN"]), {}, [GoAdapter()])
+    result = build_requirements(scan_manifests(MANIFESTS), code, {})
     assert by_kind(result.requirements, "APPLICATION")[0].env_bindings == {}
-    assert any("DATABASE_URL" in item for item in result.unmapped_items)
-    assert "DATABASE_URL" not in result.env_exceptions.replaced
+    assert any("DATABASE_DSN" in item for item in result.unmapped_items)
+    assert "DATABASE_DSN" not in result.env_exceptions.replaced
 
 
 def test_unsupported_postgres_version_is_blocked(tmp_path):
