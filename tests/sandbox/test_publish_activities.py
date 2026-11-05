@@ -63,7 +63,7 @@ def world(tmp_path, *, with_analysis=True, llm=None):
     recorder = Recorder()
     activities = SandboxLoopActivities(
         service=make_service(FakeRunner()), store=store, workspace_root=tmp_path / "work",
-        build=lambda *_: None, suite_runner=lambda *_: None, llm_factory=(lambda: llm) if llm else None,
+        build=lambda *_: None, suite_runner=lambda *_: None, llm_factory=(lambda *_: llm) if llm else None,
         pr_publisher=recorder,
     )  # fmt: skip
     payload = {
@@ -181,7 +181,8 @@ def fix_payload(payload, store, **extra):
         "classification": {"failure_class": "SPEC", "reasons": ["EGRESS_BLOCKED:x:443"]},
         "requirements_ref": payload["requirements_ref"], "logs_ref": logs.model_dump(),
         "suite_ref": payload["input"]["suite_ref"], "source": payload["source"],
-        "analysis_report_ref": payload["input"]["analysis_report_ref"], **extra,
+        "analysis_report_ref": payload["input"]["analysis_report_ref"],
+        "migration_id": payload["input"]["migration_id"], **extra,
     }  # fmt: skip
 
 

@@ -116,7 +116,7 @@ class SandboxLoopActivities:
         workspace_root: Path | str,
         build: Builder,
         suite_runner: SuiteRunner,
-        llm_factory: Callable[[], LLMClient] | None = None,
+        llm_factory: Callable[[str, str], LLMClient] | None = None,
         pr_publisher: DraftPrPublisher | None = None,
     ) -> None:
         self.pr_publisher = pr_publisher or PreparedOnlyPublisher()
@@ -280,7 +280,7 @@ class SandboxLoopActivities:
                 logs=logs,
                 tests={c.id: c.model_dump(mode="json") for c in suite.cases},
             ),
-            llm=self.llm_factory(),
+            llm=self.llm_factory(payload["migration_id"], "fixer"),
             workspace=workspace,
         )
         if outcome.status != "PROPOSED":

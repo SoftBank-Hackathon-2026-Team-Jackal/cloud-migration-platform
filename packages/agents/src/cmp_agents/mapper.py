@@ -152,4 +152,6 @@ def map_usage(
             ]
             rows = apply_dispositions(stabilize_row_ids(rows, data.previous_rows))
             return MapResult("MAPPED", rows, attempt, None, last.record)
+        if last.fatal:
+            return MapResult("NEEDS_REVIEW", [], attempt, last.failure_reason, last.record)
     return MapResult("NEEDS_REVIEW", [], max_attempts, last.failure_reason, last.record)

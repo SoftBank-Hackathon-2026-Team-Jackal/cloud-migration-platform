@@ -88,4 +88,6 @@ def generate_tests(
         )
         if last.status == "SUBMITTED":
             return GenerateResult("GENERATED", list(last.result.cases), None, last.record)
+        if last.fatal:
+            break
     return GenerateResult("FAILED", [], last.failure_reason, last.record)
