@@ -27,6 +27,7 @@
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
+| [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | TODO | 03~08B, 06, 18 입력 계약 | AV-001~AV-008, AV-017, AV-020, AV-021 | 미생성 | ☐ |
 
 ## 선행 관계
 
@@ -56,7 +57,7 @@ Q-01 ────┴→ 02B ─┐
 | ID | 내용 | 영향 티켓 | 담당 |
 | --- | --- | --- | --- |
 | D-01 | 공급자는 Claude, 연결은 Anthropic SDK(Messages API 도구 호출)로 결정. 모델·코드 전송 범위(근거 주변 조각만 전송)·키 관리·비용 한도는 ADR-004 작성 예정 | 08, 12, 14, 17 | 승철·팀 |
-| D-02 | `*_ref` 저장 위치, Build 결과 저장·정규화 Activity 담당(Planning 입력 v2 형식은 #22로 확정) | 10, 15 | 민서·승철 |
+| D-02 | 결정됨(승철, 민서님 통보) — 첫 사이클의 `*_ref`는 해시 이름 로컬 불변 저장소(`LocalArtifactStore` 관례, S3는 후속). 분석·Build 결과의 저장·정규화는 분석 쪽이 맡음 | 10, 15, 19 | 승철(민서 통보) |
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 | 10, 14 | 민서 |
 | D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
 | D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간 | 09, 10, 12 | 민서·승철 |
@@ -86,6 +87,7 @@ Q-01 ────┴→ 02B ─┐
 - 2026-11-05: 03 완료(Issue #48). 브랜치 upstream 설정 때문에 PR 없이 main에 직접 반영됐으며 push CI는 통과.
 - 2026-11-05: 02·02B를 PR #46으로 병합(이슈 #44, #45 종료). 14·15의 부모 Workflow 변경 범위를 plan에 기록하고 14에 종료 상태 정리 수용 기준을 추가.
 - 2026-11-05: 06 구현(가짜 AWS 응답 기준): `scan_aws_infra`가 허용 목록의 읽기 전용 호출만으로 EKS·VPC·보안 그룹·ELBv2·IRSA 정책·CloudTrail 요약을 읽고, `build_network`가 보안 그룹·코드 외부 호스트를 `network_intent`로, 로드 밸런서를 외부 진입·VPC CIDR로 바꾼다. `boto3`를 런타임 의존성으로 추가. 실제 계정 1회 실행(승인 필요)은 남음.
+- 2026-11-05: D-02 결정: 분석·Build 결과의 `*_ref` 저장은 해시 이름 로컬 불변 저장소(민서님의 `LocalArtifactStore`와 같은 관례, S3는 후속)로 하고 저장·정규화는 분석 쪽이 맡는다. 02~08B·06의 "Activity 연결은 후속"을 모아 Ticket 19(분석 Activity 통합)를 추가.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
 - 2026-11-04(리뷰 반영): spec AV-012에 `run_suite`의 `include`, AV-015에 INFRA와 횟수 규칙 반영(AV-013 커버리지는 원문 유지). ADR-004는 작성 예정으로 표시.
 - 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.
