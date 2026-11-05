@@ -53,6 +53,15 @@ kubectl -n cmp-system logs deploy/cmp-onprem-agent
 
 ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create(list는 17 터널 전달 대상 찾기), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·`--wait`·검사 동사, ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기, `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경하지 않는다(`NAMESPACE_NOT_OWNED`).
 
+**Network Preflight (MNP-01 N3, #51):** `networkPreflight.image`(Digest 고정, 예 `postgres@sha256:…`)를 주면 ClusterRole에 `pods` create/delete와 `pods/log` get만 추가되고 Agent가 `NETWORK_PREFLIGHT` 작업을 실행한다. 비우면(기본) 이 권한이 없고 작업은 `PREFLIGHT_NOT_CONFIGURED`로 거절된다. 검사 Pod는 복제 Namespace의 일반 Pod 한 개와 같은 노드의 읽기 전용 `hostNetwork` Pod(`ip route get`만) 한 개이며, 끝나면 지운다. Agent는 `cmp.dev/environment-id` 주석이 있는 Namespace에서만 만든다(없으면 Pod를 만들지 않고 `NAMESPACE_NOT_OWNED`). Pod 생성 권한은 클러스터 범위라 `hostNetwork` Pod도 만들 수 있다(K3s 기본에는 Pod Security 제한이 없다). 이미 클러스터 전체 Secret·`pods/exec` 권한이 있어 신뢰 범위가 크게 늘지는 않지만, 필요 없으면 비워 둔다. 허용 이미지는 `networkPreflight.allowedImages`(비우면 `image` 하나)이며 작업이 이미지를 고를 수 없다.
+
+```yaml
+networkPreflight:
+  image: postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+```
+
+이 작업 유형은 `agent-v0.2.0` 이후 Agent에만 있다. 이전 Agent는 `FAILED UNSUPPORTED_JOB`으로 보고하고 Worker는 `UNKNOWN`/`AGENT_JOB_UNSUPPORTED`로 끝낸다(시작 차단).
+
 ## 5. 폐기·제거
 
 ```bash

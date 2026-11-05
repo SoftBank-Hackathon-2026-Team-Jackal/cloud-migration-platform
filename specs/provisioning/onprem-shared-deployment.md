@@ -166,7 +166,7 @@ P0는 공개 회원가입 대신 플랫폼의 최소 소유자 식별자에 Agen
 
 Agent가 접속하는 대상 K3s는 사용자 측에 있고 Sandbox 클러스터는 플랫폼이 미리 준비한 별도 자원이다. 공통 모듈이 플랫폼 서버 내부에 앱/DB를 띄우는 것은 아니다.
 
-04A에서는 플랫폼 운영자 키를 가진 호출만 `POST /agent-enrollments`로 토큰을 발급한다. Agent는 `POST /agents/register`로 토큰을 한 번 사용해 인증 값을 받고, `POST /agents/{agent_id}/jobs/claim`과 결과 보고 API로 자기 작업만 다룬다. DB에는 토큰·인증 값의 SHA-256 Digest만 저장한다. 전송 가능한 작업 본문은 `SANDBOX_TEST`의 버전 참조와 12의 `PRODUCTION_ROLLOUT`(아래)이다. `remote_agent` CLI의 `poll-once`는 참조 조회만 하고, 승인된 운영 배포는 `python -m cmp_providers.onprem_agent`(1회) 또는 장기 실행 `python -m cmp_providers.agent_runtime`(15)이 실행한다.
+04A에서는 플랫폼 운영자 키를 가진 호출만 `POST /agent-enrollments`로 토큰을 발급한다. Agent는 `POST /agents/register`로 토큰을 한 번 사용해 인증 값을 받고, `POST /agents/{agent_id}/jobs/claim`과 결과 보고 API로 자기 작업만 다룬다. DB에는 토큰·인증 값의 SHA-256 Digest만 저장한다. 전송 가능한 작업 본문은 `SANDBOX_TEST`의 버전 참조, 12의 `PRODUCTION_ROLLOUT`(아래), MNP-01 N3의 `NETWORK_PREFLIGHT`(검사 요청·Secret 이름/키 참조만, 결과는 `ProbeObservation`)이다. `remote_agent` CLI의 `poll-once`는 참조 조회만 하고, 승인된 운영 배포는 `python -m cmp_providers.onprem_agent`(1회) 또는 장기 실행 `python -m cmp_providers.agent_runtime`(15)이 실행한다.
 
 ### 상시 실행·설치·폐기 (15, #69)
 

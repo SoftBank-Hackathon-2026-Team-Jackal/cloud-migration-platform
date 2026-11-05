@@ -1835,6 +1835,7 @@ components:
           anyOf:
           - $ref: '#/components/schemas/QueuedWork'
           - $ref: '#/components/schemas/ProductionRolloutJob'
+          - $ref: '#/components/schemas/NetworkPreflightJob'
           title: Payload
         status:
           type: string
@@ -2178,6 +2179,30 @@ components:
       - env_file_ref
       - mapping_ref
       title: EnvironmentInputV2
+    ExpectedPath:
+      properties:
+        allowed_private_destination_cidrs:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Allowed Private Destination Cidrs
+        tunnel_interface:
+          anyOf:
+          - type: string
+            pattern: ^[A-Za-z0-9_.-]{1,15}$
+          - type: 'null'
+          title: Tunnel Interface
+        tunnel_gateway:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tunnel Gateway
+      additionalProperties: false
+      type: object
+      required:
+      - allowed_private_destination_cidrs
+      title: ExpectedPath
     Failure:
       properties:
         stage:
@@ -2307,6 +2332,10 @@ components:
           type: string
           pattern: ^[A-Z0-9_]{1,64}$
           title: Code
+        observation:
+          anyOf:
+          - $ref: '#/components/schemas/ProbeObservation'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -2473,6 +2502,144 @@ components:
       - approval_pending
       - cancel_requested
       title: MigrationStatus
+    NetworkPreflightJob:
+      properties:
+        mode:
+          type: string
+          const: NETWORK_PREFLIGHT
+          title: Mode
+        job_id:
+          type: string
+          pattern: ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$
+          title: Job Id
+        agent_id:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+        request:
+          $ref: '#/components/schemas/NetworkPreflightRequest'
+      additionalProperties: false
+      type: object
+      required:
+      - mode
+      - job_id
+      - agent_id
+      - cluster_uid
+      - request
+      title: NetworkPreflightJob
+      description: 'Queued for the Agent named by `request.probe_target`. References
+        only: the DB auth is a
+
+        Secret name/key in the probe Namespace, never a value.'
+    NetworkPreflightRequest:
+      properties:
+        contract_version:
+          type: string
+          const: '1'
+          title: Contract Version
+          default: '1'
+        migration_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Migration Id
+        source_db_host:
+          type: string
+          pattern: ^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$
+          title: Source Db Host
+        source_db_port:
+          type: integer
+          maximum: 65535.0
+          minimum: 1.0
+          title: Source Db Port
+        tls_mode:
+          type: string
+          enum:
+          - disable
+          - require
+          - verify-full
+          title: Tls Mode
+        database:
+          type: string
+          pattern: ^[A-Za-z0-9_]{1,63}$
+          title: Database
+        db_auth_ref:
+          $ref: '#/components/schemas/SecretRef'
+        aws_vpc_cidrs:
+          items:
+            type: string
+          type: array
+          title: Aws Vpc Cidrs
+        onprem_routed_cidrs:
+          items:
+            type: string
+          type: array
+          title: Onprem Routed Cidrs
+        tunnel_cidrs:
+          items:
+            type: string
+          type: array
+          title: Tunnel Cidrs
+        expected_network_path:
+          $ref: '#/components/schemas/ExpectedPath'
+        probe_target:
+          $ref: '#/components/schemas/ProbeTarget'
+        transfer_bytes:
+          type: integer
+          maximum: 67108864.0
+          minimum: 65536.0
+          title: Transfer Bytes
+          default: 4194304
+        timeout_seconds:
+          type: integer
+          maximum: 600.0
+          minimum: 5.0
+          title: Timeout Seconds
+          default: 60
+      additionalProperties: false
+      type: object
+      required:
+      - migration_id
+      - source_db_host
+      - source_db_port
+      - tls_mode
+      - database
+      - db_auth_ref
+      - aws_vpc_cidrs
+      - onprem_routed_cidrs
+      - tunnel_cidrs
+      - expected_network_path
+      - probe_target
+      title: NetworkPreflightRequest
+    NodeRoute:
+      properties:
+        dev:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Dev
+        via:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Via
+        src:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Src
+      additionalProperties: false
+      type: object
+      required:
+      - dev
+      - via
+      - src
+      title: NodeRoute
     OnPremTargetSettings:
       properties:
         provider:
@@ -2716,6 +2883,82 @@ components:
       - manifest_digest
       - changes
       title: Preview
+    ProbeObservation:
+      properties:
+        node:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Node
+        resolved_ip:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resolved Ip
+        node_route:
+          anyOf:
+          - $ref: '#/components/schemas/NodeRoute'
+          - type: 'null'
+        db_stage_failed:
+          anyOf:
+          - type: string
+            enum:
+            - DNS_FAILED
+            - TCP_UNREACHABLE
+            - TLS_FAILED
+            - AUTH_FAILED
+            - QUERY_FAILED
+          - type: 'null'
+          title: Db Stage Failed
+        transfer:
+          anyOf:
+          - $ref: '#/components/schemas/Transfer'
+          - type: 'null'
+        mtu:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Mtu
+      additionalProperties: false
+      type: object
+      required:
+      - node
+      - resolved_ip
+      - node_route
+      - db_stage_failed
+      - transfer
+      title: ProbeObservation
+      description: What the on-site executor saw. Never contains query output or credentials.
+    ProbeTarget:
+      properties:
+        agent_id:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+        namespace:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$
+          title: Namespace
+        node_name:
+          anyOf:
+          - type: string
+            pattern: ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$
+          - type: 'null'
+          title: Node Name
+      additionalProperties: false
+      type: object
+      required:
+      - agent_id
+      - cluster_uid
+      - namespace
+      title: ProbeTarget
     ProductionRolloutJob:
       properties:
         mode:
@@ -3342,6 +3585,27 @@ components:
       - test_suite_ref
       - cleanup_status
       title: SandboxEvidenceV2
+    SecretRef:
+      properties:
+        secret_name:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$
+          title: Secret Name
+        username_key:
+          type: string
+          pattern: ^[-._A-Za-z0-9]{1,253}$
+          title: Username Key
+        password_key:
+          type: string
+          pattern: ^[-._A-Za-z0-9]{1,253}$
+          title: Password Key
+      additionalProperties: false
+      type: object
+      required:
+      - secret_name
+      - username_key
+      - password_key
+      title: SecretRef
     SecretRefV2:
       properties:
         name:
@@ -3400,6 +3664,30 @@ components:
       - access_ref
       - capabilities_ref
       title: TargetSelectionV2
+    Transfer:
+      properties:
+        bytes:
+          type: integer
+          minimum: 0.0
+          title: Bytes
+        seconds:
+          type: number
+          minimum: 0.0
+          title: Seconds
+        status:
+          type: string
+          enum:
+          - COMPLETE
+          - INTERRUPTED
+          - TIMEOUT
+          title: Status
+      additionalProperties: false
+      type: object
+      required:
+      - bytes
+      - seconds
+      - status
+      title: Transfer
     TunnelConfigResponse:
       properties:
         tunnel_ip:

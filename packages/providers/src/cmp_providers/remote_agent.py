@@ -96,14 +96,23 @@ class AgentControlClient:
             raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
         return response["job"]
 
-    def report(self, *, agent_id: str, credential: str, job_id: str, status: str, code: str):
+    def report(
+        self,
+        *,
+        agent_id: str,
+        credential: str,
+        job_id: str,
+        status: str,
+        code: str,
+        observation: dict | None = None,
+    ):
+        """`observation` is sent only for NETWORK_PREFLIGHT jobs (codes/IPs/counters)."""
         self._id(agent_id)
         self._id(job_id)
-        response = self._request(
-            f"/agents/{agent_id}/jobs/{job_id}/result",
-            {"status": status, "code": code},
-            credential,
-        )
+        body = {"status": status, "code": code}
+        if observation is not None:
+            body["observation"] = observation
+        response = self._request(f"/agents/{agent_id}/jobs/{job_id}/result", body, credential)
         if response.get("job_id") != job_id or response.get("accepted") is not True:
             raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
 

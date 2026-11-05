@@ -1,6 +1,6 @@
 # Tasks: Migration Network Preflight
 
-2026-11-05 사용자 합의에 따른 AWS→온프레미스 K3s 데이터 이전 전 네트워크 검사 작업이다. 공통 모듈·K8s 실행기·Activity·시작 판정은 구현하고 격리 k3d에서 검증했다. Agent 작업 경로 연결과 실제 AWS↔온프레미스 경로 검증이 남아 있다.
+2026-11-05 사용자 합의에 따른 AWS→온프레미스 K3s 데이터 이전 전 네트워크 검사 작업이다. 공통 모듈·K8s 실행기·Activity·시작 판정과 온프레미스 Agent 작업 경로(N3)를 구현하고 격리 k3d에서 검증했다. 실제 AWS↔온프레미스 경로 검증과 Data Migration Workflow 연결(데이터 담당)이 남아 있다.
 
 | ID·티켓 | 상태 | 선행 조건 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- |

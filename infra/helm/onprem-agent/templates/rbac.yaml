@@ -41,6 +41,17 @@ rules:
   - apiGroups: [""]
     resources: ["services/proxy"]
     verbs: ["get"]
+  {{- if .Values.networkPreflight.image }}
+  # MNP-01 (N2/N3): short-lived probe Pod in the replication Namespace plus a read-only
+  # hostNetwork Pod running `ip route get` on the same node; the Agent creates them only in
+  # Namespaces it owns (cmp.dev/environment-id), reads their one-line log and deletes them.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

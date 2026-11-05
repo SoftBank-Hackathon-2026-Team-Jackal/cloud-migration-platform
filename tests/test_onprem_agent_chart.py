@@ -240,3 +240,47 @@ def test_tunnel_can_be_disabled(tmp_path):
 @pytest.mark.parametrize("bad", [{"mode": "tcp"}, {"intervalSeconds": 0}, {"extra": 1}])
 def test_tunnel_values_are_validated(tmp_path, bad):
     assert render(tmp_path, values(tunnel=bad)).returncode != 0
+
+
+# --- MNP-01 (#51, N3): Network Preflight probe -------------------------------------------------
+
+PROBE = "postgres@sha256:" + "c" * 64
+
+
+def _pod_rules(docs):
+    [role] = [doc for (kind, _), doc in docs.items() if kind == "ClusterRole"]
+    return [
+        set(rule["verbs"])
+        for rule in role["rules"]
+        if rule["apiGroups"] == [""] and rule["resources"] in (["pods"], ["pods/log"])
+    ], role
+
+
+def test_preflight_disabled_by_default_grants_no_pod_create(tmp_path):
+    docs = documents(tmp_path, values())
+    rules, role = _pod_rules(docs)
+    assert rules == []
+    pod_verbs = {
+        verb for rule in role["rules"] if "pods" in rule["resources"] for verb in rule["verbs"]
+    }
+    assert pod_verbs.isdisjoint({"create", "delete"})
+    assert (
+        "--preflight-image" not in container(deployment(docs)["spec"]["template"]["spec"])["args"]
+    )
+
+
+def test_preflight_image_adds_minimal_pod_rules_and_agent_args(tmp_path):
+    docs = documents(tmp_path, values(networkPreflight={"image": PROBE}))
+    rules, _ = _pod_rules(docs)
+    assert rules == [{"create", "delete"}, {"get"}]  # pods; pods/log (no exec, no update)
+    args = container(deployment(docs)["spec"]["template"]["spec"])["args"]
+    assert args[args.index("--preflight-image") + 1] == PROBE
+    assert args[args.index("--preflight-allowed-images") + 1] == PROBE
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"image": "postgres:16-alpine"}, {"allowedImages": ["postgres:16"]}, {"other": 1}],
+)
+def test_preflight_image_must_be_digest_pinned(tmp_path, bad):
+    assert render(tmp_path, values(networkPreflight=bad)).returncode != 0

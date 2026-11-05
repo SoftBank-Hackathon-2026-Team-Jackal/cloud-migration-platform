@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Annotated, Literal
 
 from cmp_contracts.chart import KubernetesName
+from cmp_contracts.network_preflight import NetworkPreflightJob, ProbeObservation
 from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from cmp_contracts.provisioning import Text
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response
@@ -60,11 +61,13 @@ class RegistrationResponse(Request):
 class JobReport(Request):
     status: Literal["SUCCEEDED", "FAILED", "UNKNOWN"]
     code: str = Field(pattern=r"^[A-Z0-9_]{1,64}$")
+    # NETWORK_PREFLIGHT only (MNP-01 N3): what the probe saw; codes/IPs/counters, no secrets.
+    observation: ProbeObservation | None = None
 
 
 class ClaimedJob(Request):
     job_id: str
-    payload: QueuedWork | ProductionRolloutJob
+    payload: QueuedWork | ProductionRolloutJob | NetworkPreflightJob
     status: Literal["RUNNING"]
 
 
@@ -180,7 +183,12 @@ def submit_result(
             credential=credential,
             job_id=job_id,
             status=report.status,
-            result={"code": report.code},
+            result={"code": report.code}
+            | (
+                {"observation": report.observation.model_dump(mode="json")}
+                if report.observation is not None
+                else {}
+            ),
         )
     except AgentRegistrationError as exc:
         code = {"JOB_NOT_FOUND": 404, "AGENT_UNAUTHORIZED": 403}.get(str(exc), 409)

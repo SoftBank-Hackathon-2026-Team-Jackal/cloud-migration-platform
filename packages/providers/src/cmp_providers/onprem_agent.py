@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 from cmp_contracts.artifact import ArtifactRef
+from cmp_contracts.network_preflight import PREFLIGHT_JOB_MODE, NetworkPreflightJob
 from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from pydantic import ValidationError
 
@@ -397,23 +398,47 @@ class RolloutRunner:
 
 
 class RolloutAgent:
-    """One outbound poll → rollout → report cycle. Supervision/looping belongs to the caller."""
+    """One outbound poll → rollout (or Network Preflight probe) → report cycle.
+    Supervision/looping belongs to the caller."""
 
     def __init__(
-        self, agent_id: str, credential: str, client: AgentControlClient, target: ClusterTarget
+        self,
+        agent_id: str,
+        credential: str,
+        client: AgentControlClient,
+        target: ClusterTarget,
+        preflight=None,
     ):
+        """`preflight`: `agent_preflight.PreflightJobRunner`; None reports
+        PREFLIGHT_NOT_CONFIGURED for NETWORK_PREFLIGHT jobs (MNP-01 N3)."""
         self.agent_id, self.credential, self.client, self.target = (
             agent_id,
             credential,
             client,
             target,
         )
+        self.preflight = preflight
+
+    def _preflight(self, job_id: str, payload) -> dict:
+        try:
+            job = NetworkPreflightJob.model_validate(payload)
+        except ValidationError:
+            return self._report(job_id, "FAILED", "UNSUPPORTED_JOB")
+        if job.agent_id != self.agent_id or job.job_id != job_id:
+            return self._report(job_id, "FAILED", "JOB_TARGET_MISMATCH")
+        if self.preflight is None:
+            return self._report(job_id, "FAILED", "PREFLIGHT_NOT_CONFIGURED")
+        status, code, observation = self.preflight.run(job)
+        return self._report(job_id, status, code, observation)
 
     def poll_once(self) -> dict | None:
         claimed = self.client.poll_once(agent_id=self.agent_id, credential=self.credential)
         if claimed is None:
             return None
         job_id = claimed["job_id"]
+        payload = claimed.get("payload")
+        if isinstance(payload, dict) and payload.get("mode") == PREFLIGHT_JOB_MODE:
+            return self._preflight(job_id, payload)
         try:
             job = ProductionRolloutJob.model_validate(claimed["payload"])
         except ValidationError:
@@ -433,14 +458,17 @@ class RolloutAgent:
             return {"job_id": job_id, "status": "RUNNING", "code": "KUBERNETES_UNAVAILABLE"}
         return self._report(job_id, status, code)
 
-    def _report(self, job_id: str, status: str, code: str) -> dict:
+    def _report(self, job_id: str, status: str, code: str, observation: dict | None = None):
+        extra = {"observation": observation} if observation is not None else {}
         self.client.report(
             agent_id=self.agent_id,
             credential=self.credential,
             job_id=job_id,
             status=status,
             code=code,
+            **extra,
         )
+        # The returned outcome is logged by the daemon: codes only, never the observation.
         return {"job_id": job_id, "status": status, "code": code}
 
 

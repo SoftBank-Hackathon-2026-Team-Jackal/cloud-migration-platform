@@ -1,0 +1,263 @@
+{
+ "ticket": "MNP-01 N3",
+ "issue": 51,
+ "date": "2026-11-05",
+ "environment": {
+  "cluster": "isolated k3d cmp-mnp-agent (K3s v1.36.4+k3s1, ARM64), dedicated kubeconfig",
+  "agent": "cmp-onprem-agent built locally from this branch (infra/onprem-agent/Dockerfile), Helm chart infra/helm/onprem-agent, tunnel disabled",
+  "platform": "in-process FastAPI over HTTPS (throwaway CA), SQLite business DB; real run_network_preflight Activity via ActivityEnvironment",
+  "probe_image": "postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab (networkPreflight.image, allowlisted)",
+  "source_db": "PostgreSQL 16 in namespace source-db (ClusterIP Service); Service CIDR 10.43.0.0/16 stands in for AWS, no WireGuard",
+  "script": "scripts/smoke_onprem_preflight.py"
+ },
+ "cluster": {
+  "context": "k3d-cmp-mnp-agent",
+  "node": "k3d-cmp-mnp-agent-server-0"
+ },
+ "scenarios": {
+  "pass": {
+   "status": "PASS",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "PASS",
+     null
+    ],
+    "probe_large_transfer": [
+     "PASS",
+     null
+    ]
+   },
+   "transfer": {
+    "bytes_expected": 4194304,
+    "bytes_received": 4194304,
+    "seconds": 0.04,
+    "stopped_after_64kib": false,
+    "mtu": "NOT_ATTEMPTED"
+   },
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "5510217f-4844-4580-973a-877335b10770",
+    "namespace": "cmp-migration",
+    "node": "k3d-cmp-mnp-agent-server-0"
+   },
+   "may_start": [
+    true,
+    []
+   ],
+   "seconds": 6.1,
+   "jobs": [
+    {
+     "id": "preflight-b589b4d235ea3a39935291de",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ],
+   "probe_pods_left": 0
+  },
+  "same_request_reused": {
+   "status": "PASS",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "PASS",
+     null
+    ],
+    "probe_large_transfer": [
+     "PASS",
+     null
+    ]
+   },
+   "transfer": {
+    "bytes_expected": 4194304,
+    "bytes_received": 4194304,
+    "seconds": 0.04,
+    "stopped_after_64kib": false,
+    "mtu": "NOT_ATTEMPTED"
+   },
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "5510217f-4844-4580-973a-877335b10770",
+    "namespace": "cmp-migration",
+    "node": "k3d-cmp-mnp-agent-server-0"
+   },
+   "may_start": [
+    true,
+    []
+   ],
+   "seconds": 0.0,
+   "jobs": [
+    {
+     "id": "preflight-b589b4d235ea3a39935291de",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ]
+  },
+  "bad_password": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "FAIL",
+     "AUTH_FAILED"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NOT_RUN"
+    ]
+   },
+   "transfer": {
+    "mtu": "NOT_ATTEMPTED"
+   },
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "5510217f-4844-4580-973a-877335b10770",
+    "namespace": "cmp-migration",
+    "node": "k3d-cmp-mnp-agent-server-0"
+   },
+   "may_start": [
+    false,
+    [
+     "PREFLIGHT_NOT_PASSED"
+    ]
+   ],
+   "seconds": 8.0,
+   "jobs": [
+    {
+     "id": "preflight-b589b4d235ea3a39935291de",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    },
+    {
+     "id": "preflight-dbc94484705fc34e32f15304",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ]
+  },
+  "namespace_not_owned": {
+   "status": "UNKNOWN",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "UNKNOWN",
+     "NAMESPACE_NOT_OWNED"
+    ],
+    "probe_db_path": [
+     "UNKNOWN",
+     "NAMESPACE_NOT_OWNED"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NAMESPACE_NOT_OWNED"
+    ]
+   },
+   "transfer": {},
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "5510217f-4844-4580-973a-877335b10770",
+    "namespace": "cmp-unowned",
+    "node": "k3d-cmp-mnp-agent-server-0"
+   },
+   "may_start": [
+    false,
+    [
+     "PREFLIGHT_NOT_PASSED"
+    ]
+   ],
+   "seconds": 2.0,
+   "jobs": [
+    {
+     "id": "preflight-1720c909b41cd452292cf92a",
+     "status": "FAILED",
+     "code": "NAMESPACE_NOT_OWNED"
+    },
+    {
+     "id": "preflight-b589b4d235ea3a39935291de",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    },
+    {
+     "id": "preflight-dbc94484705fc34e32f15304",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ],
+   "pods_in_unowned_namespace": 0
+  }
+ },
+ "agent_log_job_events": [
+  {
+   "status": "SUCCEEDED",
+   "code": "PROBED"
+  },
+  {
+   "status": "SUCCEEDED",
+   "code": "PROBED"
+  },
+  {
+   "status": "FAILED",
+   "code": "NAMESPACE_NOT_OWNED"
+  }
+ ],
+ "events": [
+  {
+   "type": "data.preflight",
+   "status": "done",
+   "result": "PASS",
+   "may_start": true
+  },
+  {
+   "type": "data.preflight",
+   "status": "done",
+   "result": "PASS",
+   "may_start": true
+  },
+  {
+   "type": "data.preflight",
+   "status": "failed",
+   "result": "FAIL",
+   "may_start": false
+  },
+  {
+   "type": "data.preflight",
+   "status": "failed",
+   "result": "UNKNOWN",
+   "may_start": false
+  }
+ ],
+ "probe_pods_left": 0,
+ "password_absent_from_evidence_logs_events": true,
+ "password_absent_from_job_rows": true,
+ "cleanup": {
+  "agent_release_uninstalled": true,
+  "namespaces_deleted": true,
+  "k3d_cluster_deleted": true,
+  "default_kubeconfig_sha256_unchanged": true
+ }
+}

@@ -25,7 +25,14 @@ KIB_64 = 64 * 1024
 
 
 class ProbeLocationUnavailable(Exception):
-    """The replication location (Agent/K3s) could not be reached or used for the probe."""
+    """The replication location (Agent/K3s) could not be reached or used for the probe.
+
+    `code` names why (UNKNOWN on every live check): `PROBE_LOCATION_UNAVAILABLE` by default,
+    or an Agent-path code such as `AGENT_OFFLINE` (decision N3)."""
+
+    def __init__(self, code: str = "PROBE_LOCATION_UNAVAILABLE"):
+        super().__init__(code)
+        self.code = code
 
 
 class ProbeExecutor(Protocol):
@@ -154,10 +161,9 @@ def run_network_preflight(
     else:
         try:
             obs = executor.probe(request)
-        except ProbeLocationUnavailable:
+        except ProbeLocationUnavailable as exc:
             live = [
-                PreflightCheck(name=name, status="UNKNOWN", code="PROBE_LOCATION_UNAVAILABLE")
-                for name in LIVE_CHECKS
+                PreflightCheck(name=name, status="UNKNOWN", code=exc.code) for name in LIVE_CHECKS
             ]
         else:
             node = obs.node or node
