@@ -33,7 +33,7 @@
 | [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | DONE (PR #114 병합) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☑ |
 | [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | DONE (PR #119 병합) | 14C, 19, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☑ |
 | [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | DONE (PR #121 병합) | 14B, 20, 21 | AV-001, AV-015, AV-021 | #120 | ☑ |
-| [23 비공개 소스 접근(토큰 참조·교체 가능한 해석기)](../../tickets/analysis-verification/23-source-access.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 03, 19, 21 | AV-001, AV-002, AV-020 | #131 | ☐ |
+| [23 비공개 소스 접근(토큰 참조·교체 가능한 해석기)](../../tickets/analysis-verification/23-source-access.md) | DONE (PR #132 병합) | 03, 19, 21 | AV-001, AV-002, AV-020 | #131 | ☑ |
 
 ## 선행 관계
 
@@ -83,6 +83,7 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-05: 정리. 23을 DONE(PR #132)으로 맞춤. 코드 수정 후 push·PR 생성(`DraftPrPublisher`의 GitHub 구현)은 후순위로 확정: 지금은 패치 산출물만 반환하고 쓰기 토큰은 쓰지 않는다. `.env` 단일 참조 작업(`specs/env-file-ref`)의 ENV-05(분석)는 분석 담당, ENV-06(Sandbox)은 Sandbox 담당 몫이다. 그 전까지 Sandbox의 `env_names`·`env_file` 설정은 임시 경로다.
 - 2026-11-05: 10 구현: `request_build`가 B-01 Build 모듈을 `builder_factory`로 감싸 호출하고(D-12 대비), `(resource_id, source_sha256, platform)`으로 성공 결과를 재사용하며, 실패 코드를 분류하고 `BuildEvidenceV2`로 정규화한다.
 - 2026-11-05: D-16 구현 반영: 민서님이 V2에 `connection_url_secret_ref`를 추가(#81, Secret `<DB release>-url`의 키 `url`)했고, 07이 `*_URL`·`*_URI` 변수를 이 출력으로 바인딩한다(`DATABASE_URL`은 `replaced`). key=value DSN은 계속 보고만 한다. 11은 `cmp_providers.database_url`의 두 함수로 같은 형식의 URL Secret을 만든다.
 - 2026-11-05: 09 구현: `package_source`로 원본 작업 공간에서 재현 가능한 소스 아카이브를 만들어 `sources/<sha256>.tar.gz`로 올린다(같은 키는 업로드 생략). B-01 아카이브 검사를 통과한다.
@@ -119,6 +120,10 @@ Q-01 ────┴→ 02B ─┐
 
 ## 후속(첫 사이클 이후, 티켓 미작성)
 
+- 후순위(필수 아님): 수정 패치를 원본 레포에 push하고 PR을 여는 기능. 같은 `SourceTokenResolver`를 `WRITE`로 쓰는 `DraftPrPublisher`의 GitHub 구현이다. 지금은 패치 산출물을 사람이 적용한다.
+- `.env` 단일 참조 전환(`specs/env-file-ref`의 ENV-05·ENV-06·ENV-07): 분석이 `env_file_ref`에서 키 이름을 읽어 EnvPlan을 내고, Sandbox가 공통 `render_env`를 쓴다. 완료되면 `SandboxSettings.env_names`·`env_file` 임시 경로를 걷어낸다.
+- Sandbox 앱에 주입되는 값의 화면 노출(바뀐 DB 호스트·포트·이름·사용자): 지금은 준비 단계에서만 계산되고 결과에 담기지 않는다. 프론트가 필요하다고 확인되면 결과에 읽기 자리를 추가한다(비밀번호·연결 URL은 Secret 참조뿐이라 제외).
+- 만료된 Sandbox의 주기적 정리 작업, 실행 보조 스크립트(상태·정리)와 브랜치 입력 검증(`-`로 시작하는 참조 거절).
 - S3: `storage-s3` 카탈로그·Skill, 엔드포인트·인증 코드 수정 → 같은 루프. presigned URL 사례. 첫 사이클에서는 `KEEP`.
 - Dockerfile 없는 앱의 Fixer 생성 고도화, 운영 이미지 재사용 대체 경로.
 - 실행 커버리지 계측 이미지, 내부 Ingress 경로 검증(차트 지원 후).

@@ -15,16 +15,16 @@
 
 ## 2. 설정 (`.env`, 값은 예시)
 
-`.env.example`의 항목을 `.env`로 복사해 채운다. 분석 결과 저장소는 **분석 워커와 Sandbox 워커, Planning이 같은 디렉터리**를 가리키게 한다. Planning은 요구사항을 `<저장소>/<SHA-256>`로 읽는다.
+`.env.example`의 항목을 `.env`로 복사해 채운다. 경로는 **절대 경로**로 쓴다(`~`와 `$HOME`은 펼쳐지지 않을 수 있다). 분석 결과 저장소는 **분석 워커와 Sandbox 워커, Planning이 같은 디렉터리**를 가리키게 한다. Planning은 요구사항을 `<저장소>/<SHA-256>`로 읽는다.
 
 ```bash
-ANALYSIS_ARTIFACT_STORE_DIR=$HOME/cmp-data/store
-ARTIFACT_STORE_DIR=$HOME/cmp-data/store          # Planning이 읽는 곳(같은 값)
-ANALYSIS_WORKSPACE_ROOT=$HOME/cmp-data/workspaces
-SANDBOX_KUBECONFIG=$HOME/.kube/cmp-sandbox.yaml
+ANALYSIS_ARTIFACT_STORE_DIR=/절대/경로/cmp-data/store
+ARTIFACT_STORE_DIR=/절대/경로/cmp-data/store          # Planning이 읽는 곳(같은 값)
+ANALYSIS_WORKSPACE_ROOT=/절대/경로/cmp-data/workspaces
+SANDBOX_KUBECONFIG=/절대/경로/.kube/cmp-sandbox.yaml
 SANDBOX_PREBUILT_IMAGES={"orders-api": "ghcr.io/<소유자>/<앱>@sha256:<digest>"}
 LLM_ENABLED=true
-LLM_LEDGER_PATH=$HOME/cmp-data/llm-ledger.json
+LLM_LEDGER_PATH=/절대/경로/cmp-data/llm-ledger.json
 ```
 
 모델 호출 한도(마이그레이션당 $3, 하루 $20, 한 달 $100)는 `LLM_LIMIT_*`로 바꾼다. 모델을 즉시 멈추려면 `LLM_KILL_SWITCH_PATH`로 지정한 파일을 만들거나 `CMP_LLM_DISABLED=1`을 건다.
@@ -77,6 +77,12 @@ uv run python scripts/review_signal.py approve <Workflow ID> --version <버전> 
 | Planning이 요구사항을 못 읽음 | `ARTIFACT_STORE_DIR`와 `ANALYSIS_ARTIFACT_STORE_DIR`가 다르다 |
 | 앱이 시작하지 않음 | 첫 시도는 포트·헬스 경로가 틀릴 수 있고, 이 경우 SPEC으로 분류되어 Fixer가 고친다 |
 
-## 8. 아직 없는 것
+## 8. Sandbox 앱에 들어가는 값
 
-실제 Build(S3·ECR·Docker, D-12), Planning 인계(티켓 15), 승인 API·화면, 만료된 Sandbox의 주기적 정리 작업. 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.
+- DB 연결 변수(`DB_HOST`·`DB_PORT`·`DB_NAME`·`DB_USER`·`DB_PASSWORD`·`DATABASE_URL` 등 이름 패턴)는 분석이 대상 DB 출력에 묶고, Sandbox가 새로 띄운 DB 값으로 채운다. 비밀번호는 실행마다 새로 만든 Secret 참조이고 원본 값은 복사하지 않는다.
+- `AWS_*`는 복사하지 않는다. 그 밖의 변수(`APP_PORT`, 토큰 등)는 시작할 때 `--sandbox`의 `env_names`와 `env_file`로 이름과 값을 줘야 앱에 들어간다. `.env` 단일 참조 전환(`specs/env-file-ref`) 전까지의 임시 경로다.
+- 코드에 직접 적힌 주소는 바꿀 수 없다. 이 경우 실패로 분류되어 Fixer가 코드를 고친다(파일 20개·파일당 200KB 이하, 테스트·`.env`·`.git`은 수정 불가, 최대 3회).
+
+## 9. 아직 없는 것
+
+실제 Build(S3·ECR·Docker, D-12), Planning 인계(티켓 15), 승인 API·화면, 만료된 Sandbox의 주기적 정리 작업, 수정 패치의 push·PR 자동 생성(후순위). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.
