@@ -28,7 +28,10 @@ INPUT = {
 class Script:
     """Fake Activities driven by a list of per-attempt outcomes; records every call."""
 
-    def __init__(self, outcomes, *, fix=None, fix_status="PROPOSED", prepare_error=None):
+    def __init__(
+        self, outcomes, *, fix=None, fix_status="PROPOSED", prepare_error=None, changed=None
+    ):
+        self.changed = changed or []  # rows the loop handled differently
         self.outcomes = list(outcomes)  # entries: None (pass) or a failure class
         self.fix = fix or {"kind": "REQUIREMENTS", "requirements_ref": REF2}
         self.fix_status = fix_status
@@ -49,7 +52,8 @@ class Script:
         async def build(payload: dict) -> dict:
             script.record("sbx_build", payload)
             return {
-                "images": {"api": {"uri": "r@sha256:" + "e" * 64, "platforms": ["linux/amd64"]}}
+                "source_sha256": "s" * 64,
+                "images": {"api": {"uri": "r@sha256:" + "e" * 64, "platforms": ["linux/amd64"]}},
             }
 
         @activity.defn(name="sbx_prepare")
@@ -71,8 +75,10 @@ class Script:
             outcome = script.outcomes[min(script.i, len(script.outcomes) - 1)]
             script.i += 1
             reasons = [] if outcome is None else [f"TEST_FAILED:{outcome}"]
+            status = "PASSED" if outcome is None else "FAILED"
             return {
                 "verdict": {"passed": outcome is None, "reasons": reasons}, "sandbox_error": None,
+                "results": [{"id": "std-health", "status": status}],
                 "logs_ref": REF, "pod_events": [], "stack_in_app_code": False, "outcome": outcome,
             }  # fmt: skip
 
@@ -93,12 +99,26 @@ class Script:
                 return {"status": script.fix_status, "reason": "LLM_NOT_CONFIGURED"}
             return {"status": "PROPOSED", "reason": "r", **script.fix}
 
+        @activity.defn(name="sbx_plan_publish")
+        async def plan_publish(payload: dict) -> dict:
+            script.record("sbx_plan_publish", payload)
+            return {
+                "error": None, "final_ref": {"id": "analysis", "version": "v2"},
+                "changed": script.changed, "required": {r["id"]: bool(r["required"]) for r in script.changed},
+                "actor": "park",
+            }  # fmt: skip
+
+        @activity.defn(name="sbx_publish")
+        async def publish(payload: dict) -> dict:
+            script.record("sbx_publish", payload)
+            return {"status": "PUBLISHED", "requirements_ref": payload["requirements_ref"]}
+
         @activity.defn(name="sbx_teardown")
         async def teardown(payload: dict) -> dict:
             script.record("sbx_teardown", payload)
             return {"cleanup_status": "CLEANED"}
 
-        return [build, prepare, apply, verify, classify, fix, teardown]
+        return [build, prepare, apply, verify, classify, fix, plan_publish, publish, teardown]
 
 
 @workflow.defn
@@ -156,7 +176,7 @@ async def test_a_spec_failure_is_fixed_by_a_new_requirements_version_without_a_b
     assert prepares[1]["requirements_ref"] == REF2 and prepares[1]["previous_plan"] == {"n": 1}
     applies = [p for n, p in script.calls if n == "sbx_apply"]
     assert applies[0]["previous_plan"] is None and applies[1]["previous_plan"] == {"n": 1}
-    assert script.names()[-1] == "sbx_teardown"
+    assert script.names()[-3:] == ["sbx_teardown", "sbx_plan_publish", "sbx_publish"]
     verifies = [p for n, p in script.calls if n == "sbx_verify"]
     assert [v["reset"] for v in verifies] == [False, True]
 
@@ -254,3 +274,101 @@ async def test_the_parent_is_told_while_a_person_is_needed_and_the_terminal_stat
         await child.signal("resolve_review")
         assert (await asyncio.wait_for(parent.result(), timeout=10))["status"] == "NEEDS_REVIEW"
         assert await parent.query("seen") == [True, False]
+
+
+ROW = {
+    "id": "r2", "capability": "ingress", "usage": "u", "grade": "PARTIAL", "required_proposed": True,
+    "required_reason": "r", "required": False, "disposition": "KEEP", "loses": [],
+    "treatment": "APPROVAL", "status": "EVIDENCE_CHECKED", "evidence": [],
+}  # fmt: skip
+ANALYSIS = {"id": "analysis", "version": "v2"}
+
+
+@pytest.mark.asyncio
+async def test_a_pass_publishes_exactly_what_the_last_verification_used():
+    script = Script(["SPEC", None], fix={"kind": "REQUIREMENTS", "requirements_ref": REF2})
+    result, _ = await run(script)
+    publishes = [p for n, p in script.calls if n == "sbx_publish"]
+    assert len(publishes) == 1 and publishes[0]["requirements_ref"] == REF2
+    assert publishes[0]["built_source_sha256"] == "s" * 64
+    assert publishes[0]["results"] == [{"id": "std-health", "status": "PASSED"}]
+    assert result["published"]["requirements_ref"] == REF2
+    names = script.names()
+    assert (
+        names.index("sbx_teardown") < names.index("sbx_plan_publish") < names.index("sbx_publish")
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_run_publishes_nothing():
+    script = Script(["RENDER"])
+    result, _ = await run(script)
+    assert result["published"] is None
+    assert "sbx_publish" not in script.names() and "sbx_plan_publish" not in script.names()
+
+
+@pytest.mark.asyncio
+async def test_row_changes_proposed_by_the_fixer_reach_the_publication():
+    fix = {"kind": "REQUIREMENTS", "requirements_ref": REF2, "row_changes": {"r2": "KEEP"}}
+    script = Script(["SPEC", None], fix=fix)
+    await run(script)
+    plan = next(p for n, p in script.calls if n == "sbx_plan_publish")
+    assert plan["row_changes"] == {"r2": "KEEP"}
+
+
+async def run_with_reapproval(script, answer):
+    async with (
+        await WorkflowEnvironment.start_time_skipping(
+            test_server_existing_path=os.environ.get("CMP_TEST_SERVER_PATH")
+        ) as env,
+        Worker(env.client, task_queue=SANDBOX_QUEUE, activities=script.activities()),
+        create_workflow_worker(env.client),
+    ):
+        handle = await env.client.start_workflow(
+            "SandboxVerificationWorkflow", INPUT, id="reapprove", task_queue=WORKFLOW_QUEUE
+        )
+        for _ in range(100):
+            state = await handle.query("reapproval_state")
+            if state["phase"] == "WAITING_APPROVAL":
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("re-approval wait not reached")
+        assert "sbx_publish" not in script.names()
+        assert (await handle.describe()).status.name == "RUNNING"
+        await handle.signal("approve_changed_rows", answer)
+        if answer["approvals"].get("r2") == "REJECTED":
+            for _ in range(100):
+                if (await handle.query("status"))["phase"] == "NEEDS_REVIEW":
+                    break
+                await asyncio.sleep(0.05)
+            await handle.signal("resolve_review")
+        return await asyncio.wait_for(handle.result(), timeout=10), state
+
+
+@pytest.mark.asyncio
+async def test_rows_the_loop_changed_are_asked_again_before_publishing():
+    script = Script([None], changed=[ROW])
+    answer = {"analysis_ref": ANALYSIS, "approvals": {"r2": "APPROVED"}, "actor": "park"}
+    result, state = await run_with_reapproval(script, answer)
+    assert [i["id"] for i in state["items"]] == ["r2"] and state["pending"] == "approve_losses"
+    assert result["status"] == "PASSED" and result["published"]["status"] == "PUBLISHED"
+    publish = next(p for n, p in script.calls if n == "sbx_publish")
+    assert publish["decisions"]["approvals"] == {"r2": "APPROVED"}
+    assert publish["decisions"]["actor"] == "park"
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_change_stops_the_run_for_a_person_and_publishes_nothing():
+    script = Script([None], changed=[ROW])
+    answer = {"analysis_ref": ANALYSIS, "approvals": {"r2": "REJECTED"}, "actor": "park"}
+    result, _ = await run_with_reapproval(script, answer)
+    assert result["status"] == "NEEDS_REVIEW" and result["reasons"] == ["ROW_BLOCKED:r2"]
+    assert result["published"] is None and "sbx_publish" not in script.names()
+
+
+@pytest.mark.asyncio
+async def test_nothing_changed_means_no_question_and_no_wait():
+    script = Script([None])
+    result, _ = await run(script)
+    assert result["status"] == "PASSED" and "sbx_publish" in script.names()

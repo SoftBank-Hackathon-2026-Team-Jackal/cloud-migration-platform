@@ -8,11 +8,13 @@ never enter Workflow history; logs are masked and stored by reference.
 import re
 import shutil
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, propose_fix
 from cmp_agents.llm import LLMClient
+from cmp_contracts.analysis import AnalysisReport, ReviewRecord
 from cmp_contracts.provisioning import Image
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_contracts.verification import canonical_requirements
@@ -20,12 +22,28 @@ from cmp_scanners.masking import mask_text
 from cmp_testsuite import SuiteResult, load_bundle, run_suite
 from pydantic import BaseModel, ConfigDict
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from cmp_worker.artifact_store import ArtifactRef, LocalArtifactStore
 from cmp_worker.failure_classifier import (
     AttemptSignals,
     classify_failure,
     find_render_mismatches,
+)
+from cmp_worker.final_report import (
+    FinalReportError,
+    apply_row_changes,
+    build_final_report,
+    changed_rows,
+    mark_verified,
+    with_decisions,
+)
+from cmp_worker.fix_patch import (
+    DraftPrPublisher,
+    PatchError,
+    PreparedOnlyPublisher,
+    build_patch_artifact,
+    tree_sha256,
 )
 from cmp_worker.sandbox_deploy import (
     SandboxCapabilities,
@@ -60,6 +78,8 @@ class SandboxInput(BaseModel):
     env_file: str | None = None
     keep_hosts: list[dict[str, Any]] = []
     source_hosts: list[str] = []
+    analysis_report_ref: ArtifactRef | None = None  # the analysis version a person approved
+    review_ref: ArtifactRef | None = None  # its stored ReviewRecord
 
 
 def stack_in_app_code(logs: str, workspace: Path | str | None) -> bool:
@@ -97,7 +117,9 @@ class SandboxLoopActivities:
         build: Builder,
         suite_runner: SuiteRunner,
         llm_factory: Callable[[], LLMClient] | None = None,
+        pr_publisher: DraftPrPublisher | None = None,
     ) -> None:
+        self.pr_publisher = pr_publisher or PreparedOnlyPublisher()
         self.service = service
         self.store = store
         self.workspace_root = Path(workspace_root)
@@ -121,7 +143,9 @@ class SandboxLoopActivities:
             for r in requirements.resources
             if r.kind == "APPLICATION"
         }
-        return {"images": images}
+        workspace = payload["source"].get("workspace")
+        source_sha256 = tree_sha256(workspace) if workspace and Path(workspace).is_dir() else None
+        return {"images": images, "source_sha256": source_sha256}
 
     @activity.defn(name="sbx_prepare")
     async def sbx_prepare(self, payload: dict) -> dict:
@@ -262,12 +286,20 @@ class SandboxLoopActivities:
         if outcome.status != "PROPOSED":
             return {"status": outcome.status, "reason": outcome.reason}
         if outcome.requirements_fix is not None:
+            changes = {c.row_id: c.disposition for c in outcome.requirements_fix.row_changes}
+            if changes:
+                try:
+                    apply_row_changes(
+                        self._report_rows(payload.get("analysis_report_ref")), changes
+                    )
+                except FinalReportError as exc:
+                    return {"status": "FAILED", "reason": exc.code}
             fixed = apply_requirements_fix(requirements, outcome.requirements_fix)
             data, _ = canonical_requirements(fixed)
             ref = self.store.put(data, ref_id="requirements", kind="requirements")
             return {
                 "status": "PROPOSED", "kind": "REQUIREMENTS", "reason": outcome.requirements_fix.reason,
-                "requirements_ref": ref.model_dump(mode="json"),
+                "requirements_ref": ref.model_dump(mode="json"), "row_changes": changes,
             }  # fmt: skip
         fix = outcome.code_fix
         digest = self.store.put(
@@ -283,6 +315,145 @@ class SandboxLoopActivities:
             "source": {"workspace": str(target)},
         }  # fmt: skip
 
+    # ------------------------------------------------------------------ publication
+
+    def _report(self, ref: dict | None) -> AnalysisReport | None:
+        if ref is None:
+            return None
+        return AnalysisReport.model_validate_json(self.store.get(ArtifactRef.model_validate(ref)))
+
+    def _report_rows(self, ref: dict | None) -> list:
+        report = self._report(ref)
+        return list(report.mapping) if report else []
+
+    def _final(self, payload: dict) -> dict[str, Any]:
+        """The final analysis version, rows and the first review's decisions (pure)."""
+        inp = SandboxInput.model_validate(payload["input"])
+        requirements_ref = ArtifactRef.model_validate(payload["requirements_ref"])
+        report = self._report(
+            inp.analysis_report_ref.model_dump() if inp.analysis_report_ref else None
+        )
+        if report is None:
+            return {"report": None, "changed": [], "required": {}, "approvals": {}, "actor": ""}
+        required, approvals, actor = {}, {}, ""
+        if inp.review_ref is not None:
+            record = ReviewRecord.model_validate_json(self.store.get(inp.review_ref))
+            required, approvals, actor = dict(record.required), dict(record.approvals), record.actor
+        before = with_decisions(report.mapping, required)
+        after = with_decisions(
+            apply_row_changes(before, payload.get("row_changes") or {}), required
+        )
+        suite = load_bundle(self.store.get(ArtifactRef.model_validate(inp.suite_ref)))
+        verified = mark_verified(after, suite, payload.get("results") or [])
+        final = build_final_report(report, verified, requirements_ref.sha256)
+        return {
+            "report": final, "changed": changed_rows(before, after), "required": required,
+            "approvals": approvals, "actor": actor,
+        }  # fmt: skip
+
+    @activity.defn(name="sbx_plan_publish")
+    async def sbx_plan_publish(self, payload: dict) -> dict:
+        """Which rows changed handling since a person approved them (they need a new answer)."""
+        try:
+            final = self._final(payload)
+        except FinalReportError as exc:
+            return {
+                "error": exc.code,
+                "changed": [],
+                "final_ref": None,
+                "required": {},
+                "actor": "",
+            }
+        report = final["report"]
+        return {
+            "error": None,
+            "final_ref": report.ref.model_dump() if report else None,
+            "changed": [r.model_dump(mode="json") for r in final["changed"]],
+            "required": final["required"],
+            "actor": final["actor"],
+        }
+
+    @activity.defn(name="sbx_publish")
+    async def sbx_publish(self, payload: dict) -> dict:
+        """Publish exactly what the last verification used; a patch for any code change."""
+        inp = SandboxInput.model_validate(payload["input"])
+        source = payload["source"]
+        workspace = source.get("workspace")
+        built = payload.get("built_source_sha256")
+        source_sha256 = tree_sha256(workspace) if workspace and Path(workspace).is_dir() else None
+        if built is not None and source_sha256 != built:
+            raise ApplicationError(
+                "Source changed after it was verified",
+                type="SOURCE_CHANGED_AFTER_VERIFICATION", non_retryable=True,
+            )  # fmt: skip
+        result: dict[str, Any] = {
+            "status": "PUBLISHED",
+            "requirements_ref": payload["requirements_ref"],
+            "source": source,
+            "source_sha256": source_sha256,
+            "report_ref": None,
+            "review_ref": None,
+            "patch": None,
+        }
+        final = self._final(payload)
+        if final["report"] is not None:
+            report = final["report"]
+            ref = self.store.put_json(
+                report, ref_id=f"analysis-{inp.migration_id}", kind="analysis-report"
+            )
+            result["report_ref"] = ref.model_dump(mode="json")
+            result["analysis_ref"] = report.ref.model_dump(mode="json")
+            decisions = payload.get("decisions")
+            if decisions:
+                record = ReviewRecord.model_validate(
+                    {
+                        "analysis_ref": report.ref.model_dump(),
+                        "required": decisions["required"],
+                        "operational": decisions.get("operational", []),
+                        "approvals": {**final["approvals"], **decisions["approvals"]},
+                        "actor": decisions["actor"],
+                        "decided_at": datetime.now(UTC),
+                    }
+                )
+                review = self.store.put_json(
+                    record, ref_id=f"review-{inp.migration_id}", kind="review-record"
+                )
+                result["review_ref"] = review.model_dump(mode="json")
+        base = inp.source.get("workspace")
+        if workspace and base and workspace != base:
+            try:
+                artifact = build_patch_artifact(
+                    base, workspace, migration_id=inp.migration_id,
+                    reasons=payload.get("fix_reasons") or [],
+                )  # fmt: skip
+            except PatchError as exc:
+                raise ApplicationError(
+                    "Patch does not reproduce the verified source",
+                    type=exc.code,
+                    non_retryable=True,
+                ) from None
+            if artifact is not None:
+                patch_ref = self.store.put(artifact.patch, ref_id="fix-patch", kind="fix-patch")
+                record_ref = self.store.put_json(
+                    {
+                        "branch": artifact.branch, "title": artifact.title, "body": artifact.body,
+                        "base_tree_sha256": artifact.base_tree_sha256,
+                        "result_tree_sha256": artifact.result_tree_sha256,
+                        "patch_ref": patch_ref.model_dump(mode="json"),
+                    },
+                    ref_id="fix-patch-record", kind="fix-patch-record",
+                )  # fmt: skip
+                result["patch"] = {
+                    "record_ref": record_ref.model_dump(mode="json"),
+                    "patch_ref": patch_ref.model_dump(mode="json"),
+                    "branch": artifact.branch,
+                    "result_tree_sha256": artifact.result_tree_sha256,
+                    "publisher": self.pr_publisher.publish(
+                        artifact, patch_ref.model_dump(mode="json")
+                    ),
+                }
+        return result
+
     @activity.defn(name="sbx_teardown")
     async def sbx_teardown(self, payload: dict) -> dict:
         self.service.teardown_sandbox(payload["namespace"])
@@ -291,5 +462,6 @@ class SandboxLoopActivities:
     def all(self) -> list[Callable]:
         return [
             self.sbx_build, self.sbx_prepare, self.sbx_apply, self.sbx_verify,
-            self.sbx_classify, self.sbx_fix, self.sbx_teardown,
+            self.sbx_classify, self.sbx_fix, self.sbx_plan_publish, self.sbx_publish,
+            self.sbx_teardown,
         ]  # fmt: skip

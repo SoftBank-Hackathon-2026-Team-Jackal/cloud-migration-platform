@@ -75,7 +75,7 @@ class ReviewGate:
         if signal.analysis_ref.model_dump() != self.analysis_ref:
             return self._reject(name, "ANALYSIS_REF_MISMATCH")
         known = {r.id for r in self.rows}
-        approvable = {r.id for r in self.rows if r.treatment == "APPROVAL"}
+        approvable = self._approvable()
         if set(signal.approvals) - known:
             return self._reject(name, "UNKNOWN_ROW")
         if set(signal.approvals) - approvable:
@@ -89,6 +89,9 @@ class ReviewGate:
                 self._required[row_id] = True  # a rejected loss means the feature is required
         self._recompute()
         return True
+
+    def _approvable(self) -> set[str]:
+        return {r.id for r in self.rows if r.treatment == "APPROVAL"}
 
     def _recompute(self) -> None:
         self.rows = compute_treatments(self.rows, self._required)
@@ -147,3 +150,42 @@ class ReviewGate:
             "blocked": self.blocked(),
             "rejections": list(self.rejections),
         }
+
+
+class ReapprovalGate(ReviewGate):
+    """Asks again, for changed rows only, after the Sandbox loop changed how they are handled.
+
+    Earlier decisions (`required`, actor) are carried in, so only the approval step remains.
+    Every changed row needs an explicit answer, whatever its treatment is. A change that turns
+    into BLOCK ends the gate as BLOCKED. Same Signal contract and rejection records as the
+    first review.
+    """
+
+    def __init__(
+        self,
+        analysis_ref: dict[str, str],
+        rows: list[dict[str, Any] | MappingRow],
+        *,
+        required: dict[str, bool],
+        actor: str,
+    ):
+        super().__init__(analysis_ref, rows)
+        self._required = {r.id: bool(required.get(r.id, False)) for r in self.rows}
+        self._actor = actor
+        self.rows = compute_treatments(self.rows, self._required)
+        self.phase = BLOCKED if any(r.treatment == "BLOCK" for r in self.rows) else WAITING_APPROVAL
+        if not self.rows:
+            self.phase = APPROVED
+
+    def _approvable(self) -> set[str]:
+        return {r.id for r in self.rows}
+
+    def _recompute(self) -> None:
+        for row_id, decision in self._approvals.items():
+            if decision == "REJECTED":
+                self._required[row_id] = True
+        self.rows = compute_treatments(self.rows, self._required)
+        if any(r.treatment == "BLOCK" for r in self.rows):
+            self.phase = BLOCKED
+        else:
+            self.phase = APPROVED
