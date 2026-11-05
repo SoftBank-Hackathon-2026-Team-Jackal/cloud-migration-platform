@@ -122,6 +122,7 @@ async def test_parent_continues_only_after_the_db_is_switched() -> None:
 
     result, status = await run_probe(READY_VIEW, drive)
     assert result == "continue"
+    assert status["data_migration"]["writer"] == "target"
     assert status["data_migration"]["phase"] == "switched"
     assert status["data_migration"]["active"] == "target"
 
@@ -151,3 +152,39 @@ def test_start_input_carries_validated_data_migration_settings() -> None:
     with pytest.raises(ValidationError):
         build_start_input(project_id="p", repository="r", commit="c",
                           data_migration_json=json.dumps(GIVEN | {"password": "x"}))  # fmt: skip
+
+
+@workflow.defn(name="GateProbe")
+class GateProbe(MigrationWorkflow):
+    @workflow.run
+    async def run(self, given: dict) -> list:
+        self.plan = {"plan_id": "plan-1", "revision": 2}
+        gates = [self.db_gate_ok()]
+        await self._data_migration(given)
+        await workflow.wait_condition(lambda: self.db_gate_ok() is True)
+        return [*gates, self.db_gate_ok()]
+
+
+async def test_parent_db_gate_turns_true_once_reverse_replication_streams() -> None:
+    """#128: Traffic은 부모의 db_gate_ok()를 읽는다. 전환 뒤 역방향 복제 감시가 streaming이면 True."""
+    fakes = Fakes()
+    async with await WorkflowEnvironment.start_time_skipping() as env:  # noqa: SIM117
+        async with (
+            Worker(
+                env.client, task_queue=WORKFLOW_QUEUE, workflows=[GateProbe, DataMigrationWorkflow]
+            ),
+            Worker(env.client, task_queue=MIGRATION_QUEUE, activities=fakes.activities()),
+            handoff_worker(env.client, READY_VIEW),
+        ):
+            pid = f"migration-{uuid.uuid4()}"
+            handle = await env.client.start_workflow(
+                GateProbe.run, GIVEN, id=pid, task_queue=WORKFLOW_QUEUE
+            )
+            child = env.client.get_workflow_handle(f"data-{pid}")
+            for _ in range(200):
+                state = (await handle.query("status"))["data_migration"]
+                if state and state["phase"] == "streaming":
+                    break
+                await asyncio.sleep(0.05)
+            await child.signal(DataMigrationWorkflow.switchover)
+            assert await handle.result() == [None, True]

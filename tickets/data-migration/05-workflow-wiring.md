@@ -25,6 +25,7 @@ DONE(로컬 검증, PR #138). 부모 연결은 `data-migration-v1` patch 아래�
 - 대상 `DbEndpoint`는 `get_migration_handoff`(consumer `DATA_MIGRATION`)로 만든다: EKS → `AWS_EKS`, GKE → `GCP_GKE`, DB Pod는 `<release>-0`. K3s는 `target_kubeconfig_ref`가 있어야 하고, 터널 DB 주소(`tunnel_endpoint`)를 기본 `peer_host`로 쓴다. 인계값이 막혀 있으면 `data_blocked`(이유 코드는 `failure_code`).
 - 자식 `data-<migration_id>`를 `ABANDON`으로 시작한다(부모가 끝나도 역방향 복제를 유지해 롤백 가능). 자식은 단계가 바뀔 때 부모에 `data_migration_state` 신호를 보내고, 부모 `status` Query의 `data_migration`에 보인다.
 - 부모는 DB가 대상으로 전환(`switched`)될 때까지 기다린 뒤 트래픽 단계로 간다(DB 먼저, DM-007). 실패·막힘이면 `data_failed`·`data_blocked`로 끝난다. 부모 취소는 자식에 `request_cancel`을 보낸다.
+- Traffic DB 게이트(#128): 부모 `MigrationWorkflow.db_gate_ok()` — 쓰기 주체가 대상이고 역방향 복제가 streaming이면 True, 데이터 이전을 하지 않은 실행이면 None. 자식은 게이트 값이 바뀔 때마다 부모에 알린다(`data_migration_state`에 `writer`, `reverse_replication_ok`). 감시가 실패한 값(stale)으로는 True가 되지 않는다.
 - 전환 신호: `temporal workflow signal --workflow-id data-<migration_id> --name switchover` (두 번째 승인 연결 전까지 운영자가 보낸다)
 
 시험: `tests/data/test_data_parent.py`(인계값 → 대상 변환, 시험용 부모 + 진짜 자식: 전환 뒤에만 진행, 인계값 막힘)

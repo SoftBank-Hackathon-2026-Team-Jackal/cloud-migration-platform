@@ -75,7 +75,12 @@ class DataMigrationWorkflow:
     @workflow.query
     def db_gate(self) -> dict:
         """Traffic `require_db_gate`용: 쓰기 주체가 대상이고 역방향 복제가 살아 있는지."""
-        reverse_ok = self.active == "target" and self.last_sample.get("phase") == "streaming"
+        sample = self.last_sample
+        reverse_ok = (
+            self.active == "target"
+            and sample.get("phase") == "streaming"
+            and not sample.get("stale")  # 감시에 실패한 값으로는 정상이라 하지 않는다
+        )
         return {"writer": self.active, "reverse_replication_ok": reverse_ok}
 
     # ---- 실행 ----
@@ -99,12 +104,15 @@ class DataMigrationWorkflow:
 
     async def _monitor_once(self, args: dict) -> None:
         req = self._req(args)
+        gate = self.db_gate()
         try:
             self.last_sample = await self._call(dm.dm_sample, req, timeout_s=60)
             self.last_readiness = await self._call(dm.dm_readiness, req, timeout_s=60)
         except ActivityError:
             # 감시 실패는 상태만 남기고 다음 주기에 다시 본다(전환·정리를 막지 않는다).
             self.last_sample = {**self.last_sample, "stale": True}
+        if self.db_gate() != gate:
+            await self._notify()  # 부모(Traffic DB 게이트)가 값이 바뀐 것을 알게 한다
 
     async def _replicate(self, args: dict) -> str | None:
         req = self._req(args)
@@ -169,7 +177,7 @@ class DataMigrationWorkflow:
         if parent is None:
             return
         state = {"phase": self.phase, "active": self.active, "failure_code": self.failure_code,
-                 "switches": len(self.switches)}  # fmt: skip
+                 "switches": len(self.switches), **self.db_gate()}  # fmt: skip
         try:
             await workflow.get_external_workflow_handle(parent.workflow_id).signal(
                 PARENT_SIGNAL, state

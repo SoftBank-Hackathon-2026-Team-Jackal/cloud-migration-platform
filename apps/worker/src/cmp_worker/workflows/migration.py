@@ -92,6 +92,14 @@ class MigrationWorkflow:
         self._phase = value
         self.data_migration: dict | None = None  # specs/data-migration: child state (no secrets)
 
+    def db_gate_ok(self) -> bool | None:
+        """Traffic(#128) `require_db_gate`용(DM-007): DB 쓰기 주체가 대상이고 역방향 복제가 정상이면
+        True. 데이터 이전을 이 실행에서 하지 않았으면 None(판단할 근거 없음)."""
+        state = self.data_migration
+        if state is None or "writer" not in state:
+            return None
+        return state["writer"] == "target" and bool(state.get("reverse_replication_ok"))
+
     @workflow.signal
     def data_migration_state(self, state: dict) -> None:
         """DataMigrationWorkflow가 단계가 바뀔 때 보낸다."""
