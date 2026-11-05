@@ -36,6 +36,7 @@
 | [23 환경 연결 관리 API (AWS 역할 위임·GCP·Agent 목록)](../../tickets/provisioning/23-environment-connections.md) | DONE (로컬 범위, 실제 계정·데모 반영 승인 대기) | 15, 16, 21 | PROV-003, 021, 022 | [#118](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/118) | ☑ |
 | [24 이전 이벤트 저장소·SSE·운영 로그 공통 모듈](../../tickets/provisioning/24-migration-events.md) | IN_PROGRESS (로컬 완료, 리뷰·push 대기) | 07, 13, 18 | PROV-014, 015, 018, 021 | [#122](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/122) | ☐ |
 | [25 터널 상태 만료(신선도) 처리](../../tickets/provisioning/25-tunnel-status-freshness.md) | DONE (로컬 범위, 리뷰·push 대기) | 13, 16, 17, 23 | PROV-009, 019, 020, 021 | [#135](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/135) | ☑ |
+| [29 대상별 ECR 이미지 pull 전략 (GKE 갱신·K3s pull Secret)](../../tickets/provisioning/29-image-pull-strategy.md) | IN_PROGRESS (로컬 완료, 리뷰·Agent 릴리스 승인 대기) | 11, 12, 15, ENV-04 | PROV-009, 010, 013, 018, 021 | [#153](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/153) | ☐ |
 
 ## 선행 관계
 
@@ -53,6 +54,7 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 12A, 15 → 18              (Agent가 실행할 ON_PREM Plan 게시)
 08, 09, 10, 11, 18 → 22     (AWS/GCP 인프라 실행 뒤 워크로드 Plan 게시·09/11 실행)
 07, 13, 18 → 24          (이전 이벤트 저장소·SSE, 각 파트가 발행)
+11, 12, 15 → 29          (플랫폼 ECR 토큰으로 GKE·K3s pull Secret 생성·갱신)
 ```
 
 화살표는 주요 경로를 요약한다. 정확한 모든 `Blocked by`는 위 표와 각 티켓에 있다. `02`·`05`·`06`·`07`은 `CP-01`이 main에 반영된 뒤 의존성상 독립이지만 현재는 순차로 진행하며, AWS/GCP의 배포 경로는 공통 Helm 기반과 해당 인프라 준비가 끝나면 독립 진행할 수 있다. `13`은 K3s 경로로 결과 계약을 먼저 검증한다. AWS/GCP 실제 경로와의 연결은 `14`에서 확인한다.

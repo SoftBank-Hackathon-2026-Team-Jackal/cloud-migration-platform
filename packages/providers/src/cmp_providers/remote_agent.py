@@ -147,6 +147,18 @@ class AgentControlClient:
             raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
         return secrets
 
+    def image_pull(self, *, agent_id: str, credential: str, job_id: str) -> dict:
+        """Ticket 29: `{registry, username, password, expires_at}` for the caller's own rollout
+        job. The caller writes it into the cluster and never logs or reports it."""
+        self._id(agent_id)
+        self._id(job_id)
+        response = self._request(
+            f"/agents/{agent_id}/jobs/{job_id}/image-pull", None, credential, method="GET"
+        )
+        if not isinstance(response, dict) or not isinstance(response.get("password"), str):
+            raise AgentTransportError("INVALID_PLATFORM_RESPONSE")
+        return response
+
     # --- tunnel exchange (ticket 16 API, used by the ticket 17 tunnel manager) ---------------
     def register_tunnel_key(self, *, agent_id: str, credential: str, public_key: str) -> dict:
         """Registers the WireGuard *public* key; the private key never leaves the Agent."""

@@ -21,6 +21,7 @@ from cmp_contracts.onprem_rollout import (
     RolloutConnectionUrl,
     RolloutDatabase,
     RolloutEnvSecret,
+    RolloutImagePull,
     rollout_job_id,
 )
 from cmp_contracts.plan import PlanManifest
@@ -28,6 +29,7 @@ from cmp_contracts.provisioning import ContentRef
 from cmp_contracts.shared_deployment_v2 import ApplicationValuesV2, SecretRefV2
 from cmp_providers.artifacts import sha256_bytes, verify_artifact_bytes
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
+from cmp_providers.ecr_pull import PULL_SECRET, EcrPullError, PlatformRegistry, ecr_registry
 from cmp_providers.env_file import (
     DbOutputRefs,
     EnvFileError,
@@ -191,10 +193,41 @@ def _platform_env_secrets(
     return [RolloutEnvSecret(name=n, keys=sorted(k)) for n, k in sorted(keys.items())]
 
 
+def configured_platform_registry() -> PlatformRegistry | None:
+    """Ticket 29 (I1) settings; raises `EcrPullError("PLATFORM_REGISTRY_INVALID")`."""
+    from cmp_api.config import settings
+
+    return PlatformRegistry.parse(
+        settings.platform_ecr_registry, settings.platform_ecr_repositories
+    )
+
+
+def _image_pull(
+    database: PostgresChartValues,
+    application: ApplicationValuesV2,
+    registry: PlatformRegistry | None,
+) -> tuple[RolloutImagePull, PlatformRegistry] | None:
+    """Ticket 29: pull credentials are needed only when an approved image is in ECR, and only
+    the platform registry/repositories can be pulled with the platform role."""
+    uris = [database.image.uri, application.image.uri]
+    if all(ecr_registry(uri) is None for uri in uris):
+        return None  # public or other registries: unchanged path, no pull Secret
+    try:
+        registry = registry or configured_platform_registry()
+        host = PlatformRegistry.require(registry, uris)
+    except EcrPullError as error:
+        raise RolloutError(error.code) from None
+    return RolloutImagePull(secret=PULL_SECRET, registry=host), registry
+
+
 def build_rollout_job(
-    session: Session, request: dict, store: ArtifactStore
+    session: Session,
+    request: dict,
+    store: ArtifactStore,
+    registry: PlatformRegistry | None = None,
 ) -> tuple[ProductionRolloutJob, str]:
-    """Returns (job, owner_id). Raises RolloutError before anything is queued."""
+    """Returns (job, owner_id). Raises RolloutError before anything is queued.
+    `registry`: the platform ECR registry (ticket 29); None reads the API settings."""
     if request.get("provider") != "ON_PREM":
         raise RolloutError("PROVIDER_MISMATCH")
     manifest = _approved_revision(
@@ -268,6 +301,7 @@ def build_rollout_job(
             secret_refs=[SecretRefV2(name=n, key=k) for n, k in sorted(secret_refs)],
             env_secrets=env_secrets,
         ),
+        image_pull=(pull := _image_pull(database, application, registry)) and pull[0],
     )
     return job, agent.owner_id
 
@@ -389,6 +423,29 @@ def job_env_secrets(
     ):
         raise RolloutError("ENV_BINDING_MISMATCH")
     return [by_name[name] for name in sorted(expected)]
+
+
+def job_image_pull(
+    session: Session,
+    job: AgentJob,
+    store: ArtifactStore,
+    registry: PlatformRegistry | None = None,
+) -> PlatformRegistry:
+    """Ticket 29 (I3): the registry to mint a pull token for, for this Agent job. Allowed while
+    the job is RUNNING, or SUCCEEDED and still the latest approved Revision (refresh after the
+    rollout). The registry is re-derived from the approved Values, never taken from the body."""
+    if job.status not in {"RUNNING", "SUCCEEDED"} or not is_rollout(job.payload):
+        raise RolloutError("IMAGE_PULL_NOT_FOUND")
+    rollout = ProductionRolloutJob.model_validate(job.payload)
+    if rollout.image_pull is None or check_dispatchable(session, job.payload) is not None:
+        raise RolloutError("IMAGE_PULL_NOT_FOUND")
+    manifest = PlanManifest.model_validate(
+        session.get(PlanRevision, (rollout.plan_id, rollout.revision)).manifest
+    )
+    pull = _image_pull(*_values(store, manifest), registry)
+    if pull is None or pull[0] != rollout.image_pull:
+        raise RolloutError("IMAGE_PULL_NOT_FOUND")
+    return pull[1]
 
 
 _STATE = {

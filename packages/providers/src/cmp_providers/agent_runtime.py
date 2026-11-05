@@ -17,6 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from cmp_providers.agent_image_pull import PullSecretRefresher
 from cmp_providers.agent_preflight import PreflightJobRunner, probe_executor_factory
 from cmp_providers.onprem_agent import (
     MANAGED,
@@ -300,10 +301,14 @@ def main(argv: list[str] | None = None) -> int:
         target, probe_executor_factory(target, args.preflight_image, allowed)
     )
 
+    refresher = PullSecretRefresher(target, fetch=None)
+
     def poll(credential: str) -> dict | None:
         if not target.cluster_uid:
             target.discover_cluster_uid()
-        return RolloutAgent(args.agent_id, credential, client, target, preflight).poll_once()
+        outcome = RolloutAgent(args.agent_id, credential, client, target, preflight).poll_once()
+        refresh_pull_secrets(refresher, client, args.agent_id, credential, _log)
+        return outcome
 
     daemon = AgentDaemon(
         agent_id=args.agent_id,
@@ -321,6 +326,22 @@ def main(argv: list[str] | None = None) -> int:
     except AgentRuntimeError as exc:
         _log({"event": "stopped", "code": str(exc)})
         return UNAUTHORIZED_EXIT
+
+
+def refresh_pull_secrets(refresher: PullSecretRefresher, client, agent_id, credential, log):
+    """Ticket 29 (I6): after every poll, refresh managed ECR pull Secrets past half their TTL.
+    Never stops the poll loop except for AGENT_UNAUTHORIZED; logs codes and Namespaces only."""
+
+    def fetch(job_id: str) -> dict:
+        return client.image_pull(agent_id=agent_id, credential=credential, job_id=job_id)
+
+    refresher.fetch = fetch
+    try:
+        events = refresher.refresh()
+    except ClusterUnavailable:
+        events = [{"event": "image_pull_refresh", "code": "KUBERNETES_UNAVAILABLE"}]
+    for event in events:
+        log(event)
 
 
 def _poll_safely(poll, credential):

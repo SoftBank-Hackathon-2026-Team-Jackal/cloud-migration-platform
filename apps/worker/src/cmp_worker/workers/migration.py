@@ -8,6 +8,7 @@ from cmp_worker.activities.network_preflight import build_network_preflight_acti
 from cmp_worker.workflows.analysis import AnalysisWorkflow
 from cmp_worker.workflows.approval import ProvisioningApprovalWorkflow
 from cmp_worker.workflows.migration import MigrationWorkflow
+from cmp_worker.workflows.pull_refresh import GcpPullSecretRefreshWorkflow
 from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
 from cmp_worker.workflows.traffic import TrafficShiftWorkflow
 
@@ -40,5 +41,6 @@ def create_workflow_worker(client: Client) -> Worker:
             AnalysisWorkflow,
             SandboxVerificationWorkflow,
             TrafficShiftWorkflow,
+            GcpPullSecretRefreshWorkflow,  # ticket 29
         ],
     )

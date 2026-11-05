@@ -9,6 +9,7 @@ from cmp_worker.workers.build import create_worker as build_worker
 from cmp_worker.workers.migration import create_activity_worker, create_workflow_worker
 from cmp_worker.workers.provisioning import create_worker as provisioning_worker
 from cmp_worker.workers.sandbox import create_worker as sandbox_worker
+from cmp_worker.workflows.pull_refresh import ensure_refresh_schedule
 
 
 async def main() -> None:
@@ -17,6 +18,7 @@ async def main() -> None:
 
     configure_emitter(DbEventEmitter(SessionLocal))  # ticket 24: Activities emit to the DB
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
+    await ensure_refresh_schedule(client)  # ticket 29: GKE ECR pull Secret refresh
     workers = [
         analysis_worker(client),
         sandbox_worker(client),

@@ -106,6 +106,8 @@ def test_rbac_is_explicit_without_wildcards(tmp_path):
     assert granted[("storage.k8s.io", "storageclasses")] == {"get"}
     assert granted[("", "pods/exec")] == {"create"}
     assert granted[("", "services/proxy")] == {"get"}
+    # Ticket 29 (I8): pull Secret linked to the default ServiceAccount; no delete/update.
+    assert granted[("", "serviceaccounts")] == {"get", "create", "patch"}
     assert "delete" not in granted[("", "namespaces")]
     [binding] = [doc for (kind, _), doc in docs.items() if kind == "ClusterRoleBinding"]
     assert binding["roleRef"]["name"] == role["metadata"]["name"]

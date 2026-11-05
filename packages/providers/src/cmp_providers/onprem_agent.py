@@ -15,6 +15,7 @@ import os
 import secrets
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from cmp_contracts.artifact import ArtifactRef
@@ -22,6 +23,7 @@ from cmp_contracts.network_preflight import PREFLIGHT_JOB_MODE, NetworkPreflight
 from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from pydantic import ValidationError
 
+from cmp_providers import agent_image_pull
 from cmp_providers.artifacts import verify_artifact_bytes
 from cmp_providers.database_url import connection_url
 from cmp_providers.remote_agent import AgentControlClient, AgentTransportError, _secret_file
@@ -137,6 +139,32 @@ class ClusterTarget:
         if result.returncode:
             raise RolloutAgentError("KUBERNETES_OPERATION_FAILED", "UNKNOWN")
 
+    def list_pull_secrets(self) -> list[dict]:
+        """Ticket 29: managed pull Secrets in every Namespace. Keeps only names, labels and the
+        platform's own `cmp.dev/*` annotations; data and `last-applied-configuration` (which
+        `kubectl apply` fills with the whole object) are dropped immediately."""
+        selector = f"{MANAGED}=true,{agent_image_pull.PURPOSE}={agent_image_pull.PULL_PURPOSE}"
+        result = self.kubectl("get", "secrets", "-A", "-l", selector, "-o", "json")
+        if result.returncode:
+            raise ClusterUnavailable()
+        found = []
+        for item in json.loads(result.stdout or b"{}").get("items", []):
+            meta = item.get("metadata") or {}
+            annotations = meta.get("annotations") or {}
+            found.append(
+                {
+                    "metadata": {
+                        "name": meta.get("name"),
+                        "namespace": meta.get("namespace"),
+                        "labels": meta.get("labels") or {},
+                        "annotations": {
+                            k: v for k, v in annotations.items() if k.startswith("cmp.dev/")
+                        },
+                    }
+                }
+            )
+        return found
+
     def release(self, name: str, namespace: str) -> dict | None:
         result = self.helm("status", name, "-n", namespace, "-o", "json")
         if result.returncode:
@@ -151,12 +179,14 @@ def _marker(job: ProductionRolloutJob, chart: ArtifactRef, values: ArtifactRef) 
 
 
 class RolloutRunner:
-    def __init__(self, target: ClusterTarget, fetch, fetch_env_secrets=None):
+    def __init__(self, target: ClusterTarget, fetch, fetch_env_secrets=None, fetch_image_pull=None):
         """`fetch(ref) -> bytes` downloads one artifact of the current job.
         `fetch_env_secrets() -> [{name, data}]` (ENV-04) returns the job's rendered EnvPlan
-        Secrets; values stay in memory and are applied only inside this cluster."""
+        Secrets; values stay in memory and are applied only inside this cluster.
+        `fetch_image_pull() -> {registry, username, password, expires_at}` (ticket 29)."""
         self.target, self.fetch = target, fetch
         self.fetch_env_secrets = fetch_env_secrets
+        self.fetch_image_pull = fetch_image_pull
 
     # --- read-only preflight -------------------------------------------------------------
     def preflight(self, job: ProductionRolloutJob) -> None:
@@ -185,6 +215,7 @@ class RolloutRunner:
         url = job.database.connection_url
         managed = [url.secret.name] if url is not None else []
         managed += [secret.name for secret in job.application.env_secrets]  # ENV-04
+        managed += [job.image_pull.secret] if job.image_pull else []  # ticket 29
         for name in managed:
             existing = self.target.get("secret", name, job.namespace)
             labels = ((existing or {}).get("metadata") or {}).get("labels") or {}
@@ -207,6 +238,28 @@ class RolloutRunner:
         ):
             raise RolloutAgentError("ENV_SECRETS_INVALID")
         return secrets
+
+    def _image_pull(self, job: ProductionRolloutJob) -> dict | None:
+        """Ticket 29 (I5): fetch the job's ECR pull credential before any mutation."""
+        if job.image_pull is None:
+            return None
+        if self.fetch_image_pull is None:
+            raise RolloutAgentError("IMAGE_PULL_NOT_CONFIGURED")
+        try:
+            return agent_image_pull.validate(self.fetch_image_pull(), job.image_pull.registry)
+        except AgentTransportError:
+            raise RolloutAgentError("IMAGE_PULL_CREDENTIALS_UNAVAILABLE", "UNKNOWN") from None
+        except agent_image_pull.ImagePullError as exc:
+            raise RolloutAgentError(exc.code) from None
+
+    def _apply_image_pull(self, job: ProductionRolloutJob, credential: dict | None) -> None:
+        if credential is None:
+            return
+        name, now = job.image_pull.secret, time.time()
+        agent_image_pull.apply_pull_secret(
+            self.target, job.namespace, name, job.job_id, credential, now
+        )
+        agent_image_pull.link_service_account(self.target, job.namespace, name)
 
     def _download(self, job: ProductionRolloutJob, workdir: Path) -> dict[str, Path]:
         paths = {}
@@ -346,6 +399,8 @@ class RolloutRunner:
             or status.get("replicas", desired) != desired
             or status.get("unavailableReplicas", 0) != 0
         ):
+            if agent_image_pull.image_pull_failed(self.target, namespace, name):
+                raise RolloutAgentError("IMAGE_PULL_FAILED")  # ticket 29 (I7)
             raise RolloutAgentError("WORKLOAD_NOT_READY")
 
     def _endpoints_ready(self, name: str, namespace: str) -> None:
@@ -418,8 +473,11 @@ class RolloutRunner:
             with tempfile.TemporaryDirectory(prefix="cmp-rollout-") as directory:
                 paths = self._download(job, Path(directory))
                 env_secrets = self._env_secrets(job)
+                pull = self._image_pull(job)
                 self._prepare_namespace(job, env_secrets)
                 del env_secrets
+                self._apply_image_pull(job, pull)
+                del pull
                 db, app = job.database, job.application
                 self._install(job, db.release, db.chart, db.values, paths)
                 self._install(job, app.release, app.chart, app.values, paths)
@@ -497,8 +555,15 @@ class RolloutAgent:
                 agent_id=self.agent_id, credential=self.credential, job_id=job_id
             )
 
+        def fetch_image_pull() -> dict:
+            return self.client.image_pull(
+                agent_id=self.agent_id, credential=self.credential, job_id=job_id
+            )
+
         try:
-            status, code = RolloutRunner(self.target, fetch, fetch_env_secrets).rollout(job)
+            status, code = RolloutRunner(
+                self.target, fetch, fetch_env_secrets, fetch_image_pull
+            ).rollout(job)
         except ClusterUnavailable:
             # Nothing was changed; keep the job RUNNING and re-inspect on the next poll.
             return {"job_id": job_id, "status": "RUNNING", "code": "KUBERNETES_UNAVAILABLE"}

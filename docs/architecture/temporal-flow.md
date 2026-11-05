@@ -187,6 +187,8 @@ Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning
 
 Temporal 측에서는 요청·Agent 작업 ID의 상관관계, 완료·실패 보고, 연결 단절과 재연결, 중복 전달 방지, 재연결 후 실제 작업 상태 조회를 다뤄야 한다. 장시간 결과 대기를 일반적인 동기 API 호출로 고정하지 않는다. 12(#36)는 Provisioning Activity(`execute_on_prem_plan`)가 heartbeat하며 업무 DB의 Agent 작업 상태를 조회하는 방식을 택했다. 대기 한도를 넘으면 작업을 보존한 채 `UNKNOWN`을 반환하며 같은 작업을 재발행하지 않는다. Workflow 측 claim/complete 연결은 08 소유다.
 
+이미지 pull 자격(29, #153)은 Temporal을 거치지 않는다. 플랫폼 API가 Agent 요청마다 ECR 토큰을 발급하고 Agent가 클러스터 안의 pull Secret을 만들고 갱신한다. GKE의 pull Secret은 플랫폼 측 Temporal Schedule `cmp-gcp-ecr-pull-refresh`(6시간, 겹침 건너뜀)가 `GcpPullSecretRefreshWorkflow` → Provisioning Activity `refresh_gcp_pull_secrets`로 갱신한다. Workflow 입력·결과·이력에는 개수·코드만 있고 토큰은 Activity 메모리에만 있다. Schedule은 Workflow Worker 시작 때 없으면 만든다(`ensure_refresh_schedule`).
+
 ## 15. 실제 배포 후 검증
 
 Sandbox 성공과 Production 준비·검증은 구분한다. Production Provisioning 직후에는 대상 EKS·GKE·K3s 클러스터와 Pod 상태, 앱 준비 상태, PostgreSQL 기본 접근성, Service·Secret·환경변수 매핑, PVC·StorageClass, 실제 Ingress·Load Balancer 접근을 확인한다. Sandbox 테스트 묶음은 데이터 이전·정합성 확인 후 트래픽 전환 전에 대상 환경에서 실행하되 사용자 데이터·테스트 계정·정리 정책을 먼저 고려한다.
