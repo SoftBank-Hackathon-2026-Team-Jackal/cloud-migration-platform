@@ -72,13 +72,13 @@ Q-01 ────┴→ 02B ─┐
 | D-02 | 결정됨(승철) — 첫 사이클의 `*_ref`는 해시 이름 로컬 불변 저장소(`LocalArtifactStore` 관례, S3는 후속). 분석·Build 결과의 저장·정규화는 분석 쪽이 맡음. **조사 결과(2026-11-05):** Planning(`plan_publish`)은 요구사항 바이트를 자기 저장소(`api_settings.artifact_store_dir`)에서 `<root>/<sha256>`로 읽고 `ArtifactRef`의 필드(id·version·kind·sha256·size_bytes)도 같으므로, `ContentRef`류(요구사항·보고서·검토 기록)는 두 쪽이 같은 디렉터리를 가리키면 된다(단일 호스트). `S3ArchiveRef`류(소스 묶음·테스트 묶음)는 계약이 S3 URI를 요구하므로 실제 S3 업로드가 필요하다 | 10, 15, 19, 21 | 승철 |
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 | 10, 14 | 민서 |
 | D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
-| D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간. 실제 빌드(D-12)와 15번 인계 전에 필요. 계정은 `cmp-aws-prod`(운영 이름)라 생성·사용 전에 사용자 승인이 필요하다 | 09, 10, 12, 15 | 민서·승철 |
+| D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간. 실제 빌드(D-12)와 15번 인계 전에 필요. 계정은 `cmp-aws-prod`(운영 이름)라 생성·사용 전에 사용자 승인이 필요하다. **현재 플랫폼의 S3 버킷은 두 개뿐이다**(플랫폼 구성도, 2026-11-05): Terraform State·잠금 버킷과, GitHub Actions가 선택한 커밋의 소스를 올려 EC2가 내려받는 배포 버킷. 둘 다 분석의 소스·테스트 묶음·빌드 로그용이 아니므로, 새 버킷을 만들지 배포 버킷에 접두사(`sources/`, `tests/`)를 쓸지 정해야 한다. **임시 방향(승철, 2026-11-05):** 새 버킷 없이 기존 버킷을 같이 쓰고 키 접두사로 구분한다(코드는 이미 `sources/`·`tests/`). Terraform State 버킷은 쓰지 않는다. **민서님 확인(2026-11-06):** 배포 버킷을 소스·테스트 묶음·빌드 로그용으로 같이 쓰고 쓰기 권한을 추가해 준다(구현 대기) | 09, 10, 12, 15, 25 | 민서·승철 |
 | D-07 | 결정됨 — 첫 사이클 지원 언어는 Go(데모 앱 `demo-app`이 Go) | 05, 16, 17 | 승철 |
 | D-08 | 결정됨(승철) — Sandbox 기반은 이 Mac의 로컬 k3d `cmp-sandbox`(Colima, 전용 kubeconfig)로 준비. 설정 방법은 11 티켓의 환경 준비 참조 | 11, 16 | 승철 |
 | D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 12 | 승철·소울 |
 | D-10 | Production 테스트 묶음 실행 시점(데이터 이전 후·트래픽 전환 전)·데이터 정리 | 15 | 민서·소울·상헌 |
 | D-11 | DB 이미지를 고르는 "대상 구성 단계"의 소유자, Sandbox·Production 공유 방식(요구사항엔 이미지 없음, #22) | 11 | 민서 |
-| D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한(`resource_id`·`source_version_id`는 구현됨). 코드 연결은 25에서 끝났고(`BUILD_*` 설정이 모두 있을 때 켜짐) 실제 AWS 실행이 이 결정과 승인을 기다린다 | 10, 25 | 민서 |
+| D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한. 이미지를 올리는 ECR은 플랫폼 쪽 데모 ECR이다(도메인 경계 문서의 "Registry(데모 ECR)"), 사용자 계정의 ECR이 아니다. **민서님 확인(2026-11-06):** ECR 저장소와 push 권한은 아직 구현되어 있지 않고(민서님은 로컬 프로필로 돌려 왔음), 빌드 컨테이너를 하나 추가하면서 push 권한을 같이 주는 방향으로 구현한다. 호출 방식(어느 Activity가 어떤 입출력으로 빌드를 부르는지)은 컨테이너 설계 후 맞춘다. 지금 우리 코드는 Sandbox 워커가 빌드를 직접 호출한다(`resource_id`·`source_version_id`는 구현됨). 코드 연결은 25에서 끝났고(`BUILD_*` 설정이 모두 있을 때 켜짐) 실제 AWS 실행이 이 결정과 승인을 기다린다 | 10, 25 | 민서 |
 | D-13 | DB 내부 상태 사전 점검 담당(기본 키·시퀀스·복제 설정) | 07 | 소울 |
 | D-14 | PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체(현재 확장 요구는 Planning이 거절) | 07 | 민서 |
 | D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법(그 전까지 `AnalysisReport`에 기록) | 01, 06, 13 | 민서 |
@@ -86,6 +86,9 @@ Q-01 ────┴→ 02B ─┐
 
 ## 변경 기록
 
+- 2026-11-06: 민서님 답변 반영. D-06: 배포 버킷 접두사 공유와 쓰기 권한 추가 확정(구현 대기). D-12: 빌드 컨테이너를 따로 추가하고 ECR push 권한을 함께 주는 방향(구현 대기, 호출 방식은 설계 후 협의). EKS는 같은 계정이면 노드 역할로 ECR 이미지를 받고, 그 밖의 대상은 배포 때 권한을 만들어 붙인다(민서님). 우리 몫으로 남는 것: Sandbox(k3d)가 비공개 ECR 이미지를 받는 pull Secret(GKE 쪽 방식처럼 네임스페이스 Secret과 `default` ServiceAccount 연결).
+
+- 2026-11-05: 플랫폼 구성도 대조로 S3 서술을 바로잡음: 소스·테스트 묶음 키는 `sources/<sha256>.tar.gz`·`tests/<sha256>.tar.gz`(코드 기준, 문서의 `<migration_id>/` 경로는 틀렸음), D-06에 현재 버킷 두 개가 분석용이 아님을 기록. 배포된 플랫폼(EC2, Docker Compose)의 워커는 Sandbox 클러스터 설정이 없어 scaffold만 실행하므로 실제 루프는 k3d가 있는 컴퓨터의 워커로 돌린다(runbook).
 - 2026-11-05: `make smoke-temporal` 통과(로컬 Temporal 1.29.1, `scaffold_complete`). 스크립트가 Sandbox 자식 Workflow 도입(02B) 이후 `sandbox` 워커를 띄우지 않아 승인 대기에 못 닿던 문제를 고쳤다. 이 컴퓨터에는 `docker compose` 플러그인이 없어 `make infra-up` 대신 같은 이미지(Temporal 자동 설정 서버와 전용 DB)를 `docker run`으로 띄워 확인했다. 이 확인은 문자열(scaffold) 경로만 다루며, 새 인계 경로(`--planning`)와 실제 빌드는 시간 건너뛰기 환경의 Workflow 테스트로 확인했다.
 - 2026-11-05: 25(#140)·15(#141) 구현: 빌드 설정 네 항목이 모두 있으면 소스 S3 업로드 → 민서님 Build 모듈 → `BuildAttempt` 증거(`builds_ref`)를 쓰는 실제 빌드 경로(없으면 미리 빌드한 이미지 유지, 빌드 실패는 `BUILD:<코드>`로 사람 검토), 테스트 묶음 S3 아카이브. 통과한 실행은 `sbx_plan_assemble`로 Planning 입력을 조립·검증하고 `register_planning_input`(민서님 등록 함수 호출)으로 등록한 뒤 계획 단계로 간다(`planning-handoff-v1` patched, `--planning` 설정이 있을 때만). 실제 AWS 실행은 D-06·D-12·승인 대기. 부모 Workflow 변경은 호출 1곳과 헬퍼 1개.
 - 2026-11-05: 24 구현(#136): `scripts/sandbox_ctl.py`(`status`/`cleanup`, 전용 컨텍스트만)와 소스 입력 검증(`-` 시작·공백·제어 문자 거절, git 호출 전), 만료 Sandbox 정리 진입점(주기 실행은 cron·launchd 안내), Tester 연결(`sbx_ai_tests`, 설정 `ai_tests`, 원본 실행기가 없으면 모델 미호출, Workflow는 `ai-tests-v1` patched). 원본 쪽 테스트 자원은 D-09 대기.

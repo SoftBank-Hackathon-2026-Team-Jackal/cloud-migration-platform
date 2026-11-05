@@ -127,17 +127,20 @@ uv run python scripts/start_migration.py ... --planning '{"target_selection": {.
 
 ### 같은 테스트 묶음을 Production에서 다시 돌리기
 
-Sandbox에서 통과한 묶음은 해시로 고정되어 있고(S3 `tests/<sha256>.tar.gz`), 대상 주소와 인증 참조만 바꿔 같은 `run_suite`로 돌린다.
+Planning에 넘긴 `test_suite_ref`는 S3의 `tests/<sha256>.tar.gz`(아카이브 해시)다. 아카이브 안의 `suite.json`이 `run_suite`가 읽는 묶음이고, 그 파일의 해시가 고정 해시다. 대상 주소와 인증 참조만 바꿔 같은 함수로 돌린다.
 
 ```python
-from cmp_testsuite import run_suite
-
+# suite.json을 꺼내 저장소에 두고, 그 파일의 SHA-256로 참조를 만든다
 result = run_suite(
-    suite_ref, "https://<Production 앱 주소>", auth_ref=None, include="ALL", store=store
+    bundle_ref, "https://<Production 앱 주소>", auth_ref=None, include="ALL", store=store
 )
 ```
 
 순서: 배포 직후에는 준비 검사(Pod 준비, DB 연결, 헬스)만 하고, 데이터 이전이 끝난 뒤에 테스트 묶음을 실행한다. 묶음이 바뀌었으면(`SUITE_HASH_MISMATCH`) 실행하지 않는다. 실행 시점과 데이터 정리 규칙은 D-10에서 정한다.
+
+### 배포된 플랫폼과의 관계
+
+배포된 플랫폼은 EC2 한 대에서 Docker Compose로 API, 워커, Temporal을 돌린다. 그 워커에는 Sandbox 클러스터(`SANDBOX_KUBECONFIG`)가 없어 Sandbox 루프는 scaffold만 실행된다. 실제 루프는 k3d가 있는 이 컴퓨터의 워커와 로컬 Temporal로 돌린다. 이 컴퓨터의 워커를 배포된 Temporal(SSM 포트 포워딩)에 붙이면 같은 Task Queue를 듣는 EC2 워커와 작업을 나눠 가지므로, 그렇게 하지 않는다.
 
 ## 9. 아직 없는 것
 
