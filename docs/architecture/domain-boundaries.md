@@ -52,7 +52,7 @@ Sandbox는 변환 오류를 사전에 찾는 곳이다. **Sandbox 성공은 실�
 | 책임 제외 | Sandbox 클러스터 운영·임시 Namespace 정리, PostgreSQL 데이터 복제 자체, 트래픽 가중치 제어 |
 | 의존 모듈 | 공통 Provider 모듈, Terraform, Helm, Kubernetes API, AWS/GCP 연동, 온프레미스 Agent, 이미지 Registry |
 
-대상은 AWS EKS, GCP GKE, 온프레미스 K3s다. Preview와 승인된 계획의 일치 방식을 후속 설계에서 정해야 하며, **승인 전 실제 인프라를 생성하지 않는다.** Provisioning은 Data Migration에 DB 접근 참조를, Traffic Migration에 신규 서비스 접근 정보와 준비 상태를 제공한다. 실제 배포 후의 상태·헬스·기능 검증은 Sandbox 검증과 별개의 결과다.
+대상은 AWS EKS, GCP GKE, 온프레미스 K3s다. Preview와 승인된 계획의 일치 방식을 후속 설계에서 정해야 하며, **승인 전 실제 인프라를 생성하지 않는다.** Provisioning은 Data Migration에 DB 접근 참조를, Traffic Migration에 신규 서비스 접근 정보와 준비 상태를 제공한다. 원본 AWS 접근·대상 환경 연결의 발급(역할 위임 등록·확인, `credential_ref` 발급, 기준점 조회)도 Provisioning이 맡는다. 기준점에서 참조를 따라가는 스캔과 범위 확정은 Analysis가 맡는다([ADR-005](../decisions/ADR-005.md)). 실제 배포 후의 상태·헬스·기능 검증은 Sandbox 검증과 별개의 결과다.
 
 온프레미스 Agent는 최소 소유자 기록과 묶어 등록한다. Agent 등록 토큰은 일회용·만료이며 인증된 Agent만 자신의 작업을 조회·보고한다. 공개 회원가입은 P0 범위 밖이다. 등록·인증은 플랫폼 API/업무 DB 경계, 대상 K3s 적용은 Agent 경계, 승인된 실행 판단은 Provisioning/Temporal 경계다. [공통 배포 계약](../../specs/provisioning/onprem-shared-deployment.md)을 따른다.
 

@@ -32,6 +32,7 @@
 | [19 DB 연결 URL Secret 출력 (D-16)](../../tickets/provisioning/19-db-connection-url.md) | DONE | 01A, 04B, 09, 11, 12 | PROV-004, 005, 010, 012, 021 | [#79](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/79) | ☑ |
 | [20 업로드 .env를 대상 ConfigMap·Secret으로 생성](../../tickets/provisioning/20-env-config-injection.md) | TODO | 09, 11, 12, 18, 19 | PROV-004, 012, 016, 021 | [#99](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/99) | ☐ |
 | [21 데모 플랫폼에서 Provisioning 실행 환경 구성](../../tickets/provisioning/21-demo-provisioning-runtime.md) | IN_PROGRESS (로컬 완료, 서버 반영 승인·18 후 스모크 대기) | 15 | PROV-008, 009, 015, 016, 021 | [#100](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/100) | ☐ |
+| [23 환경 연결 관리 API (AWS 역할 위임·GCP·Agent 목록)](../../tickets/provisioning/23-environment-connections.md) | DONE (로컬 범위, 실제 계정·데모 반영 승인 대기) | 15, 16, 21 | PROV-003, 021, 022 | [#118](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/118) | ☑ |
 
 ## 선행 관계
 
