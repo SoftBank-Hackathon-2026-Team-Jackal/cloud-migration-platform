@@ -113,3 +113,7 @@ identity = approval_target(manifest, preview)
 ## Plan 생성·게시와 Preview 조회 (18)
 
 새 공유 모델은 `cmp_contracts.plan_publish`의 `PlanningInputRegistration`(Planning 입력 v2 + Provider별 대상 설정 + 선택 요구사항 바이트)과 `plan_id_for`(Migration당 Plan ID)뿐이다. 기존 `PlanManifest`·`Preview`·`approval_target`·`onprem_preview`·05/06 Plan 함수는 바꾸지 않고 호출한다. `publish_plan_revision`은 선택 인자 `input_digest`를 받아 같은 트랜잭션에 `provisioning_plan_publications`를 기록한다(기존 호출 동작은 그대로). `ProvisioningApprovalWorkflow` 요청은 선택 필드 `approval_timeout_seconds`를 받아 승인 없이 기간이 지나면 `EXPIRED/APPROVAL_EXPIRED`로 끝난다. 상세는 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05)을 따른다.
+
+## AWS/GCP 워크로드 Plan 게시 (22)
+
+22(#108)는 공유 모델에 하위 호환 필드만 더한다. `AwsTargetSettings`·`GcpTargetSettings`의 선택 필드 `workloads: CloudWorkloadSettings{namespace, storage_class, database_image}`와 `workload_plan_id_for`(Migration당 워크로드 Plan ID)다. 18 입력 Digest는 `workloads`를 빼고 계산해 기존 등록의 Digest가 바뀌지 않는다. 인프라 Revision 실행 결과(업무 DB refs)로 별도 `WORKLOADS` Plan을 게시하며, manifest `target`은 인프라 manifest와 같아 09·11이 그 인프라 실행의 클러스터를 찾는다. 앱 Values는 09·11의 v1 `ApplicationValues` 템플릿이고 산출물은 `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/<sha256>`에 둔다. Preview는 `cmp_providers.cloud_workload_preview`(순수 함수). `PlanManifest`·`Preview`·`ProvisioningResult`·승인·실행 계약은 바꾸지 않는다. 상세는 [22 티켓](../../tickets/provisioning/22-cloud-workload-plan.md#착수-결정-2026-11-05).

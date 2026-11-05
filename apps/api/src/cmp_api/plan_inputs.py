@@ -67,7 +67,9 @@ def input_digest(registration: PlanningInputRegistration) -> str:
         {
             "contract_version": registration.contract_version,
             "planning_request": request.model_dump(mode="json"),
-            "target": registration.target.model_dump(mode="json"),
+            # Ticket 22 W3: workload settings feed only the WORKLOADS Plan Digest, so adding them
+            # neither re-plans infrastructure nor changes 18 Digests of existing registrations.
+            "target": registration.target.model_dump(mode="json", exclude={"workloads"}),
             "requirements_sha256": request.analysis.requirements_ref.sha256,
             "template_version": template_version(registration),
         }

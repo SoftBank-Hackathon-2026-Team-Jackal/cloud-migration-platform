@@ -86,7 +86,7 @@ Blocked by: 01A, 04B, 05, 06, 07, 12, 12A, 15 (DONE)
 - 만료 후에도 API는 승인 결정을 DB에 기록할 수 있다. 실행은 일어나지 않고 `workflow_state`가 `EXPIRED`로 보인다
 
 ## 후속
-- AWS/GCP 워크로드 Plan 게시(09·11 연결), `.env` 값 주입(20), S3 ArtifactStore(21), Analysis·Sandbox·Build 결과로 Planning 입력을 자동 등록하는 상위 연결(각 담당과 합의)
+- AWS/GCP 워크로드 Plan 게시(09·11 연결)는 [22](22-cloud-workload-plan.md)(#108)로 분리, `.env` 값 주입(20), S3 ArtifactStore(21), Analysis·Sandbox·Build 결과로 Planning 입력을 자동 등록하는 상위 연결(각 담당과 합의)
 
 ## 관련 문서
 - [05](05-aws-preview.md) · [06](06-gcp-preview.md) · [07](07-approval-gate.md) · [12](12-k3s-approved-rollout.md) · [12A](12a-onprem-preview.md) · [04B](04b-shared-render-v2.md) · [공유 계약](../../specs/provisioning/shared-contracts.md)
