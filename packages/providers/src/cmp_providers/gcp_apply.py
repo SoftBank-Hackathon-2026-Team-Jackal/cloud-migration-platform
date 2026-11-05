@@ -31,9 +31,10 @@ from cmp_providers.aws_apply import (
     template_evidence,
 )
 from cmp_providers.gcp_preview import GcpPlanInput
+from cmp_providers.resources import resource_root
 from cmp_providers.terraform_events import apply_runner, is_stale
 
-GCP_TEMPLATE_ROOT = Path(__file__).resolve().parents[4] / "infra/terraform/gcp"
+GCP_TEMPLATE_ROOT = resource_root() / "infra/terraform/gcp"
 OUTPUT_REFS = {
     "project_id": "gcp_project_id",
     "network_name": "vpc_network",

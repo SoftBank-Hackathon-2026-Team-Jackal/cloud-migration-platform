@@ -11,10 +11,17 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock.txt
 COPY pyproject.toml README.md ./
 COPY apps ./apps
 COPY packages ./packages
-COPY infra/terraform ./infra/terraform
 COPY scripts ./scripts
 COPY alembic.ini ./
 RUN pip install --no-cache-dir --no-deps .
+# Ticket 43 (#178): the installed packages live in site-packages, so the runtime resources
+# (cmp_providers.resources.RUNTIME_RESOURCE_DIRS) are copied here and located through
+# CMP_RESOURCE_ROOT instead of the package location.
+COPY infra/terraform ./infra/terraform
+COPY infra/helm ./infra/helm
+COPY catalog ./catalog
+COPY skills ./skills
+ENV CMP_RESOURCE_ROOT=/app
 
 EXPOSE 8000
 

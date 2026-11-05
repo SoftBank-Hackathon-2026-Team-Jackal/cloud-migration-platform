@@ -27,6 +27,7 @@ from pydantic import Field
 
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes
 from cmp_providers.plans import manifest_digest
+from cmp_providers.resources import resource_root
 
 _NAME = r"^[a-z][a-z0-9-]{0,38}[a-z0-9]$"
 _GCP_PROJECT = r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
@@ -319,7 +320,7 @@ def plan_gcp_infrastructure(
             _reject("MISSING_IDENTITY", "aws_profile", "Explicit named State identity is required.")
     else:
         _reject("UNSUPPORTED_PLAN_MODE", "mode", "Unknown Plan mode.")
-    root = template_dir or Path(__file__).resolve().parents[4] / "infra/terraform/gcp"
+    root = template_dir or resource_root() / "infra/terraform/gcp"
     lock = root / ".terraform.lock.hcl"
     if not lock.exists():
         _reject("MISSING_PROVIDER_LOCK", "terraform", "A reviewed provider lockfile is required.")
