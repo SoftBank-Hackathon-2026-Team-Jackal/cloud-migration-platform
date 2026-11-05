@@ -11,6 +11,7 @@
 | `ArtifactRef`, `RenderedChart` | `cmp_contracts.artifact` | 불변 ID·버전·종류·바이트 크기·SHA-256 및 Chart/Values/Manifest 참조 |
 | `PostgresChartValues` | `cmp_contracts.chart` | Sandbox/Production 공통 DB 입력. 환경·Provider·Release·Namespace·이미지·DB·Pod 자원·StorageClass/PVC |
 | `DynamicBinding` | `cmp_contracts.chart` | 허용된 DB host/Secret 이름/URL Secret 이름 위치와 값 출처 |
+| `DB_PROBE`, `judge_probe`, `default_parameters` | `cmp_providers.db_replication` | 대상 DB 논리 복제 기본 설정과 복제 가능 판정(27). AWS/GCP 배포 Activity와 ON_PREM Agent가 같은 SQL·판정을 쓴다 |
 | `connection_url`, `connection_url_secret_name` | `cmp_providers.database_url` | DB 연결 URL 형식과 URL Secret 이름 규칙(19). Sandbox·운영 실행 주체가 함께 사용 |
 | `PlanManifest`, `Preview`, `ApprovalTarget` | `cmp_contracts.plan` | Plan/Revision·템플릿 버전·대상·실행 범위·산출물 연결, 표시 요약, 승인 대상 식별 |
 | `sha256_bytes`, `canonical_json_bytes`, `sha256_json`, `verify_artifact_bytes` | `cmp_providers.artifacts` | 순수 바이트/정규화 JSON Digest 및 조회한 실제 바이트 검증 |
@@ -48,6 +49,8 @@ Preview는 manifest Digest와 허용된 자원 변경 요약(종류·행위·이
 ## DB Chart 입력과 동적 바인딩
 
 `PostgresChartValues`는 SANDBOX/PRODUCTION 및 AWS/GCP/ON_PREM에서 같은 구조다. 클라우드 Credential을 받지 않는다. PostgreSQL 16의 이름·사용자, Secret 이름/키, Pod CPU millicores·메모리 MiB, PVC GiB·StorageClass를 명시한다. Node 디스크와 PVC를 혼동하지 않는다. 이미지 URI는 Digest에 고정한다. Registry 인증이 필요한 경우에만 참조를 제공한다.
+
+선택 필드 `database.parameters`(27)는 Chart가 `postgres -c k=v` 인자로 넘기는 서버 설정의 허용 목록이다: `wal_level`(`replica`·`logical`), `max_replication_slots`·`max_wal_senders`(0~64), 표시용 `app`(`app.<키>`, 최대 8개, 키·값 문자 제한). 그 밖의 설정은 계약·스키마가 거절한다. 필드가 없으면 직렬화에서 빠져 이미 승인된 Values의 바이트·Digest와 렌더 결과가 그대로다. v2 공통 렌더러는 `wal_level=logical`·슬롯 10·송신자 10·`app.node_name=<provider 소문자>-<DB release>`를 기본으로 넣어, 새 Plan의 대상 DB가 역방향 복제 publisher가 될 수 있다.
 
 이름은 초기 구현에서 보수적인 Kubernetes label 형태, Secret key는 영숫자·점·밑줄·하이픈으로 제한한다. 이미지가 실제 PostgreSQL 16인지, Secret/PVC가 존재하는지는 렌더/실환경 검증에서 확인한다. DB Chart의 Helm 템플릿은 02에서 `infra/helm/postgres`에 구현했다. 사용법·렌더 제한은 [Helm 안내](../../infra/helm/README.md)를 따른다. 현재 Chart는 해결되지 않은 `registry_auth_ref`를 거절하며, 실제 Secret/StorageClass 존재·이미지 실행 검증은 후속 배포 경계다.
 

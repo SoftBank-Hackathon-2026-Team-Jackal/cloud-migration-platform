@@ -1,9 +1,11 @@
-# Only the Agent API is public. Operator, approval and tunnel-admin routes, /docs and
-# /openapi.json stay on the loopback-bound API (SSM port forwarding) and still require keys.
-@agent path /agents/*
-handle @agent {
+# Public routes. Only the Agent API (/agents/*) and the relay polling API (/relays/*) reach the backend;
+# every other path is the web front end. Operator, approval and tunnel-admin routes, /docs and
+# /openapi.json stay on the loopback-bound API (SSM port forwarding) and still require keys: the web
+# container calls the API on the internal network and never forwards raw request paths.
+@backend path /agents/* /relays/*
+handle @backend {
 	reverse_proxy {$CMP_API_UPSTREAM}
 }
 handle {
-	respond 404
+	reverse_proxy {$CMP_WEB_UPSTREAM}
 }

@@ -258,7 +258,9 @@ def report_job(
         result = normalise_report(status, result)
         if job.status == status and same_report(job.result, result):
             return
-    elif set(result) != {"code"}:
+    elif set(result) - {"replication"} != {"code"} or (
+        "replication" in result and (status, code) != ("SUCCEEDED", "READY")
+    ):
         raise AgentRegistrationError("INVALID_JOB_RESULT")
     elif job.status == status and job.result == result:
         return

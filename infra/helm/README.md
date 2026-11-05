@@ -13,7 +13,7 @@ helm template sandbox-postgres infra/helm/postgres \
 uv run pytest tests/test_postgres_helm.py
 ```
 
-예제 이미지 Digest·StorageClass·Secret은 렌더용 테스트 데이터다. 실배포 가능한 이미지/리소스를 보장하지 않는다. 실제 입력은 `cmp_contracts.chart.PostgresChartValues` 구조이며 `values.schema.json`은 그 모델에서 생성한다. 스키마 일치 회귀 검사가 계약 변경 누락을 감지한다. 기본 Values는 비어 있으며 모든 필수 입력을 제공해야 한다. CLI Release/Namespace도 Values와 일치해야 한다.
+예제 이미지 Digest·StorageClass·Secret은 렌더용 테스트 데이터다. 실배포 가능한 이미지/리소스를 보장하지 않는다. 실제 입력은 `cmp_contracts.chart.PostgresChartValues` 구조이며 `values.schema.json`은 그 모델에서 생성한다. 스키마 일치 회귀 검사가 계약 변경 누락을 감지한다. 기본 Values는 비어 있으며 모든 필수 입력을 제공해야 한다. CLI Release/Namespace도 Values와 일치해야 한다. 선택 필드 `database.parameters`(27)가 있으면 컨테이너 `args`에 `-c wal_level=… -c max_replication_slots=… -c max_wal_senders=…`와 `-c app.<키>=…`(키 정렬)를 넣는다. 허용 목록 밖의 설정은 스키마가 거절하고, 필드가 없으면 `args`가 없다.
 
 - 단일 PostgreSQL StatefulSet, 내부 headless Service(5432), 명시 StorageClass의 ReadWriteOnce PVC를 만든다. Service DNS는 `<release>.<namespace>.svc`다.
 - CPU millicores와 메모리 MiB는 requests/limits에 동일 적용하고, 디스크는 별도 PVC GiB로 적용한다. 지원 이미지 플랫폼에 따라 Linux/CPU node affinity를 설정한다.

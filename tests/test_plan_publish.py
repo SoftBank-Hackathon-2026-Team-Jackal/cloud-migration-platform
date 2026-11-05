@@ -439,7 +439,13 @@ def test_published_onprem_plan_holds_secret_references_only(db, store, tmp_path,
         "secret_name",
         "secret_key",
         "version",
+        "parameters",
     }
+    # Ticket 27: published Plans make the target logical-replication capable.
+    assert db_values["database"]["parameters"]["wal_level"] == "logical"
+    _, preview = stored(db, result)
+    [database] = [c for c in preview.changes if c.resource_type == "DATABASE" and c.quantity == 1]
+    assert database.size.endswith("논리 복제 설정 wal_level=logical · 슬롯 10 · 송신자 10")
     app_values = json.loads(store.read(manifest.artifacts["application_values"]))
     sources = {env["name"]: env["source"] for env in app_values["env"]}
     assert sources["DB_PASSWORD"] == {

@@ -33,12 +33,23 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `AWS_CONFIG_FILE`, `PROVISIONING_AWS_PROFILE=cmp-demo-provisioning` | worker | `/opt/cmp/secrets/aws/config`(읽기 전용). EC2 인스턴스 역할(`credential_source = Ec2InstanceMetadata`), `.env`의 `PROVISIONING_AWS_ROLE_ARN`이 있으면 그 역할을 Assume |
 | `CMP_GCP_PROJECT`, `PROVISIONING_GCLOUD_CONFIGURATION=cmp-demo` | worker | 운영자가 둔 `/opt/cmp/secrets/gcp/key.json`(읽기 전용) → 진입점이 tmpfs gcloud 구성·ADC 생성 |
 | `CMP_PUBLIC_HOST` | edge | 비어 있으면 에지를 띄우지 않는다. 예: `<EIP>.sslip.io` |
+| `WEB_AUTH_SECRET` | web | `/opt/cmp/.env`에 없을 때만 생성(웹 로그인 세션 서명용). 웹은 `AUTH_SECRET`으로 받는다 |
+| `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`, `GEMINI_API_KEY` 등 | web | 운영자가 `/opt/cmp/web.env`(0600)에 직접 둔다. 저장소·릴리스 아카이브에 넣지 않는다 |
 
 `.env`·`/opt/cmp/secrets/`는 서버에만 있고 저장소·이미지·릴리스 아카이브에 들어가지 않는다. 키 값을 터미널이나 로그에 출력하지 않는다.
 
 ### 공개 HTTPS 에지
 
-`edge`(Caddy)는 443에서만 듣고 ACME TLS-ALPN-01로 인증서를 받아 `/opt/cmp/data/caddy`에 보관한다. `/agents/*`만 API로 전달하고 나머지는 404다. 승인·운영자·터널 관리 API와 `/docs`는 계속 SSM 포트 포워딩으로만 접근한다. Traffic 중계 서버(별도 호스트, DNS 전환 P0 제외)와 포트·도메인을 공유하지 않는다.
+`edge`(Caddy)는 443에서만 듣고 ACME TLS-ALPN-01로 인증서를 받아 `/opt/cmp/data/caddy`에 보관한다. 경로는 둘로 나뉜다.
+
+- `/agents/*`, `/relays/*` → API(`api:8000`). Agent API와 중계 서버가 읽는 `GET /relays/{relay_id}/agents`다.
+- 그 밖의 모든 경로 → 웹 화면(`web:3000`).
+
+승인·운영자·터널 관리 API와 `/docs`, `/openapi.json`은 에지가 API로 넘기지 않으므로 계속 SSM 포트 포워딩으로만 쓴다(웹 서버 코드가 내부망에서 `http://api:8000`을 부를 뿐, 받은 경로를 그대로 전달하지 않는다). `/agent-enrollments`, `/docs` 같은 경로를 인터넷에서 열면 API가 아니라 웹이 404를 돌려준다. Traffic 중계 서버(별도 호스트, DNS 전환 P0 제외)와 포트·도메인을 공유하지 않는다.
+
+웹 컨테이너(`web`)는 포트를 열지 않고(`expose: 3000`) 에지 뒤에서만 받는다. 웹은 **`AGENT_ENROLLMENT_ADMIN_KEY`를 받지 않는다**: 웹의 `/api/agents` 경로는 아직 사용자 로그인이 없어서, 공개 웹이 이 키를 가지면 누구나 Agent 등록을 만들 수 있다. 키 없이는 연결 관리 화면이 목업 데이터로 동작한다. 로그인 확인이 생기면 운영자가 `/opt/cmp/web.env`에 넣는다.
+
+웹 화면은 이 저장소가 아니라 `cloud-migration-web`에서 온다. 노트북에서 `bash infra/demo/release-web.sh <웹 저장소 경로>`로 올리면 `releases/web-<sha>.tar.gz`로 올라가고(인스턴스 역할은 `releases/*`만 읽을 수 있다), 서버에서 `/opt/cmp/web/<sha>`로 풀려 `/opt/cmp/web/current`가 가리키며 `web` 서비스가 다시 만들어진다. 이후 플랫폼 릴리스(`start.sh`)도 `/opt/cmp/web/current/Dockerfile`이 있으면 웹을 함께 올린다.
 
 ### 원격 반영 순서 (각 단계 사용자 승인 필요)
 
@@ -46,6 +57,7 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 2. Provisioning 권한: 인스턴스 역할 또는 별도 역할(`PROVISIONING_AWS_ROLE_ARN`)에 대상 EKS/VPC/IAM과 State 버킷 권한을 검토 후 부여.
 3. GCP 키: 서비스 계정 키를 SSM 세션에서 `/opt/cmp/secrets/gcp/key.json`(root, 0600)으로 두고 `.env`에 `CMP_GCP_PROJECT=<project>`를 추가. 키를 S3 배포 버킷이나 저장소로 옮기지 않는다.
 4. `.env`에 `CMP_PUBLIC_HOST=<EIP>.sslip.io`(Stack 출력 `AgentEdgeDefaultHost`) 추가 후 `bash infra/demo/release.sh HEAD`.
+5. 웹 화면: `/opt/cmp/web.env`에 GitHub 로그인 앱 값(`AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`)을 두고(콜백 주소 `https://<CMP_PUBLIC_HOST>/api/auth/callback/github`), 노트북에서 `bash infra/demo/release-web.sh <웹 저장소 경로>`. 고정 IP가 정해진 뒤에 한다(호스트 이름이 IP에서 나온다).
 
 ### 서버 점검·스모크
 
@@ -56,8 +68,10 @@ docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-pro
 docker exec cmp-demo-worker-1 gcloud config get-value project --configuration cmp-demo
 # 노트북에서 (공개 경로만 열려 있는지)
 curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/agents/x        # 401/404 (API 응답)
-curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/agent-enrollments  # 404 (에지)
-curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/docs              # 404 (에지)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/relays/x/agents     # 401 (API: 중계 서버 자격증명 필요)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/                  # 200 (웹 화면)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/agent-enrollments  # 404 (웹이 답한다. API로는 안 간다)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/docs              # 404 (웹이 답한다. API로는 안 간다)
 ```
 
 Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰을 발급한 뒤 15의 Chart에 `platform.url=https://<CMP_PUBLIC_HOST>`로 설치한다. 등록·작업 수신이 되면 18의 Plan 게시 → 승인 → ON_PREM 실행 스모크를 진행한다(18 완료 후).
