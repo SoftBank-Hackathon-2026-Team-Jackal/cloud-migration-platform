@@ -172,6 +172,8 @@ async def test_a_spec_failure_is_fixed_by_a_new_requirements_version_without_a_b
     result, _ = await run(script)
     assert result["status"] == "PASSED" and result["requirements_ref"] == REF2
     assert script.names().count("sbx_build") == 1 and script.names().count("sbx_fix") == 1
+    fixes = [p for n, p in script.calls if n == "sbx_fix"]
+    assert fixes[0]["migration_id"] == "mig"  # the model spend is booked against this migration
     prepares = [p for n, p in script.calls if n == "sbx_prepare"]
     assert prepares[1]["requirements_ref"] == REF2 and prepares[1]["previous_plan"] == {"n": 1}
     applies = [p for n, p in script.calls if n == "sbx_apply"]

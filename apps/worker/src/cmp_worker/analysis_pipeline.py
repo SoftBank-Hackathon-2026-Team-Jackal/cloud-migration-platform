@@ -60,7 +60,7 @@ class AnalysisPipeline:
         workspace_root: Path | str,
         skills_root: Path | str,
         catalog_dir: Path | str,
-        llm_factory: Callable[[], LLMClient] | None = None,
+        llm_factory: Callable[[str, str], LLMClient] | None = None,
         aws_clients_factory: Callable[[AnalysisInput], AwsClients] | None = None,
         allow_local_repositories: bool = False,
     ) -> None:
@@ -251,7 +251,7 @@ class AnalysisPipeline:
         catalog = load_catalog(self.catalog_dir, skills_root=self.skills_root)
         result = run_mapper(
             MapperInput(evidence_summary=mask_text(summary)),
-            llm=self.llm_factory(),
+            llm=self.llm_factory(self._input(inp).migration_id, "mapper"),
             catalog=catalog,
             skills_root=self.skills_root,
         )

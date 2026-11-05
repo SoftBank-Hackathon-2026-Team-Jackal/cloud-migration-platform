@@ -240,4 +240,6 @@ def propose_fix(
             if wants_spec:
                 return FixOutcome("PROPOSED", requirements_fix=last.result, record=last.record)
             return FixOutcome("PROPOSED", code_fix=last.result, record=last.record)
+        if last.fatal:
+            break
     return FixOutcome("FAILED", reason=last.failure_reason, record=last.record)

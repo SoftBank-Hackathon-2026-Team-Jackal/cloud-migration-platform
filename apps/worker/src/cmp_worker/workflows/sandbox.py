@@ -274,6 +274,7 @@ class SandboxVerificationWorkflow:
                         "suite_ref": data["suite_ref"],
                         "source": source,
                         "analysis_report_ref": data.get("analysis_report_ref"),
+                        "migration_id": data["migration_id"],
                     },
                     minutes=20,
                 )

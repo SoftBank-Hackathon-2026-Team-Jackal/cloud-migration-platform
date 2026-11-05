@@ -466,7 +466,7 @@ def _loop_world(service, tmp_path, *, fixes, build_for=None):
         workspace_root=tmp_path / "work",
         build=build,
         suite_runner=make_proxy_suite_runner(service),
-        llm_factory=lambda: FakeLLMClient(
+        llm_factory=lambda *_: FakeLLMClient(
             [LLMResponse(tool_calls=[call(name, **args)]) for name, args in fixes]
         ),
     )
