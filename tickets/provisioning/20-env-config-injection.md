@@ -3,6 +3,8 @@
 ## 상태
 TODO — [Issue #99](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/99). 착수 전 검토 필요. 2026-11-05 Provisioning 공백 점검에서 발견했다.
 
+2026-11-05: 분석 담당과 `.env` 규칙을 합의해 [.env 단일 참조 명세](../../specs/env-file-ref/spec.md)로 구체화했다. 구축 쪽 구현은 [ENV-04](../env-file-ref/04-provisioning-render-env.md)로 진행하고 이 Issue(#99)를 그대로 쓴다. 업로드·공통 함수·시작 요청은 ENV-01~03이다.
+
 ## 목적
 운영 배포(09·11·12)는 앱이 참조하는 ConfigMap과 사용자 Secret이 대상에 미리 있어야 통과한다. 없으면 AWS/GCP는 `CONFIG_MAP_MISSING`·`USER_SECRET_MISSING`, ON_PREM은 `SECRET_REFERENCE_MISSING`으로 실패한다. 지금은 이 값을 만드는 코드가 없고, 실검증 때는 사람이 직접 만들었다. 사용자가 업로드한 `.env`를 일반 설정(ConfigMap)과 비밀값(Secret)으로 나눠 대상에 만들어, 사람 손 없이 배포가 이어지게 한다.
 
