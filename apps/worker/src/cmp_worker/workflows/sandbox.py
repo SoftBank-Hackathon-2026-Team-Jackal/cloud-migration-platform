@@ -9,6 +9,7 @@ with workflow.unsafe.imports_passed_through():
     from cmp_contracts.queues import SANDBOX_QUEUE
 
     from cmp_worker.activities import sandbox
+    from cmp_worker.review_gate import ReapprovalGate
     from cmp_worker.sandbox_deploy import sandbox_namespace
 
 
@@ -22,6 +23,8 @@ class SandboxVerificationWorkflow:
         self.cleanup_failed = False
         self.attempts: list[dict] = []
         self.integrated = False
+        self.reapproval: ReapprovalGate | None = None
+        self.early_rejections: list[dict[str, str]] = []
 
     @workflow.query
     def status(self) -> dict:
@@ -37,6 +40,24 @@ class SandboxVerificationWorkflow:
     def review(self) -> None:
         if self.phase == "NEEDS_REVIEW":
             self.reviewed = True
+
+    @workflow.signal
+    def approve_changed_rows(self, payload: dict) -> None:
+        """A person answers for rows whose handling the loop changed (ticket 14C)."""
+        if self.reapproval is None:
+            self.early_rejections.append(
+                {"signal": "approve_losses", "code": "NOT_WAITING", "detail": ""}
+            )
+            return
+        self.reapproval.approve(payload)
+
+    @workflow.query
+    def reapproval_state(self) -> dict:
+        if self.reapproval is None:
+            return {"phase": "NONE", "rejections": list(self.early_rejections)}
+        view = self.reapproval.view()
+        view["rejections"] = [*self.early_rejections, *view["rejections"]]
+        return view
 
     @workflow.signal
     def resolve_review(self) -> None:
@@ -157,15 +178,18 @@ class SandboxVerificationWorkflow:
         outcome, reasons = "FAILED", []
         prepared = False
         failed = False
+        row_changes: dict[str, str] = {}
+        fix_reasons: list[str] = []
+        last_results: list[dict] = []
+        built_sha: str | None = None
         try:
             self.phase = "sbx_build"
-            images = (
-                await act(
-                    "sbx_build",
-                    {"requirements_ref": requirements_ref, "source": source},
-                    minutes=30,
-                )
-            )["images"]
+            built = await act(
+                "sbx_build",
+                {"requirements_ref": requirements_ref, "source": source},
+                minutes=30,
+            )
+            images, built_sha = built["images"], built.get("source_sha256")
             self.phase = "sbx_prepare"
             prepared = True
             prep = await act(
@@ -208,6 +232,7 @@ class SandboxVerificationWorkflow:
                 tests_ran = tests_ran or applied.get("sandbox_error") is None
                 self.verdict = verified["verdict"]
                 if self.verdict["passed"]:
+                    last_results = verified["results"]
                     self.attempts.append({"attempt": self.attempt, "passed": True})
                     outcome = "PASSED"
                     break
@@ -248,6 +273,7 @@ class SandboxVerificationWorkflow:
                         "logs_ref": verified["logs_ref"],
                         "suite_ref": data["suite_ref"],
                         "source": source,
+                        "analysis_report_ref": data.get("analysis_report_ref"),
                     },
                     minutes=20,
                 )
@@ -256,18 +282,19 @@ class SandboxVerificationWorkflow:
                     outcome = "NEEDS_REVIEW"
                     break
                 self.attempt += 1
+                fix_reasons.append(fix.get("reason") or "")
                 if fix["kind"] == "REQUIREMENTS":
                     requirements_ref = fix["requirements_ref"]
+                    row_changes.update(fix.get("row_changes") or {})
                 else:
                     source = fix["source"]
                     self.phase = "sbx_build"
-                    images = (
-                        await act(
-                            "sbx_build",
-                            {"requirements_ref": requirements_ref, "source": source},
-                            minutes=30,
-                        )
-                    )["images"]
+                    rebuilt = await act(
+                        "sbx_build",
+                        {"requirements_ref": requirements_ref, "source": source},
+                        minutes=30,
+                    )
+                    images, built_sha = rebuilt["images"], rebuilt.get("source_sha256")
                 prep = await act(
                     "sbx_prepare",
                     {
@@ -293,6 +320,49 @@ class SandboxVerificationWorkflow:
                     self.cleanup_failed = True
                     if not failed:
                         raise
+        published = None
+        if outcome == "PASSED":
+            self.phase = "sbx_plan_publish"
+            publish = {
+                "input": data,
+                "requirements_ref": requirements_ref,
+                "source": source,
+                "row_changes": row_changes,
+                "results": last_results,
+            }
+            planned = await act("sbx_plan_publish", publish)
+            decisions = None
+            if planned["error"]:
+                outcome, reasons = "NEEDS_REVIEW", [f"PUBLISH:{planned['error']}"]
+            elif planned["changed"]:
+                # Rows the loop handled differently go back to a person before anything is published.
+                self.reapproval = ReapprovalGate(
+                    planned["final_ref"],
+                    planned["changed"],
+                    required=planned["required"],
+                    actor=planned["actor"],
+                )
+                self.phase = "REAPPROVAL_PENDING"
+                await self._tell_parent(True)
+                await workflow.wait_condition(lambda: self.reapproval.finished)
+                await self._tell_parent(False)
+                if self.reapproval.phase == "BLOCKED":
+                    outcome = "NEEDS_REVIEW"
+                    reasons = [f"ROW_BLOCKED:{b['id']}" for b in self.reapproval.blocked()]
+                else:
+                    decisions = self.reapproval.decisions()
+            if outcome == "PASSED":
+                self.phase = "sbx_publish"
+                published = await act(
+                    "sbx_publish",
+                    {
+                        **publish,
+                        "decisions": decisions,
+                        "built_source_sha256": built_sha,
+                        "fix_reasons": [r for r in fix_reasons if r],
+                    },
+                    minutes=5,
+                )
         self.phase = outcome
         if outcome == "NEEDS_REVIEW":
             await self._tell_parent(True)
@@ -305,4 +375,5 @@ class SandboxVerificationWorkflow:
             "reasons": reasons,
             "requirements_ref": requirements_ref,
             "source": source,
+            "published": published,
         }

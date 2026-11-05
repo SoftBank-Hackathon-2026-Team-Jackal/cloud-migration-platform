@@ -1,7 +1,7 @@
 # Ticket 14B — 갱신 루프와 부모 종료 상태
 
 ## 상태
-IN_PROGRESS — 구현 완료(SPEC 경로는 실제 k3d, 나머지 경로는 가짜 Activity), 리뷰 대기, Issue 번호 미기록
+DONE — PR #110 병합, Issue #109 (SPEC 경로는 실제 k3d, 나머지 경로는 가짜 Activity로 검증)
 
 ## 목적
 mock Activity를 실제 Sandbox Activity로 바꾸고, 실패 시 분류·수정·같은 Sandbox 갱신으로 재검증하는 루프를 Workflow에 넣는다. 부모 종료 상태 값을 정리한다.

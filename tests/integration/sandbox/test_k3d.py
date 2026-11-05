@@ -412,6 +412,35 @@ def test_network_rules_block_unlisted_traffic_and_record_what_leaves_the_sandbox
         service.teardown_sandbox(plan.namespace)
 
 
+def _analysis_refs(store):
+    """A stored analysis version with one checked row, and the review that approved it."""
+    from datetime import UTC, datetime
+
+    from cmp_contracts.analysis import AnalysisReport, MappingRow, ReviewRecord
+    from cmp_contracts.provisioning import VersionRef
+
+    row = MappingRow(
+        id="r1", capability="environment-config", usage="env settings", grade="DIRECT",
+        required_proposed=True, required_reason="needed", required=None, disposition="MIGRATE",
+        loses=[], treatment=None, status="EVIDENCE_CHECKED", evidence=[],
+    )  # fmt: skip
+    ref = VersionRef(id="analysis", version="v1")
+    report = AnalysisReport(
+        migration_id="it-mig", ref=ref, base_commit="c" * 40, commit_verified=False,
+        usage_profile={"usages": []}, mapping=[row], precheck={"findings": []},
+        external_entries=[], source_cidrs=[], source_db_images={}, unmapped_items=[],
+        unverified_risks=[],
+    )  # fmt: skip
+    review = ReviewRecord(
+        analysis_ref=ref, required={"r1": True}, operational=[], approvals={}, actor="it",
+        decided_at=datetime(2026, 11, 5, tzinfo=UTC),
+    )  # fmt: skip
+    return {
+        "analysis_report_ref": store.put_json(report, ref_id="a", kind="analysis-report"),
+        "review_ref": store.put_json(review, ref_id="r", kind="review-record"),
+    }
+
+
 def _loop_world(service, tmp_path, *, fixes, build_for=None):
     """Real Sandbox Activities with a fake model and a fake builder, driven through Temporal."""
     from cmp_agents.llm import FakeLLMClient, LLMResponse, call
@@ -448,6 +477,7 @@ def _loop_world(service, tmp_path, *, fixes, build_for=None):
                 id="std-health",
                 source="STANDARD",
                 effect="READ_ONLY",
+                covers=["environment-config"],
                 steps=[HttpStep(path="/healthz", expect=Expect(status=200))],
             )
         ],
@@ -484,13 +514,18 @@ async def test_a_wrong_port_is_classified_as_spec_fixed_and_the_same_sandbox_pas
     wrong_req = RequirementsV2.model_validate(wrong)
     req_ref = store.put(canonical(wrong_req)[0], ref_id="requirements", kind="requirements")
     suite_ref = store.put(bundle, ref_id="suite", kind="test-suite")
+    analysed = _analysis_refs(store)
+    source_dir = tmp_path / "src"  # only the application source: results are stored elsewhere
+    source_dir.mkdir()
+    (source_dir / "main.go").write_text("package main\n")
     data = SandboxInput(
         migration_id="it-mig",
         run_id="lp-" + uuid.uuid4().hex[:8],
         requirements_ref=req_ref,
         suite_ref=suite_ref,
-        source={"workspace": str(tmp_path)},
+        source={"workspace": str(source_dir)},
         database_image=POSTGRES,
+        **analysed,
     ).model_dump(mode="json")
     async with (
         await WorkflowEnvironment.start_time_skipping(
@@ -510,6 +545,16 @@ async def test_a_wrong_port_is_classified_as_spec_fixed_and_the_same_sandbox_pas
         (2, True, None),
     ]
     assert len(builds) == 1  # a requirements fix never rebuilds
+    published = result["published"]
+    assert published["status"] == "PUBLISHED" and published["patch"] is None
+    from cmp_contracts.analysis import AnalysisReport
+    from cmp_worker.artifact_store import ArtifactRef
+
+    final = AnalysisReport.model_validate_json(
+        store.get(ArtifactRef.model_validate(published["report_ref"]))
+    )
+    assert [r.status for r in final.mapping] == ["SANDBOX_VERIFIED"]
+    assert published["requirements_ref"] == result["requirements_ref"]
     assert result["requirements_ref"] != data["requirements_ref"]
     namespace = f"cmp-sbx-it-mig-{data['run_id']}"
     assert not kubectl("get", "namespace", "-o", "name").stdout.count(data["run_id"]), namespace

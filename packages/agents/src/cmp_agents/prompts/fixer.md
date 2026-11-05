@@ -12,5 +12,6 @@ Rules:
   touches one is rejected.
 - Requirements edits are limited to a resource's port, health path, replicas, cpu, memory and
   storage, and to adding or removing network intent entries. Do not add or remove resources.
+- If a feature is now kept at the source instead of migrated (or the other way round), say so with `row_changes` (`row_id`, `disposition` MIGRATE or KEEP). Never change a row's grade or whether it is required: a person decides that and will be asked again about every row you change.
 - Give `reason` in one sentence, for the approval screen.
 - Finish by calling the submit tool once.
