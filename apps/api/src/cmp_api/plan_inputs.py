@@ -10,6 +10,7 @@ from cmp_contracts.plan_publish import PlanningInputRegistration
 from cmp_providers.artifacts import sha256_bytes, sha256_json
 from cmp_providers.aws_preview import AwsPlanInput
 from cmp_providers.gcp_preview import GcpPlanInput
+from cmp_providers.network_policy import TEMPLATE_VERSION as NETWORK_POLICY_TEMPLATE
 from pydantic import ValidationError
 from sqlalchemy import JSON, Integer, String
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from cmp_api.db import Base
 from cmp_api.onprem_rollout import LocalArtifactStore, RolloutError
 
-CLOUD_TEMPLATES = {"AWS": "aws-eks-v2", "GCP": "gcp-gke-v2"}
+CLOUD_TEMPLATES = {"AWS": "aws-eks-v3", "GCP": "gcp-gke-v3"}
 _CLOUD_MODELS = {"AWS": AwsPlanInput, "GCP": GcpPlanInput}
 
 
@@ -76,6 +77,10 @@ def input_digest(registration: PlanningInputRegistration) -> str:
     # Plan here, the AWS/GCP WORKLOADS Plan in `env_plan_digest` (infrastructure is unaffected).
     if registration.env_plan is not None and registration.target.provider == "ON_PREM":
         payload["env_plan"] = registration.env_plan.model_dump(mode="json")
+    # Ticket 26: the ON_PREM Plan renders NetworkPolicies, so earlier Revisions are re-planned.
+    # Cloud infrastructure Digests are unchanged (their WORKLOADS Digest carries it instead).
+    if registration.target.provider == "ON_PREM":
+        payload["network_policy"] = NETWORK_POLICY_TEMPLATE
     return sha256_json(payload)
 
 

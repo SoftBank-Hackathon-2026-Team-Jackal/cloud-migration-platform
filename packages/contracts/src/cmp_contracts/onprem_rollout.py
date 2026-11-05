@@ -85,6 +85,11 @@ class ProductionRolloutJob(Contract):
     storage_class: KubernetesName
     database: RolloutDatabase
     application: RolloutApplication
+    # Ticket 26: the approved NetworkPolicy objects. Omitted when absent so jobs from Plans
+    # published before ticket 26 keep identical payloads; an older Agent rejects a job with it.
+    network_policies: ArtifactRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Ticket 29: omitted when no image needs ECR auth so earlier jobs keep identical payloads;
     # an Agent older than ticket 29 rejects a job that carries it (UNSUPPORTED_JOB).
     image_pull: RolloutImagePull | None = Field(
@@ -96,15 +101,18 @@ class ProductionRolloutJob(Contract):
         for part in (self.database, self.application):
             if part.chart.kind != "CHART" or part.values.kind != "VALUES":
                 raise ValueError("Chart and Values artifacts required")
+        if self.network_policies is not None and self.network_policies.kind != "MANIFEST":
+            raise ValueError("NetworkPolicy artifact must be a MANIFEST")
         return self
 
     def artifact_refs(self) -> list[ArtifactRef]:
-        return [
+        refs = [
             self.database.chart,
             self.database.values,
             self.application.chart,
             self.application.values,
         ]
+        return refs + ([self.network_policies] if self.network_policies is not None else [])
 
 
 class RolloutReplication(Contract):

@@ -24,6 +24,7 @@ ArtifactRole = Literal[
     "application_chart",
     "application_values",
     "bindings",
+    "network_policies",  # ticket 26: rendered NetworkPolicy objects (JSON), applied as-is
 ]
 ImageURI = Annotated[str, Field(pattern=r"^[^\s@]+@sha256:[a-f0-9]{64}$")]
 
@@ -67,6 +68,7 @@ class PlanManifest(Contract):
             "application_chart": "CHART",
             "application_values": "VALUES",
             "bindings": "BINDINGS",
+            "network_policies": "MANIFEST",
         }
         for role, artifact in self.artifacts.items():
             if artifact.kind != expected[role]:

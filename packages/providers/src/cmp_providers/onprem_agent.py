@@ -187,6 +187,7 @@ class RolloutRunner:
         `fetch_image_pull() -> {registry, username, password, expires_at}` (ticket 29)."""
         self.target, self.fetch = target, fetch
         self.fetch_env_secrets = fetch_env_secrets
+        self.approved_policies: set[str] = set()  # ticket 26: names applied by this rollout
         self.fetch_image_pull = fetch_image_pull
         # Ticket 27: {capable, code} after READY; None = not verified (probe did not run).
         self.replication: dict | None = None
@@ -328,6 +329,55 @@ class RolloutRunner:
                 }
             )
 
+    # --- NetworkPolicies (ticket 26) -------------------------------------------------------
+    def _network_policies(self, job: ProductionRolloutJob, paths: dict[str, Path]) -> list[dict]:
+        """Approved policies, checked read-only before any mutation: every object is a managed
+        NetworkPolicy in the job Namespace, and no unmanaged policy holds one of the names."""
+        if job.network_policies is None:
+            return []
+        try:
+            policies = json.loads(paths[job.network_policies.sha256].read_bytes())["policies"]
+            for item in policies:
+                meta = item["metadata"]
+                if (
+                    item["kind"] != "NetworkPolicy"
+                    or meta["namespace"] != job.namespace
+                    or meta["labels"].get(MANAGED) != "true"
+                ):
+                    raise ValueError
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise RolloutAgentError("INVALID_NETWORK_POLICIES") from None
+        for item in policies:
+            existing = self.target.get("networkpolicy", item["metadata"]["name"], job.namespace)
+            labels = ((existing or {}).get("metadata") or {}).get("labels") or {}
+            if existing is not None and labels.get(MANAGED) != "true":
+                raise RolloutAgentError("NETWORK_POLICY_CONFLICT")  # never overwrite the user's
+        return policies
+
+    def _managed_policy_names(self, namespace: str) -> set[str]:
+        listed = self.target.kubectl(
+            "get", "networkpolicy", "-n", namespace, "-l", f"{MANAGED}=true", "-o", "json"
+        )
+        if listed.returncode:
+            raise RolloutAgentError("KUBERNETES_OPERATION_FAILED", "UNKNOWN")
+        return {item["metadata"]["name"] for item in json.loads(listed.stdout).get("items", [])}
+
+    def _apply_network_policies(self, job: ProductionRolloutJob, policies: list[dict]) -> None:
+        """Apply before Helm, so Pods start under the approved rules; then remove managed
+        policies a previous Revision created that this one no longer approves. Jobs from Plans
+        published before ticket 26 carry no artifact and leave the Namespace untouched."""
+        if job.network_policies is None:
+            return
+        for item in policies:
+            self.target.apply(item)
+        wanted = {item["metadata"]["name"] for item in policies}
+        for name in sorted(self._managed_policy_names(job.namespace) - wanted):
+            result = self.target.kubectl(
+                "delete", "networkpolicy", name, "-n", job.namespace, "--ignore-not-found"
+            )
+            if result.returncode:
+                raise RolloutAgentError("KUBERNETES_OPERATION_FAILED", "UNKNOWN")
+
     def _write_connection_url(self, job: ProductionRolloutJob) -> None:
         """Ticket 19 (U2–U5): rebuilt from the current password on every rollout so it never
         drifts; the URL and password stay inside the user's cluster."""
@@ -451,6 +501,10 @@ class RolloutRunner:
         )
         if health.returncode:  # kubectl returns non-zero for any non-2xx proxied response
             raise RolloutAgentError("APPLICATION_HEALTH_FAILED")
+        if job.network_policies is not None and not self.approved_policies <= (
+            self._managed_policy_names(ns)
+        ):
+            raise RolloutAgentError("NETWORK_POLICY_MISSING")
         for release, chart, values in [
             (db.release, db.chart, db.values),
             (app.release, app.chart, app.values),
@@ -492,11 +546,14 @@ class RolloutRunner:
             with tempfile.TemporaryDirectory(prefix="cmp-rollout-") as directory:
                 paths = self._download(job, Path(directory))
                 env_secrets = self._env_secrets(job)
+                policies = self._network_policies(job, paths)
+                self.approved_policies = {item["metadata"]["name"] for item in policies}
                 pull = self._image_pull(job)
                 self._prepare_namespace(job, env_secrets)
                 del env_secrets
                 self._apply_image_pull(job, pull)
                 del pull
+                self._apply_network_policies(job, policies)
                 db, app = job.database, job.application
                 self._install(job, db.release, db.chart, db.values, paths)
                 self._install(job, app.release, app.chart, app.values, paths)

@@ -142,6 +142,8 @@ def _values(store: ArtifactStore, manifest: PlanManifest):
         )
         for role in ("database_chart", "application_chart"):
             store.read(manifest.artifacts[role])
+        if "network_policies" in manifest.artifacts:  # ticket 26; absent on older Plans
+            store.read(manifest.artifacts["network_policies"])
     except KeyError:
         raise RolloutError("ARTIFACT_MISSING") from None
     except ValidationError:
@@ -301,6 +303,7 @@ def build_rollout_job(
             secret_refs=[SecretRefV2(name=n, key=k) for n, k in sorted(secret_refs)],
             env_secrets=env_secrets,
         ),
+        network_policies=manifest.artifacts.get("network_policies"),
         image_pull=(pull := _image_pull(database, application, registry)) and pull[0],
     )
     return job, agent.owner_id

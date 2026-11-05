@@ -3424,6 +3424,10 @@ components:
           $ref: '#/components/schemas/RolloutDatabase'
         application:
           $ref: '#/components/schemas/RolloutApplication'
+        network_policies:
+          anyOf:
+          - $ref: '#/components/schemas/ArtifactRef'
+          - type: 'null'
         image_pull:
           anyOf:
           - $ref: '#/components/schemas/RolloutImagePull'

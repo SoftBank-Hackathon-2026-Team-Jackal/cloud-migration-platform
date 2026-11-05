@@ -19,6 +19,7 @@ from typing import Protocol
 
 from cmp_api.approvals import PlanExecution, PlanRevision
 from cmp_contracts.plan import PlanManifest
+from cmp_providers.network_policy import gke_dataplane_v2
 from cmp_providers.plans import manifest_digest
 from sqlalchemy import select
 from temporalio import activity
@@ -188,6 +189,11 @@ class GcpWorkloadsActivities(ApprovedWorkloads):
             "gke_cluster_name": target.cluster_name,
             "gke_location": target.location,
         }
+
+    def policy_enforcement(self, cluster) -> str | None:
+        """Ticket 26: GKE Dataplane V2."""
+        anetd = cluster.get_object("daemonset", "anetd", "kube-system")
+        return "gke-dataplane-v2" if gke_dataplane_v2(anetd) else None
 
     def storage_class_manifest(self, name: str) -> dict:
         return storage_class_manifest(name)
