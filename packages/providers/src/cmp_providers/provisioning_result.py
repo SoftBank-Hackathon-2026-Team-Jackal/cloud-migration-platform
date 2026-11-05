@@ -82,7 +82,12 @@ ONPREM_CHECKS = [  # ticket 12 Agent rollout order (onprem_agent.RolloutRunner)
         "WORKLOAD",
         "helm_releases",
         DEPLOY,
-        {"HELM_RELEASE_FAILED", "RELEASE_NOT_DEPLOYED", "KUBERNETES_OPERATION_FAILED"},
+        {
+            "HELM_RELEASE_FAILED",
+            "RELEASE_NOT_DEPLOYED",
+            "KUBERNETES_OPERATION_FAILED",
+            "ROLLBACK_FAILED",  # ticket 51: the previous Revision could not be restored
+        },
     ),
     ("WORKLOAD", "pods_ready", VERIFY, {"WORKLOAD_MISSING", "WORKLOAD_NOT_READY"}),
     ("WORKLOAD", "service_endpoints", VERIFY, {"SERVICE_ENDPOINT_NOT_READY"}),

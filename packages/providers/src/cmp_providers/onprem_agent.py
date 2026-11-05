@@ -23,7 +23,7 @@ from cmp_contracts.network_preflight import PREFLIGHT_JOB_MODE, NetworkPreflight
 from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from pydantic import ValidationError
 
-from cmp_providers import agent_image_pull
+from cmp_providers import agent_image_pull, agent_rollout_recovery
 from cmp_providers.artifacts import verify_artifact_bytes
 from cmp_providers.database_url import connection_url
 from cmp_providers.db_replication import DB_PROBE, judge_probe
@@ -45,6 +45,15 @@ class RolloutAgentError(Exception):
 class ClusterUnavailable(RolloutAgentError):
     def __init__(self):
         super().__init__("KUBERNETES_UNAVAILABLE", "UNKNOWN")
+
+
+class ReleaseNotSettled(RolloutAgentError):
+    """Ticket 51: the upgrade did not settle; `previous` is the deployed revision to restore
+    (None when nothing ran before, e.g. a failed first install)."""
+
+    def __init__(self, kind: str, release: str, previous: int | None):
+        super().__init__("HELM_RELEASE_FAILED", "UNKNOWN")
+        self.kind, self.release, self.previous = kind, release, previous
 
 
 SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
@@ -172,7 +181,24 @@ class ClusterTarget:
             if b"not found" in result.stderr:
                 return None
             raise ClusterUnavailable()
-        return json.loads(result.stdout).get("info", {})
+        data = json.loads(result.stdout)
+        return data.get("info", {}) | {"revision": data.get("version")}
+
+    def history(self, name: str, namespace: str) -> list[dict]:
+        """Ticket 51: revision numbers and statuses only (descriptions/manifests dropped)."""
+        result = self.helm("history", name, "-n", namespace, "-o", "json", "--max", "50")
+        if result.returncode:
+            raise ClusterUnavailable()
+        return [
+            {"revision": item.get("revision"), "status": item.get("status")}
+            for item in json.loads(result.stdout or b"[]")
+        ]
+
+    def now(self) -> float:
+        return time.monotonic()
+
+    def pause(self, seconds: float) -> None:
+        time.sleep(seconds)
 
 
 def _marker(job: ProductionRolloutJob, chart: ArtifactRef, values: ArtifactRef) -> str:
@@ -408,15 +434,30 @@ class RolloutRunner:
             }
         )
 
-    def _install(self, job, release, chart, values, paths) -> None:
-        marker = _marker(job, chart, values)
-        info = self.target.release(release, job.namespace)
+    def _install(self, job, kind, release, chart, values, paths) -> None:
+        """Ticket 51 boundary: Release inspection → upgrade (no `--wait`) → settle. A failure
+        raises `ReleaseNotSettled` with the revision `rollout` restores."""
+        marker, namespace = _marker(job, chart, values), job.namespace
+        info = self.target.release(release, namespace)
+        if info is not None and info.get("status") == "failed":
+            # Helm finished and failed (an older Agent, or an API error): inspect the history,
+            # return to the last deployed Revision, then re-apply. None: nothing ran before.
+            revision = agent_rollout_recovery.last_deployed_revision(
+                self.target, release, namespace
+            )
+            if revision is not None:
+                if not agent_rollout_recovery.restore(
+                    self.target, kind, release, namespace, revision
+                ):
+                    raise RolloutAgentError("ROLLBACK_FAILED", "UNKNOWN")
+                info = self.target.release(release, namespace)
         if info is not None:
-            if info.get("status") != "deployed":
-                # pending-*/failed: an earlier attempt may still be running or half-applied.
+            if info.get("status") not in ("deployed", "failed"):
+                # pending-*/uninstalling: an earlier Helm step may still be running (52).
                 raise RolloutAgentError("INSPECTION_REQUIRED", "UNKNOWN")
-            if info.get("description") == marker:
+            if info.get("status") == "deployed" and info.get("description") == marker:
                 return  # Already applied with these exact approved bytes: verify only.
+        previous = info.get("revision") if info and info.get("status") == "deployed" else None
         result = self.target.helm(
             "upgrade",
             "--install",
@@ -428,30 +469,22 @@ class RolloutRunner:
             str(paths[values.sha256]),
             "--description",
             marker,
-            "--wait",
             "--timeout",
             self.target.helm_timeout,
             timeout=900,
         )
-        if result.returncode:
-            raise RolloutAgentError("HELM_RELEASE_FAILED", "UNKNOWN")
+        if result.returncode or not agent_rollout_recovery.settle(
+            self.target, kind, release, namespace
+        ):
+            raise ReleaseNotSettled(kind, release, previous)
 
     # --- READY checks (E8) ---------------------------------------------------------------
     def _workload_ready(self, kind: str, name: str, namespace: str) -> None:
         resource = self.target.get(kind, name, namespace)
         if resource is None:
             raise RolloutAgentError("WORKLOAD_MISSING")
-        status = resource.get("status", {})
-        desired = resource["spec"].get("replicas", 1)
-        if (
-            desired < 1
-            or status.get("observedGeneration", 0) < resource["metadata"]["generation"]
-            or status.get("readyReplicas", 0) != desired
-            or status.get("updatedReplicas", 0) != desired
-            # A stuck rolling update still has a Ready old Pod; require no surplus/unavailable.
-            or status.get("replicas", desired) != desired
-            or status.get("unavailableReplicas", 0) != 0
-        ):
+        # A stuck rolling update still has a Ready old Pod; require no surplus/unavailable.
+        if not agent_rollout_recovery.workload_settled(resource):
             if agent_image_pull.image_pull_failed(self.target, namespace, name):
                 raise RolloutAgentError("IMAGE_PULL_FAILED")  # ticket 29 (I7)
             raise RolloutAgentError("WORKLOAD_NOT_READY")
@@ -555,22 +588,40 @@ class RolloutRunner:
                 del pull
                 self._apply_network_policies(job, policies)
                 db, app = job.database, job.application
-                self._install(job, db.release, db.chart, db.values, paths)
-                self._install(job, app.release, app.chart, app.values, paths)
+                self._install(job, "statefulset", db.release, db.chart, db.values, paths)
+                self._install(job, "deployment", app.release, app.chart, app.values, paths)
         except AgentTransportError:
             return "UNKNOWN", "ARTIFACT_UNAVAILABLE"
+        except ReleaseNotSettled as exc:
+            unsettled = exc  # report the first failing READY check, then restore (ticket 51)
         except RolloutAgentError as exc:
-            if exc.code != "HELM_RELEASE_FAILED":
-                return exc.status, exc.code
-            # Helm did not reach Ready: report the first failing READY check instead.
+            return exc.status, exc.code
+        else:
+            unsettled = None
         try:
             self.verify(job)
         except ClusterUnavailable:
-            return "UNKNOWN", "INSPECTION_REQUIRED"
+            outcome = ("UNKNOWN", "INSPECTION_REQUIRED")
         except RolloutAgentError as exc:
-            return exc.status, exc.code
-        self.replication = self.check_replication(job)
-        return "SUCCEEDED", "READY"
+            outcome = (exc.status, exc.code)
+        else:
+            self.replication = self.check_replication(job)
+            return "SUCCEEDED", "READY"
+        if unsettled is not None and not self._restore(job, unsettled):
+            return "UNKNOWN", "ROLLBACK_FAILED"
+        return outcome
+
+    def _restore(self, job: ProductionRolloutJob, failed: ReleaseNotSettled) -> bool:
+        """Ticket 51 (C-02): return only the Release that did not settle to the revision that
+        was deployed before this job. Nothing to restore after a failed first install."""
+        if failed.previous is None:
+            return True
+        try:
+            return agent_rollout_recovery.restore(
+                self.target, failed.kind, failed.release, job.namespace, failed.previous
+            )
+        except RolloutAgentError:
+            return False
 
 
 class RolloutAgent:

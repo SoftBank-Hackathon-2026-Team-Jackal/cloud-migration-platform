@@ -20,7 +20,7 @@ uv run pytest tests/test_postgres_helm.py
 - 기존 Secret의 이름/키만 `secretKeyRef`로 연결한다. Secret 생성·비밀번호·클라우드 Credential 입력은 없다. Namespace/StorageClass/Secret 준비와 존재·권한 검사는 배포 담당자의 책임이다.
 - 이미지는 Digest로 고정하고 공식 PostgreSQL 16 이미지의 `POSTGRES_*` 및 PGDATA 인터페이스를 지원해야 한다. 버전 필드나 Digest 형식만으로 실제 이미지의 버전/실행을 검증할 수 없다. `registry_auth_ref`가 있는 입력은 이 티켓에서 아직 대상 imagePullSecret으로 해석할 수 없으므로 명시적으로 거절한다. 이미 인증된 노드 또는 공개 Registry 경로만 렌더 가능하며 비공개 Registry 연결은 후속 배포 작업이다.
 - PGDATA는 볼륨 아래 하위 디렉터리를 사용한다. readiness는 `pg_isready`이며 인증된 SQL 접속 검증을 대신하지 않는다. DB 이름/사용자/비밀번호는 신규 데이터 디렉터리 초기화 시 사용되고 기존 DB의 변경/회전을 수행하지 않는다.
-- PVC에 `helm.sh/resource-policy: keep`을 설정해 Helm 삭제 대상에서 보존한다. 자동 삭제/rollback/재설치는 구현하지 않는다. 보존 PVC의 재사용·확장·StorageClass 변경은 실제 상태와 데이터 소유권을 검증한 후 별도로 결정해야 한다.
+- PVC에 `helm.sh/resource-policy: keep`을 설정해 Helm 삭제 대상에서 보존한다. Chart는 자동 삭제/rollback/재설치를 하지 않는다. ON_PREM Agent는 정착하지 않은 업그레이드를 직전 Revision으로 `helm rollback`하며 PVC는 그대로 둔다(51). 보존 PVC의 재사용·확장·StorageClass 변경은 실제 상태와 데이터 소유권을 검증한 후 별도로 결정해야 한다.
 
 현재 결과는 로컬 Manifest다. S3 저장·`RenderedChart` 참조 발급, Helm 설치, 실제 PVC Bound/마운트, DB 접속, 데이터 복사/CDC는 구현 범위 밖이다. 이후 저장 경계는 이 Chart/Values/Manifest의 정확한 바이트로 공통 ArtifactRef를 발급해야 한다.
 

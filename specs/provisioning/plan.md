@@ -170,7 +170,7 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 실행 순서는 Namespace/StorageClass·Controller 준비 → DB 인증 Secret 준비 → PostgreSQL Helm 설치/업그레이드 → PVC Bound·Pod Ready·DB 접속 확인 → 대상 DB Service와 비밀 참조로 앱 Values 완성 → App Helm 설치/업그레이드 → Pod Ready·Service·Ingress/LB 주소 확인이다. 데이터 이전용 복제 역할·설정 적용 가능 여부도 확인하되 실제 복제는 Data Migration에 맡긴다. Registry Pull 인증·CPU 아키텍처를 배포 전에 검증한다. NetworkPolicy는 승인된 `network_intent`로 렌더해 Plan 산출물 `network_policies`에 고정하고, Namespace 준비 직후·Helm 전에 적용한다(티켓 26). Pod Ready나 PVC 객체 존재만으로 DB 접근·실제 Volume 사용 가능성을 선언하지 않는다.
 
-재시도 시 Release 이름·Namespace·Chart/Values Digest와 실제 Helm Release 상태를 조회한다. 성공 응답 유실이면 적용 상태를 결과로 복구하고, 실패/미완료이면 충돌·기존 Revision·Kubernetes 객체를 조사한다. 승인된 Values와 다른 내용으로 임의 업그레이드하지 않는다. Helm 자동 rollback·atomic 사용 여부는 PVC/DB 데이터 보존과 부분 배포 처리 정책이 정해진 뒤 선택한다.
+재시도 시 Release 이름·Namespace·Chart/Values Digest와 실제 Helm Release 상태를 조회한다. 성공 응답 유실이면 적용 상태를 결과로 복구하고, 실패/미완료이면 충돌·기존 Revision·Kubernetes 객체를 조사한다. 승인된 Values와 다른 내용으로 임의 업그레이드하지 않는다. Helm 자동 rollback·atomic 사용 여부는 PVC/DB 데이터 보존과 부분 배포 처리 정책이 정해진 뒤 선택한다. **ON_PREM(51, #186):** Agent는 `--wait`·`--atomic` 없이 업그레이드하고 직접 정착을 기다린다. 정착하지 않은 Release만 이 작업 전 `deployed` Revision으로 `helm rollback`하고(승인·배포된 적 있는 내용), 이전 Revision을 막는 Ready가 아닌 StatefulSet Pod를 지운다. PVC는 건드리지 않는다. 결과는 `FAILED <원인 코드>`, 복원 실패는 `UNKNOWN ROLLBACK_FAILED`다. AWS/GCP(09/11)는 바뀌지 않았다.
 
 **AWS 구현(09, #37):** `execute_aws_workloads` Activity가 위 순서를 EKS에 적용한다. 실행 전 업무 DB의 승인·최신 Revision·manifest Digest와 `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/<sha256>`의 Chart tgz·Values·bindings 바이트를 재확인하고, 08 인프라 실행의 `resource_refs`(클러스터·VPC·LB Controller IRSA)로 대상을 찾는다. StorageClass(gp3 EBS CSI)·AWS Load Balancer Controller(고정 Chart 버전·SHA-256)를 준비하고 DB Secret은 Worker가 생성해 stdin으로만 전달한다. Helm은 기존 Release 조회 후 install/skip/upgrade하고 `pending-*`는 UNKNOWN, `failed`는 FAILED로 멈추며 atomic·rollback은 쓰지 않는다. Ingress는 앱 Chart 계약을 바꾸지 않고 승인 Values에서 만든 고정 ALB(HTTP:80, 도메인·TLS 없음) 템플릿이다. PVC Bound·인증 DB 접속(PostgreSQL 16)·Pod Ready·내부 헬스·ALB 주소·외부 헬스가 모두 통과해야 `WORKLOADS_READY`다. 결정 상세는 [09 티켓](../../tickets/provisioning/09-aws-workloads.md) W1~W11.
 
@@ -237,6 +237,7 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 | Terraform Apply 부분 실패·Worker 종료 | 잠금·State·실제 자원 조회 후 유지/재개/수동 조치 결정. 무조건 Destroy 금지 |
 | EKS/GKE 생성 지연 | 실제 클러스터 상태 조회와 제한된 재시도·Timeout. 수치 미정 |
 | Helm 설치/응답 유실 | Release·Kubernetes 상태 조회 후 같은 승인 Values로 재개 |
+| ON_PREM 새 Revision 정착 실패 | 그 Release만 직전 `deployed` Revision으로 rollback·고착 Pod 정리 후 `FAILED <원인>`. 다음 Revision은 그대로 적용, `failed`로 남은 Release는 검사 후 복원·재적용(51) |
 | Image Pull 오류 | Digest·Registry 인증·Node 아키텍처 진단, READY 금지 |
 | PostgreSQL PVC Pending | StorageClass·CSI·용량·Pod 이벤트 확인, READY 금지 |
 | Agent 연결 끊김 | 작업 ID·Agent 상태 유지, 재연결 후 조회. 중복 제출 억제 |

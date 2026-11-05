@@ -43,6 +43,7 @@
 | [41 데모 서버 API에 플랫폼 ECR pull 설정 전달 (29 후속)](../../tickets/provisioning/41-demo-ecr-pull-wiring.md) | IN_PROGRESS (로컬 완료, 리뷰·서버 반영 승인 대기) | 28, 29 | PROV-009, 010, 021 | [#176](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/176) | ☐ |
 | [43 worker 이미지에 Terraform·Helm·catalog 경로 포함과 Linux Provider lock](../../tickets/provisioning/43-worker-image-packaging.md) | IN_PROGRESS | 21, 28 | PROV-001, 004, 008, 021 | [#178](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/178) | ☐ |
 | [42 Agent 이미지·Chart를 사용자 클러스터가 받을 수 있게 (GHCR 공개·imagePullSecrets)](../../tickets/provisioning/42-agent-package-access.md) | IN_PROGRESS (Chart·문서 완료, GHCR 공개 전환 승인 대기) | 15 | PROV-009, 016, 021 | [#177](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/177) | ☐ |
+| [51 ON_PREM 배포 실패 시 기존 앱·DB 보존과 복구](../../tickets/provisioning/51-agent-rollout-recovery.md) | IN_PROGRESS (로컬·k3d 완료, 리뷰·Agent 릴리스 승인 대기) | 12, 15, 27 | PROV-009, 011, 016, 017, 018 | [#186](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/186) | ☐ |
 
 ## 선행 관계
 

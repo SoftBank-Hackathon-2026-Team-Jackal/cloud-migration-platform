@@ -106,6 +106,15 @@ def test_rbac_is_explicit_without_wildcards(tmp_path):
     assert granted[("storage.k8s.io", "storageclasses")] == {"get"}
     assert granted[("", "pods/exec")] == {"create"}
     assert granted[("", "services/proxy")] == {"get"}
+    # Ticket 51: delete only (stuck StatefulSet Pod after rollback); never create/update/exec.
+    pod_verbs = set().union(
+        *(
+            set(r["verbs"])
+            for r in role["rules"]
+            if "pods" in r["resources"] and r["apiGroups"] == [""]
+        )
+    )
+    assert pod_verbs == {"get", "list", "watch", "delete"}
     # Ticket 29 (I8): pull Secret linked to the default ServiceAccount; no delete/update.
     assert granted[("", "serviceaccounts")] == {"get", "create", "patch"}
     assert "delete" not in granted[("", "namespaces")]
@@ -261,11 +270,11 @@ def _pod_rules(docs):
 def test_preflight_disabled_by_default_grants_no_pod_create(tmp_path):
     docs = documents(tmp_path, values())
     rules, role = _pod_rules(docs)
-    assert rules == []
+    assert rules == [{"delete"}]  # ticket 51 rollback recovery only
     pod_verbs = {
         verb for rule in role["rules"] if "pods" in rule["resources"] for verb in rule["verbs"]
     }
-    assert pod_verbs.isdisjoint({"create", "delete"})
+    assert "create" not in pod_verbs
     assert (
         "--preflight-image" not in container(deployment(docs)["spec"]["template"]["spec"])["args"]
     )
@@ -274,7 +283,8 @@ def test_preflight_disabled_by_default_grants_no_pod_create(tmp_path):
 def test_preflight_image_adds_minimal_pod_rules_and_agent_args(tmp_path):
     docs = documents(tmp_path, values(networkPreflight={"image": PROBE}))
     rules, _ = _pod_rules(docs)
-    assert rules == [{"create", "delete"}, {"get"}]  # pods; pods/log (no exec, no update)
+    # ticket 51 pods delete; preflight pods create/delete; pods/log (no exec, no update)
+    assert rules == [{"delete"}, {"create", "delete"}, {"get"}]
     args = container(deployment(docs)["spec"]["template"]["spec"])["args"]
     assert args[args.index("--preflight-image") + 1] == PROBE
     assert args[args.index("--preflight-allowed-images") + 1] == PROBE

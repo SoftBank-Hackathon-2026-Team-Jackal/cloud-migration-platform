@@ -36,6 +36,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "endpoints", "events"]
     verbs: ["get", "list", "watch"]
+  # Ticket 51: a StatefulSet stays blocked on a never-Ready Pod of a failed revision even after
+  # rollback; the Agent deletes only such Pods of its managed DB StatefulSet (never Ready ones).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]

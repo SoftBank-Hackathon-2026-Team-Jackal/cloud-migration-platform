@@ -54,6 +54,60 @@ def helm_revision(target, release):
     return info["version"]
 
 
+def sql(target, statement: str) -> str:
+    """Ticket 51: one psql statement in the DB container (credentials stay in its env)."""
+    script = f'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "{statement}"'
+    out = kubectl(target, "exec", "-n", NAMESPACE, "statefulset/demo-db", "-c", "postgres",
+                  "--", "sh", "-c", script)  # fmt: skip
+    return out.decode().strip()
+
+
+def workload_state(target) -> dict:
+    """Ticket 51: what is running now (readiness, DB Pod, Helm history statuses only)."""
+    sts = target.get("statefulset", "demo-db", NAMESPACE)
+    app_ = target.get("deployment", "demo-app", NAMESPACE)
+    pods = json.loads(
+        kubectl(
+            target,
+            "get",
+            "pods",
+            "-n",
+            NAMESPACE,
+            "-l",
+            "app.kubernetes.io/instance=demo-db",
+            "-o",
+            "json",
+        )
+    )["items"]
+    return {
+        "db_ready_replicas": sts["status"].get("readyReplicas", 0),
+        "app_ready_replicas": app_["status"].get("readyReplicas", 0),
+        "db_pods": [
+            {
+                "phase": pod["status"].get("phase"),
+                "ready": any(
+                    c["type"] == "Ready" and c["status"] == "True"
+                    for c in pod["status"].get("conditions", [])
+                ),
+            }
+            for pod in pods
+        ],
+        "helm_history": {
+            release: [item["status"] for item in target.history(release, NAMESPACE)]
+            for release in ("demo-db", "demo-app")
+        },
+    }
+
+
+def wait_app_ready(target, seconds=120) -> bool:
+    for _ in range(seconds // 2):
+        state = workload_state(target)
+        if state["app_ready_replicas"] == 1 and state["db_ready_replicas"] == 1:
+            return True
+        time.sleep(2)
+    return False
+
+
 def start_api(db, store) -> str:
     def session():
         with db() as value:
@@ -215,6 +269,45 @@ def main():
                 "activity": activity2,
                 "rollout": rollout_status(session, "plan-k3s", 2),
             }
+        # Ticket 51: the failed app Revision was rolled back; app and DB still serve rev1.
+        steps["not_ready_revision"]["after"] = workload_state(target)
+        steps["not_ready_revision"]["app_ready_again"] = wait_app_ready(target)
+
+        # 5. Audit C-02: a Revision whose DB and app Pods cannot schedule on this node's
+        #    architecture. The running DB (and its data) and app must survive, and the next
+        #    Revision must apply without INSPECTION_REQUIRED.
+        sql(
+            target,
+            "CREATE TABLE IF NOT EXISTS c02_probe(v text); INSERT INTO c02_probe VALUES ('kept')",
+        )
+        other = "linux/amd64" if args.platform == "linux/arm64" else "linux/arm64"
+        wrong = build_artifacts(store, args.state_dir, **(images | {"platforms": (other,)}))
+        with db() as session:
+            manifest3 = plan(wrong, revision=3, agent_id="agent-smoke", cluster_uid=cluster_uid)
+            request3 = claim_request(approve(session, manifest3), manifest3)
+        started = time.monotonic()
+        activity3, polled3 = asyncio.run(execute_with_agent(db, store, request3, agent))
+        steps["c02_wrong_arch_revision"] = {
+            "agent": polled3,
+            "activity": activity3,
+            "seconds": round(time.monotonic() - started),
+            "after": workload_state(target),
+            "app_ready_again": wait_app_ready(target),
+            "rows_kept": sql(target, "SELECT count(*) FROM c02_probe"),
+        }
+
+        # 6. Next approved Revision (the original images) applies normally.
+        fixed = build_artifacts(store, args.state_dir, **images)
+        with db() as session:
+            manifest4 = plan(fixed, revision=4, agent_id="agent-smoke", cluster_uid=cluster_uid)
+            request4 = claim_request(approve(session, manifest4), manifest4)
+        activity4, polled4 = asyncio.run(execute_with_agent(db, store, request4, agent))
+        steps["c02_next_revision"] = {
+            "agent": polled4,
+            "activity": activity4,
+            "after": workload_state(target),
+            "rows_kept": sql(target, "SELECT count(*) FROM c02_probe"),
+        }
     finally:
         cleanup = target.kubectl(
             "delete", "namespace", NAMESPACE, "--ignore-not-found", "--wait=true", timeout=180

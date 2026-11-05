@@ -62,12 +62,13 @@ kubectl -n cmp-system logs deploy/cmp-onprem-agent
 - 작업이 없으면 `idleSeconds`(기본 10초)마다 폴링하고, 작업을 처리하면 바로 다시 폴링한다.
 - 플랫폼 요청 실패와 Kubernetes 접속 불가는 1→2→4…초, 최대 60초 간격으로 재시도한다.
 - 401/403(폐기·잘못된 자격 증명, 거절된 등록 토큰)은 종료 코드 2로 멈춘다. Pod는 재시작되지만 같은 이유로 다시 멈춘다.
-- SIGTERM을 받으면 진행 중인 Helm 단계가 끝난 뒤 종료한다. `terminationGracePeriodSeconds`(기본 960초)는 Agent의 Helm 단계 상한(900초)보다 길다. 그래도 강제 종료돼 Release가 `pending-*`로 남으면 다음 수신 때 `UNKNOWN INSPECTION_REQUIRED`로 보고하고 자동 재적용하지 않는다(12).
+- SIGTERM을 받으면 진행 중인 Helm 단계가 끝난 뒤 종료한다. `terminationGracePeriodSeconds`(기본 960초)는 Agent의 Helm 단계 상한(900초)보다 길다. 그래도 강제 종료돼 Release가 `pending-*`로 남으면 다음 수신 때 `UNKNOWN INSPECTION_REQUIRED`로 보고하고 자동 재적용하지 않는다(12, 시한·정리는 52).
+- 새 Revision이 `--helm-timeout`(기본 5분) 안에 정착하지 않으면 그 Release를 직전 `deployed` Revision으로 되돌리고 `FAILED <원인 코드>`를 보고한다. 되돌림이 끝날 때까지 한 단계가 최대 약 두 배의 시한을 쓴다. 이전 Agent가 `failed`로 남긴 Release는 다음 배포가 먼저 복원한다(51).
 - Deployment는 replica 1, `Recreate` 전략이라 교체 중 두 Agent가 함께 작업하지 않는다.
 
 ## 4. 권한 (H2)
 
-ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create(list는 17 터널 전달 대상 찾기), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·`--wait`·검사 동사, ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기, `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경하지 않는다(`NAMESPACE_NOT_OWNED`).
+ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create(list는 17 터널 전달 대상 찾기), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·`--wait`·검사 동사, ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기, `pods` delete(51: 실패 Revision에 묶인 Ready가 아닌 DB Pod 정리), `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경하지 않는다(`NAMESPACE_NOT_OWNED`).
 
 **Network Preflight (MNP-01 N3, #51):** `networkPreflight.image`(Digest 고정, 예 `postgres@sha256:…`)를 주면 ClusterRole에 `pods` create/delete와 `pods/log` get만 추가되고 Agent가 `NETWORK_PREFLIGHT` 작업을 실행한다. 비우면(기본) 이 권한이 없고 작업은 `PREFLIGHT_NOT_CONFIGURED`로 거절된다. 검사 Pod는 복제 Namespace의 일반 Pod 한 개와 같은 노드의 읽기 전용 `hostNetwork` Pod(`ip route get`만) 한 개이며, 끝나면 지운다. Agent는 `cmp.dev/environment-id` 주석이 있는 Namespace에서만 만든다(없으면 Pod를 만들지 않고 `NAMESPACE_NOT_OWNED`). Pod 생성 권한은 클러스터 범위라 `hostNetwork` Pod도 만들 수 있다(K3s 기본에는 Pod Security 제한이 없다). 이미 클러스터 전체 Secret·`pods/exec` 권한이 있어 신뢰 범위가 크게 늘지는 않지만, 필요 없으면 비워 둔다. 허용 이미지는 `networkPreflight.allowedImages`(비우면 `image` 하나)이며 작업이 이미지를 고를 수 없다.
 
@@ -92,6 +93,14 @@ kubectl delete namespace cmp-system
 
 - 등록 직후 자격 증명 저장 전에 Agent가 중단되면 토큰은 이미 사용돼 다시 쓸 수 없다. 로그가 `ENROLLMENT_REJECTED`로 멈추면 새 `agent_id`로 토큰을 다시 발급해 설치한다.
 - `cmp-agent-credential`이 지워졌다면 같은 방법으로 새 Agent를 등록하고 이전 Agent는 폐기한다.
+- 배포가 `UNKNOWN ROLLBACK_FAILED` 또는 `UNKNOWN INSPECTION_REQUIRED`로 멈췄다면(51): Agent가 작업 중이 아닌지 로그로 확인한 뒤 상태를 본다.
+
+  ```bash
+  helm history <release> -n <namespace>          # 마지막 deployed Revision 번호 확인
+  kubectl get pods -n <namespace> -L controller-revision-hash
+  ```
+
+  `pending-*` Release는 `helm rollback <release> <deployed 번호> -n <namespace>`로 되돌린다. DB StatefulSet Pod가 Ready가 아니고 `controller-revision-hash`가 `kubectl get statefulset <release> -n <namespace> -o jsonpath='{.status.updateRevision}'`과 다르면 그 Pod를 지운다(`kubectl delete pod <pod> -n <namespace>`, PVC는 지우지 않는다). 그다음 새 Revision을 승인하면 Agent가 이어서 적용한다. `failed` 상태는 Agent가 다음 배포에서 직접 복원하므로 수동 조치가 필요 없다.
 
 ## 7. WireGuard 터널 (17)
 
