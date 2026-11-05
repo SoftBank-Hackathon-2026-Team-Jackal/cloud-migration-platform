@@ -32,7 +32,7 @@
 | [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | DONE (PR #92 병합) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☑ |
 | [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | DONE (PR #114 병합) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☑ |
 | [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | DONE (PR #119 병합) | 14C, 19, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☑ |
-| [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14B, 20, 21 | AV-001, AV-015, AV-021 | 미생성 | ☐ |
+| [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 14B, 20, 21 | AV-001, AV-015, AV-021 | #120 | ☐ |
 
 ## 선행 관계
 
