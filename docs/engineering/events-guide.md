@@ -83,7 +83,7 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 
 | 이벤트 | 발행 위치 | 값 |
 | --- | --- | --- |
-| `plan.ready` | `publish_migration_plan` Activity(게시 성공 시, `PlanReadyEvents` 래퍼) | `{plan_id, revision, manifest_digest, preview_digest}` — 승인 API에 그대로 되돌려 보낸다 |
+| `plan.ready` | `publish_migration_plan`·`publish_workload_plan` Activity(게시 성공 시, `PlanReadyEvents` 래퍼). AWS/GCP는 인프라 Plan과 워크로드 Plan에서 한 번씩 나오며, 화면은 마지막 값을 승인 대상으로 쓴다 | `{plan_id, revision, manifest_digest, preview_digest}` — 승인 API에 그대로 되돌려 보낸다 |
 | `approval.decision` | 승인 API `POST …/approvals`, 재전달 `POST …/delivery` | `ApprovalResponse`와 같은 값(승인자 ID 제외). `DELIVERED`면 `done`, `PENDING`·`FAILED`면 `waiting` |
 | `provision.resource` | `execute_aws_plan`·`execute_gcp_plan`(Terraform `apply -json`: 리소스마다 시작·완료·오류, `key` = `network`/`cluster`/`iam`/`other`, `name` = 주소), `execute_aws_workloads`·`execute_gcp_workloads`(Helm release `db`·`app`, 외부 LB `lb`) | `{"id":"aws_vpc.target","key":"network","state":"done","progress":50,"name":"aws_vpc.target"}`. 진행률은 n/m(Terraform: `planned_change` 수 또는 Preview 변경 수, 워크로드: 7단계) |
 | `provision.check` | 워크로드 Activity 검사마다 | `pods_ready`(DB·앱 각각), `db_connect`, `app_health` → `{"name":"db_connect","state":"done"}` |
@@ -156,7 +156,7 @@ uv run python -m cmp_worker.poc_bridge watch --migration-id <id> \
 | 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다). `Evidence.kind` 6개 값과 웹 `via` 4개 값의 대응 **결정 필요**. `finding.key`의 웹 문구 사전과 백엔드 능력 이름 맞추기 |
 | 샌드박스 | `sbx_apply`가 버리는 `apply_network` 반환값(namespace·TTL·egress) 살리기, `BuildResult`를 `sbx_build`에 연결, `sandbox.tests` 출처별 개수와 `checks`(`calls_in_mapping` 등) 값을 만드는 코드, `run` 번호 규칙(웹 `[가정]`) |
 | 계획(매핑) | `MappingRow`에 대상 서비스(`after`)와 노드 분류(`kind`) 값 없음 |
-| 계획 게시·승인·구축(민서) | `plan.preview`(Preview `changes[]`→`resources`, `{resource_type, action, name, quantity, size}` → `{id, group, name, detail:"", size, change}`; 원본·대상 환경·보안 규칙·env 재매핑 값은 Preview에 없음), `approval.required`, ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, Workflow 종료 시 `error` 이벤트(PR #117의 Workflow 변경 뒤 `emit_migration_event`로 연결), 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |
+| 계획 게시·승인·구축(민서) | `plan.preview`(Preview `changes[]`→`resources`, `{resource_type, action, name, quantity, size}` → `{id, group, name, detail:"", size, change}`; 원본·대상 환경·보안 규칙·env 재매핑 값은 Preview에 없음), `approval.required`, ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, Workflow 종료 시 `error` 이벤트(`emit_migration_event`로 연결 예정), 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |
 | 데이터 | 플랫폼 `copy_data` 구현 전체, `data.progress`(총 행 수·덤프 %), `data.verify`(행 수·체크섬), PoC `source_lsn`/`target_lsn` 샘플링(패널 `NODE_SQL`에 `pg_current_wal_lsn()` 추가 필요), 테이블 총 행 수 |
 | 트래픽 | 플랫폼 `shift_traffic` 구현 전체, `traffic.prepare`·`traffic.snapshot` 필드 확정(#61–#63), 중계 방식(PoC HAProxy, 웹은 Envoy 가정). **롤백 기준 결정 필요: #61의 "직전 안전 값으로 되돌림" vs #63의 "원본 100%로 되돌림" — 상헌님 결정** |
 | 전환 | 플랫폼 전환 Activity, 두 번째 승인(`approval.required gate: cutover`), 웹 6단계 모델과 PoC fast 순서 차이(3·4·6 동시) — 웹 표시 조정(민서), `cutover.result`의 `fail`·`loss` 측정(PoC `fault`의 `FAULT_RESULT`로 채울 수 있음) |

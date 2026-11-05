@@ -43,7 +43,7 @@ migration_events(id PK, migration_id, seq, at, phase, type, status, progress NUL
 migration_logs(id PK, migration_id, at, level, source, activity NULL, attempt, code, fields JSON)
 ```
 
-Alembic revision `20261105_06_migration_events`(down `20261105_04`). 티켓 23의 `20261105_05`와 함께 합칠 때 down_revision을 `20261105_05`로 다시 잇는다.
+Alembic revision `20261105_06_migration_events`(down `20261105_05`, 티켓 23 다음).
 
 ## 공개 인터페이스
 
