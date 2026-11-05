@@ -69,6 +69,7 @@ class TunnelStatus(Base):
     last_handshake_at: Mapped[int | None] = mapped_column(Integer)
     app_health_ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
     db_connect_ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    code: Mapped[str | None] = mapped_column(String(64))  # ticket 17 W8 failure code
     reported_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -213,6 +214,7 @@ def record_status(
     last_handshake_at: int | None,
     app_health_ok: bool,
     db_connect_ok: bool,
+    code: str | None = None,
 ) -> None:
     tunnel = session.get(AgentTunnel, agent_id)
     if tunnel is None:
@@ -222,6 +224,7 @@ def record_status(
     status = session.get(TunnelStatus, agent_id) or TunnelStatus(agent_id=agent_id)
     status.tunnel_ip, status.last_handshake_at = tunnel_ip, last_handshake_at
     status.app_health_ok, status.db_connect_ok = app_health_ok, db_connect_ok
+    status.code = code
     status.reported_at = _now()
     session.add(status)
     session.commit()
@@ -239,4 +242,5 @@ def tunnel_view(session: Session, agent_id: str | None) -> dict | None:
         "app_health_ok": status.app_health_ok,
         "db_connect_ok": status.db_connect_ok,
         "last_handshake_at": status.last_handshake_at,
+        "code": status.code,
     }

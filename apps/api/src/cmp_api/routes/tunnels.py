@@ -78,6 +78,8 @@ class TunnelStatusReport(Strict):
     last_handshake_at: int | None = None
     app_health_ok: bool
     db_connect_ok: bool
+    # Ticket 17 W8: why a check failed (code only, never free text); null when all checks pass.
+    code: Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{0,63}$")] | None = None
 
 
 class RelayRegistration(Strict):

@@ -1,5 +1,14 @@
-# On-premises Agent image (ticket 15, #69). Build from the repository root:
+# On-premises Agent image (ticket 15, #69; tunnel ticket 17, #71). Build from the repository root:
 #   docker build -f infra/onprem-agent/Dockerfile -t cmp-onprem-agent:dev .
+
+# wireguard-go: userspace fallback when the node kernel lacks WireGuard (ticket 17 W1). Pinned to
+# the 0.0.20250522 tag commit; module downloads are verified against the Go checksum database.
+FROM golang:1.24-bookworm AS wireguard-go
+ARG WIREGUARD_GO_COMMIT=f333402bd9cbe0f3eeb02507bd14e23d7d639280
+RUN CGO_ENABLED=0 GOFLAGS=-trimpath GOBIN=/out \
+      go install "golang.zx2c4.com/wireguard@${WIREGUARD_GO_COMMIT}" \
+    && mv /out/wireguard /out/wireguard-go
+
 FROM python:3.11-slim-bookworm
 
 ARG TARGETARCH
@@ -18,7 +27,7 @@ RUN set -eux; \
       *) echo "unsupported architecture: ${TARGETARCH}"; exit 1 ;; \
     esac; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl; \
+    apt-get install -y --no-install-recommends ca-certificates curl iproute2 wireguard-tools; \
     curl -fsSLo /usr/local/bin/kubectl \
       "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl"; \
     echo "${kubectl_sha}  /usr/local/bin/kubectl" | sha256sum -c -; \
@@ -29,6 +38,8 @@ RUN set -eux; \
     install -m 0755 "/tmp/linux-${TARGETARCH}/helm" /usr/local/bin/helm; \
     rm -rf /tmp/helm.tgz "/tmp/linux-${TARGETARCH}"; \
     apt-get purge -y curl; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
+
+COPY --from=wireguard-go /out/wireguard-go /usr/local/bin/wireguard-go
 
 COPY infra/onprem-agent/requirements.lock.txt /tmp/requirements.lock.txt
 RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock.txt \

@@ -176,7 +176,7 @@ Agent가 접속하는 대상 K3s는 사용자 측에 있고 Sandbox 클러스터
 
 ### 터널 설정 교환 (16, #70)
 
-Agent는 기존 Bearer 자격 증명으로 WireGuard **공개키만** 등록한다(`PUT /agents/{agent_id}/tunnel/key`). 응답과 `GET /agents/{agent_id}/tunnel/config`에 배정 터널 IP(`10.200.0.0/24`의 /32, 중계 서버는 `.1`), 중계 서버 목록(`endpoint`·`public_key`), 설정 버전이 있고, 설정 조회에는 MTU 1420, PersistentKeepalive 25, 노출 포트(5432 + READY 앱 포트)도 있다. Agent는 터널 경유 앱 헬스·DB 접속 결과를 `POST /agents/{agent_id}/tunnel/status`로 보고한다. 중계 서버는 `GET /relays/{relay_id}/agents`를 폴링해 peer를 반영하고, 폐기 Agent(`revoked: true`)는 peer를 지운다. 확인이 끝난 ON_PREM 결과만 Data(`tunnel_endpoint = 터널IP:5432`)·Traffic(`external_host = 터널IP`, `external_port = 앱포트`) 인계가 진행된다. 상세는 [16 티켓](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.
+Agent는 기존 Bearer 자격 증명으로 WireGuard **공개키만** 등록한다(`PUT /agents/{agent_id}/tunnel/key`). 응답과 `GET /agents/{agent_id}/tunnel/config`에 배정 터널 IP(`10.200.0.0/24`의 /32, 중계 서버는 `.1`), 중계 서버 목록(`endpoint`·`public_key`), 설정 버전이 있고, 설정 조회에는 MTU 1420, PersistentKeepalive 25, 노출 포트(5432 + READY 앱 포트)도 있다. Agent는 터널 경유 앱 헬스·DB 접속 결과와 실패 원인 코드(`code`, 성공이면 `null`, 17 W8)를 `POST /agents/{agent_id}/tunnel/status`로 보고한다. Agent 쪽 WireGuard 클라이언트·터널 IP 전용 전달기는 [17 티켓](../../tickets/provisioning/17-agent-wireguard-tunnel.md)과 [Agent 설치 문서 §터널](onprem-agent-install.md#7-wireguard-터널-17)을 따른다. 중계 서버는 `GET /relays/{relay_id}/agents`를 폴링해 peer를 반영하고, 폐기 Agent(`revoked: true`)는 peer를 지운다. 확인이 끝난 ON_PREM 결과만 Data(`tunnel_endpoint = 터널IP:5432`)·Traffic(`external_host = 터널IP`, `external_port = 앱포트`) 인계가 진행된다. 상세는 [16 티켓](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.
 
 ### DB 연결 URL Secret (19, #79)
 
