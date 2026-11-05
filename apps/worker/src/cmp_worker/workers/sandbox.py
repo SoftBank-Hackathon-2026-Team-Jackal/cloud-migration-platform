@@ -39,7 +39,9 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
     kubeconfig = Path(config.sandbox_kubeconfig).expanduser()
     if not kubeconfig.is_file():
         raise ValueError("SANDBOX_KUBECONFIG_NOT_FOUND")
-    repo_root = Path(__file__).resolve().parents[5]  # resolved here: a Workflow import may not
+    from cmp_providers.resources import resource_root  # ticket 43: CMP_RESOURCE_ROOT in the image
+
+    repo_root = resource_root()  # resolved here: a Workflow import may not
     resources = Path(config.analysis_resources_dir) if config.analysis_resources_dir else repo_root
     workspace_root = Path(
         config.sandbox_workspace_root

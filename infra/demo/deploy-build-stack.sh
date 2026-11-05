@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create or update the separate build stack (ticket 28, #152). Never touches cmp-demo-control-plane.
 #   deploy-build-stack.sh --plan   # create a change set only and print it (no change applied)
-#   deploy-build-stack.sh          # create/update the stack and print the worker .env lines
+#   deploy-build-stack.sh          # create/update the stack and print the api/worker .env lines
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -44,8 +44,13 @@ aws cloudformation deploy \
 
 uri="$(aws cloudformation describe-stacks --profile "$profile" --region "$region" --stack-name "$stack" \
   --query 'Stacks[0].Outputs[?OutputKey==`RepositoryUri`].OutputValue|[0]' --output text)"
+# Ticket 41 (#176): the API's platform registry host is the repository URI's host part.
+registry="${uri%%/*}"
+[[ "$registry" == "${account}.dkr.ecr.${region}.amazonaws.com" ]] \
+  || { echo "Unexpected repository URI: $uri" >&2; exit 1; }
 cat <<EOF
 Add to /opt/cmp/.env on the demo host (SSM session), then run release.sh:
+PLATFORM_ECR_REGISTRY=$registry
 BUILD_ECR_REPOSITORY=$uri
 BUILD_SOURCE_BUCKET=$bucket
 BUILD_LOG_BUCKET=$bucket

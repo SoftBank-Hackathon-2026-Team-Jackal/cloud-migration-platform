@@ -296,3 +296,110 @@ def test_preflight_image_adds_minimal_pod_rules_and_agent_args(tmp_path):
 )
 def test_preflight_image_must_be_digest_pinned(tmp_path, bad):
     assert render(tmp_path, values(networkPreflight=bad)).returncode != 0
+
+
+# --- ticket 42 (#177): private registry pull (imagePullSecrets) ----------------------------------
+
+
+def test_no_image_pull_secrets_by_default(tmp_path):
+    pod = deployment(documents(tmp_path, values()))["spec"]["template"]["spec"]
+    assert "imagePullSecrets" not in pod  # public GHCR packages need no credential
+
+
+def test_image_pull_secrets_apply_to_the_agent_pod(tmp_path):
+    data = values(imagePullSecrets=[{"name": "cmp-agent-ghcr"}, {"name": "mirror-pull"}])
+    docs = documents(tmp_path, data)
+    pod = deployment(docs)["spec"]["template"]["spec"]
+    assert pod["imagePullSecrets"] == [{"name": "cmp-agent-ghcr"}, {"name": "mirror-pull"}]
+    # Every Pod template the Chart renders references the Secret (agent + tunnel share one Pod).
+    templates = [
+        doc["spec"]["template"]["spec"]
+        for doc in docs.values()
+        if "template" in doc.get("spec", {})
+    ]
+    assert templates and all(
+        t.get("imagePullSecrets") == pod["imagePullSecrets"] for t in templates
+    )
+    # The Chart only references a Secret the user created; it never stores registry credentials.
+    assert not any(kind == "Secret" and name == "cmp-agent-ghcr" for kind, name in docs)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        ["cmp-agent-ghcr"],  # objects with `name`, like the Kubernetes field
+        [{"name": ""}],
+        [{"name": "Bad_Name"}],
+        [{"name": "ok", "password": "x"}],  # credentials never go through Chart values
+        {"name": "ok"},
+    ],
+)
+def test_image_pull_secrets_are_validated(tmp_path, bad):
+    assert render(tmp_path, values(imagePullSecrets=bad)).returncode != 0
+
+
+# --- ticket 42 (#177): anonymous package access check ---------------------------------------------
+
+
+def _access_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_agent_package_access", ROOT / "scripts/check_agent_package_access.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _registry(public):
+    """Anonymous GHCR behaviour: public packages get a token and a manifest, private ones 401/403."""
+    calls = []
+
+    def fetch(url, headers):
+        calls.append((url, headers))
+        package = url.split("repository:", 1)[-1].split(":pull")[0] if "token?" in url else ""
+        if "/token?" in url:
+            name = package.split("/", 1)[1]
+            return (200, b'{"token":"anon"}') if name in public else (401, b'{"errors":[]}')
+        name = url.split("/v2/", 1)[1].split("/manifests/")[0].split("/", 1)[1]
+        assert headers.get("Authorization") == "Bearer anon"
+        assert "application/vnd.oci.image.index.v1+json" in headers["Accept"]
+        return (200, b"{}") if name in public else (403, b"")
+
+    return fetch, calls
+
+
+def test_access_check_reports_public_packages():
+    module = _access_module()
+    fetch, calls = _registry({"cmp-onprem-agent", "charts/onprem-agent"})
+    report = module.check("0.3.0", "SoftBank-Hackathon-2026-Team-Jackal", fetch=fetch)
+    assert report == {"cmp-onprem-agent": "PUBLIC", "charts/onprem-agent": "PUBLIC"}
+    assert any(
+        url
+        == "https://ghcr.io/v2/softbank-hackathon-2026-team-jackal/charts/onprem-agent/manifests/0.3.0"
+        for url, _ in calls
+    )
+    assert all("Authorization" not in headers for url, headers in calls if "/token?" in url)
+
+
+def test_access_check_reports_private_packages_and_fails():
+    module = _access_module()
+    fetch, _ = _registry({"cmp-onprem-agent"})
+    report = module.check("0.3.0", "softbank-hackathon-2026-team-jackal", fetch=fetch)
+    assert report == {"cmp-onprem-agent": "PUBLIC", "charts/onprem-agent": "PRIVATE"}
+    assert module.main(["--version", "0.3.0"], fetch=fetch) == 1
+    with pytest.raises(ValueError, match="INVALID_VERSION"):
+        module.check("latest", "owner", fetch=fetch)
+
+
+def test_release_notes_document_public_and_authenticated_install():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/agent-release.yml").read_text())
+    steps = {step.get("name"): step for step in workflow["jobs"]["release"]["steps"]}
+    notes = steps["Create GitHub Release"]["run"]
+    assert "--create-namespace" in notes  # anonymous path stays the default command
+    assert "helm registry login ghcr.io" in notes
+    assert "create secret docker-registry cmp-agent-ghcr" in notes
+    assert "imagePullSecrets[0].name=cmp-agent-ghcr" in notes
+    check = steps["Check anonymous pull"]["run"]
+    assert "scripts/check_agent_package_access.py" in check and "::warning::" in check

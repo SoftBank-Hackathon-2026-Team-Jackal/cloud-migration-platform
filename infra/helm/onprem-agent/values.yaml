@@ -19,6 +19,13 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
+# Ticket 42 (#177): Secrets (kubernetes.io/dockerconfigjson, same Namespace) used to pull the Agent
+# image when the GHCR package is not public. Empty by default: public packages need no credential.
+# The Chart only references existing Secrets and never takes registry credentials as values.
+#   imagePullSecrets:
+#     - name: cmp-agent-ghcr
+imagePullSecrets: []
+
 helmTimeout: 5m
 idleSeconds: 10
 # Must exceed the longest Helm step (helm --wait is bounded by 900s in the Agent).

@@ -324,3 +324,77 @@ def test_worker_entrypoint_without_key_runs_command_and_fails_closed_later(tmp_p
         check=True,
     )
     assert "GCP identity not configured" in result.stderr
+
+
+# Ticket 41 (#176): the API mints K3s Agent ECR pull tokens and names the platform registry in
+# ON_PREM rollout jobs, so it needs the instance-role build profile and the registry settings.
+
+
+def test_api_uses_the_instance_role_build_profile_without_gcp_credentials():
+    api = _compose()["services"]["api"]
+    env = api["environment"]
+    assert env["AWS_CONFIG_FILE"] == "/run/cmp/aws/config"
+    assert "/opt/cmp/secrets/aws:/run/cmp/aws:ro" in api["volumes"]
+    # Same profile the worker's Build module uses; ensure-secrets.sh writes it as the instance
+    # role itself (never PROVISIONING_AWS_ROLE_ARN).
+    assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
+    assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
+    assert "PROVISIONING_AWS_PROFILE" not in env
+    # The API never gets the GCP key or a gcloud configuration.
+    assert not [m for m in api["volumes"] if "/secrets/gcp" in m or "/run/cmp/gcp" in m]
+    assert not [name for name in env if "GCP" in name or "GCLOUD" in name]
+
+
+def test_api_platform_registry_settings_default_to_disabled():
+    env = _env("api")
+    assert env["PLATFORM_ECR_REGISTRY"] == "${PLATFORM_ECR_REGISTRY:-}"
+    assert env["PLATFORM_ECR_REPOSITORIES"] == "${PLATFORM_ECR_REPOSITORIES:-cmp-platform-builds}"
+    from cmp_providers.ecr_pull import PlatformRegistry
+
+    # An empty registry (unset in /opt/cmp/.env) keeps today's behavior: no platform registry.
+    assert PlatformRegistry.parse("", "cmp-platform-builds") is None
+
+
+def _run_deploy_build_stack(tmp_path, uri: str) -> subprocess.CompletedProcess:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "git": "exit 0\n",  # `git status --porcelain`: clean tree
+        "aws": f"""case "$*" in
+  *get-caller-identity*) echo 714066696240 ;;
+  *describe-stack-resource*) echo cmp-demo-control-plane-InstanceRole-ABC ;;
+  *DeployBucket*) echo cmp-demo-714066696240-apne2-deploy ;;
+  *RepositoryUri*) echo {uri} ;;
+  *"cloudformation deploy"*) ;;
+  *) echo "unexpected aws $*" >&2; exit 9 ;;
+esac
+""",
+    }
+    for name, body in stubs.items():
+        path = bin_dir / name
+        path.write_text("#!/usr/bin/env bash\n" + body)
+        path.chmod(0o755)
+    return subprocess.run(
+        ["bash", str(DEMO / "deploy-build-stack.sh")],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_build_stack_apply_prints_the_platform_registry_from_the_repository_uri(tmp_path):
+    registry = "714066696240.dkr.ecr.ap-northeast-2.amazonaws.com"
+    result = _run_deploy_build_stack(tmp_path, f"{registry}/cmp-platform-builds")
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert f"PLATFORM_ECR_REGISTRY={registry}" in lines
+    assert f"BUILD_ECR_REPOSITORY={registry}/cmp-platform-builds" in lines
+
+
+def test_build_stack_apply_refuses_a_repository_outside_the_expected_registry(tmp_path):
+    result = _run_deploy_build_stack(
+        tmp_path, "111111111111.dkr.ecr.us-east-1.amazonaws.com/cmp-platform-builds"
+    )
+    assert result.returncode != 0
+    assert "PLATFORM_ECR_REGISTRY=" not in result.stdout
