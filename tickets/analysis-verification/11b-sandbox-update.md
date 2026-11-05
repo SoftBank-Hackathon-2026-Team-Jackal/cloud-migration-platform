@@ -1,7 +1,7 @@
 # Ticket 11B — Sandbox 제자리 갱신과 테스트 데이터 초기화
 
 ## 상태
-IN_PROGRESS — 구현 완료(실제 k3d `cmp-sandbox`에서 검증), 리뷰 대기, Issue #95
+DONE — PR #96 병합, Issue #95 (실제 k3d `cmp-sandbox`에서 검증)
 
 ## 목적
 시도마다 Sandbox를 새로 만들지 않고 바뀐 부분만 갱신하며, 테스트 데이터를 처음 상태로 되돌린다.

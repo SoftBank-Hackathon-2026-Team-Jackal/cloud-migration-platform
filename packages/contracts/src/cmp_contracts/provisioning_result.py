@@ -73,7 +73,13 @@ class ApplicationHandoff(Contract):
     release: Text | None = None
     image: Text | None = None
     internal_endpoint: Text | None = None
-    external_endpoint: Text | None = None  # traffic destination; None until an LB is reachable
+    # Ticket 16 T1/T10: where the relay (Envoy) forwards requests. AWS/GCP: the LB address once
+    # reachable; ON_PREM: the tunnel-side app (filled in the handoff view after a tunnel health
+    # check). The relay public address is never stored here. `external_endpoint` stays as the
+    # joined URL for compatibility; the relay reads host and port separately (P2).
+    external_endpoint: Text | None = None
+    external_host: Text | None = None
+    external_port: Positive | None = None
     ingress: IngressRef | None = None
     port: Positive | None = None
     health_path: Text | None = None

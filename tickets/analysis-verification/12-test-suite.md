@@ -1,7 +1,7 @@
 # Ticket 12 — 테스트 묶음·Tester·`run_suite`
 
 ## 상태
-IN_PROGRESS — 구현 완료(실제 k3d `cmp-sandbox`에서 검증), 리뷰 대기, Issue #97
+DONE — PR #101 병합, Issue #97 (실제 k3d `cmp-sandbox`에서 검증)
 
 ## 목적
 Sandbox와 Production에서 같은 정의로 돌릴 앱 기능 테스트 묶음과 실행기를 만들고, AI 생성 테스트는 네 조건으로 검증해 고정한다.

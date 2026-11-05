@@ -158,7 +158,7 @@ def test_the_mapper_sees_only_masked_text_and_the_report_checks_its_evidence(rep
             )
         ]
     )
-    pipeline = make(repo, llm_factory=lambda: llm)
+    pipeline = make(repo, llm_factory=lambda *_: llm)
     inp = AnalysisInput(
         migration_id="mig-1", repository=repo["url"], requested_commit=sha, manifests_dir="k8s"
     ).model_dump(mode="json")

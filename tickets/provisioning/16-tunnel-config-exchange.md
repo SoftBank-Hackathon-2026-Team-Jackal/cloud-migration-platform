@@ -1,7 +1,7 @@
 # Ticket 16 — 터널 설정 교환 API와 결과 계약
 
 ## 상태
-IN_PROGRESS — [Issue #70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70). 2026-11-05 사용자 지시로 **Traffic 담당(이상헌님) 답변과 무관한 부분부터 착수**했다. 답변이 필요한 부분은 아래 "⚠️ 답변 대기 — 답변 받은 뒤 진행" 표에 남겼고, 그 항목은 답변 전에는 구현하지 않는다.
+DONE — [Issue #70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70). 2026-11-05 답변 무관 부분(#82)을 먼저 구현했고, 같은 날 Traffic 담당(이상헌님) 답변(P1~P5)을 받아 중계 서버용 Agent 목록과 ON_PREM `external_endpoint`까지 구현했다(T10~T13). 실제 WireGuard 연결은 17, 중계 서버의 목록 반영은 Traffic 범위다.
 
 ## 목적
 노트북의 Agent와 AWS 중계 서버가 WireGuard로 연결되려면 서로의 공개키·주소를 알아야 한다. 둘은 서로를 직접 모르므로 플랫폼이 이 값을 전달한다. 연결 결과는 `ProvisioningResult`로 Data/Traffic Migration에 넘긴다.
@@ -24,7 +24,7 @@ Blocked by: 13 (DONE), 15 (Agent 장기 실행 기반; API 자체는 병행 가�
   - Agent → 플랫폼: WireGuard 공개키 등록·교체. 비밀키는 받지 않는다.
   - 플랫폼 → Agent: 터널 설정 조회(중계 서버 목록 `[{endpoint, public_key}]`, 배정 터널 IP, AllowedIPs, MTU 1420, PersistentKeepalive, 터널에 노출할 포트 목록, 설정 버전).
   - 중계 서버 등록(운영자): 중계 서버 ID·WireGuard 공개 endpoint·공개키·중계 서버 전용 자격 증명.
-  - 플랫폼 → 중계 서버: 인증된 중계 서버가 연결할 Agent 목록 조회(`agent_id`, 공개키, 터널 IP, 허용 포트, 버전).
+  - 플랫폼 → 중계 서버: 인증된 중계 서버가 연결할 Agent 목록 조회(`agent_id`, 공개키, 터널 IP(/32), 허용 포트, 폐기 표시, 목록 버전).
   - 터널 IP 배정: 설정된 터널 CIDR에서 Agent마다 /32를 배정하고 재등록·키 교체에도 유지.
   - Agent → 플랫폼: 터널 상태 보고(마지막 handshake 시각, 터널 IP, 터널 경유 앱 헬스·DB 접속 확인 결과).
   - 결과 계약: ON_PREM `external_endpoint`에 터널 쪽 앱 목적지를 채우고(T1), DB 터널 목적지와 Data 인계 조건을 추가한다.
@@ -32,17 +32,19 @@ Blocked by: 13 (DONE), 15 (Agent 장기 실행 기반; API 자체는 병행 가�
 - 제외: 중계 서버 구현(Envoy 설정, WireGuard 서버 peer 반영 방식), DNS, 사용자 공인 주소, TLS, 노트북 쪽 WireGuard 실행(17).
 
 ## 수용 기준
-- [ ] 등록된 Agent만 자기 공개키를 등록·교체하고 자기 터널 설정만 조회한다. 다른 Agent·소유자 정보는 보이지 않는다.
-- [ ] 인증된 중계 서버만 Agent 목록을 조회하고, 폐기된 Agent(15)는 목록에서 빠진다.
-- [ ] 같은 Agent의 터널 IP는 재조회·키 교체 후에도 같고, Agent 간 중복이 없다.
-- [ ] 중계 서버 공개키·endpoint가 바뀌면 설정 버전이 올라가 Agent가 변경을 알 수 있다.
-- [ ] ON_PREM 결과의 `internal_endpoint`는 클러스터 내부 주소, `external_endpoint`는 터널 쪽 목적지(`http://터널IP:포트`)이며 중계 서버 공인 주소는 어느 필드에도 넣지 않는다.
-- [ ] 터널 경유 앱 헬스가 확인된 ON_PREM 결과에만 `external_endpoint`가 채워져 Traffic 인계가 진행되고, 터널 경유 DB 접속이 확인된 결과만 Data 인계가 진행된다. 확인 전에는 차단 코드가 남는다.
-- [ ] 비밀키·자격 증명 원문이 DB·작업·로그·Temporal 이력에 없다.
+- [x] 등록된 Agent만 자기 공개키를 등록·교체하고 자기 터널 설정만 조회한다. 다른 Agent·소유자 정보는 보이지 않는다.
+- [x] 인증된 중계 서버만 Agent 목록을 조회하고, 폐기된 Agent(15)는 목록에 **폐기 표시(`revoked: true`)와 빈 허용 포트로 남아** 중계 서버가 peer를 제거할 수 있다. (2026-11-05 P1 답변으로 "목록에서 빠진다"에서 변경)
+- [x] 같은 Agent의 터널 IP는 재조회·키 교체 후에도 같고, Agent 간 중복이 없다.
+- [x] 중계 서버 공개키·endpoint가 바뀌면 설정 버전이 올라가 Agent가 변경을 알 수 있다. Agent 목록이 바뀌면 목록 버전이 바뀌어 중계 서버가 변경을 알 수 있다.
+- [x] Agent는 키 등록 응답에서 바로 중계 서버 목록(`endpoint`, `public_key`)을 받는다(설정 조회에도 유지).
+- [x] ON_PREM 결과의 `internal_endpoint`는 클러스터 내부 주소, `external_endpoint`는 터널 쪽 목적지(`http://터널IP:앱포트`)이며 같은 값을 `external_host`·`external_port`로 나눠 준다. 중계 서버 공인 주소는 어느 필드에도 넣지 않는다.
+- [x] 터널 경유 앱 헬스가 확인된 ON_PREM 결과에만 `external_endpoint`가 채워져 Traffic 인계가 진행되고, 터널 경유 DB 접속이 확인된 결과만 Data 인계가 진행된다. 확인 전에는 차단 코드가 남는다.
+- [x] 비밀키·자격 증명 원문이 DB·작업·로그·Temporal 이력에 없다.
 
 ## Test Seam
 - FastAPI `TestClient` + SQLite 업무 DB: 공개키 등록, 설정 조회, 중계 서버 등록·목록 조회, 상태 보고, 인증·격리·폐기.
 - `get_migration_handoff`와 결과 API: 터널 확인 전·후의 ON_PREM Traffic/Data 진행 여부와 노출 범위.
+- `GET /relays/{relay_id}/agents`: 중계 서버 인증, 목록 필드, 목록 버전 변화, 폐기 표시.
 - 놓치는 것: 실제 WireGuard 연결(17), 실제 중계 서버의 목록 반영(Traffic).
 
 ## 착수 결정 후보 (구현 시작 시 확정)
@@ -69,23 +71,29 @@ T1은 사용자 결정으로 확정됐다. T2·T3·T5는 아래처럼 확정하�
 | T8 설정 버전 | 중계 서버 등록·갱신마다 1씩 오르는 정수 `config_version`. Agent 설정 응답과 키 등록 응답에 담아 Agent가 변경을 알 수 있게 한다. |
 | T9 공개키만 | WireGuard 공개키(Base64 32바이트) 형식만 받는다. 비밀키는 어떤 API에도 없다. 폐기된 Agent(15)는 인증 단계에서 거절된다. |
 
-## ⚠️ 답변 대기 — 답변 받은 뒤 진행 (2026-11-05 기록)
+## 답변 반영 결정 (2026-11-05, P1~P5 답변 후)
 
-상헌님께 확인 메시지를 보냈다(사용자 전달). **아래 항목은 답변을 받은 뒤에만 진행한다.** 답변을 받으면 이 표의 "답변"을 채우고 해당 작업을 끝낸 뒤 DONE을 검토한다.
+| ID | 결정 |
+| --- | --- |
+| T10 인계 필드 모양 | `ApplicationHandoff`에 `external_host`(문자열)·`external_port`(정수)를 추가한다. `external_endpoint`(`http://host[:port]`)는 호환을 위해 그대로 두고, 둘은 같은 목적지를 나눈 값이다. 헬스 경로는 기존 `health_path`를 쓰며 ON_PREM 인계 뷰에서 비어 있으면 `/health`. AWS/GCP는 결과를 만들 때 `external_endpoint`에서 나눠 채운다(LB 주소, 포트 생략 시 80). 앱 컨테이너 포트인 기존 `port`와 섞지 않으려고 `external_` 접두어를 쓴다. 중계 서버 공인 주소는 이 필드에 넣지 않는다(P5). |
+| T11 ON_PREM Traffic 인계 | P2 "포트 그대로": `get_migration_handoff`가 ON_PREM `READY` 결과를 읽을 때 그 Agent의 최신 터널 상태가 `app_health_ok=true`이면 `external_endpoint = http://터널IP:앱포트`, `external_host = 터널IP`, `external_port = 앱포트`를 인계 뷰에 채운다(T6처럼 저장 결과는 그대로). 그 전에는 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단한다. 사용자 요약 API(13 R8)는 저장 결과를 쓰므로 터널 주소를 보이지 않는다. |
+| T12 중계 서버용 Agent 목록 | P1 "폴링": `GET /relays/{relay_id}/agents`, `Authorization: Bearer <중계 서버 자격 증명(T3)>`. 응답 `{list_version, agents: [{agent_id, public_key, tunnel_ip, allowed_ips: ["터널IP/32"], allowed_ports, revoked}]}`. 공개키를 등록한 모든 Agent가 나온다. 폐기 Agent는 `revoked: true`, `allowed_ports: []`로 남는다. `list_version`은 목록 내용의 SHA-256 앞 16자로, Agent 추가·키 교체·폐기·포트 변경 때 바뀐다(별도 카운터 관리 없음). 인증 실패·다른 중계 서버 ID는 403, 자격 증명 없음은 401. 소유자·`cluster_uid`는 넣지 않는다. |
+| T13 키 등록 응답 | P1 "Agent도 등록 응답으로 받기": `PUT /agents/{agent_id}/tunnel/key` 응답에 `relays: [{relay_id, endpoint, public_key}]`를 더한다. `GET .../tunnel/config`의 `relays`·MTU 1420·PersistentKeepalive 25는 그대로. |
+
+## Traffic 담당 확인 (2026-11-05 질문, 같은 날 답변)
+
+상헌님께 확인 메시지를 보냈고(사용자 전달) 2026-11-05 답변을 받았다. 답변에 따라 T10~T13을 구현했다. DNS는 도메인 문제로 일단 확장 범위로 미뤘다(Traffic 쪽 결정).
 
 | # | 확인할 것 | 현재 가정 | 답변 전 처리 | 답변 후 할 일 | 답변 |
 | --- | --- | --- | --- | --- | --- |
-| P1 | 중계 서버가 Agent 목록을 받는 방식(주기 폴링 / push / 파일)과 응답 필드 | 플랫폼 조회 API 주기 폴링, 필드 `agent_id`·공개키·터널 IP(/32)·허용 포트·설정 버전, 폐기 Agent 제외 | **미구현.** 중계 서버 등록·인증(T3)까지만 구현 | 확정된 방식·필드로 중계 서버용 목록 API 구현·테스트, OpenAPI 갱신 | (대기) |
-| P2 | 온프레미스 `external_endpoint` 포트: 적힌 포트 그대로 사용인지, 80 고정인지(#63 수용 기준 "포트 80") | `http://터널IP:앱포트`(예: `:8080`) | **미구현.** ON_PREM Traffic 인계는 계속 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단 | 앱 포트면 터널 경유 앱 헬스 확인 후 `external_endpoint` 채우기. 80 고정이면 Agent 쪽 80→앱포트 포워딩(17)도 함께 결정 | (대기) |
-| P3 | 터널 대역과 중계 서버 주소 배정 주체 | `10.200.0.0/24`, 중계 서버 `.1`, Agent별 /32 플랫폼 배정 | 기본값으로 구현(설정값) | 다르면 설정값만 변경 | (대기) |
-| P4 | 중계 서버 EC2(인스턴스·EIP·보안 그룹) 생성 주체 | Traffic 담당이 만들고 운영자가 플랫폼에 endpoint·공개키 등록 | 코드 영향 없음 | Provisioning이 만들어야 하면 별도 티켓으로 분리 | (대기) |
-| P5 | `external_endpoint` = "중계 서버가 전달할 목적지"(T1) 공유 확인 | #61·#63이 같은 의미로 읽음 | T1대로 진행 | 다르게 읽고 있으면 T1 재검토 | (대기) |
+| P1 | 중계 서버가 Agent 목록을 받는 방식(주기 폴링 / push / 파일)과 응답 필드 | 플랫폼 조회 API 주기 폴링, 필드 `agent_id`·공개키·터널 IP(/32)·허용 포트·설정 버전, 폐기 Agent 제외 | **미구현.** 중계 서버 등록·인증(T3)까지만 구현 | 확정된 방식·필드로 중계 서버용 목록 API 구현·테스트, OpenAPI 갱신 | **폴링 OK.** 목록 필드는 가정대로, 폐기 Agent는 빠지지 말고 폐기 표시로 남겨 중계 서버가 peer를 지우게 한다. 목록 전체 버전도 필요. Agent도 중계 서버 공개키·endpoint를 키 등록 응답으로 받아야 한다 → T12·T13 |
+| P2 | 온프레미스 `external_endpoint` 포트: 적힌 포트 그대로 사용인지, 80 고정인지(#63 수용 기준 "포트 80") | `http://터널IP:앱포트`(예: `:8080`) | **미구현.** ON_PREM Traffic 인계는 계속 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단 | 앱 포트면 터널 경유 앱 헬스 확인 후 `external_endpoint` 채우기. 80 고정이면 Agent 쪽 80→앱포트 포워딩(17)도 함께 결정 | **적힌 포트 그대로 전달.** 주소와 포트는 콜론으로 합치지 말고 따로, 헬스 체크 경로도 함께(기본 `/health`) → T10·T11 |
+| P3 | 터널 대역과 중계 서버 주소 배정 주체 | `10.200.0.0/24`, 중계 서버 `.1`, Agent별 /32 플랫폼 배정 | 기본값으로 구현(설정값) | 다르면 설정값만 변경 | **가정대로** `10.200.0.0/24`, 중계 서버 `10.200.0.1`, MTU 1420. 변경 없음 |
+| P4 | 중계 서버 EC2(인스턴스·EIP·보안 그룹) 생성 주체 | Traffic 담당이 만들고 운영자가 플랫폼에 endpoint·공개키 등록 | 코드 영향 없음 | Provisioning이 만들어야 하면 별도 티켓으로 분리 | **이상헌님이 만든다.** Provisioning 작업 없음 |
+| P5 | `external_endpoint` = "중계 서버가 전달할 목적지"(T1) 공유 확인 | #61·#63이 같은 의미로 읽음 | T1대로 진행 | 다르게 읽고 있으면 T1 재검토 | **확인.** `external_endpoint` = 중계 서버가 전달할 목적지 |
 
 ## 결정 대기 (Traffic 담당과 확인)
-1. 중계 서버가 Agent 목록을 읽는 방식: 위 조회 API를 주기 폴링할지, 다른 형식이 필요한지.
-2. 터널 CIDR과 중계 서버 쪽 주소 배정 주체.
-3. 중계 서버 EC2 자체(인스턴스·EIP·보안 그룹)의 Terraform 생성 주체.
-4. ~~T1과 Traffic 티켓의 필드 충돌~~ → 2026-11-05 사용자 결정으로 `external_endpoint` 사용(T1). 이 정의를 #61·#63 담당자에게 공유한다.
+모두 2026-11-05 답변으로 해소됐다(위 표 P1~P5). T10의 `external_host`·`external_port` 필드 이름은 Traffic 담당에게 공유한다.
 
 ## 완료 시 확인할 동작
 Agent와 중계 서버가 플랫폼을 통해 서로의 공개키·주소를 얻고, 터널 확인 결과가 Data/Traffic 인계 조건에 반영된다.
@@ -96,14 +104,15 @@ Agent와 중계 서버가 플랫폼을 통해 서로의 공개키·주소를 얻
 
 ## 설계 변경 기록
 - 2026-11-05 사용자 결정: 중계 서버안(Route 53 → Envoy 중계 → WireGuard → 온프레미스)을 전제로 한다. Provisioning은 Agent 쪽 연결과 플랫폼 교환 API·결과 계약까지, 중계 서버 내부는 Traffic 담당이다. PROV-009의 "Data/Traffic이 사용할 대상 접근 참조 제공"을 터널 목적지로 구체화한다. 같은 날 `external_endpoint`를 "중계 서버가 전달할 목적지"로 정의하기로 결정했다(T1). 13·shared-contracts의 필드 설명과 spec 문구 갱신은 구현 PR에 포함한다.
+- 2026-11-05 P1 답변: 폐기 Agent를 목록에서 빼지 않고 폐기 표시로 남긴다(수용 기준 변경). P2 답변: ON_PREM 전달 포트는 앱 포트 그대로, 주소·포트·헬스 경로를 따로 준다(T10·T11). DNS는 확장 범위로 미룬다.
 - 참고: 상헌님 실측(11/3~4) — 서울 AWS 중계 ↔ 춘천 서버 WireGuard 왕복 4.5ms, MTU 1420 필수, 양쪽 PersistentKeepalive 권장.
 
 ## 완료 체크리스트
-- [ ] 수용 기준과 Test Seam 확인
-- [ ] 관련 테스트 통과와 회귀 확인
-- [ ] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
-- [ ] 미검증 항목과 결과 증거 기록
+- [x] 수용 기준과 Test Seam 확인
+- [x] 관련 테스트 통과와 회귀 확인
+- [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
+- [ ] 구현·계약 정합성 및 최종 리뷰 (조정 세션 리뷰 대기)
+- [x] 미검증 항목과 결과 증거 기록
 
 ## 구현 (2026-11-05, 답변 무관 부분)
 
@@ -124,10 +133,27 @@ Agent와 중계 서버가 플랫폼을 통해 서로의 공개키·주소를 얻
 | `UV_CACHE_DIR=/tmp/cmp-uv-cache make check` | Ruff·전체 753개 통과(분석 쪽 로컬 전용 1개 skip) |
 | `make openapi` | 터널 경로 4개와 스키마 7개만 추가, 기존 경로 변경 없음, `private` 필드 없음 |
 
-### 남은 작업 (답변 대기 — 위 "⚠️ 답변 대기" 표)
+## 구현 (2026-11-05, 답변 반영 T10~T13)
 
-- **P1** 중계 서버용 Agent 목록 API: 미구현. 중계 서버 인증 함수(`authenticate_relay`)만 준비했다.
-- **P2** ON_PREM `external_endpoint`(포트): 미구현. Traffic 인계 차단 유지.
-- P3·P4·P5: 기본값으로 진행했고 답변에 따라 설정·문서만 바꾼다.
-- 실제 WireGuard 연결과 터널 경유 헬스·DB 확인을 보고하는 Agent 쪽 구현은 17이다.
+- `GET /relays/{relay_id}/agents`(`cmp_api.tunnels.relay_agent_list`): 중계 서버 자격 증명 Bearer, 응답은 T12. 업무 DB 변경 없음(기존 `agent_tunnels`와 15의 `revoked_at`을 읽기만 함).
+- `PUT /agents/{agent_id}/tunnel/key` 응답에 `relays` 추가(T13).
+- 결과 계약: `ApplicationHandoff.external_host`·`external_port` 추가. AWS/GCP는 `build_provisioning_result`가 `external_endpoint`에서 나눠 채운다(`forward_target`). ON_PREM은 `handoff`가 터널 앱 헬스 확인 뒤에 인계 뷰에만 채운다(T11). 저장 결과 JSON에 새 필드가 생겼지만 기본값 `null`이라 기존 행도 그대로 읽힌다.
+
+## 검증 기록 (2026-11-05, 답변 반영)
+
+| 명령·환경 | 결과 |
+| --- | --- |
+| `uv run pytest tests/test_tunnel_exchange.py tests/test_provisioning_result.py` | 31개 통과. 새 테스트: 키 등록 응답의 중계 서버 목록, ON_PREM Traffic 인계(헬스 실패·확인 전 차단, 확인 후 `http://10.200.0.2:8080`·host/port/health_path, 중계 서버 공인 주소·자격 증명 없음, 저장 결과 불변), 중계 서버 목록 필드·버전 변화·폐기 표시·인증(401/403, 다른 중계 서버·Agent 자격 증명 거절), AWS/GCP `external_host`·`external_port` |
+| `make check` | Ruff·전체 테스트 통과 |
+| `make openapi` | `GET /relays/{relay_id}/agents`와 `RelayAgent`·`RelayAgentList` 스키마, `TunnelKeyResponse.relays`만 추가. 기존 경로 변경 없음 |
+| `make check` 수치 | 1027개 통과, 6개 skip |
+| `alembic upgrade head` + `alembic check`(SQLite) | `No new upgrade operations detected.` 테이블·열 변경 없음 |
+| `make smoke-temporal`(로컬 Temporal) | 실패: `Approval gate not reached`(phase `sandbox`에서 멈춤). **같은 실패가 변경 없는 `origin/main`(088aca5)에서도 재현**되어 이 변경과 무관하다. 16은 Workflow를 바꾸지 않는다(인계 Activity가 부르는 순수 함수만 변경) |
+
+### 미검증·제한
+
+- 실제 중계 서버가 이 목록을 폴링해 peer를 반영하는지는 Traffic 범위로 확인하지 않았다.
+- 실제 WireGuard 연결과 터널 경유 헬스·DB 확인을 보고하는 Agent 쪽 구현은 17(#71)이다. 지금은 `POST .../tunnel/status` 보고를 테스트에서 직접 넣었다.
+- 터널 상태는 최신 보고 하나만 본다. 보고가 오래돼도 인계를 막지 않는다(신선도 기준은 17에서 필요하면 정한다).
+- 폐기 Agent는 목록에 계속 남는다(정리 기준 없음, P0 규모에서 충분).
 

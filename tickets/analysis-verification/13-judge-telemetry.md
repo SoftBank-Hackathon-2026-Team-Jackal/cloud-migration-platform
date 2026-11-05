@@ -1,7 +1,7 @@
 # Ticket 13 — 통신 규칙·판정·실행 기록
 
 ## 상태
-IN_PROGRESS — 구현 완료(실제 k3d `cmp-sandbox`에서 검증), 리뷰 대기, Issue 번호 미기록
+DONE — PR #103 병합, Issue #102 (실제 k3d `cmp-sandbox`에서 검증)
 
 ## 목적
 `network_intent`로 Sandbox NetworkPolicy와 출구 규칙을 만들고, 객관적 신호로 통과 여부를 정한다.

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from cmp_agents.llm import LLMClient, Message, ToolCall, ToolDefinition
+from cmp_agents.llm import LLMClient, LLMError, Message, ToolCall, ToolDefinition
 from cmp_agents.skills import SkillLoader
 from cmp_agents.tools import ToolRegistry
 
@@ -51,6 +51,8 @@ class AgentRun:
     result: BaseModel | None
     failure_reason: str | None
     record: AgentRecord
+    # A model-side stop (budget, refusal, provider error): trying the same run again is pointless.
+    fatal: bool = False
 
 
 def _summary(value: Any) -> str:
@@ -88,7 +90,7 @@ def run_agent(
     skills_before = len(skills.loaded) if skills else 0
     state = {"turns": 0, "input": 0, "output": 0}
 
-    def finish(status, result=None, reason=None) -> AgentRun:
+    def finish(status, result=None, reason=None, fatal=False) -> AgentRun:
         record = AgentRecord(
             role=role,
             prompt_version=prompt_version,
@@ -98,7 +100,9 @@ def run_agent(
             input_tokens=state["input"],
             output_tokens=state["output"],
         )
-        return AgentRun(status=status, result=result, failure_reason=reason, record=record)
+        return AgentRun(
+            status=status, result=result, failure_reason=reason, record=record, fatal=fatal
+        )
 
     def record_step(call: ToolCall, result: str, ok: bool) -> None:
         steps.append(
@@ -118,7 +122,10 @@ def run_agent(
         if clock() - started > budget.max_seconds:
             return finish("FAILED", reason="BUDGET_TIME")
         state["turns"] += 1
-        response = llm.complete(system=prompt, messages=messages, tools=definitions)
+        try:
+            response = llm.complete(system=prompt, messages=messages, tools=definitions)
+        except LLMError as exc:
+            return finish("FAILED", reason=exc.code, fatal=True)
         state["input"] += response.input_tokens
         state["output"] += response.output_tokens
         if state["input"] > budget.max_input_tokens:
@@ -130,7 +137,16 @@ def run_agent(
 
         calls = list(response.tool_calls)
         messages.append(
-            Message(role="assistant", content=response.text or "", tool_calls=tuple(calls))
+            Message(
+                role="assistant",
+                content=response.text or "",
+                tool_calls=tuple(calls),
+                provider_blocks=(
+                    tuple(response.provider_blocks)
+                    if response.provider_blocks is not None
+                    else None
+                ),
+            )
         )
         if not calls:
             messages.append(

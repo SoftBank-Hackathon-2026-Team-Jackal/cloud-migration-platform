@@ -327,6 +327,8 @@ async def test_gcp_ready_result_is_normalized_and_both_handoffs_proceed(temporal
 
     app_part = result.application
     assert app_part.external_endpoint == "http://34.102.136.6"
+    # Ticket 16 T10: the relay reads host and port separately (P2).
+    assert (app_part.external_host, app_part.external_port) == ("34.102.136.6", 80)
     assert app_part.internal_endpoint == "http://cmp-demo-api.cmp-demo-target.svc:8080"
     assert (app_part.ingress.kind, app_part.ingress.address) == ("GKE_INGRESS", "34.102.136.6")
     assert (app_part.port, app_part.health_path, app_part.scheme, app_part.tls) == (
@@ -376,6 +378,10 @@ async def test_aws_full_result_merges_infra_and_workload_refs(temporal, db, prov
     assert result.application.ingress.kind == "ALB"
     assert result.application.ingress.address == AWS_REFS["alb_hostname"]
     assert result.application.external_endpoint == AWS_REFS["app_external_endpoint"]
+    assert (result.application.external_host, result.application.external_port) == (
+        AWS_REFS["alb_hostname"],
+        80,
+    )
 
 
 async def test_onprem_ready_result_carries_agent_location_and_blocks_traffic(

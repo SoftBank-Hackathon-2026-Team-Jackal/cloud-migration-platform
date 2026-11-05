@@ -27,7 +27,8 @@ class Expect(_Strict):
 class HttpStep(_Strict):
     action: Literal["HTTP"] = "HTTP"
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"] = "GET"
-    path: Annotated[str, Field(pattern=r"^/")]
+    # A path, or a variable such as `{{health_path}}` that the runner fills in from the target.
+    path: Annotated[str, Field(pattern=r"^(/|\{\{[a-z_]+\}\})")]
     json_body: dict | list | str | int | float | bool | None = None
     # variable name -> dotted path into the JSON response body
     save: dict[str, str] = Field(default_factory=dict)

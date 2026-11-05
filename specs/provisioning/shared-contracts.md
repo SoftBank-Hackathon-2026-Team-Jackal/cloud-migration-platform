@@ -106,10 +106,45 @@ identity = approval_target(manifest, preview)
 
 `cmp_contracts.provisioning_result.ProvisioningResult` v1이 Provisioning → Data/Traffic Migration 인계 계약이다. `cmp_providers.provisioning_result`의 `build_provisioning_result`(실행 상태·코드·단계·refs → 결과), `handoff`(소비자별 뷰·`proceed`/`blocked_by`), `public_summary`(사용자 요약)는 순수 함수다. 저장·조회는 `cmp_api.provisioning_results`(`add_result`/`load_result`, 테이블 `provisioning_results`), Worker 진입점은 Activity `get_migration_handoff`, 사용자 조회는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`다. 필드·판정 규칙은 [티켓 13 결정 R1~R10](../../tickets/provisioning/13-result-handoff.md#착수-결정-2026-11-05)을 따른다. Provider 실행 refs의 표준 키(R4)는 이 결과의 입력이며 기존 키는 유지한다.
 
-## 터널 설정 교환 (16, 진행 중)
+## 터널 설정 교환 (16)
 
-`cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`가 추가됐다. `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합치며, Data 인계는 터널 경유 DB 접속 확인 뒤에만 진행한다. 중계 서버용 Agent 목록과 ON_PREM `external_endpoint`는 Traffic 담당 답변을 기다린다([티켓 16 답변 대기](../../tickets/provisioning/16-tunnel-config-exchange.md)).
+`cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록(응답에 중계 서버 목록 포함)·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록·중계 서버용 Agent 목록(`GET /relays/{relay_id}/agents`, 중계 서버 자격 증명, 폐기 Agent는 `revoked: true`로 남음, 내용 digest인 `list_version`)을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`와 `ApplicationHandoff.external_host`·`external_port`가 추가됐다. `external_endpoint`는 "중계 서버가 전달할 목적지"이며 호환을 위해 유지하고, 같은 목적지를 host·port로도 준다(AWS/GCP는 LB 주소·80). `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합친다. Data 인계는 터널 경유 DB 접속 확인 뒤, Traffic 인계는 터널 경유 앱 헬스 확인 뒤(`http://터널IP:앱포트`)에만 진행한다. 중계 서버 공인 주소는 어느 인계 필드에도 없다. 상세는 [티켓 16 T1~T13](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.
 
 ## Plan 생성·게시와 Preview 조회 (18)
 
 새 공유 모델은 `cmp_contracts.plan_publish`의 `PlanningInputRegistration`(Planning 입력 v2 + Provider별 대상 설정 + 선택 요구사항 바이트)과 `plan_id_for`(Migration당 Plan ID)뿐이다. 기존 `PlanManifest`·`Preview`·`approval_target`·`onprem_preview`·05/06 Plan 함수는 바꾸지 않고 호출한다. `publish_plan_revision`은 선택 인자 `input_digest`를 받아 같은 트랜잭션에 `provisioning_plan_publications`를 기록한다(기존 호출 동작은 그대로). `ProvisioningApprovalWorkflow` 요청은 선택 필드 `approval_timeout_seconds`를 받아 승인 없이 기간이 지나면 `EXPIRED/APPROVAL_EXPIRED`로 끝난다. 상세는 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05)을 따른다.
+
+## 환경 연결 (23)
+
+[ADR-005](../../docs/decisions/ADR-005.md), [23 티켓](../../tickets/provisioning/23-environment-connections.md). 모든 라우트는 운영자 키 `X-Enrollment-Admin-Key`가 필요하고, 웹 BFF가 서버 측에서만 호출한다(CORS 없음). 시각은 epoch 초 정수다. 422 응답에는 입력값이 없다.
+
+| 라우트 | 요청 | 응답 |
+| --- | --- | --- |
+| `POST /connections` | `{kind: AWS_SOURCE\|AWS_TARGET\|GCP_TARGET, display_name, region, gcp?: {project_id, expected_principal}}`. `gcp`는 GCP_TARGET에만, 다른 필드는 거절한다 | 201 `{connection_id, kind, display_name, status: "PENDING", external_id, launch_stack_url}`. GCP는 둘 다 `null`, 템플릿 호스팅이 없으면 링크 `null` |
+| `PUT /connections/{id}/role` | `{role_arn}`(`arn:aws[-cn\|-us-gov]:iam::<12자리>:role/...`) | 상세. 한 번만 등록(같은 값 멱등, 다른 값 409 `ROLE_ALREADY_SET`, GCP 409 `ROLE_NOT_APPLICABLE`) |
+| `POST /connections/{id}/verify` | — | 200 `{status: CONNECTED\|FAILED, code, checked_at, account_id\|project_id, principal, eks_clusters?}`. `eks_clusters`는 성공한 AWS_SOURCE에만 있다. 코드: `OK`, `ROLE_NOT_SET`, `ASSUME_ROLE_DENIED`, `ASSUME_ROLE_FAILED`, `PLATFORM_CREDENTIALS_UNAVAILABLE`, `IDENTITY_CHECK_FAILED`, `ACCOUNT_MISMATCH`, `EKS_LIST_DENIED`, `EKS_LIST_FAILED`, `ADC_*` |
+| `GET /connections` | — | `{"connections":[{connection_id, kind, display_name, account_id\|project_id, region, status, last_verified_at}], "agents":[Agent 항목]}`. External ID는 없다 |
+| `GET /connections/{id}` | — | 상세: 위 필드 + `role_arn`, `external_id`, `expected_principal`, `principal`, `credential_ref`, `launch_stack_url`, `stack_name`, `last_code`, `last_checked_at` |
+| `GET /connections/{id}/eks-clusters?region=` | 리전(생략 시 연결 리전) | `{connection_id, region, eks_clusters: [이름]}`. AWS_SOURCE 전용, 실패는 409 + 코드 |
+| `DELETE /connections/{id}` | — | `{connection_id, deleted: true, stack_name, notice}`. 플랫폼 데이터·생성 프로필만 지운다. 사용자 계정 스택은 사용자가 지운다 |
+| `GET /agent-admin/agents` | — | `{"agents":[Agent 항목]}` |
+
+Agent 항목:
+
+```json
+{"agent_id": "...", "cluster_uid": "...", "last_seen_at": 0, "online": true, "revoked": false, "version": null,
+ "tunnel": {"tunnel_ip": "10.200.0.2", "last_handshake_at": 0, "app_health_ok": true, "db_connect_ok": true}}
+```
+
+- `online`: 폐기되지 않았고 `last_seen_at`이 60초 이내다.
+- `tunnel`: 16의 마지막 `agent_tunnel_status` 보고다. 보고가 없으면 `null`이다.
+- `version`: Agent 버전 보고가 후속이라 `null`이다.
+
+**`credential_ref` 해석:** 역할이 등록된 AWS 연결의 `credential_ref`는 `cmp-conn-<연결 hex>`다. 이 이름은 생성된 AWS config 파일(`connection_aws_config_file`)의 프로필이다. 프로필은 `role_arn`, `external_id`, `source_profile = connection_platform_aws_profile`, `role_session_name`, `duration_seconds = 3600`, `region`이다. 분석 `cmp_scanners.aws_infra.get_session(credential_ref)`과 Provisioning `aws_profile`에 그대로 넘긴다. 프로세스는 `AWS_CONFIG_FILE`이 이 파일을 가리켜야 한다. 대기 중인 연결과 GCP 연결은 `credential_ref: null`이다. GCP 데모는 기존 `provisioning_gcloud_configuration`·ADC 설정을 쓴다.
+
+API 설정(`cmp_api.config`):
+- `connection_platform_aws_profile`: verify가 쓰는 플랫폼 주체 프로필이자 `source_profile`
+- `connection_platform_principal_arn`: 템플릿 신뢰 대상
+- `connection_template_base_url`: S3 템플릿 접두어
+- `connection_aws_config_file`, `connection_aws_base_config_file`
+- `connection_gcp_project_id`

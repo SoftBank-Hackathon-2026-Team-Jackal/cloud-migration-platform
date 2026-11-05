@@ -45,15 +45,24 @@ class ResourceFieldEdit(_Strict):
     value: int | str
 
 
+class RowChange(_Strict):
+    """A mapping row now handled differently (kept at the source or migrated). It never touches
+    `grade` or `required`: those stay with the analysis and the person who confirmed them."""
+
+    row_id: str
+    disposition: Literal["MIGRATE", "KEEP"]
+
+
 class RequirementsFix(_Strict):
     reason: str = Field(min_length=1)
     edits: list[ResourceFieldEdit] = Field(default_factory=list)
+    row_changes: list[RowChange] = Field(default_factory=list)
     add_intents: list[NetworkIntent] = Field(default_factory=list)
     remove_intents: list[NetworkIntent] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _changes_something(self):
-        if not (self.edits or self.add_intents or self.remove_intents):
+        if not (self.edits or self.add_intents or self.remove_intents or self.row_changes):
             raise ValueError("a fix must change something")
         return self
 
@@ -231,4 +240,6 @@ def propose_fix(
             if wants_spec:
                 return FixOutcome("PROPOSED", requirements_fix=last.result, record=last.record)
             return FixOutcome("PROPOSED", code_fix=last.result, record=last.record)
+        if last.fatal:
+            break
     return FixOutcome("FAILED", reason=last.failure_reason, record=last.record)

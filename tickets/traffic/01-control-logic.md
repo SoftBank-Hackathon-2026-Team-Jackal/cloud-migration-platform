@@ -24,4 +24,4 @@ DONE(로컬 검증, PR 전) — [Issue #61](https://github.com/SoftBank-Hackatho
 
 ## 관련 문서
 
-[ADR-004](../../docs/decisions/ADR-004.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md)
+[ADR-006](../../docs/decisions/ADR-006.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md)

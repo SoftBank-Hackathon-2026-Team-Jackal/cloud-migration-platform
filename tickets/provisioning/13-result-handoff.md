@@ -105,7 +105,9 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
     "release": "cmp-demo-api",
     "image": "…/cmp-demo-api@sha256:…",
     "internal_endpoint": "http://cmp-demo-api.cmp-demo-target.svc:8080",
-    "external_endpoint": "http://34.102.136.6",  // 트래픽 목적지. 없으면 null
+    "external_endpoint": "http://34.102.136.6",  // 중계 서버/Traffic이 전달할 목적지. 없으면 null
+    "external_host": "34.102.136.6",  // 16 T10: 같은 목적지를 나눈 값
+    "external_port": 80,
     "ingress": {"kind": "GKE_INGRESS", "name": "cmp-demo-target/cmp-demo-api", "address": "34.102.136.6"},
     "port": 8080,
     "health_path": "/health",
@@ -156,3 +158,5 @@ Data/Traffic Worker가 Secret 원문 없이 대상 접근 참조와 준비 상�
 - 상위 `MigrationWorkflow`와 실제 Data/Traffic Worker의 소비는 범위 밖이다.
 
 > 2026-11-05 티켓 16 변경: ON_PREM Data 인계는 터널 경유 DB 접속이 확인된 뒤에만 진행하고 `database.tunnel_endpoint`를 인계 뷰에 채운다(16 T2·T7). 저장된 결과는 바꾸지 않는다(T6).
+>
+> 2026-11-05 티켓 16 답변 반영: `application.external_host`·`external_port`를 추가했다(16 T10, AWS/GCP는 `external_endpoint`에서 나눈 값). ON_PREM Traffic 인계는 터널 경유 앱 헬스가 확인되면 인계 뷰에 `external_endpoint = http://터널IP:앱포트`와 host·port를 채워 진행한다(16 T11). 확인 전에는 위처럼 `EXTERNAL_ENDPOINT_UNAVAILABLE`로 차단된다. R7 조건 자체는 바뀌지 않는다.

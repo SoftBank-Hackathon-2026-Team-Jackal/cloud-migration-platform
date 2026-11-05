@@ -23,9 +23,9 @@ Envoy 어댑터와 로컬 compose에서 실제 전환·롤백을 검증한다.
 
 ## 관련 문서
 
-[ADR-004](../../docs/decisions/ADR-004.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md)
+[ADR-006](../../docs/decisions/ADR-006.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md)
 
 ## 실제 환경 시험 기록(2026-11-05)
 
 - 로컬 플랫폼(Temporal + 워커 + Envoy)에서 서울 AWS EC2(원본)와 서울 GCP e2-micro(대상)로 정상 전환, 5xx 주입 롤백, 지연 주입 p99 롤백을 통과했다. 내 PC → 춘천 OCI(SSH 터널) 대상 정상 전환과 터널 단절 롤백도 통과했다.
-- 시험으로 정한 값은 [ADR-004](../../docs/decisions/ADR-004.md)에 적었다. 시험용 클라우드 리소스는 모두 삭제했다.
+- 시험으로 정한 값은 [ADR-006](../../docs/decisions/ADR-006.md)에 적었다. 시험용 클라우드 리소스는 모두 삭제했다.

@@ -33,6 +33,14 @@ class MigrationWorkflow:
         self.cancel_requested = False
         self.plan: dict | None = None
         self.plan_code: str | None = None
+        self.review_pending = False
+        self.failure_code: str | None = None
+        self.pipeline: dict | None = None  # ticket 21: references the real pipeline produced
+
+    @workflow.signal
+    def sandbox_review_pending(self, pending: bool) -> None:
+        """The Sandbox child waits for (or no longer waits for) a person; not a terminal state."""
+        self.review_pending = bool(pending)
 
     @workflow.signal
     def approve(self) -> None:
@@ -51,6 +59,9 @@ class MigrationWorkflow:
             "mode": "scaffold",
             "plan": self.plan,  # ticket 18: published Plan Revision identifiers only
             "plan_code": self.plan_code,
+            "review_pending": self.review_pending,  # ticket 14B: in progress, not terminal
+            "failure_code": self.failure_code,
+            "pipeline": self.pipeline,
         }
 
     async def _plan_and_provision(self) -> str | None:
@@ -127,7 +138,12 @@ class MigrationWorkflow:
         )
 
     @workflow.run
-    async def run(self, project_id: str) -> str:
+    async def run(self, data: str | dict) -> str:
+        # A string is the project ID of the scaffold run. A dict is the real pipeline input:
+        # {"project_id", "analysis": AnalysisInput, "sandbox": SandboxSettings} (ticket 21).
+        project_id = data if isinstance(data, str) else data["project_id"]
+        pipeline_input = None if isinstance(data, str) else data
+        analysis_result: dict | None = None
         if workflow.patched("analysis-child-v1"):
             if self.cancel_requested:
                 self.phase = "cancelled"
@@ -136,7 +152,11 @@ class MigrationWorkflow:
             migration_id = workflow.info().workflow_id
             child = await workflow.start_child_workflow(
                 AnalysisWorkflow.run,
-                migration_id,
+                (
+                    migration_id
+                    if pipeline_input is None
+                    else {**pipeline_input["analysis"], "migration_id": migration_id}
+                ),
                 id=f"analysis-{migration_id}",
                 task_queue=WORKFLOW_QUEUE,
                 parent_close_policy=workflow.ParentClosePolicy.TERMINATE,
@@ -157,7 +177,7 @@ class MigrationWorkflow:
                             raise
                     self.phase = "cancelled"
                     return "cancelled"
-                await child
+                analysis_result = await child
             except asyncio.CancelledError:
                 if not child_cancel_requested:
                     child.cancel()
@@ -177,9 +197,19 @@ class MigrationWorkflow:
                     self.phase = "cancelled"
                     return "cancelled"
                 self.phase = "sandbox"
+                sandbox_arg: str | dict = workflow.info().workflow_id
+                if pipeline_input is not None and analysis_result is not None:
+                    # The Sandbox loop input is built next to the analysis workspace and store.
+                    sandbox_arg = await workflow.execute_activity(
+                        "assemble_sandbox_input",
+                        {"analysis": analysis_result, "settings": pipeline_input.get("sandbox")},
+                        task_queue=ANALYSIS_QUEUE,
+                        start_to_close_timeout=timedelta(minutes=2),
+                        retry_policy=RetryPolicy(maximum_attempts=2),
+                    )
                 child = await workflow.start_child_workflow(
                     SandboxVerificationWorkflow.run,
-                    workflow.info().workflow_id,
+                    sandbox_arg,
                     id=f"sandbox-{workflow.info().workflow_id}",
                     task_queue=WORKFLOW_QUEUE,
                     parent_close_policy=workflow.ParentClosePolicy.TERMINATE,
@@ -201,7 +231,20 @@ class MigrationWorkflow:
                         self.phase = "cancelled"
                         return "cancelled"
                     result = await child
+                    if pipeline_input is not None and analysis_result is not None:
+                        self.pipeline = {
+                            "analysis_ref": analysis_result["report"]["ref"],
+                            "requirements_ref": analysis_result["requirements"],
+                            "sandbox_status": result["status"],
+                            "published": result.get("published"),
+                        }
                     if result["status"] != "PASSED":
+                        if workflow.patched("sandbox-terminal-v1"):
+                            # Ticket 14B: one failure terminal state; the cause is a code.
+                            self.failure_code = result["status"]
+                            self.review_pending = False
+                            self.phase = "failed"
+                            return "failed"
                         self.phase = result["status"].lower()
                         return self.phase
                 except asyncio.CancelledError:

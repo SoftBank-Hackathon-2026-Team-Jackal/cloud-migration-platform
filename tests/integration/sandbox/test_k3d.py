@@ -410,3 +410,151 @@ def test_network_rules_block_unlisted_traffic_and_record_what_leaves_the_sandbox
         assert "HTTP:200" in app_probe.sh(via_proxy + "http://example.com/")
     finally:
         service.teardown_sandbox(plan.namespace)
+
+
+def _analysis_refs(store):
+    """A stored analysis version with one checked row, and the review that approved it."""
+    from datetime import UTC, datetime
+
+    from cmp_contracts.analysis import AnalysisReport, MappingRow, ReviewRecord
+    from cmp_contracts.provisioning import VersionRef
+
+    row = MappingRow(
+        id="r1", capability="environment-config", usage="env settings", grade="DIRECT",
+        required_proposed=True, required_reason="needed", required=None, disposition="MIGRATE",
+        loses=[], treatment=None, status="EVIDENCE_CHECKED", evidence=[],
+    )  # fmt: skip
+    ref = VersionRef(id="analysis", version="v1")
+    report = AnalysisReport(
+        migration_id="it-mig", ref=ref, base_commit="c" * 40, commit_verified=False,
+        usage_profile={"usages": []}, mapping=[row], precheck={"findings": []},
+        external_entries=[], source_cidrs=[], source_db_images={}, unmapped_items=[],
+        unverified_risks=[],
+    )  # fmt: skip
+    review = ReviewRecord(
+        analysis_ref=ref, required={"r1": True}, operational=[], approvals={}, actor="it",
+        decided_at=datetime(2026, 11, 5, tzinfo=UTC),
+    )  # fmt: skip
+    return {
+        "analysis_report_ref": store.put_json(report, ref_id="a", kind="analysis-report"),
+        "review_ref": store.put_json(review, ref_id="r", kind="review-record"),
+    }
+
+
+def _loop_world(service, tmp_path, *, fixes, build_for=None):
+    """Real Sandbox Activities with a fake model and a fake builder, driven through Temporal."""
+    from cmp_agents.llm import FakeLLMClient, LLMResponse, call
+    from cmp_contracts.verification import canonical_requirements
+    from cmp_testsuite import Expect, HttpStep, Suite, SuiteCase, dump_bundle
+    from cmp_worker.activities.sandbox_loop import (
+        SandboxInput,
+        SandboxLoopActivities,
+        make_proxy_suite_runner,
+    )
+    from cmp_worker.artifact_store import LocalArtifactStore
+
+    store = LocalArtifactStore(tmp_path / "store")
+    builds = []
+
+    def build(resource_id, source):
+        builds.append(source)
+        return (build_for or (lambda s: PODINFO))(source)
+
+    loop = SandboxLoopActivities(
+        service=service,
+        store=store,
+        workspace_root=tmp_path / "work",
+        build=build,
+        suite_runner=make_proxy_suite_runner(service),
+        llm_factory=lambda *_: FakeLLMClient(
+            [LLMResponse(tool_calls=[call(name, **args)]) for name, args in fixes]
+        ),
+    )
+    suite = Suite(
+        name="demo",
+        cases=[
+            SuiteCase(
+                id="std-health",
+                source="STANDARD",
+                effect="READ_ONLY",
+                covers=["environment-config"],
+                steps=[HttpStep(path="/healthz", expect=Expect(status=200))],
+            )
+        ],
+    )
+    return loop, store, builds, SandboxInput, canonical_requirements, dump_bundle(suite)
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_port_is_classified_as_spec_fixed_and_the_same_sandbox_passes(
+    service, tmp_path
+):
+    import os
+
+    from cmp_contracts.provisioning_v2 import RequirementsV2
+    from cmp_contracts.queues import WORKFLOW_QUEUE
+    from cmp_worker.workers.migration import create_workflow_worker
+    from cmp_worker.workers.sandbox import create_worker
+    from temporalio.testing import WorkflowEnvironment
+
+    service.helm_timeout = "40s"  # a pod that never becomes ready must fail fast in this test
+    fixes = [
+        ("submit_requirements_fix", {
+            "reason": "the application listens on 9898",
+            "edits": [{"resource_id": "demo-api", "field": "port", "value": 9898}],
+        })
+    ]  # fmt: skip
+    loop, store, builds, SandboxInput, canonical, bundle = _loop_world(
+        service, tmp_path, fixes=fixes
+    )
+    wrong = requirements().model_dump(mode="json")
+    for resource in wrong["resources"]:
+        if resource["id"] == "demo-api":
+            resource["port"] = 8080  # the fault: podinfo listens on 9898
+    wrong_req = RequirementsV2.model_validate(wrong)
+    req_ref = store.put(canonical(wrong_req)[0], ref_id="requirements", kind="requirements")
+    suite_ref = store.put(bundle, ref_id="suite", kind="test-suite")
+    analysed = _analysis_refs(store)
+    source_dir = tmp_path / "src"  # only the application source: results are stored elsewhere
+    source_dir.mkdir()
+    (source_dir / "main.go").write_text("package main\n")
+    data = SandboxInput(
+        migration_id="it-mig",
+        run_id="lp-" + uuid.uuid4().hex[:8],
+        requirements_ref=req_ref,
+        suite_ref=suite_ref,
+        source={"workspace": str(source_dir)},
+        database_image=POSTGRES,
+        **analysed,
+    ).model_dump(mode="json")
+    async with (
+        await WorkflowEnvironment.start_time_skipping(
+            test_server_existing_path=os.environ.get("CMP_TEST_SERVER_PATH")
+        ) as env,
+        create_worker(env.client, loop),
+        create_workflow_worker(env.client),
+    ):
+        handle = await env.client.start_workflow(
+            "SandboxVerificationWorkflow", data, id=f"it-{data['run_id']}",
+            task_queue=WORKFLOW_QUEUE,
+        )  # fmt: skip
+        result = await handle.result()
+    assert result["status"] == "PASSED", result
+    assert [(a["attempt"], a["passed"], a.get("failure_class")) for a in result["attempts"]] == [
+        (1, False, "SPEC"),
+        (2, True, None),
+    ]
+    assert len(builds) == 1  # a requirements fix never rebuilds
+    published = result["published"]
+    assert published["status"] == "PUBLISHED" and published["patch"] is None
+    from cmp_contracts.analysis import AnalysisReport
+    from cmp_worker.artifact_store import ArtifactRef
+
+    final = AnalysisReport.model_validate_json(
+        store.get(ArtifactRef.model_validate(published["report_ref"]))
+    )
+    assert [r.status for r in final.mapping] == ["SANDBOX_VERIFIED"]
+    assert published["requirements_ref"] == result["requirements_ref"]
+    assert result["requirements_ref"] != data["requirements_ref"]
+    namespace = f"cmp-sbx-it-mig-{data['run_id']}"
+    assert not kubectl("get", "namespace", "-o", "name").stdout.count(data["run_id"]), namespace
