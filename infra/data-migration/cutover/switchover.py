@@ -125,6 +125,20 @@ def readiness(conn, slot: str, app_name: str) -> dict:
     return {"longest_xact_ms": row[0], "lock_waiters": row[1], "lag_bytes": row[2]}
 
 
+def direct_clients(conn, app_name: str) -> int:
+    """옛 주 DB에 PgBouncer를 거치지 않고 붙은 세션 수. PgBouncer와 이 실행기는 같은 Pod라 출발지 주소가
+    같으므로, 내 접속 주소(inet_client_addr)와 다른 클라이언트를 센다. 이런 세션이 있으면 전환 뒤에도
+    옛 주 DB에 쓸 수 있어(롤링 재시작 중인 옛 앱 Pod 등) 새 주 DB에서 커밋된 쓰기가 사라진다."""
+    return one(
+        conn,
+        """select count(*) from pg_stat_activity
+           where backend_type = 'client backend' and pid <> pg_backend_pid()
+             and coalesce(application_name, '') <> %s
+             and client_addr is distinct from inet_client_addr()""",
+        (app_name,),
+    )
+
+
 def is_ready(s: dict, cfg: dict) -> tuple[bool, list[str]]:
     reasons = []
     if s["longest_xact_ms"] > cfg["max_xact_ms"]:
@@ -212,6 +226,9 @@ def switchover(cfg: dict) -> tuple[dict, int]:
     if not 0 <= lag <= cfg["lag_ok_bytes"]:
         raise Abort("REPLICATION_LAG", f"{lag} bytes")
 
+    if direct := direct_clients(old, app):
+        raise Abort("DIRECT_CLIENTS", f"{direct} sessions bypass PgBouncer")
+
     verify_mode = cfg.get("verify", "auto")
     if verify_mode == "auto":
         size = one(old, "select pg_database_size(current_database())")
@@ -269,6 +286,8 @@ def switchover(cfg: dict) -> tuple[dict, int]:
                 if now_ms() - ts["wait_ready"] > cfg["wait_ready_sec"] * 1000:
                     raise Abort("NOT_READY", ",".join(reasons))
                 time.sleep(0.02)
+        if direct := direct_clients(old, app):
+            raise Abort("DIRECT_CLIENTS", f"{direct} sessions bypass PgBouncer")
 
         ts["start"] = now_ms()
         log("1. PAUSE")

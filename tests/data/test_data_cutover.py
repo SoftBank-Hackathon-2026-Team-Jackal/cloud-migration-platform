@@ -102,6 +102,9 @@ class FakeCluster:
     def rollout_wait(self, namespace, deployment, timeout=300):
         pass
 
+    def wait_old_pods_gone(self, namespace, deployment, timeout=300):
+        self.restarts.append(f"wait:{deployment}")
+
     def pod_for(self, namespace, selector):
         return "cmp-cutover-abc"
 
@@ -167,7 +170,8 @@ async def test_install_then_route_app_once_and_keep_the_original_url(fakes) -> N
 
     assert (await run(dc.dm_route_app, PAYLOAD))["routed"]
     assert not (await run(dc.dm_route_app, PAYLOAD))["routed"]
-    assert cluster.restarts == ["chat-app"]
+    # 재시작 뒤 옛 Pod(원본 DB에 직접 붙은)가 사라질 때까지 기다린다. 재실행도 다시 확인한다.
+    assert cluster.restarts == ["chat-app", "wait:chat-app", "wait:chat-app"]
     assert (
         "cmp-pgbouncer.chat.svc:6432" in cluster.secrets[("chat", "chat-secrets")]["DATABASE_URL"]
     )

@@ -54,6 +54,7 @@ class ClusterPort(Protocol):
     def rollout_restart(self, namespace: str, deployment: str) -> None: ...
     def rollout_wait(self, namespace: str, deployment: str, timeout: int = 300) -> None: ...
     def pod_for(self, namespace: str, selector: str) -> str: ...
+    def wait_old_pods_gone(self, namespace: str, deployment: str, timeout: int = 300) -> None: ...
     def run_runner(self, namespace: str, pod: str, config: dict) -> tuple[int, dict]: ...
 
 
@@ -96,6 +97,24 @@ class KubectlCluster:
             "rollout", "status", "-n", namespace, f"deployment/{deployment}",
             f"--timeout={timeout}s", timeout=timeout + 30,
         )  # fmt: skip
+
+    def wait_old_pods_gone(self, namespace: str, deployment: str, timeout: int = 300) -> None:
+        """rollout 완료 뒤에도 옛 Pod는 종료 중에 계속 DB에 쓸 수 있다(SIGTERM을 무시하면 최대 유예 시간).
+        Deployment의 Pod가 모두 현재 ReplicaSet의 것이고 종료 중인 Pod가 없을 때까지 기다린다."""
+        item = self._s._get("deployment", deployment, namespace) or {}
+        labels = item.get("spec", {}).get("selector", {}).get("matchLabels") or {}
+        selector = ",".join(f"{k}={v}" for k, v in labels.items())
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            pods = json.loads(
+                self._s._kubectl("get", "pod", "-n", namespace, "-l", selector, "-o", "json")
+            ).get("items", [])
+            hashes = {p["metadata"].get("labels", {}).get("pod-template-hash") for p in pods}
+            terminating = any(p["metadata"].get("deletionTimestamp") for p in pods)
+            if pods and len(hashes) == 1 and not terminating:
+                return
+            time.sleep(2)
+        raise CommandError("kubectl")
 
     def pod_for(self, namespace: str, selector: str) -> str:
         out = self._s._kubectl(
@@ -186,12 +205,15 @@ def route_app(app: co.SourceApp, source: DbEndpoint) -> dict:
         data = cluster.secret_data(app.namespace, app.url_secret) or {}
         routed = co.pgbouncer_url(state["original_url"], app.namespace)
         if data.get(app.url_key) == routed:
+            # 재시도: 앞선 시도가 재시작 뒤 옛 Pod를 기다리다 끊겼을 수 있다.
+            cluster.wait_old_pods_gone(app.namespace, app.deployment)
             return {"routed": False}
         cluster.put_secret(
             app.namespace, app.url_secret, data | {app.url_key: routed}, replace=True
         )
         cluster.rollout_restart(app.namespace, app.deployment)
         cluster.rollout_wait(app.namespace, app.deployment)
+        cluster.wait_old_pods_gone(app.namespace, app.deployment)
     return {"routed": True}
 
 

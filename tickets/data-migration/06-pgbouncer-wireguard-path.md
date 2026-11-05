@@ -10,6 +10,7 @@ PgBouncer: DONE(로컬 k3d 검증, PR 전). WireGuard: TODO(실습은 NodePort�
 - `dm_install_cutover`: 원본 앱 Namespace에 Secret `cmp-cutover`(userlist, 연결 대상, 원래 URL)를 만들고 Deployment·Service(`cmp-pgbouncer:6432`)를 server-side apply. 처음 연결 대상은 원본 DB(`local_host`). 서버 쪽 로그인은 DB 컨테이너의 관리자 계정, 앱은 자기 사용자로 붙는다.
 - `dm_route_app`: 앱 Secret의 `DATABASE_URL` 호스트·포트만 PgBouncer로 바꾸고 Deployment 재시작(최초 1회, 재실행 시 건너뜀)
 - `pool_mode = transaction`, 레플리카 1, `Recreate`
+- 앱 재시작 뒤 옛 Pod가 모두 사라질 때까지 기다린다(DM-014). 종료 중인 옛 Pod는 PgBouncer를 거치지 않고 원본 DB에 계속 쓸 수 있다.
 
 실습: 초당 약 50건 쓰기 중 설치·앱 연결 변경에서 오류 0건(앱 재시작은 롤링).
 
