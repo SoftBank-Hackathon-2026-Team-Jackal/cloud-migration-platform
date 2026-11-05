@@ -8,6 +8,9 @@
       "$ref": "#/$defs/event:analysis.finding"
     },
     {
+      "$ref": "#/$defs/event:analysis.scan"
+    },
+    {
       "$ref": "#/$defs/event:analysis.done"
     },
     {
@@ -102,6 +105,18 @@
     },
     {
       "$ref": "#/$defs/event:sandbox.done"
+    },
+    {
+      "$ref": "#/$defs/event:cutover.plan"
+    },
+    {
+      "$ref": "#/$defs/event:cutover.ready"
+    },
+    {
+      "$ref": "#/$defs/event:cutover.outcome"
+    },
+    {
+      "$ref": "#/$defs/event:cutover.verify"
     }
   ],
   "$defs": {
@@ -171,6 +186,99 @@
         "progress",
         "message",
         "detail"
+      ],
+      "additionalProperties": false
+    },
+    "data:analysis.scan": {
+      "type": "object",
+      "description": "스캔 Activity(fetch_source · scan_manifests · scan_code · scan_aws_infra · scan_network)가 끝날 때마다 한 건 [가정: 이벤트 이름]. 항목마다 이벤트를 내지 않는다. completed/total은 이 흐름의 n/m.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "activity": {
+          "type": "string"
+        },
+        "stream": {
+          "enum": [
+            "infrastructure",
+            "code"
+          ]
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "n": {
+                "type": "number",
+                "minimum": 0
+              },
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "n"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "activity",
+        "stream",
+        "completed",
+        "total",
+        "items",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "description": "cmp_contracts.analysis.Evidence. CLOUD_RESOURCE·IAM_POLICY·CLOUDTRAIL은 백엔드가 늘 verified=false로 둔다.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "CODE",
+            "MANIFEST",
+            "CLOUD_RESOURCE",
+            "IAM_POLICY",
+            "CLOUDTRAIL",
+            "CONFIG"
+          ]
+        },
+        "locator": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "locator",
+        "verified"
       ],
       "additionalProperties": false
     },
@@ -256,6 +364,13 @@
         },
         "file": {
           "type": "string"
+        },
+        "new_env_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "[가정] 이 수정으로 코드가 새로 읽게 된 환경 변수 이름(값 없음)"
         }
       },
       "required": [
@@ -393,6 +508,12 @@
           "enum": [
             "cutover"
           ]
+        },
+        "pending_decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
         }
       },
       "required": [
@@ -750,13 +871,45 @@
         "n": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 6
+          "maximum": 32
         },
         "state": {
           "enum": [
             "running",
             "done",
             "verify"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "description": "[가정] 단계 이름(예: pause, marker, sub_off, seq, reverse, liveness, retarget, resume, checksum, revert)"
+        },
+        "ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "method": {
+          "enum": [
+            "fast",
+            "classic"
+          ]
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "result": {
+          "enum": [
+            "ok",
+            "fail",
+            "revert"
+          ]
+        },
+        "window": {
+          "enum": [
+            "pre",
+            "pause"
           ]
         }
       },
@@ -891,6 +1044,46 @@
         },
         "data": {
           "$ref": "#/$defs/data:analysis.finding"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "event:analysis.scan": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "analysis.scan"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:analysis.scan"
         }
       },
       "required": [
@@ -1429,6 +1622,9 @@
           "$ref": "#/$defs/event:analysis.finding"
         },
         {
+          "$ref": "#/$defs/event:analysis.scan"
+        },
+        {
           "$ref": "#/$defs/event:analysis.done"
         },
         {
@@ -1520,6 +1716,18 @@
         },
         {
           "$ref": "#/$defs/event:sandbox.done"
+        },
+        {
+          "$ref": "#/$defs/event:cutover.plan"
+        },
+        {
+          "$ref": "#/$defs/event:cutover.ready"
+        },
+        {
+          "$ref": "#/$defs/event:cutover.outcome"
+        },
+        {
+          "$ref": "#/$defs/event:cutover.verify"
         }
       ]
     },
@@ -1820,8 +2028,12 @@
         "state": {
           "enum": [
             "running",
-            "done"
+            "done",
+            "held"
           ]
+        },
+        "detail": {
+          "type": "string"
         }
       },
       "required": [
@@ -2461,7 +2673,10 @@
                 "enum": [
                   "CREATE",
                   "PINNED",
-                  "KEEP_SOURCE"
+                  "KEEP_SOURCE",
+                  "UPDATE",
+                  "DELETE",
+                  "EXISTING"
                 ]
               },
               "kind": {
@@ -2480,6 +2695,19 @@
               },
               "warning": {
                 "type": "string"
+              },
+              "resource_type": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "number",
+                "minimum": 0
+              },
+              "backend_name": {
+                "type": "string"
+              },
+              "defaulted": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -2706,6 +2934,31 @@
             "lines"
           ],
           "additionalProperties": false
+        },
+        "pending_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "resource": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "manifest_digest": {
+          "type": "string"
         }
       },
       "required": [
@@ -2747,7 +3000,14 @@
           "type": "string"
         },
         "data": {
-          "$ref": "#/$defs/data:plan.preview"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/data:plan.preview"
+            },
+            {
+              "$ref": "#/$defs/data:plan.preview.backend"
+            }
+          ]
         }
       },
       "required": [
@@ -3582,6 +3842,811 @@
         },
         "data": {
           "$ref": "#/$defs/data:traffic.prepare"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "previewChange": {
+      "type": "object",
+      "description": "cmp_contracts.plan.ResourceChange. size는 검토된 표시용 문자열.",
+      "properties": {
+        "resource_type": {
+          "type": "string",
+          "description": "NETWORK · CLUSTER · NODE · APP · DATABASE · STORAGE · INGRESS"
+        },
+        "action": {
+          "enum": [
+            "CREATE",
+            "UPDATE",
+            "DELETE",
+            "READ",
+            "NO_CHANGE"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "size": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "resource_type",
+        "action",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "validationIssue": {
+      "type": "object",
+      "description": "cmp_contracts.provisioning.ValidationIssue",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "path",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "data:plan.preview.backend": {
+      "type": "object",
+      "description": "백엔드 Preview(cmp_contracts.plan.Preview) 그대로 + 프론트 감싸기 [가정](plan_id·revision·source·target·env_remap·security_rules는 Preview에 없어 계획 입력·앱 Values에서 채운다). 화면은 previewAdapter로 옮긴다.",
+      "properties": {
+        "contract_version": {
+          "const": "1"
+        },
+        "manifest_digest": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/previewChange"
+          }
+        },
+        "applied_defaults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/previewChange"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
+        },
+        "pending_decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "platform",
+            "location"
+          ],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "platform",
+            "location"
+          ],
+          "additionalProperties": false
+        },
+        "env_remap": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "secret": {
+                "type": "boolean"
+              },
+              "keep": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to",
+              "secret"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "security_rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "port": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "protocol": {
+                "enum": [
+                  "TCP",
+                  "UDP",
+                  "ANY"
+                ]
+              },
+              "action": {
+                "enum": [
+                  "ALLOW",
+                  "DENY"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "port",
+              "protocol",
+              "action"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "manifest_digest",
+        "changes",
+        "applied_defaults",
+        "warnings",
+        "errors",
+        "pending_decisions"
+      ],
+      "additionalProperties": false
+    },
+    "data:cutover.plan": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "fast",
+            "classic"
+          ]
+        },
+        "expected_pause_ms": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "min",
+            "max"
+          ],
+          "additionalProperties": false
+        },
+        "rehearsal": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "runs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "fast",
+                      "classic"
+                    ]
+                  },
+                  "pause_ms": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "method",
+                  "pause_ms"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "source",
+            "runs",
+            "methods"
+          ],
+          "additionalProperties": false
+        },
+        "preconditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "pass",
+                  "wait",
+                  "fail"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "string"
+              },
+              "proposal": {
+                "type": "boolean",
+                "description": "백엔드에 아직 없는 제안안 조건"
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "start_ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "window": {
+                "enum": [
+                  "pre",
+                  "pause"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "ms"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "properties": {
+            "standby_hours": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "standby_hours"
+          ],
+          "additionalProperties": false
+        },
+        "topology": {
+          "type": "object",
+          "properties": {
+            "app": {
+              "type": "string"
+            },
+            "pooler": {
+              "type": "string"
+            },
+            "source_db": {
+              "type": "string"
+            },
+            "target_db": {
+              "type": "string"
+            },
+            "source_where": {
+              "type": "string"
+            },
+            "target_where": {
+              "type": "string"
+            },
+            "writes_per_sec": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "app",
+            "pooler",
+            "source_db",
+            "target_db",
+            "source_where",
+            "target_where",
+            "writes_per_sec"
+          ],
+          "additionalProperties": false
+        },
+        "handover": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item": {
+                "enum": [
+                  "dns",
+                  "origin",
+                  "access"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "item"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "method",
+        "expected_pause_ms",
+        "rehearsal",
+        "preconditions",
+        "steps",
+        "rollback",
+        "topology",
+        "handover"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 두 번째 승인 전 전환 계획"
+    },
+    "data:cutover.ready": {
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "longest_tx_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lock_waits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "commits_per_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "longest_tx_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "lock_waits": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "longest_tx_ms",
+            "lock_waits"
+          ],
+          "additionalProperties": false
+        },
+        "waiting_on": {
+          "type": "string"
+        },
+        "waited_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "attempt",
+        "longest_tx_ms",
+        "lock_waits",
+        "commits_per_sec",
+        "ready",
+        "limits"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 전환 가능 시점 대기"
+    },
+    "data:cutover.outcome": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "enum": [
+            "switched",
+            "refused"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "active": {
+          "enum": [
+            "source",
+            "target"
+          ]
+        },
+        "pause_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "held_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replication": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "enum": [
+                "reverse",
+                "forward"
+              ]
+            },
+            "lag_ms": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "direction",
+            "lag_ms"
+          ],
+          "additionalProperties": false
+        },
+        "message": {
+          "type": "string",
+          "description": "중단 시 stderr 글"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "start_ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "window": {
+                "enum": [
+                  "pre",
+                  "pause"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "ms"
+            ],
+            "additionalProperties": false
+          },
+          "description": "통과 시 steps_ms"
+        }
+      },
+      "required": [
+        "result",
+        "active",
+        "pause_ms",
+        "replication"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 전환 결과(통과·거부)"
+    },
+    "data:cutover.verify": {
+      "type": "object",
+      "properties": {
+        "table": {
+          "type": "string"
+        },
+        "source_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_rows": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "checksum": {
+          "enum": [
+            "match",
+            "mismatch",
+            "pending",
+            "skipped"
+          ]
+        }
+      },
+      "required": [
+        "table",
+        "source_rows",
+        "target_rows",
+        "checksum"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 전환 순간 스냅샷 기준 테이블별 검증"
+    },
+    "event:cutover.plan": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.plan"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.plan"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "event:cutover.ready": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.ready"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.ready"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "event:cutover.outcome": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.outcome"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.outcome"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "event:cutover.verify": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.verify"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.verify"
         }
       },
       "required": [

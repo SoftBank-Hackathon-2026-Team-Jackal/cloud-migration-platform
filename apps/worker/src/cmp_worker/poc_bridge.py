@@ -6,9 +6,9 @@ Sources (Softbank-Hackathon-2026-Finals, read-only):
   (same rule as `poc/cdc/scripts/readiness.py`) → `data.phase`, `data.lsn`, `data.table`,
   `data.readiness`
 - `poc/cdc/results/switchover-*.json` (written by `05_switchover_fast.py` on success) →
-  `cutover.step` / `cutover.result`, in the PoC fast order: reverse prepare and sequence pre-bump
-  before PAUSE, subscription off/on in parallel (`switch_subscriptions` = web steps 3·4·6)
-- a failed switchover (exit code, stderr) → `error` + masked operational log
+  `cutover.step` per step, `cutover.outcome` (`steps_ms` → `steps`), `cutover.result` checksum, in
+  the PoC fast order: sequence pre-bump before PAUSE, subscription off/on in parallel
+- a failed switchover (exit code, stderr) → `cutover.outcome` refused + masked operational log
 
     uv run python -m cmp_worker.poc_bridge watch --migration-id M --panel http://127.0.0.1:8090 \
         --results-dir ../Softbank-Hackathon-2026-Finals/poc/cdc/results
@@ -112,68 +112,82 @@ def state_events(state: dict) -> list[Draft]:
     return out
 
 
-# 05_switchover_fast.py steps_ms keys (suffix " (PAUSE 전)" etc. stripped) in execution order.
-# Web steps: 1 pause writes · 2 last changes+check · 3 block source writes · 4 promote target ·
-# 5 resume on target · 6 reverse replication. The fast path does 3·4·6 together.
-FAST_STEPS: list[tuple[str, tuple[int, ...]]] = [
-    ("prepare_reverse", ()),
-    ("seq_prebump", ()),
-    ("sync_window_on", ()),
-    ("wait_ready", ()),
-    ("pause_wait_inflight", (1,)),
-    ("marker_wait", ()),
-    ("snapshot_seq_check", (2,)),
-    ("switch_subscriptions", (3, 4, 6)),
-    ("retarget_resume", (5,)),
-    ("drop_forward", ()),
-    ("verify", ()),
+# 05_switchover_fast.py `steps_ms` key (suffix " (PAUSE 전)" etc. stripped) → web step ids, in
+# execution order. `window`: pre = before PAUSE, pause = inside the write pause, None = after RESUME.
+# `switch_subscriptions` turns the forward subscription off and the reverse one on together, so it
+# becomes the parallel web steps `sub_off` + `reverse` (same start). The PoC times retarget and
+# RESUME as one step (`retarget`), and has no separate liveness probe.
+FAST_STEPS: list[tuple[str, tuple[str, ...], str | None]] = [
+    ("prepare_reverse", ("prepare_reverse",), "pre"),
+    ("seq_prebump", ("seq_raise",), "pre"),
+    ("sync_window_on", ("sync_window_on",), "pre"),
+    ("wait_ready", ("wait_ready",), "pre"),
+    ("pause_wait_inflight", ("pause",), "pause"),
+    ("marker_wait", ("marker",), "pause"),
+    ("snapshot_seq_check", ("snapshot_seq_check",), "pause"),
+    ("switch_subscriptions", ("sub_off", "reverse"), "pause"),
+    ("retarget_resume", ("retarget",), "pause"),
+    ("drop_forward", ("drop_forward",), None),
+    ("verify", ("verify",), None),
 ]
 _SUFFIX = re.compile(r"\s*\(.*\)\s*$")
 
 
-def switchover_events(result: dict) -> list[Draft]:
-    """A switchover result JSON → cutover drafts in PoC order (timings as `step.<key>` rows)."""
-    steps = {_SUFFIX.sub("", k): v for k, v in (result.get("steps_ms") or {}).items()}
-    run = f"{result.get('from')}->{result.get('to')}:{result.get('write_pause_ms')}"
-    out: list[Draft] = []
-    done = 0
-    for key, web_steps in FAST_STEPS:
+def fast_steps(steps_ms: dict) -> list[dict]:
+    """`steps_ms` → web `CutoverStepPlan[]` with `start_ms` inside the pause window."""
+    steps = {_SUFFIX.sub("", k): v for k, v in (steps_ms or {}).items()}
+    plan: list[dict] = []
+    cursor = 0.0
+    for key, ids, window in FAST_STEPS:
         if key not in steps:
             continue
+        ms = max(float(steps[key]), 0.0)
+        for step_id in ids:
+            item: dict = {"id": step_id, "ms": ms}
+            if window == "pause":
+                item["start_ms"] = cursor
+            if window:
+                item["window"] = window
+            plan.append(item)
+        if window == "pause":
+            cursor += ms
+    return plan
+
+
+def switchover_events(result: dict) -> list[Draft]:
+    """A successful switchover JSON (written only on success, at the end) → `cutover.step` per
+    step in PoC order, `cutover.outcome` with the timings, and the checksum result."""
+    plan = fast_steps(result.get("steps_ms") or {})
+    run = f"{result.get('from')}->{result.get('to')}:{result.get('write_pause_ms')}"
+    out: list[Draft] = []
+    for n, step in enumerate(plan, start=1):
         out.append(
             Draft(
-                "cutover.result",
+                "cutover.step",
                 "verification",
                 "running",
-                {"id": f"step.{key}", "value": f"{steps[key]}ms", "label": key},
-                f"{run}:result:{key}",
+                {"n": n, "state": "done", "method": "fast", "of": len(plan), "result": "ok",
+                 **{k: v for k, v in step.items() if k != "start_ms"}},
+                f"{run}:step:{n}",
+                progress=round(100 * n / len(plan), 1),
             )
-        )
-        for n in web_steps:
-            done += 1
-            out.append(
-                Draft(
-                    "cutover.step",
-                    "verification",
-                    "running",
-                    {"n": n, "state": "done"},
-                    f"{run}:step:{n}",
-                    progress=round(100 * done / 6, 1),
-                )
-            )
-    out.append(
-        Draft("cutover.step", "verification", "running", {"n": 6, "state": "verify"}, f"{run}:v")
-    )
+        )  # fmt: skip
+    verify_ok = result.get("verify_ok")
     out.append(
         Draft(
-            "cutover.result",
+            "cutover.outcome",
             "verification",
             "running",
-            {"id": "delay", "value": f"{result.get('write_pause_ms')}ms"},
-            f"{run}:delay",
+            {
+                "result": "switched",
+                "active": "target",
+                "pause_ms": result.get("write_pause_ms"),
+                "steps": plan,
+                "replication": {"direction": "reverse", "lag_ms": None},
+            },
+            f"{run}:outcome",
         )
     )
-    verify_ok = result.get("verify_ok")
     out.append(
         Draft(
             "cutover.result",
@@ -182,6 +196,7 @@ def switchover_events(result: dict) -> list[Draft]:
             {
                 "id": "checksum",
                 "value": {True: "MATCH", False: "MISMATCH"}.get(verify_ok, "SKIPPED"),
+                "label": "checksum",
                 "ok": verify_ok is not False,
             },
             f"{run}:checksum",
@@ -190,13 +205,27 @@ def switchover_events(result: dict) -> list[Draft]:
     return out
 
 
-def switchover_failed(rc: int) -> Draft:
+_REASON = re.compile(r"\b([A-Z][A-Z0-9_]{3,})\b")
+
+
+def switchover_refused(rc: int, stderr: str) -> Draft:
+    """A switchover that did not finish: the web `refused` outcome (the run RESUMEs on the source).
+    The PoC gives only stderr; its masked tail is the `message`, an UPPER_SNAKE code the `reason`."""
+    from cmp_api.migration_events import mask_value
+
+    tail = mask_value(stderr[-2000:])
+    data: dict = {
+        "result": "refused",
+        "message": tail,
+        "active": "source",
+        "pause_ms": None,
+        "replication": {"direction": "forward", "lag_ms": None},
+    }
+    found = _REASON.findall(stderr)
+    if found:
+        data["reason"] = found[-1]
     return Draft(
-        "error",
-        "verification",
-        "failed",
-        {"code": "SWITCHOVER_FAILED", "message": "", "phase": "verification", "retryable": False},
-        f"switchover-failed:{rc}:{time.time_ns()}",
+        "cutover.outcome", "verification", "waiting", data, f"refused:{rc}:{time.time_ns()}"
     )
 
 
@@ -253,7 +282,7 @@ class Bridge:
         return sent
 
     def failed(self, rc: int, stderr: str) -> None:
-        self.emit([switchover_failed(rc)])
+        self.emit([switchover_refused(rc, stderr)])
         self.emitter.log(
             self.migration_id,
             "error",

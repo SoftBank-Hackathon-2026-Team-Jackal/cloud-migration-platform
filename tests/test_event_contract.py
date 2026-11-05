@@ -171,3 +171,39 @@ def test_unknown_type_and_extra_fields_are_rejected():
         validate_data("plan.unknown", {})
     with pytest.raises(ValueError):
         validate_data("provision.check", {"name": "pods_ready", "state": "done", "extra": 1})
+
+
+def test_analysis_scan_takes_backend_evidence_kinds_as_is():
+    kinds = ["CODE", "MANIFEST", "CLOUD_RESOURCE", "IAM_POLICY", "CLOUDTRAIL", "CONFIG"]
+    data = validate_data(
+        "analysis.scan",
+        {
+            "id": "scan_code",
+            "activity": "scan_code",
+            "stream": "code",
+            "completed": 2,
+            "total": 5,
+            "items": [{"key": "s3", "n": 3}],
+            "evidence": [{"kind": k, "locator": f"loc-{k}", "verified": False} for k in kinds],
+        },
+    )
+    assert [e["kind"] for e in data["evidence"]] == kinds
+
+
+def test_plan_preview_accepts_the_backend_preview_shape():
+    backend = validate_data(
+        "plan.preview",
+        {
+            "contract_version": "1",
+            "manifest_digest": "a" * 64,
+            "changes": [
+                {"resource_type": "CLUSTER", "action": "CREATE", "name": "gke", "quantity": None,
+                 "size": None},
+            ],
+            "applied_defaults": [],
+            "warnings": [],
+            "errors": [],
+            "pending_decisions": [],
+        },
+    )  # fmt: skip
+    assert backend["changes"][0]["quantity"] is None  # nullable optional kept as null

@@ -31,8 +31,13 @@ PHASES: tuple[str, ...] = BackendPhase.__args__
 STATUSES: tuple[str, ...] = EventStatus.__args__
 
 
+# Marks an optional field the web declares nullable: None is sent as null, not omitted.
+KEEP_NULL = {"x-keep-null": True}
+
+
 class WebModel(BaseModel):
-    """Strict web-contract model. Optional fields left as None are omitted when serialized."""
+    """Strict web-contract model. Optional fields left as None are omitted when serialized,
+    except fields marked `KEEP_NULL`."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True, hide_input_in_errors=True)
 
@@ -41,7 +46,8 @@ class WebModel(BaseModel):
         data = handler(self)
         for name, field in type(self).model_fields.items():
             key = field.alias or name
-            if not field.is_required() and data.get(key, 0) is None:
+            keep = field.json_schema_extra == KEEP_NULL
+            if not field.is_required() and not keep and data.get(key, 0) is None:
                 data.pop(key)
         return data
 
@@ -57,6 +63,32 @@ class AnalysisFindingData(WebModel):
     progress: float = Field(ge=0, le=100)
     message: str
     detail: str
+
+
+class AnalysisScanItemsItem(WebModel):
+    key: str
+    n: float = Field(ge=0)
+    sku: str | None = Field(default=None)
+
+
+class Evidence(WebModel):
+    """cmp_contracts.analysis.Evidence. CLOUD_RESOURCE·IAM_POLICY·CLOUDTRAIL은 백엔드가 늘 verified=false로 둔다."""
+
+    kind: Literal["CODE", "MANIFEST", "CLOUD_RESOURCE", "IAM_POLICY", "CLOUDTRAIL", "CONFIG"]
+    locator: str
+    verified: bool
+
+
+class AnalysisScanData(WebModel):
+    """스캔 Activity(fetch_source · scan_manifests · scan_code · scan_aws_infra · scan_network)가 끝날 때마다 한 건 [가정: 이벤트 이름]. 항목마다 이벤트를 내지 않는다. completed/total은 이 흐름의 n/m."""
+
+    id: str
+    activity: str
+    stream: Literal["infrastructure", "code"]
+    completed: int = Field(ge=0)
+    total: int = Field(ge=1)
+    items: list[AnalysisScanItemsItem]
+    evidence: list[Evidence]
 
 
 class AnalysisDoneData(WebModel):
@@ -82,6 +114,7 @@ class BuildFixData(WebModel):
     why: str
     evidence: str
     file: str | None = Field(default=None)
+    new_env_keys: list[str] | None = Field(default=None)
 
 
 class PlanStepData(WebModel):
@@ -159,7 +192,7 @@ class PlanPreviewResourcesItem(WebModel):
     detail: str
     size: str
     size_detail: str | None = Field(default=None)
-    change: Literal["CREATE", "PINNED", "KEEP_SOURCE"]
+    change: Literal["CREATE", "PINNED", "KEEP_SOURCE", "UPDATE", "DELETE", "EXISTING"]
     kind: (
         Literal[
             "ingress",
@@ -176,6 +209,10 @@ class PlanPreviewResourcesItem(WebModel):
         | None
     ) = Field(default=None)
     warning: str | None = Field(default=None)
+    resource_type: str | None = Field(default=None)
+    quantity: float | None = Field(default=None, ge=0)
+    backend_name: str | None = Field(default=None)
+    defaulted: bool | None = Field(default=None)
 
 
 class PlanPreviewEnvRemapItem(WebModel):
@@ -237,6 +274,12 @@ class PlanPreviewCost(WebModel):
     basis: str | None = Field(default=None)
 
 
+class PlanPreviewPendingDecisionsItem(WebModel):
+    id: str
+    resource: str | None = Field(default=None)
+    message: str
+
+
 class PlanPreviewData(WebModel):
     """PROV-014 계획 미리보기 [가정: 이벤트 이름·필드는 백엔드와 미정]. 비밀값 원문은 담지 않는다."""
 
@@ -250,12 +293,79 @@ class PlanPreviewData(WebModel):
     validation: PlanPreviewValidation
     rollout: PlanPreviewRollout | None = Field(default=None)
     cost: PlanPreviewCost | None = Field(default=None)
+    pending_decisions: list[PlanPreviewPendingDecisionsItem] | None = Field(default=None)
+    manifest_digest: str | None = Field(default=None)
+
+
+class PreviewChange(WebModel):
+    """cmp_contracts.plan.ResourceChange. size는 검토된 표시용 문자열."""
+
+    resource_type: str
+    action: Literal["CREATE", "UPDATE", "DELETE", "READ", "NO_CHANGE"]
+    name: str
+    quantity: int | None = Field(default=None, ge=1, json_schema_extra=KEEP_NULL)
+    size: str | None = Field(default=None, json_schema_extra=KEEP_NULL)
+
+
+class ValidationIssue(WebModel):
+    """cmp_contracts.provisioning.ValidationIssue"""
+
+    code: str
+    path: str
+    message: str
+
+
+class PlanPreviewBackendSource(WebModel):
+    provider: str
+    platform: str
+    location: str
+
+
+class PlanPreviewBackendTarget(WebModel):
+    provider: str
+    platform: str
+    location: str
+
+
+class PlanPreviewBackendEnvRemapItem(WebModel):
+    key: str
+    from_: str = Field(alias="from")
+    to: str
+    secret: bool
+    keep: bool | None = Field(default=None)
+
+
+class PlanPreviewBackendSecurityRulesItem(WebModel):
+    from_: str = Field(alias="from")
+    to: str
+    port: int | None = Field(ge=0, le=65535)
+    protocol: Literal["TCP", "UDP", "ANY"]
+    action: Literal["ALLOW", "DENY"]
+
+
+class PlanPreviewBackendData(WebModel):
+    """백엔드 Preview(cmp_contracts.plan.Preview) 그대로 + 프론트 감싸기 [가정](plan_id·revision·source·target·env_remap·security_rules는 Preview에 없어 계획 입력·앱 Values에서 채운다). 화면은 previewAdapter로 옮긴다."""
+
+    contract_version: Literal["1"] | None = Field(default=None)
+    manifest_digest: str
+    changes: list[PreviewChange]
+    applied_defaults: list[PreviewChange]
+    warnings: list[ValidationIssue]
+    errors: list[ValidationIssue]
+    pending_decisions: list[ValidationIssue]
+    plan_id: str | None = Field(default=None)
+    revision: int | None = Field(default=None, ge=1)
+    source: PlanPreviewBackendSource | None = Field(default=None)
+    target: PlanPreviewBackendTarget | None = Field(default=None)
+    env_remap: list[PlanPreviewBackendEnvRemapItem] | None = Field(default=None)
+    security_rules: list[PlanPreviewBackendSecurityRulesItem] | None = Field(default=None)
 
 
 class ApprovalRequiredData(WebModel):
     excluded: list[str]
     rollback_policy: str
     gate: Literal["cutover"] | None = Field(default=None)
+    pending_decisions: list[ValidationIssue] | None = Field(default=None)
 
 
 class ApprovalDecisionData(WebModel):
@@ -526,8 +636,14 @@ class TrafficPrepareData(WebModel):
 
 
 class CutoverStepData(WebModel):
-    n: int = Field(ge=1, le=6)
+    n: int = Field(ge=1, le=32)
     state: Literal["running", "done", "verify"]
+    id: str | None = Field(default=None)
+    ms: float | None = Field(default=None, ge=0)
+    method: Literal["fast", "classic"] | None = Field(default=None)
+    of: int | None = Field(default=None, ge=1, le=32)
+    result: Literal["ok", "fail", "revert"] | None = Field(default=None)
+    window: Literal["pre", "pause"] | None = Field(default=None)
 
 
 class CutoverResultData(WebModel):
@@ -539,7 +655,8 @@ class CutoverResultData(WebModel):
 
 class CutoverHandoverData(WebModel):
     item: Literal["dns", "origin", "access"]
-    state: Literal["running", "done"]
+    state: Literal["running", "done", "held"]
+    detail: str | None = Field(default=None)
 
 
 class ErrorData(WebModel):
@@ -612,8 +729,125 @@ class SandboxDoneData(WebModel):
     digest: str | None
 
 
+class CutoverPlanExpectedPauseMs(WebModel):
+    min: float = Field(ge=0)
+    max: float = Field(ge=0)
+
+
+class CutoverPlanRehearsalMethodsItem(WebModel):
+    method: Literal["fast", "classic"]
+    pause_ms: float = Field(ge=0)
+
+
+class CutoverPlanRehearsal(WebModel):
+    source: str
+    runs: int = Field(ge=0)
+    methods: list[CutoverPlanRehearsalMethodsItem]
+
+
+class CutoverPlanPreconditionsItem(WebModel):
+    id: str
+    state: Literal["pass", "wait", "fail"]
+    value: str | None = Field(default=None)
+    evidence: str | None = Field(default=None)
+    proposal: bool | None = Field(default=None)
+
+
+class CutoverPlanStepsItem(WebModel):
+    id: str
+    ms: float = Field(ge=0)
+    start_ms: float | None = Field(default=None, ge=0)
+    window: Literal["pre", "pause"] | None = Field(default=None)
+
+
+class CutoverPlanRollback(WebModel):
+    standby_hours: float = Field(ge=0)
+
+
+class CutoverPlanTopology(WebModel):
+    app: str
+    pooler: str
+    source_db: str
+    target_db: str
+    source_where: str
+    target_where: str
+    writes_per_sec: float = Field(ge=0)
+
+
+class CutoverPlanHandoverItem(WebModel):
+    item: Literal["dns", "origin", "access"]
+    detail: str | None = Field(default=None)
+
+
+class CutoverPlanData(WebModel):
+    """[가정] 두 번째 승인 전 전환 계획"""
+
+    method: Literal["fast", "classic"]
+    expected_pause_ms: CutoverPlanExpectedPauseMs
+    rehearsal: CutoverPlanRehearsal
+    preconditions: list[CutoverPlanPreconditionsItem]
+    steps: list[CutoverPlanStepsItem]
+    rollback: CutoverPlanRollback
+    topology: CutoverPlanTopology
+    handover: list[CutoverPlanHandoverItem]
+
+
+class CutoverReadyLimits(WebModel):
+    longest_tx_ms: float = Field(ge=0)
+    lock_waits: int = Field(ge=0)
+
+
+class CutoverReadyData(WebModel):
+    """[가정] 전환 가능 시점 대기"""
+
+    attempt: int = Field(ge=1)
+    longest_tx_ms: float = Field(ge=0)
+    lock_waits: int = Field(ge=0)
+    commits_per_sec: float = Field(ge=0)
+    ready: bool
+    limits: CutoverReadyLimits
+    waiting_on: str | None = Field(default=None)
+    waited_ms: float | None = Field(default=None, ge=0)
+
+
+class CutoverOutcomeReplication(WebModel):
+    direction: Literal["reverse", "forward"]
+    lag_ms: float | None = Field(ge=0)
+
+
+class CutoverOutcomeStepsItem(WebModel):
+    id: str
+    ms: float = Field(ge=0)
+    start_ms: float | None = Field(default=None, ge=0)
+    window: Literal["pre", "pause"] | None = Field(default=None)
+
+
+class CutoverOutcomeData(WebModel):
+    """[가정] 전환 결과(통과·거부)"""
+
+    result: Literal["switched", "refused"]
+    reason: str | None = Field(default=None)
+    active: Literal["source", "target"]
+    pause_ms: float | None = Field(ge=0)
+    held_requests: int | None = Field(default=None, ge=0)
+    failed_requests: int | None = Field(default=None, ge=0)
+    replication: CutoverOutcomeReplication
+    message: str | None = Field(default=None)
+    steps: list[CutoverOutcomeStepsItem] | None = Field(default=None)
+
+
+class CutoverVerifyData(WebModel):
+    """[가정] 전환 순간 스냅샷 기준 테이블별 검증"""
+
+    table: str
+    source_rows: int = Field(ge=0)
+    target_rows: int | None = Field(ge=0)
+    checksum: Literal["match", "mismatch", "pending", "skipped"]
+
+
 DATA_MODELS: dict[str, type[WebModel]] = {
     "analysis.finding": AnalysisFindingData,
+    "analysis.scan": AnalysisScanData,
     "analysis.done": AnalysisDoneData,
     "build.check": BuildCheckData,
     "build.fix": BuildFixData,
@@ -645,6 +879,17 @@ DATA_MODELS: dict[str, type[WebModel]] = {
     "sandbox.tests": SandboxTestsData,
     "sandbox.attempt": SandboxAttemptData,
     "sandbox.done": SandboxDoneData,
+    "cutover.plan": CutoverPlanData,
+    "cutover.ready": CutoverReadyData,
+    "cutover.outcome": CutoverOutcomeData,
+    "cutover.verify": CutoverVerifyData,
+}
+# Event types whose `data` is one of several shapes: `$defs` name -> model, tried in order.
+DATA_VARIANTS: dict[str, dict[str, type[WebModel]]] = {
+    "plan.preview": {
+        "data:plan.preview": PlanPreviewData,
+        "data:plan.preview.backend": PlanPreviewBackendData,
+    },
 }
 
 
@@ -730,7 +975,14 @@ def validate_data(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
     model = DATA_MODELS.get(event_type)
     if model is None:
         raise ValueError(f"unknown event type: {event_type}")
-    return model.model_validate(to_web(event_type, data)).model_dump(mode="json", by_alias=True)
+    shaped = to_web(event_type, data)
+    variants = list(DATA_VARIANTS.get(event_type, {}).values()) or [model]
+    for candidate in variants[:-1]:
+        try:
+            return candidate.model_validate(shaped).model_dump(mode="json", by_alias=True)
+        except ValueError:
+            continue
+    return variants[-1].model_validate(shaped).model_dump(mode="json", by_alias=True)
 
 
 # ---- JSON Schema in the web layout ----
@@ -751,7 +1003,7 @@ def _strip_optional_null(schema: dict) -> dict:
         for name, prop in props.items():
             prop.pop("default", None)
             prop.pop("title", None)
-            if name in required:
+            if prop.pop("x-keep-null", False) or name in required:
                 continue
             branches = prop.get("anyOf")
             if branches and any(b.get("type") == "null" for b in branches):
@@ -769,13 +1021,17 @@ def event_json_schema() -> dict:
     defs: dict[str, Any] = {"phase": {"enum": list(PHASES)}, "status": {"enum": list(STATUSES)}}
     one_of = []
     for event_type, model in DATA_MODELS.items():
-        data_schema = _strip_optional_null(
-            model.model_json_schema(by_alias=True, mode="serialization")
-        )
-        nested = data_schema.pop("$defs", {})
-        defs.update({f"model:{k}": _strip_optional_null(v) for k, v in nested.items()})
-        defs[f"data:{event_type}"] = data_schema
-        defs[f"event:{event_type}"] = _envelope(event_type, f"#/$defs/data:{event_type}")
+        variants = DATA_VARIANTS.get(event_type) or {f"data:{event_type}": model}
+        for name, variant in variants.items():
+            data_schema = _strip_optional_null(
+                variant.model_json_schema(by_alias=True, mode="serialization")
+            )
+            nested = data_schema.pop("$defs", {})
+            defs.update({f"model:{k}": v for k, v in nested.items()})  # already stripped
+            defs[name] = data_schema
+        refs = [{"$ref": f"#/$defs/{name}"} for name in variants]
+        data = refs[0] if len(refs) == 1 else {"oneOf": refs}
+        defs[f"event:{event_type}"] = _envelope(event_type, data)
         one_of.append({"$ref": f"#/$defs/event:{event_type}"})
     defs["nonSnapshotEvent"] = {"oneOf": list(one_of)}
     defs["snapshotData"] = {
@@ -789,7 +1045,7 @@ def event_json_schema() -> dict:
         "required": ["migration_id", "status", "reset", "events"],
         "additionalProperties": False,
     }
-    defs["event:snapshot"] = _envelope("snapshot", "#/$defs/snapshotData")
+    defs["event:snapshot"] = _envelope("snapshot", {"$ref": "#/$defs/snapshotData"})
     one_of.append({"$ref": "#/$defs/event:snapshot"})
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -799,15 +1055,29 @@ def event_json_schema() -> dict:
     }
 
 
+# Nested models the web schema names as shared `$defs` entries.
+SHARED_DEFS = {
+    "Evidence": "evidence",
+    "PreviewChange": "previewChange",
+    "ValidationIssue": "validationIssue",
+}
+
+
 def _prefix_model_refs(defs: dict) -> dict:
-    """Pydantic nested refs point at `#/$defs/<Model>`; here they live under `model:<Model>`."""
+    """Pydantic nested refs point at `#/$defs/<Model>`; here they live under `model:<Model>`,
+    or under the web's shared name (`evidence`, ...)."""
+    for model_name, shared in SHARED_DEFS.items():
+        if f"model:{model_name}" in defs:
+            defs[shared] = defs.pop(f"model:{model_name}")
     raw = json.dumps(defs, ensure_ascii=False)
     for name in [k.removeprefix("model:") for k in defs if k.startswith("model:")]:
         raw = raw.replace(f'"#/$defs/{name}"', f'"#/$defs/model:{name}"')
+    for model_name, shared in SHARED_DEFS.items():
+        raw = raw.replace(f'"#/$defs/{model_name}"', f'"#/$defs/{shared}"')
     return json.loads(raw)
 
 
-def _envelope(event_type: str, data_ref: str) -> dict:
+def _envelope(event_type: str, data: str | dict) -> dict:
     return {
         "type": "object",
         "properties": {
@@ -821,7 +1091,7 @@ def _envelope(event_type: str, data_ref: str) -> dict:
             "status": {"$ref": "#/$defs/status"},
             "progress": {"type": "number"},
             "message": {"type": "string"},
-            "data": {"$ref": data_ref},
+            "data": data if isinstance(data, dict) else {"$ref": data},
         },
         "required": ["seq", "at", "phase", "type", "status", "data"],
         "additionalProperties": False,

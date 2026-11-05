@@ -53,10 +53,10 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 
 | 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
 | --- | --- | --- | --- |
-| `analysis.finding` | `scan_code`·`scan_manifests`·`scan_aws_infra`·`scan_network`이 **끝날 때마다**(항목 단위 진행은 불가: 스캔 안에 진행 신호가 없다) | 스캔 결과 항목 → `id`(항목 ID), `stream`(`code`/`infrastructure`), `key`(능력 이름, 예 `s3`), `via`(근거 출처, §2 주의), `progress`(끝난 스캔 수 / 전체 스캔 수 ×100), `message`·`detail`은 `""` | `{"id":"f-s3-1","stream":"code","key":"s3","via":["code"],"progress":50,"message":"","detail":""}` |
+| `analysis.scan` | `fetch_source`·`scan_manifests`·`scan_code`·`scan_aws_infra`·`scan_network`이 **끝날 때마다 한 건**(항목마다 내지 않는다: 스캔 안에 진행 신호가 없다) | `id`(스캔 ID), `activity`(Activity 이름), `stream`(`code`/`infrastructure`), `completed`/`total`(이 흐름의 끝난 스캔 수 n / 전체 m), `items[{key, n, sku?}]`(찾은 능력과 개수), `evidence[]` = `Evidence{kind, locator, verified}` **그대로**(6개 값 `CODE`·`MANIFEST`·`CLOUD_RESOURCE`·`IAM_POLICY`·`CLOUDTRAIL`·`CONFIG`) | `{"id":"scan-code","activity":"scan_code","stream":"code","completed":2,"total":5,"items":[{"key":"s3","n":3}],"evidence":[{"kind":"CODE","locator":"app/storage.py:12","verified":true}]}` |
 | `analysis.done` | `build_requirements` 성공 직후 | 없음(`{}`) | `{}` (status `done`) |
 
-주의: 백엔드 `Evidence.kind`는 `CODE/MANIFEST/CLOUD_RESOURCE/IAM_POLICY/CLOUDTRAIL/CONFIG`인데 웹 `via`는 `code/iam/trail/config`뿐이다. **결정 필요**(§5): 웹이 6개 값을 그대로 받게 할지, 백엔드가 `CODE→code, IAM_POLICY→iam, CLOUDTRAIL→trail, MANIFEST·CLOUD_RESOURCE·CONFIG→config`로 줄여 보낼지. 결정 전에는 줄인 값을 쓰면 검증을 통과한다.
+`Evidence.kind`는 **결정됨**(웹 `2cf5f5b`): `analysis.scan`이 백엔드 6개 값을 그대로 받는다. `CLOUD_RESOURCE`·`IAM_POLICY`·`CLOUDTRAIL`은 백엔드가 늘 `verified: false`로 둔다. 예전 `analysis.finding`(`via` 4개 값)은 웹이 호환용으로만 남겼으니 새로 쓰지 않는다.
 
 ### 샌드박스·빌드 (승철님) — `phase: build`
 
@@ -115,13 +115,18 @@ Helm heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`)은 Temp
 
 ### 전환·인계 (상헌님·데이터 담당) — `phase: verification`
 
+웹 `2cf5f5b`는 PoC fast 순서와 "끝에 한 번 오는 `steps_ms`" 방식에 맞췄다. 실행 중에는 단계 상태만, 끝나면 시간과 결과를 보낸다. 단계 이름·순서·시간은 모두 이벤트 값이고 화면은 받은 순서대로 그린다.
+
 | 보낼 이벤트 | 어느 Activity에서 | 값 | 예시 |
 | --- | --- | --- | --- |
-| `approval.required` (`gate: "cutover"`) | DB 전환 승인 대기 직전 | 제외 항목·롤백 정책 | `[없음]` |
-| `cutover.step` | 전환 단계마다 | `n`(1–6), `running/done/verify`. PoC fast 순서로 보낸다(§3) | `{"n":1,"state":"done"}` |
-| `cutover.result` | 측정 끝 | `delay`=쓰기 중단 ms, `checksum`=검증, 단계 시간 `step.<key>` | `{"id":"delay","value":"412ms"}` |
-| `cutover.handover` | 인계 단계 | `dns`·`origin`·`access` | `[없음]` |
-| `error` | 실패 | `{code, message:"", phase, retryable}` | `{"code":"SWITCHOVER_FAILED","message":"","phase":"verification","retryable":false}` |
+| `cutover.plan` | 두 번째 승인 전 | 방식(`fast`/`classic`), 예상 쓰기 중단 `expected_pause_ms{min,max}`, 리허설 근거, 전 조건 `preconditions[{id,state,value?,evidence?}]`, 단계 미리보기 `steps[{id,ms,start_ms?,window?}]`, 롤백 대기 시간, 구성, 인계 항목 | `[없음]` |
+| `approval.required` (`gate: "cutover"`) | DB 전환 승인 대기 직전 | 제외 항목·롤백 정책, 선택 `pending_decisions[]`(`ValidationIssue`) | `[없음]` |
+| `cutover.ready` | PAUSE 전 대기 중 1초마다 | `attempt`, `readiness.py` 값(`longest_xact_ms`·`lock_waiters` 자동 변환)·`commits_per_sec`·`ready`, 기준 `limits{longest_tx_ms, lock_waits}`(PoC 200 ms·0), `waiting_on?`, `waited_ms?` | `{"attempt":1,"longest_tx_ms":40,"lock_waits":0,"commits_per_sec":41,"ready":true,"limits":{"longest_tx_ms":200,"lock_waits":0}}` |
+| `cutover.step` | 단계마다 | `n`/`of`, `id`(PoC fast: `seq_raise`(pre) → `pause` → `marker` → `sub_off`·`reverse`(동시) → `retarget` → `resume`), `state`, `ms`, `method`, `result`(`ok`/`fail`/`revert`), `window`(`pre`/`pause`) | `{"n":5,"state":"done","id":"pause","ms":80,"method":"fast","of":12,"result":"ok","window":"pause"}` |
+| `cutover.outcome` | 전환이 끝났을 때 한 번 | 통과 `{result:"switched", active:"target", pause_ms: write_pause_ms, steps: steps_ms→[{id,ms,start_ms,window}], replication{direction:"reverse", lag_ms}}`, 거부·중단 `{result:"refused", reason?, message: stderr(마스킹), active:"source", pause_ms:null, replication{direction:"forward"}}`(status `waiting`) | `{"result":"switched","active":"target","pause_ms":412,"steps":[…],"replication":{"direction":"reverse","lag_ms":null}}` |
+| `cutover.verify` | RESUME 뒤 테이블마다 | 전환 순간 스냅샷 기준 행 수·체크섬(`match`/`mismatch`/`pending`/`skipped`) | `[없음]`(PoC는 전체 일치 여부만) |
+| `cutover.result` | 측정 합계 | `orders_lost`·`msg_lost`·`msg_dup`·`fail`·`latency_max` 등, 모르는 id는 `label`·`value` 그대로 | `{"id":"checksum","value":"MATCH","label":"checksum","ok":true}` |
+| `cutover.handover` | 인계 단계 | `dns`·`origin`·`access`, `state`(`running`/`done`/`held`), `detail?` | `[없음]` |
 
 ## 3. PoC 브리지 (데이터·트래픽·전환 플랫폼 구현 전)
 
@@ -138,8 +143,8 @@ uv run python -m cmp_worker.poc_bridge watch --migration-id <id> \
 | `replication.lag`(bytes) | `data.lsn.lag_bytes` (`source_lsn`은 PoC가 샘플링하지 않아 `""`) |
 | `replication.tables[]`(`state`=srsubstate, `copying_rows`) | `data.table` (`rows_total`은 PoC에 없어 0) |
 | `readiness`(= `readiness.py` 기준) | `data.readiness` |
-| `results/switchover-*.json`(성공 시에만 기록) `steps_ms`, `write_pause_ms`, `verify_ok` | PoC fast 순서 그대로: `step.prepare_reverse`·`step.seq_prebump`(시퀀스 사전 증가)·`step.sync_window_on`·`step.wait_ready` → `cutover.step` 1(`pause_wait_inflight`) → 2(`marker_wait`·`snapshot_seq_check`) → 3·4·6(`switch_subscriptions`: 구독 끄기/켜기 병렬) → 5(`retarget_resume`) → `step.drop_forward` → 6 `verify` → `delay`·`checksum` |
-| 전환 실패(종료 코드, stderr) | `error`(`SWITCHOVER_FAILED`) + 마스킹한 stderr 끝 2,000자를 운영 로그로: `… 2> err.txt \|\| uv run python -m cmp_worker.poc_bridge switchover-failed --migration-id <id> --rc $? < err.txt` |
+| `results/switchover-*.json`(성공 시에만, 끝에 기록) `steps_ms`, `write_pause_ms`, `verify_ok` | PoC fast 순서 그대로 `cutover.step`: `prepare_reverse`·`seq_prebump→seq_raise`·`sync_window_on`·`wait_ready`(window `pre`) → `pause_wait_inflight→pause` → `marker_wait→marker` → `snapshot_seq_check` → `switch_subscriptions→sub_off`+`reverse`(같은 `start_ms`, 구독 끄기/켜기 동시) → `retarget_resume→retarget`(PoC는 retarget과 RESUME을 한 단계로 잰다) → `drop_forward`·`verify`(RESUME 뒤). 이어서 `cutover.outcome`(`switched`, `pause_ms`, `steps`)과 `cutover.result` `checksum` |
+| 전환 실패(종료 코드, stderr) | `cutover.outcome` `refused`(`message` = 마스킹한 stderr 끝 2,000자, stderr의 대문자 코드가 있으면 `reason`, status `waiting`) + 같은 내용 운영 로그: `… 2> err.txt \|\| uv run python -m cmp_worker.poc_bridge switchover-failed --migration-id <id> --rc $? < err.txt` |
 
 패널의 한국어 `stage`·`reasons` 문구는 보내지 않는다.
 
@@ -153,11 +158,11 @@ uv run python -m cmp_worker.poc_bridge watch --migration-id <id> \
 
 | 파트 | 없는 것 |
 | --- | --- |
-| 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다). `Evidence.kind` 6개 값과 웹 `via` 4개 값의 대응 **결정 필요**. `finding.key`의 웹 문구 사전과 백엔드 능력 이름 맞추기 |
+| 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다), 실제 `analysis.scan` 발행 코드. `items[].key`의 웹 문구 사전과 백엔드 능력 이름, `sku` 값 맞추기 |
 | 샌드박스 | `sbx_apply`가 버리는 `apply_network` 반환값(namespace·TTL·egress) 살리기, `BuildResult`를 `sbx_build`에 연결, `sandbox.tests` 출처별 개수와 `checks`(`calls_in_mapping` 등) 값을 만드는 코드, `run` 번호 규칙(웹 `[가정]`) |
 | 계획(매핑) | `MappingRow`에 대상 서비스(`after`)와 노드 분류(`kind`) 값 없음 |
-| 계획 게시·승인·구축(민서) | `plan.preview`(Preview `changes[]`→`resources`, `{resource_type, action, name, quantity, size}` → `{id, group, name, detail:"", size, change}`; 원본·대상 환경·보안 규칙·env 재매핑 값은 Preview에 없음), `approval.required`, ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, Workflow 종료 시 `error` 이벤트(`emit_migration_event`로 연결 예정), 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |
+| 계획 게시·승인·구축(민서) | `plan.preview` 발행(웹이 백엔드 Preview를 그대로 받는 `data:plan.preview.backend` 형태가 생겼다: Preview + `plan_id`·`revision`, 선택 `source`·`target`·`env_remap`·`security_rules`는 Preview에 없어 계획 입력·앱 Values에서 채워야 함), `approval.required`, ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, Workflow 종료 시 `error` 이벤트(`emit_migration_event`로 연결 예정), 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |
 | 데이터 | 플랫폼 `copy_data` 구현 전체, `data.progress`(총 행 수·덤프 %), `data.verify`(행 수·체크섬), PoC `source_lsn`/`target_lsn` 샘플링(패널 `NODE_SQL`에 `pg_current_wal_lsn()` 추가 필요), 테이블 총 행 수 |
 | 트래픽 | 플랫폼 `shift_traffic` 구현 전체, `traffic.prepare`·`traffic.snapshot` 필드 확정(#61–#63), 중계 방식(PoC HAProxy, 웹은 Envoy 가정). **롤백 기준 결정 필요: #61의 "직전 안전 값으로 되돌림" vs #63의 "원본 100%로 되돌림" — 상헌님 결정** |
-| 전환 | 플랫폼 전환 Activity, 두 번째 승인(`approval.required gate: cutover`), 웹 6단계 모델과 PoC fast 순서 차이(3·4·6 동시) — 웹 표시 조정(민서), `cutover.result`의 `fail`·`loss` 측정(PoC `fault`의 `FAULT_RESULT`로 채울 수 있음) |
-| 인계 | `cutover.handover`(`dns`·`origin`·`access`)를 만드는 코드 없음 |
+| 전환 | 플랫폼 전환 Activity, 두 번째 승인(`approval.required gate: cutover`), `cutover.plan`(리허설 통계·전 조건·구성), 전환 중 `cutover.ready`(PoC 패널이 전환 작업 중임을 기계 값으로 주지 않아 브리지가 구분 못 함), 단계 실시간 상태(PoC는 성공 시 끝에 `steps_ms`만 씀), PoC fast의 `liveness` 단계와 retarget·RESUME 분리 측정, `cutover.verify` 테이블별 행 수·체크섬(PoC는 전체 일치 여부만), `held_requests`·`failed_requests`, 거부 사유 코드(PoC stderr에 코드가 없으면 비어 있음), `cutover.result`의 `orders_lost`·`msg_lost`·`msg_dup`·`fail`·`latency_max`(PoC `fault`의 `FAULT_RESULT`로 일부 채울 수 있음) |
+| 인계 | `cutover.handover`(`dns`·`origin`·`access`, `held`·`detail`)를 만드는 코드 없음 |

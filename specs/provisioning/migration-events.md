@@ -4,7 +4,7 @@
 
 ## 범위
 
-- 이벤트 봉투와 타입별 `data` 계약: `cmp_contracts.events`. 기준은 웹 계약 `src/lib/migration/events.ts`·`contract/events.schema.json`(`Minseo` 브랜치, 커밋 `971ce73`)이며 사본을 [docs/contracts/events.schema.json](../../docs/contracts/events.schema.json)에 둔다.
+- 이벤트 봉투와 타입별 `data` 계약: `cmp_contracts.events`. 기준은 웹 계약 `src/lib/migration/events.ts`·`contract/events.schema.json`(`Minseo` 브랜치, 커밋 `2cf5f5b`)이며 사본을 [docs/contracts/events.schema.json](../../docs/contracts/events.schema.json)에 둔다.
 - 저장: 업무 PostgreSQL `migration_events`(append-only), `migration_logs`.
 - 발행: `cmp_worker.events.emit_event`·`log_event`(Activity 전용), `EventEmitter`·`InMemoryEmitter`·`DbEventEmitter`.
 - 읽기: `GET /migrations/{id}/events` SSE(snapshot·`Last-Event-ID`·하트비트·종료)와 JSON 읽기(`?after=`), `GET /migrations/{id}/logs?after=`.
@@ -34,6 +34,7 @@
 | E15 Terraform | AWS·GCP Apply를 `-json`으로 실행하고 `apply_start`·`apply_complete`·`apply_errored` 메시지를 리소스 단위 `provision.resource`로 바꾼다. 진행률은 `planned_change` 수(n/m)로 환산한다. Saved Plan stale 판단은 `diagnostic` 메시지에서 한다 | 리소스마다 시작·완료를 화면에 보인다. 출력 원문은 여전히 결과에 넣지 않는다 |
 | E16 Helm | 워크로드 Activity의 heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`·`ready:<name>`·`pvc`·`lb-*`)은 화면용이 아니라 명령줄 값이다. 이벤트는 단계 경계에서 따로 낸다: `helm:<name>` 시작·완료→`provision.resource`(`key=helm_release`), `pods_ready`·`db_connect`·`app_health` 검사마다 `provision.check` | heartbeat는 Temporal 생존 신호라 문자열을 바꾸지 않는다 |
 | E17 phase | 봉투 `phase`는 웹 `BackendPhase`다. Workflow phase `sandbox`는 `build`다 | 웹 계약 |
+| E18 변형·공유 정의 | 웹 스키마가 `plan.preview` `data`를 두 형태(`data:plan.preview` 화면 형태, `data:plan.preview.backend` 백엔드 Preview 그대로) 중 하나로 받는다. `DATA_VARIANTS`가 순서대로 검증한다. 공유 정의 `evidence`·`previewChange`·`validationIssue`는 같은 이름으로 내보낸다. 선택이면서 null을 허용하는 필드(`KEEP_NULL`, 예: `previewChange.quantity`)는 None을 생략하지 않고 null로 보낸다 | 웹 `2cf5f5b` 계약 |
 
 ## 저장 스키마
 

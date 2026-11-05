@@ -77,24 +77,37 @@ def test_korean_metrics_phase_label_is_understood():
 
 def test_switchover_result_keeps_the_fast_order(tmp_path):
     drafts = switchover_events(SWITCHOVER)
-    steps = [d.data["n"] for d in drafts if d.type == "cutover.step" and d.data["state"] == "done"]
-    assert steps == [1, 2, 3, 4, 6, 5]  # subscriptions off/on together, resume after
-    timings = [d.data["id"] for d in drafts if d.data.get("id", "").startswith("step.")]
-    assert timings[:2] == ["step.prepare_reverse", "step.seq_prebump"]  # before PAUSE
+    steps = [d.data for d in drafts if d.type == "cutover.step"]
+    assert [s["id"] for s in steps] == [
+        "prepare_reverse", "seq_raise", "sync_window_on", "wait_ready",  # before PAUSE
+        "pause", "marker", "snapshot_seq_check", "sub_off", "reverse", "retarget",
+        "drop_forward", "verify",
+    ]  # fmt: skip
+    assert steps[1]["window"] == "pre" and steps[-1]["of"] == len(steps)
+    assert "window" not in steps[-1] and all("start_ms" not in s for s in steps)
+    [outcome] = [d.data for d in drafts if d.type == "cutover.outcome"]
+    timing = {s["id"]: s for s in outcome["steps"]}
+    # subscription off/on run together: same start inside the pause window
+    assert timing["sub_off"]["start_ms"] == timing["reverse"]["start_ms"] == 80 + 150 + 30
+    assert timing["retarget"]["start_ms"] == 80 + 150 + 30 + 110
+    assert outcome["result"] == "switched" and outcome["pause_ms"] == 412
+    assert outcome["steps"][1] == {"id": "seq_raise", "ms": 15.0, "window": "pre"}
+
     emitter = InMemoryEmitter()
     (tmp_path / "switchover-20261105T120000-pg-a-to-pg-b.json").write_text(json.dumps(SWITCHOVER))
     bridge = Bridge("poc-1", emitter)
-    assert bridge.results(tmp_path) == len(drafts)
+    assert bridge.results(tmp_path) == len(drafts)  # every draft passes the web contract
     assert bridge.results(tmp_path) == 0  # each file once
     last = emitter.events[-1]
-    assert last.data == {"id": "checksum", "value": "MATCH", "ok": True} and last.status == "done"
-    assert any(e.data == {"id": "delay", "value": "412ms"} for e in emitter.events)
+    assert last.data["id"] == "checksum" and last.data["ok"] is True and last.status == "done"
 
 
-def test_failed_switchover_is_an_error_event_and_masked_log():
+def test_failed_switchover_is_a_refused_outcome_and_masked_log():
     emitter = InMemoryEmitter()
-    Bridge("poc-1", emitter).failed(3, "ERROR: postgresql://app:hunter22@pg-b/app mismatch")
-    [error] = emitter.events
-    assert error.type == "error" and error.status == "failed"
-    assert error.data["code"] == "SWITCHOVER_FAILED" and error.data["message"] == ""
-    assert "hunter22" not in json.dumps(emitter.logs)
+    stderr = "ERROR: postgresql://app:hunter22@pg-b/app CHECKSUM_MISMATCH on orders"
+    Bridge("poc-1", emitter).failed(3, stderr)
+    [outcome] = emitter.events
+    assert outcome.type == "cutover.outcome" and outcome.status == "waiting"
+    assert outcome.data["result"] == "refused" and outcome.data["active"] == "source"
+    assert outcome.data["reason"] == "CHECKSUM_MISMATCH" and outcome.data["pause_ms"] is None
+    assert "hunter22" not in json.dumps(outcome.data) + json.dumps(emitter.logs)

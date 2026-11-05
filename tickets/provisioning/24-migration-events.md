@@ -35,11 +35,11 @@ Blocked by: 07, 13, 18 (DONE). 22(PR #117)·23(#123)은 main에 반영됐고 이
 명세의 "테스트 Seam" 절. 실제 클라우드·Temporal 서버 없이 SQLite·`ActivityEnvironment`·FastAPI `TestClient`로 확인한다.
 
 ## 결과
-- 계약: `cmp_contracts.events`(33개 타입 data 모델), 웹 스키마 사본 `docs/contracts/events.schema.json`(웹 `Minseo` `971ce73`), `scripts/export_event_schema.py`, 정규형 비교 `tests/test_event_contract.py`.
+- 계약: `cmp_contracts.events`(38개 타입 data 모델, `plan.preview` 두 형태), 웹 스키마 사본 `docs/contracts/events.schema.json`(웹 `Minseo` `2cf5f5b`; 처음 `971ce73`에서 갱신: `analysis.scan`, `cutover.plan`·`ready`·`outcome`·`verify`, `cutover.step` 확장), `scripts/export_event_schema.py`, 정규형 비교 `tests/test_event_contract.py`.
 - 저장·발행: Alembic `20261105_06`(down `20261105_05`, main 병합 때 23 다음으로 재연결), `cmp_api.migration_events`, `cmp_worker.events`. Worker 시작 시 `DbEventEmitter(SessionLocal)`.
 - SSE: `cmp_api.event_stream` + `GET /migrations/{id}/events`(SSE·JSON), `GET /migrations/{id}/logs`. `failed` 계열 종료 phase에서 닫히지 않던 문제 수정.
 - Provisioning: `approval.decision`(승인 API), `plan.ready`(`PlanReadyEvents` 래퍼, 인프라·워크로드 Plan 게시 모두), Terraform `apply -json` → `provision.resource`(`cmp_providers.terraform_events`), 워크로드 Helm·LB → `provision.resource`, `pods_ready`·`db_connect`·`app_health` → `provision.check`, 실행 결과 운영 로그.
-- PoC 브리지: `cmp_worker.poc_bridge`(패널 `/api/state`·switchover 결과·실패 stderr).
+- PoC 브리지: `cmp_worker.poc_bridge`(패널 `/api/state` → `data.*`, switchover 결과 → `cutover.step`·`cutover.outcome`(PoC fast 순서, `steps_ms`), 실패 stderr → `cutover.outcome` refused).
 - 안내서: `docs/engineering/events-guide.md`(파트별 발행표, PoC 브리지, "아직 없음").
-- 결정 필요: `Evidence.kind` ↔ 웹 `via` 대응(승철님), 롤백 기준 #61 vs #63(상헌님). 웹 쪽 후속(민서): `event: status` 블록 건너뛰기 또는 `?legacy=false`, PoC fast 순서(3·4·6 동시) 표시.
+- `Evidence.kind`는 결정됨(웹 `analysis.scan`이 6개 값을 그대로 받음). 결정 필요: 롤백 기준 #61 vs #63(상헌님). 웹 쪽 후속(민서): `event: status` 블록 건너뛰기 또는 `?legacy=false`.
 - 미검증: PostgreSQL 대상 Alembic·동시성, Temporal 서버 스모크, 실제 Terraform `-json` 스트리밍(가짜 runner로만 확인).
