@@ -52,7 +52,7 @@ Blocked by: B-01 (DONE), 21 (로컬 완료). 29(#153, Agent 이미지 pull·토�
 4. 서버 스모크(README 「빌드 실행 환경」)
 
 ## 관련 문서
-- [ADR-003](../../docs/decisions/ADR-003.md) · [B-01](b-01-image-build.md) · [21](21-demo-provisioning-runtime.md) · [`infra/demo/README.md`](../../infra/demo/README.md)
+- [ADR-003](../../docs/decisions/ADR-003.md) · [B-01](b-01-image-build.md) · [21](21-demo-provisioning-runtime.md) · [43](43-worker-image-packaging.md)(후속: worker 이미지 리소스 경로·Linux lock) · [`infra/demo/README.md`](../../infra/demo/README.md)
 
 ## 완료 체크리스트
 - [x] 수용 기준과 Test Seam 확인 (서버 검증 제외)

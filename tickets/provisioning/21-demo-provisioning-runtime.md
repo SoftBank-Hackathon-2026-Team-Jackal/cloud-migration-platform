@@ -54,7 +54,7 @@ Blocked by: 15 (DONE). 18과 병렬 가능. 공개 주소·TLS 방식은 Traffic
 착수 결정 D1(저장소)·D2(HTTPS·도메인)·D5/D6/D8(자격 증명·비용·정리)로 결정했다.
 
 ## 관련 문서
-- [15](15-agent-runtime-install.md) · [18](18-onprem-plan-publish.md) · [`infra/demo/README.md`](../../infra/demo/README.md) · [테스트 전략](../../docs/engineering/testing-strategy.md)
+- [15](15-agent-runtime-install.md) · [18](18-onprem-plan-publish.md) · [43](43-worker-image-packaging.md)(후속: 이미지 안 템플릿·차트 경로와 Linux Provider lock — 이 티켓은 도구 설치만 확인해 놓쳤다) · [`infra/demo/README.md`](../../infra/demo/README.md) · [테스트 전략](../../docs/engineering/testing-strategy.md)
 
 ## 완료 체크리스트
 - [x] 수용 기준과 Test Seam 확인 (서버 스모크 제외)

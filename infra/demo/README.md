@@ -24,6 +24,8 @@ bash infra/demo/release.sh HEAD
 
 worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1.17.0, kubectl v1.37.1, Helm v4.3.1, AWS CLI 2.35.21, gcloud 588.0.0(+`gke-gcloud-auth-plugin`)을 버전·SHA-256으로 고정한다. API는 도구가 없는 `api` 대상을 쓴다.
 
+두 대상 모두 런타임 리소스(`infra/terraform`, `infra/helm`, `catalog`, `skills`)를 `/app` 아래 저장소와 같은 상대 경로로 복사하고 `CMP_RESOURCE_ROOT=/app`을 지정한다(ticket 43). 패키지는 site-packages에 설치되므로 코드는 자기 위치가 아니라 이 값으로 템플릿·차트를 찾는다(`cmp_providers.resources`). 새 리소스 디렉터리를 코드에서 쓰면 `RUNTIME_RESOURCE_DIRS`와 Dockerfile `COPY`를 함께 고친다(`tests/test_worker_image_resources.py`가 대조). Terraform lock 파일은 `linux_amd64`·`linux_arm64`·`darwin_arm64`·`darwin_amd64` 해시를 담는다.
+
 | 설정 | 서비스 | 값·출처 |
 | --- | --- | --- |
 | `DATABASE_URL`, `TEMPORAL_ADDRESS` | api, worker | 업무 PostgreSQL·Temporal (compose 내부망) |
@@ -31,6 +33,8 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `PROVISIONING_ARTIFACT_ROOT=/opt/cmp/plans` | api, worker | 호스트 `/opt/cmp/data/plans` 공유 볼륨 |
 | `APPROVAL_ADMIN_KEY`, `AGENT_ENROLLMENT_ADMIN_KEY` | api만 | `/opt/cmp/.env`(0600), 없을 때만 생성 |
 | `AWS_CONFIG_FILE`, `PROVISIONING_AWS_PROFILE=cmp-demo-provisioning` | worker | `/opt/cmp/secrets/aws/config`(읽기 전용). EC2 인스턴스 역할(`credential_source = Ec2InstanceMetadata`), `.env`의 `PROVISIONING_AWS_ROLE_ARN`이 있으면 그 역할을 Assume |
+| `AWS_CONFIG_FILE`, `CONNECTION_PLATFORM_AWS_PROFILE=cmp-demo-build` | api | 같은 `/opt/cmp/secrets/aws/config`(읽기 전용)의 인스턴스 역할 프로필(`role_arn` 없음). Agent ECR pull 토큰 발급(29)·환경 연결(23)의 플랫폼 주체(#176, 티켓 41). api에는 GCP 키·gcloud 구성을 주지 않는다 |
+| `PLATFORM_ECR_REGISTRY`, `PLATFORM_ECR_REPOSITORIES` | api | `/opt/cmp/.env`. 레지스트리가 비면(기본) ON_PREM 작업에 플랫폼 레지스트리가 없고 토큰을 발급하지 않는다(29 이전 동작). 저장소 기본값 `cmp-platform-builds` |
 | `CMP_GCP_PROJECT`, `PROVISIONING_GCLOUD_CONFIGURATION=cmp-demo` | worker | 운영자가 둔 `/opt/cmp/secrets/gcp/key.json`(읽기 전용) → 진입점이 tmpfs gcloud 구성·ADC 생성 |
 | `CMP_PUBLIC_HOST` | edge | 비어 있으면 에지를 띄우지 않는다. 예: `<EIP>.sslip.io` |
 | `WEB_AUTH_SECRET` | web | `/opt/cmp/.env`에 없을 때만 생성(웹 로그인 세션 서명용). 웹은 `AUTH_SECRET`으로 받는다 |
@@ -85,6 +89,7 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 | ECR 저장소 | `cmp-platform-builds` (`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-platform-builds`), `IMMUTABLE`, 푸시 시 스캔, 태그 없는 이미지만 7일 뒤 만료, 스택 삭제 시 보존 |
 | 인스턴스 역할 인라인 정책 | `cmp-demo-build`: `ecr:GetAuthorizationToken`, 그 저장소의 pull·push, 배포 버킷 `sources/`·`tests/`·`builds/`의 `GetObject`·`PutObject`, 버킷 `ListBucket`. `releases/`는 읽기 전용 그대로 |
 | worker 설정 | `BUILD_ECR_REPOSITORY`·`BUILD_SOURCE_BUCKET`·`BUILD_LOG_BUCKET`·`BUILD_PLATFORM`(`/opt/cmp/.env`, 비면 사전 빌드 이미지), `BUILD_AWS_PROFILE`·`AWS_PROFILE`=`cmp-demo-build`(인스턴스 역할 프로필) |
+| api 설정 (#176, 티켓 41) | `PLATFORM_ECR_REGISTRY`(`/opt/cmp/.env`, 비면 꺼짐)·`PLATFORM_ECR_REPOSITORIES`(기본 `cmp-platform-builds`), `CONNECTION_PLATFORM_AWS_PROFILE=cmp-demo-build`, AWS 설정 파일 읽기 전용 마운트. K3s Agent의 `GET /agents/{agent_id}/jobs/{job_id}/image-pull` 토큰을 이 프로필(인스턴스 역할)로 발급한다 |
 | worker 빌드 | 이미지의 Docker CLI 28.5.2·buildx v0.37.2 → 마운트한 호스트 `/var/run/docker.sock`의 데몬 |
 
 **소켓 위험**: Docker 소켓을 가진 컨테이너는 호스트 root와 같은 권한이다. worker에만 주며, 빌드하는 앱 Dockerfile의 `RUN`도 호스트 데몬에서 실행된다. 대회용 단일 호스트에서만 허용한다. 운영급 대안은 rootless BuildKit을 별도 서비스로 두고 worker가 `BUILDKIT_HOST`(TLS)로만 접속하거나, 빌드를 CodeBuild·Kaniko 같은 격리 실행으로 옮기는 것이다.
@@ -93,15 +98,19 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 
 ```sh
 bash infra/demo/deploy-build-stack.sh --plan   # 변경 세트만 만들고 실행하지 않음
-bash infra/demo/deploy-build-stack.sh          # 스택 생성, BUILD_* 네 줄 출력
-# SSM 세션에서 출력된 네 줄을 /opt/cmp/.env에 추가한 뒤
+bash infra/demo/deploy-build-stack.sh          # 스택 생성·갱신, PLATFORM_ECR_REGISTRY와 BUILD_* 네 줄 출력
+# SSM 세션에서 출력된 다섯 줄을 /opt/cmp/.env에 추가한 뒤
 bash infra/demo/release.sh HEAD
 ```
+
+스택이 이미 있으면 두 번째 명령은 변경 없이 출력만 다시 한다(`--no-fail-on-empty-changeset`). 레지스트리 값은 저장소 URI의 호스트(`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com`)다. api는 `.env`를 다시 읽어야 하므로 릴리스(또는 api 재생성)가 필요하다.
 
 ### 서버 점검
 
 ```sh
 # SSM 세션에서
+docker exec cmp-demo-api-1 python -c 'import boto3; print(boto3.Session(profile_name="cmp-demo-build").client("sts").get_caller_identity()["Arn"])'   # .../cmp-demo-control-plane-InstanceRole-.../i-...
+docker exec cmp-demo-api-1 python -c 'from cmp_api.onprem_rollout import configured_platform_registry as r; print(r())'   # PlatformRegistry(registry='714066696240.dkr.ecr...', ...)
 docker exec cmp-demo-worker-1 sh -c 'docker version --format "{{.Server.Version}}"; docker buildx version'
 docker exec cmp-demo-worker-1 aws sts get-caller-identity --query Arn --output text   # .../cmp-demo-control-plane-InstanceRole-.../i-...
 docker exec cmp-demo-worker-1 aws ecr describe-repositories --region ap-northeast-2 --repository-names cmp-platform-builds --query 'repositories[0].imageTagMutability' --output text  # IMMUTABLE
