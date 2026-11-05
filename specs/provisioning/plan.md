@@ -208,6 +208,10 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 `execute_gcp_workloads`(`cmp_worker.activities.gcp_workloads`)는 09의 승인 워크로드 흐름을 공통 기반(`k8s_workloads`·`k8s_workloads_cli`)으로 재사용하고 GCP 고유 부분만 더한다: gcloud 설정 프로젝트·클러스터 `RUNNING` 확인, PD CSI StorageClass(`pd-balanced`·Retain), 승인된 ECR Digest를 위한 단기 Pull Secret(`cmp-ecr-pull`, default ServiceAccount 연결, 토큰은 stdin만), GCE Ingress(외부 HTTP LB, NEG)와 외부 헬스 200. AWS LB Controller는 쓰지 않는다. 대상 클러스터는 10 G4 refs(`gcp_project_id`·`gke_cluster_name`·`gke_location`)로 찾는다. 결정 K1~K12와 실검증은 [티켓 11](../../tickets/provisioning/11-gcp-workloads.md)에 있다.
 
+### 29 이미지 pull 전략 (#153)
+
+플랫폼만 AWS 권한을 갖는다. EKS는 노드 역할(`AmazonEC2ContainerRegistryPullOnly`)로 받는다. K3s는 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/image-pull`로 플랫폼이 발급한 단기 ECR 토큰을 받아 `cmp-ecr-pull`을 만들고, TTL 절반이 지나면 갱신한다. GKE는 실행마다 Secret을 새 토큰으로 다시 쓰고, 플랫폼 측 6시간 Schedule이 승인된 배포의 Secret만 다시 쓴다. 플랫폼 레지스트리·저장소는 `PLATFORM_ECR_REGISTRY`·`PLATFORM_ECR_REPOSITORIES`로 정한다. ON_PREM pull 실패는 `IMAGE_PULL_FAILED`. 결정 I1~I11은 [티켓 29](../../tickets/provisioning/29-image-pull-strategy.md)에 있다.
+
 ### 12A 온프레미스 Preview (#41)
 
 ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). 18(#98)이 이 함수를 운영 Plan 게시 경로에서 호출한다. AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.

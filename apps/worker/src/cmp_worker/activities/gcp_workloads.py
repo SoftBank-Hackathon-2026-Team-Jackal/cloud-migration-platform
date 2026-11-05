@@ -17,7 +17,11 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
+from cmp_api.approvals import PlanExecution, PlanRevision
+from cmp_contracts.plan import PlanManifest
 from cmp_providers.network_policy import gke_dataplane_v2
+from cmp_providers.plans import manifest_digest
+from sqlalchemy import select
 from temporalio import activity
 
 from cmp_worker.activities import k8s_workloads
@@ -31,6 +35,7 @@ from cmp_worker.activities.k8s_workloads import (
 )
 
 ACTIVITY_NAME = "execute_gcp_workloads"
+REFRESH_ACTIVITY = "refresh_gcp_pull_secrets"  # ticket 29 (I10), pull_refresh Workflow
 PULL_SECRET = "cmp-ecr-pull"
 STORAGE_PROVISIONER = "pd.csi.storage.gke.io"
 ECR = re.compile(
@@ -244,3 +249,75 @@ class GcpWorkloadsActivities(ApprovedWorkloads):
     @activity.defn(name=ACTIVITY_NAME)
     async def execute_gcp_workloads(self, request: dict) -> dict:
         return await self._execute(request)
+
+    # ---- ticket 29 (I10): periodic pull Secret refresh, platform side -------------------
+
+    def _refresh_requests(self) -> list[dict]:
+        """Approved GCP workload executions that created the ECR pull Secret (refs only)."""
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(PlanExecution, PlanRevision)
+                .join(
+                    PlanRevision,
+                    (PlanRevision.plan_id == PlanExecution.plan_id)
+                    & (PlanRevision.revision == PlanExecution.revision),
+                )
+                .where(PlanExecution.status == "SUCCEEDED")
+            ).all()
+            requests = {}
+            for execution, revision in rows:
+                refs = execution.resource_refs or {}
+                manifest = PlanManifest.model_validate(revision.manifest)
+                if (
+                    refs.get("image_pull_secret") != PULL_SECRET
+                    or manifest.target.provider != self.provider
+                    or manifest.scope not in {"WORKLOADS", "FULL"}
+                ):
+                    continue
+                requests[(execution.plan_id, execution.revision)] = {
+                    "approval_id": execution.approval_id,
+                    "plan_id": execution.plan_id,
+                    "revision": execution.revision,
+                    "provider": self.provider,
+                    "scope": manifest.scope,
+                    "manifest_digest": manifest_digest(manifest),
+                    "resource_refs": dict(refs),
+                }
+        return [requests[key] for key in sorted(requests)]
+
+    async def _refresh_one(self, request: dict) -> None:
+        """Same approval/identity checks as the deploy, then only the pull Secret (no Helm)."""
+        approved = await self._call(self._load, request)
+        await self.check_identity(approved)
+        connection = self._runtime.connect(approved.target)
+        try:
+            cluster = await self._call(connection.__enter__)
+        except Exception:  # noqa: BLE001
+            raise WorkloadFailure("CLUSTER_ACCESS_FAILED") from None
+        try:
+            await self.prepare_namespace(cluster, approved, {})
+        finally:
+            await self._call(connection.__exit__, None, None, None)
+
+    @activity.defn(name=REFRESH_ACTIVITY)
+    async def refresh_gcp_pull_secrets(self, request: dict | None = None) -> dict:
+        """Counts and codes only; a superseded Revision (`STALE_REVISION`) is skipped."""
+        del request
+        summary = {"refreshed": 0, "skipped": 0, "failed": 0, "codes": []}
+        for item in await self._call(self._refresh_requests):
+            activity.heartbeat({"plan_id": item["plan_id"], "revision": item["revision"]})
+            try:
+                await self._refresh_one(item)
+            except WorkloadFailure as failure:
+                stale = failure.code == "STALE_REVISION"
+                summary["skipped" if stale else "failed"] += 1
+                if not stale:
+                    summary["codes"].append(failure.code)
+                continue
+            except Exception:  # noqa: BLE001 - boundary: never raw errors or tokens
+                summary["failed"] += 1
+                summary["codes"].append("REFRESH_INTERRUPTED")
+                continue
+            summary["refreshed"] += 1
+        summary["codes"] = sorted(set(summary["codes"]))
+        return summary

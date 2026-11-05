@@ -257,6 +257,18 @@ def test_onprem_plan_pins_policies_in_the_digest_and_preview_shows_them(db, stor
     assert not [p for p in _policy_bytes(db, store, again) if "ipBlock" in json.dumps(p)]
 
 
+@pytest.fixture
+def platform_registry(monkeypatch):
+    """Ticket 29: an ON_PREM job with an ECR image needs the platform registry configured."""
+    from cmp_api.config import settings
+
+    monkeypatch.setattr(
+        settings, "platform_ecr_registry", "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com"
+    )
+    monkeypatch.setattr(settings, "platform_ecr_repositories", "demo")
+
+
+@pytest.mark.usefixtures("platform_registry")
 def test_onprem_rollout_job_carries_the_approved_policy_artifact(db, store, tmp_path):
     with db() as session:
         register_agent(session)
