@@ -56,19 +56,23 @@ def _single_port(rule) -> int | None:
 
 
 def build_network(
-    infra: AwsInfraScan,
+    infra: AwsInfraScan | None,
     code: CodeScan,
     *,
     application_ids: Sequence[str],
     database_ids: Sequence[str],
 ) -> NetworkAnalysis:
     candidates = [*application_ids, *database_ids]
-    owner = {g.id: _resource_for(g, candidates) for g in infra.security_groups}
     notes: list[str] = []
+    if infra is None:
+        notes.append("INFRA_NOT_COLLECTED: security groups, load balancers and CIDRs were not read")
+    groups = infra.security_groups if infra else []
+    balancers = infra.load_balancers if infra else []
+    owner = {g.id: _resource_for(g, candidates) for g in groups}
     intents: list[NetworkIntent] = []
     entries: list[ExternalEntry] = []
 
-    for group in infra.security_groups:
+    for group in groups:
         destination = owner[group.id]
         for rule in group.ingress:
             if not rule.source_group_ids:
@@ -93,7 +97,7 @@ def build_network(
                     )
 
     covered: set[str] = set()
-    for balancer in infra.load_balancers:
+    for balancer in balancers:
         if balancer.scheme != "internet-facing":
             continue
         by_name = [a for a in application_ids if a.lower() in balancer.name.lower()]
@@ -122,7 +126,7 @@ def build_network(
             )
             covered.add(targets[0])
 
-    for group in infra.security_groups:
+    for group in groups:
         resource = owner[group.id]
         if resource not in application_ids or resource in covered:
             continue
@@ -154,6 +158,6 @@ def build_network(
     return NetworkAnalysis(
         intents=merge_network_intents(intents),
         external_entries=[e for i, e in enumerate(entries) if e not in entries[:i]],
-        source_cidrs=sorted({c for vpc in infra.vpcs for c in vpc.cidrs}),
+        source_cidrs=sorted({c for vpc in (infra.vpcs if infra else []) for c in vpc.cidrs}),
         notes=list(dict.fromkeys(notes)),
     )

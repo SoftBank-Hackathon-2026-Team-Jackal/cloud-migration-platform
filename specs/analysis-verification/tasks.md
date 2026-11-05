@@ -11,13 +11,13 @@
 | [03 소스 확보·운영 커밋 고정·마스킹](../../tickets/analysis-verification/03-source-fetch.md) | DONE (main 반영) | 01 | AV-002, AV-020 | #48 | ☑ |
 | [04 매니페스트·클러스터 리소스 스캔](../../tickets/analysis-verification/04-manifest-scan.md) | DONE (PR #54 병합) | 01 | AV-004 | #50 | ☑ |
 | [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DONE (PR #58 병합) | 03, D-07(언어별 어댑터만) | AV-003 | #57 | ☑ |
-| [06 AWS 인프라·네트워크 스캔과 통신 의도](../../tickets/analysis-verification/06-aws-infra-scan.md) | DRAFT | 01, AWS 테스트 계정(외부) | AV-005, AV-020 | 미생성 | ☐ |
-| [07 요구사항·사용 프로필·사전 점검 조립](../../tickets/analysis-verification/07-profile-precheck.md) | DRAFT | 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시) | AV-006, AV-017 | 미생성 | ☐ |
-| [08A 에이전트 실행 기반과 Skill 형식](../../tickets/analysis-verification/08a-agent-runtime.md) | DRAFT | 01 | AV-007, AV-020 | 미생성 | ☐ |
-| [08 카탈로그·Skill v1과 매핑](../../tickets/analysis-verification/08-mapping.md) | DRAFT | 07, 08A, D-01(실제 LLM 연결 시) | AV-007, AV-008, AV-020 | 미생성 | ☐ |
-| [08B 필수 기능 확정과 손실 승인 게이트](../../tickets/analysis-verification/08b-review-gate.md) | DRAFT | 02, 08 | AV-022, AV-008 | 미생성 | ☐ |
-| [09 소스 묶음 생성과 S3 업로드](../../tickets/analysis-verification/09-source-archive.md) | DRAFT | 03 | AV-009, AV-020 | 미생성 | ☐ |
-| [10 Build 모듈 연동과 실패 분류](../../tickets/analysis-verification/10-build-integration.md) | DRAFT | 09, Provisioning B-01(DONE) | AV-010 | 미생성 | ☐ |
+| [06 AWS 인프라·네트워크 스캔과 통신 의도](../../tickets/analysis-verification/06-aws-infra-scan.md) | IN_PROGRESS (PR #90 병합, 실제 계정 실행 남음) | 01, AWS 테스트 계정(외부) | AV-005, AV-020 | #89 | ☐ |
+| [07 요구사항·사용 프로필·사전 점검 조립](../../tickets/analysis-verification/07-profile-precheck.md) | DONE (PR #64, #77, #86 병합) | 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시) | AV-006, AV-017 | #59 | ☑ |
+| [08A 에이전트 실행 기반과 Skill 형식](../../tickets/analysis-verification/08a-agent-runtime.md) | DONE (PR #68 병합) | 01 | AV-007, AV-020 | #67 | ☑ |
+| [08 카탈로그·Skill v1과 매핑](../../tickets/analysis-verification/08-mapping.md) | DONE (PR #73 병합) | 07, 08A, D-01(실제 LLM 연결 시) | AV-007, AV-008, AV-020 | #72 | ☑ |
+| [08B 필수 기능 확정과 손실 승인 게이트](../../tickets/analysis-verification/08b-review-gate.md) | DONE (PR #80 병합) | 02, 08 | AV-022, AV-008 | #78 | ☑ |
+| [09 소스 묶음 생성과 S3 업로드](../../tickets/analysis-verification/09-source-archive.md) | DONE (PR #84 병합) | 03 | AV-009, AV-020 | #83 | ☑ |
+| [10 Build 모듈 연동과 실패 분류](../../tickets/analysis-verification/10-build-integration.md) | DONE (PR #88 병합) | 09, Provisioning B-01(DONE) | AV-010 | #87 | ☑ |
 | [11 Sandbox 구성·적용·정리](../../tickets/analysis-verification/11-sandbox-apply.md) | DRAFT | 02B, 07, Provisioning 공통 렌더 v2(#24, DONE) | AV-011, AV-016, AV-020 | 미생성 | ☐ |
 | [11B Sandbox 제자리 갱신과 테스트 데이터 초기화](../../tickets/analysis-verification/11b-sandbox-update.md) | DRAFT | 11 | AV-011, AV-015 | 미생성 | ☐ |
 | [12 테스트 묶음·Tester·`run_suite`](../../tickets/analysis-verification/12-test-suite.md) | DRAFT | 07, 08A, 11 | AV-012, AV-020 | 미생성 | ☐ |
@@ -27,7 +27,7 @@
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
 | [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
-| [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | TODO | 03~08B, 06, 18 입력 계약 | AV-001~AV-008, AV-017, AV-020, AV-021 | 미생성 | ☐ |
+| [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | IN_PROGRESS (구현 완료, 리뷰 대기) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☐ |
 
 ## 선행 관계
 
@@ -57,7 +57,7 @@ Q-01 ────┴→ 02B ─┐
 | ID | 내용 | 영향 티켓 | 담당 |
 | --- | --- | --- | --- |
 | D-01 | 공급자는 Claude, 연결은 Anthropic SDK(Messages API 도구 호출)로 결정. 모델·코드 전송 범위(근거 주변 조각만 전송)·키 관리·비용 한도는 ADR-004 작성 예정 | 08, 12, 14, 17 | 승철·팀 |
-| D-02 | 결정됨(승철, 민서님 통보) — 첫 사이클의 `*_ref`는 해시 이름 로컬 불변 저장소(`LocalArtifactStore` 관례, S3는 후속). 분석·Build 결과의 저장·정규화는 분석 쪽이 맡음 | 10, 15, 19 | 승철(민서 통보) |
+| D-02 | 결정됨(승철) — 첫 사이클의 `*_ref`는 해시 이름 로컬 불변 저장소(`LocalArtifactStore` 관례, S3는 후속). 분석·Build 결과의 저장·정규화는 분석 쪽이 맡음 | 10, 15, 19 | 승철 |
 | D-04 | Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 | 10, 14 | 민서 |
 | D-05 | 결정됨 — `sandbox` Queue 분리 | Q-01, 02B | 승철(민서 공유) |
 | D-06 | 소스·테스트 묶음 버킷 소유·이름·정리 규칙, Sandbox 이미지 보존 기간 | 09, 10, 12 | 민서·승철 |
@@ -88,6 +88,7 @@ Q-01 ────┴→ 02B ─┐
 - 2026-11-05: 02·02B를 PR #46으로 병합(이슈 #44, #45 종료). 14·15의 부모 Workflow 변경 범위를 plan에 기록하고 14에 종료 상태 정리 수용 기준을 추가.
 - 2026-11-05: 06 구현(가짜 AWS 응답 기준): `scan_aws_infra`가 허용 목록의 읽기 전용 호출만으로 EKS·VPC·보안 그룹·ELBv2·IRSA 정책·CloudTrail 요약을 읽고, `build_network`가 보안 그룹·코드 외부 호스트를 `network_intent`로, 로드 밸런서를 외부 진입·VPC CIDR로 바꾼다. `boto3`를 런타임 의존성으로 추가. 실제 계정 1회 실행(승인 필요)은 남음.
 - 2026-11-05: D-02 결정: 분석·Build 결과의 `*_ref` 저장은 해시 이름 로컬 불변 저장소(민서님의 `LocalArtifactStore`와 같은 관례, S3는 후속)로 하고 저장·정규화는 분석 쪽이 맡는다. 02~08B·06의 "Activity 연결은 후속"을 모아 Ticket 19(분석 Activity 통합)를 추가.
+- 2026-11-05: 19 구현(가짜 LLM·AWS 미설정 기준): `AnalysisPipeline`과 `AnalysisActivities`가 03~08B·06의 실제 함수를 연결하고 결과를 `ArtifactStore`에 참조로 저장한다. `AnalysisWorkflow`는 문자열 입력이면 scaffold, `AnalysisInput` dict면 실제 경로를 탄다. 부모의 입력 연결과 실제 Claude 연결은 남음.
 - 2026-11-04(팀 확인): 민서님이 분석·Sandbox 자식 Workflow 분리 방향에 이견이 없다고 확인. 새 종료 상태(`needs_review`, `stopped_render`)는 기존 완료·취소에 끼워 맞추지 않고 검토 대기·실패·완료를 구분해 API(SSE 종료 조건)와 함께 정리하기로 함(API는 민서님 담당). 자식에 직접 Signal을 보내는 설계와 권한·상태 이중 확인도 동의. 신규 Worker 배포 시 동작 이상 여부는 별도 확인 항목.
 - 2026-11-04(리뷰 반영): spec AV-012에 `run_suite`의 `include`, AV-015에 INFRA와 횟수 규칙 반영(AV-013 커버리지는 원문 유지). ADR-004는 작성 예정으로 표시.
 - 2026-11-04: D-05 결정: `sandbox` Task Queue를 분리한다. Q-01에서 Worker 등록, 02·02B에서 범위를 한정한 Workflow 연결을 수행한다.
