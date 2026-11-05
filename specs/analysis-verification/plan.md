@@ -98,12 +98,13 @@ MigrationWorkflow (migration)
 - 02 골격은 `analysis-child-v1` 패치로 기존 이력을 구분한다. 자식 실패는 부모에 전파하고, 부모의 `request_cancel` Signal은 자식 취소 완료를 기다린 후 `cancelled`를 반환한다. 부모의 외부 취소 시에도 자식에 취소를 요청한다. 부모가 종료될 때 미완료 자식의 ParentClosePolicy는 `TERMINATE`다. 스캔 결과와 최종 보고서는 실제 분석 증거가 아닌 작은 fixture다.
 - 02B 골격은 별도 `sandbox-child-v1` 패치로 기존 부모 이력을 보존하며 `sandbox-<migration_id>` 자식을 호출한다. 자식과 부모의 취소는 정리 Activity를 실행한다. 검토가 필요한 경우 정리를 완료한 뒤 `NEEDS_REVIEW`에서 Signal을 기다린다. 골격의 검토 Signal은 검토 종료만 나타내며 통과나 운영 승인으로 취급하지 않는다. `PASSED` 이외에는 부모가 다음 scaffold 단계로 진행하지 않는다. 빌드·판정·수정·정리는 무해한 mock이며 실제 Sandbox 증거가 아니다.
 - 02의 Temporal 경계는 기존 기본 Data Converter를 유지하고 Activity의 JSON 호환 `dict`·참조를 주고받는다. Pydantic 모델은 Activity 등 경계에서 `model_validate`로 검사하고 `model_dump(mode="json")`으로 직렬화한다. Workflow에는 대용량 결과나 비밀값을 넣지 않고 참조·작은 메타데이터만 전달한다. 02의 테스트는 실제 기본 Converter와 Workflow·Activity 경계에서 fixture 왕복 및 잘못된 입력 거절을 확인한다. 공유 API Client의 Converter는 변경하지 않는다.
+- 분석 Activity 통합(Ticket 19): `AnalysisWorkflow.run`은 문자열이면 02의 scaffold 경로, `AnalysisInput` dict이면 실제 경로를 탄다(부모가 아직 문자열을 넘기므로 기존 흐름과 이력은 그대로). 실제 경로는 스캔 3종(코드·매니페스트·AWS)을 병렬로 돌리고 `build_requirements`가 코드·매니페스트·AWS 결과로 요구사항과 통신 의도(`scan_network` 역할 포함)를 만든 뒤 사전 점검 → 매핑 → 근거 확인 → 검토 게이트로 이어진다. 스캔 원본·요구사항 바이트·매핑 행·보고서는 해시 이름 로컬 저장소(`ArtifactStore`, D-02)에 두고 Activity 사이에는 참조만 넘긴다. 분석 Activity는 로컬 작업 공간 때문에 한 Worker 프로세스에서 돈다. 설정 `ANALYSIS_ARTIFACT_STORE_DIR`과 `ANALYSIS_WORKSPACE_ROOT`가 모두 있을 때만 실제 Activity를 등록한다.
 - Workflow에는 참조와 작은 메타데이터만 둔다. 스캔 원본·렌더 결과·테스트 보고서·테스트 묶음은 S3에 `<sha256>` 이름으로 저장하고 참조로 넘긴다.
 - Planning은 앞 단계를 다시 실행하지 않는다. 최상위 Workflow가 결과 참조를 모아 한 번에 넘기고, Planning이 저장소에서 내용을 읽어 대조한다.
 
 ### 2.1 소스 확보 (AV-002)
 
-1. 개발 중: 토큰 클론. 이후: GitHub App(해당 저장소 읽기, 짧은 수명 토큰).
+1. 공개 GitHub 저장소를 고른 데모 경로는 기존 `cmp_scanners.source.fetch_source(..., token=None)`를 재사용한다. 비공개 저장소용 토큰 클론·GitHub App은 후속 범위다. 웹은 소스 파일 대신 저장소 ID·`owner/repo`·요청 SHA를 보내고, API는 공개 여부·ID·커밋을 확인한다. 현재 API와 `fetch_source` Activity 사이의 연결은 [18](../../tickets/analysis-verification/18-public-github-source.md)에서 담당자와 입력 계약을 맞춘 뒤 구현한다.
 2. 운영 커밋: EKS의 실행 이미지 → ECR 이미지 설정의 OCI 라벨에서 커밋. 실패 시 사용자 지정 커밋 + `commit_verified=false`.
 3. 작업 공간: Worker의 격리 디렉터리 `<workdir>/<migration_id>/<commit>`. 원본(빌드용)과 마스킹본(LLM용)을 분리 보관한다.
 4. `.env`는 분석 단계에서 이름만 파싱한다. 값은 Sandbox 워커가 Secret을 만들 때만 읽는다(§2.6).
@@ -182,6 +183,7 @@ record_review ──> ReviewRecord(불변 저장, analysis_ref 버전에 묶음)
 - Workflow는 Signal을 기다리며 Query로 "검토 대기 중"과 검토할 항목을 보여 준다. 자동 승인은 없다.
 - Signal이 다른 분석 버전(`analysis_ref`)을 가리키면 거절한다. 확정·승인 키는 해당 버전의 행 ID이며, Sandbox 루프에서 매핑이 바뀌면 바뀐 행만 다시 승인받는다(`publish_final_report` 전에 확인).
 - 데모 시간을 위해 화면 없이도 진행할 수 있게, 같은 Signal을 CLI 스크립트로 보낼 수 있게 한다.
+- 구현 메모: Signal은 호출자에게 오류를 돌려주지 못하므로 거절한 Signal은 무시하고 거절 기록(코드만, 내용 없음)을 Query의 `rejections`에 남긴다. `BLOCK`이면 부모 공유 파일을 바꾸지 않고 멈추기 위해 자식이 `ANALYSIS_BLOCKED`로 실패하고(부모가 자식 실패를 전파), 사유·대안은 종료 후에도 Query로 조회한다. 상태 기계는 `cmp_worker.review_gate.ReviewGate`, 전송은 `cmp_worker.review_client`(Query 후 Signal)와 `scripts/review_signal.py`다.
 
 ### 2.4 소스 묶음 (AV-009)
 
@@ -282,7 +284,7 @@ NetworkPolicy(Sandbox 워커 생성):
 
 테스트:
 - 테스트 정의: YAML 시나리오(`request` → `expect`) + 필요 시 Python 검사. 각 테스트에 `READ_ONLY` / `WRITES_DATA`, 외부 부수효과 여부를 표시한다. 외부 부수효과가 있는 테스트는 기본 제외.
-- 묶음: 정의 + 메타데이터를 tar.gz로 묶어 `s3://<버킷>/<migration_id>/tests/<sha256>.tar.gz`. 이 SHA-256이 `test_suite_ref`이자 고정 해시다.
+- 묶음: 정의 + 메타데이터를 tar.gz로 묶어 D-02의 해시 이름 저장소(`ArtifactStore`, 후속에 `s3://<버킷>/<migration_id>/tests/<sha256>.tar.gz`). 이 SHA-256이 `test_suite_ref`이자 고정 해시다.
 - `run_suite(suite_ref, base_url, auth_ref, include=READ_ONLY|ALL)`: 실행 전에 해시를 확인하고 결과를 구조화해 반환한다. Production에서는 민서님 쪽이 이 함수를 호출한다.
 - 표준 테스트(첫 사이클): 헬스체크, 앱 API로 DB 쓰기 → 읽기 → 내용 일치, 재시작 후 데이터 유지(PVC).
 - AI 테스트 검증(`validate_tests`):
@@ -519,8 +521,8 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 
 | 요구사항 | 설계 위치 | 티켓 |
 | --- | --- | --- |
-| AV-001 | §1, §3 | 01, 02 |
-| AV-002 | §2.1 | 03 |
+| AV-001 | §1, §3 | 01, 02, 18 |
+| AV-002 | §2.1 | 03, 18 |
 | AV-003 | §2.2, §2.10 | 05, 17 |
 | AV-004 | §2.2 | 04 |
 | AV-005 | §2.2 | 06 |

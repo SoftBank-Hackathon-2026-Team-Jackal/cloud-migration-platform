@@ -24,7 +24,7 @@
 
 ## 2. 적용 범위와 전제
 
-- **원본:** AWS EKS의 데모 앱. Deployment·Service·Ingress(ALB)·ConfigMap·Secret·PVC, PostgreSQL 16(클러스터 내 Pod 가정, RDS 여부는 소울 확인), VPC·Subnet·Route Table·Security Group.
+- **원본:** AWS EKS의 데모 앱. Deployment·Service·Ingress(ALB)·ConfigMap·Secret·PVC, PostgreSQL 16(클러스터 내 Pod. 첫 사이클은 RDS를 쓰지 않고 Pod로 한다고 결정, 2026-11-05), VPC·Subnet·Route Table·Security Group.
 - **대상:** AWS EKS, GCP GKE, 온프레미스 K3s(P-02). 대상 선택은 **분석 시작 전에** 받는다. 선택에는 Provider와 **capabilities**(CPU 아키텍처, 사용 가능한 StorageClass, 이미지 접근 여부 등 실제 제약)가 들어 있다. 이름 붙은 Profile은 선택 기본값일 뿐 필수가 아니다.
 - **첫 사이클 우선:** 컨테이너 실행, PostgreSQL, 환경변수, 네트워크, Ingress, 볼륨, Pod 신원. 리소스 종류는 `APPLICATION`·`POSTGRESQL`만 지원하고 나머지는 거절된다(공통 모듈 기준).
 - **첫 사이클 제외:** S3 의존 코드 수정(사이클 완성 직후 고도화). S3는 원본에 남겨 두고 쓰는 서비스로 취급한다. 대응 없음 등급 서비스(DynamoDB 고유 기능, Step Functions, Lambda 중심, Kinesis)는 차단 사유로만 표시.
@@ -78,7 +78,7 @@
 
 #### AV-001 — 분석 요청 수신
 
-저장소·앱 식별자·`.env` 참조·원본 접근 참조·대상 선택을 받아 검증한다.
+저장소·앱 식별자·`.env` 참조·필요한 원본 접근 참조·대상 선택을 받아 검증한다. 공개 GitHub 소스에는 소스 인증 참조를 요구하지 않는다.
 
 - 대상 선택(Provider·capabilities)이 없으면 분석을 시작하지 않는다.
 - 자격 증명과 `.env`는 참조로만 받고 원문을 Workflow 입력·이력에 싣지 않는다.
@@ -86,6 +86,7 @@
 
 #### AV-002 — 소스 확보와 운영 커밋 고정
 
+- 공개 GitHub 저장소를 선택한 데모 입력은 저장소 식별자·요청 커밋으로 전달한다. 분석 워커가 토큰 없이 소스를 확보하며, 소스 파일이나 GitHub 로그인 토큰을 Workflow 입력에 싣지 않는다.
 - 운영 중인 이미지 라벨(`org.opencontainers.image.revision`)에서 커밋을 찾아 고정한다. 찾지 못하면 사용자 지정 커밋을 쓰고 결과에 "운영 버전 일치 미확인"을 남긴다.
 - 격리된 작업 공간에 클론한다. 플랫폼 서비스 서버에서 사용자 코드를 빌드·실행하지 않는다.
 - 같은 커밋 재요청은 기존 작업 공간을 재사용한다.
@@ -279,7 +280,7 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 
 ## 8. 확인 필요
 
-- 원본 PostgreSQL이 RDS인지 Pod인지, 데모 앱 언어·API 목록·LLM 사용 여부·Dockerfile/매니페스트 위치 (소울)
+- (결정됨: 첫 사이클은 클러스터 안 Pod) 데모 앱 언어·API 목록·LLM 사용 여부·Dockerfile/매니페스트 위치 (소울)
 - DB 이미지를 선택하는 "대상 구성 단계"의 소유자와, 그 결과를 Sandbox·Production이 같이 쓰는 방식 (민서, D-11)
 - Build 호출을 어느 Worker 프로세스에서 하는지(권한 배치)와 전체 시간 상한 (민서, D-12)
 - Build 실패 상세(`BUILD_FAILED`/`PUSH_FAILED` 분리, 정제된 출력 일부) — 급하지 않음 (민서, D-04)

@@ -102,6 +102,11 @@ spec:
                 secretKeyRef:
                   name: {{ .source.name | quote }}
                   key: {{ .source.key | quote }}
+              {{- else if eq .source.field "connection_url_secret_ref" }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "database.url_secret_name is required" $.Values.database.url_secret_name | quote }}
+                  key: "url"
               {{- else if eq .source.field "secret_ref" }}
               valueFrom:
                 secretKeyRef:

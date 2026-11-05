@@ -193,13 +193,14 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
             resource_type, name = _RESOURCE_TYPES[kind]
             key = resource_type, _ACTIONS[action], name
             counts[key] = counts.get(key, 0) + 1
-    required = {
-        ("NETWORK", "CREATE", "VPC"),
-        ("CLUSTER", "CREATE", "EKS 클러스터"),
-        ("NODE", "CREATE", "관리형 노드 그룹"),
-    }
-    if not required.issubset(counts):
+    # Ticket 14 F9: a recovery Revision over this environment's own State may keep resources
+    # already created by an earlier (possibly lost) Apply. They must be unchanged (no-op); any
+    # update/delete is still rejected above, and the full topology must still be present.
+    present = {(kind, name) for kind, action, name in counts if action in ("CREATE", "NO_CHANGE")}
+    required = {("NETWORK", "VPC"), ("CLUSTER", "EKS 클러스터"), ("NODE", "관리형 노드 그룹")}
+    if not required.issubset(present):
         _reject("INCOMPLETE_NEW_PLAN", "terraform_plan", "신규 VPC·EKS·Node 계획이 필요합니다.")
+    continuation = any(action == "NO_CHANGE" for _, action, _ in counts)
     subnet_summary = "; ".join(
         f"{'공개' if subnet.role == 'PUBLIC' else '비공개'} {subnet.zone} {subnet.cidr}"
         for subnet in request.subnets
@@ -249,6 +250,17 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
             message="단일 NAT 게이트웨이에 비공개 서브넷 아웃바운드가 의존합니다.",
         ),
     ]
+    if continuation:
+        warnings.append(
+            ValidationIssue(
+                code="RECOVERY_CONTINUATION",
+                path="terraform_plan",
+                message=(
+                    "이 환경의 State에 이전 Apply가 만든 자원이 있어 변경 없이 유지합니다. "
+                    "부족한 자원만 생성합니다(14 F9)."
+                ),
+            )
+        )
     return Preview(
         contract_version="1",
         manifest_digest=digest,

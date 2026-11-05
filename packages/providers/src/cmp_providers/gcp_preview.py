@@ -150,15 +150,20 @@ def terraform_variables(request: GcpPlanInput) -> dict:
 def preview_from_plan(plan_json: dict, request: GcpPlanInput, digest: str) -> Preview:
     """Only fixed resource types and reviewed request fields enter the Preview."""
     counts: dict[str, int] = {}
+    actions: dict[str, str] = {}
     for change in plan_json.get("resource_changes", []):
         kind = change.get("type")
         if change.get("mode") != "managed" or kind not in _RESOURCE_TYPES:
             _reject("UNREVIEWED_PLAN", "terraform_plan", "Plan contains an unexpected resource.")
-        if change.get("change", {}).get("actions") != ["create"]:
+        # Ticket 14 F9: resources kept unchanged from this environment's own State are allowed
+        # in a recovery Revision; anything else than create/no-op is still rejected.
+        action = change.get("change", {}).get("actions")
+        if action not in (["create"], ["no-op"]):
             _reject(
                 "NON_CREATE_PLAN", "terraform_plan", "New-network Plan must only create resources."
             )
         counts[kind] = counts.get(kind, 0) + 1
+        actions[kind] = "CREATE" if action == ["create"] else "NO_CHANGE"
     if set(counts) != set(_RESOURCE_TYPES) or any(count != 1 for count in counts.values()):
         _reject(
             "INCOMPLETE_NEW_PLAN", "terraform_plan", "Expected one of each reviewed GCP resource."
@@ -185,7 +190,7 @@ def preview_from_plan(plan_json: dict, request: GcpPlanInput, digest: str) -> Pr
     changes = [
         ResourceChange(
             resource_type=_RESOURCE_TYPES[kind][0],
-            action="CREATE",
+            action=actions[kind],
             name=_RESOURCE_TYPES[kind][1],
             quantity=count,
             size=display.get(_RESOURCE_TYPES[kind][1]),
@@ -219,7 +224,18 @@ def preview_from_plan(plan_json: dict, request: GcpPlanInput, digest: str) -> Pr
                 path="external_access",
                 message="Ingress, TLS, workload image pull and storage are outside this Plan.",
             ),
-        ],
+        ]
+        + (
+            [
+                ValidationIssue(
+                    code="RECOVERY_CONTINUATION",
+                    path="terraform_plan",
+                    message="Resources from an earlier Apply in this State stay unchanged (14 F9).",
+                )
+            ]
+            if "NO_CHANGE" in actions.values()
+            else []
+        ),
     )
 
 

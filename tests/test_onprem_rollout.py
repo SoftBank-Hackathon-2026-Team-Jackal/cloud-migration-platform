@@ -29,16 +29,17 @@ from onprem_rollout_support import (
 )
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from temporalio.testing import ActivityEnvironment
 
 
 @pytest.fixture
-def db():
+def db(tmp_path):
+    # Activities use the DB from worker threads while the fake Agent polls on the event loop.
+    # A file DB gives every session its own connection; a shared in-memory StaticPool
+    # connection lets one session's commit/rollback cut into another thread's transaction.
     engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        f"sqlite+pysqlite:///{tmp_path / 'business.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
     )
     Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine)
@@ -151,6 +152,15 @@ async def test_offline_agent_keeps_job_then_reconnect_reports_ready(db, store, s
     assert second["status"] == "SUCCEEDED" and second["code"] == "READY"
     assert second["resource_refs"]["database_endpoint"] == "demo-db.cmp-prod-demo.svc:5432"
     assert second["resource_refs"]["application_endpoint"] == "demo-app.cmp-prod-demo.svc:8080"
+    # Ticket 13 R4: standard handoff keys from the job and the approved Values bytes.
+    refs = second["resource_refs"]
+    assert (refs["agent_id"], refs["cluster_uid"]) == ("agent-a", "cluster-a")
+    assert refs["db_host"] == "demo-db.cmp-prod-demo.svc" and refs["db_port"] == "5432"
+    assert refs["db_secret_ref"] == "demo-db-auth/" + payload.database.password_secret.key
+    assert refs["app_internal_endpoint"] == "http://demo-app.cmp-prod-demo.svc:8080"
+    assert refs["app_health_path"] == payload.application.health_path
+    assert {"db_name", "db_user", "db_version", "db_storage_size_gib", "app_replicas"} <= set(refs)
+    assert all(isinstance(v, str) for v in refs.values())
     assert len(jobs(db)) == 1  # retry reused the same Revision job
     with db() as session:
         assert rollout_status(session, "plan-k3s", 1)["state"] == "READY"

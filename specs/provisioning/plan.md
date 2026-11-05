@@ -210,7 +210,7 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 ### 12A 온프레미스 Preview (#41)
 
-ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.
+ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이트에서 만든다(`cmp_providers.onprem_preview`). 18(#98)이 이 함수를 운영 Plan 게시 경로에서 호출한다. AWS/GCP와 같은 공통 `Preview`·승인 계약을 쓰며, 클러스터 조회 없이 Agent가 실행할 DB·앱 변경과 기본값을 보여 준다. 기존 Release 여부는 12의 Agent가 실행 시 확인한다.
 
 ## 11. ProvisioningResult와 후속 단계 (`PROV-018`~`020`)
 
@@ -219,6 +219,8 @@ ON_PREM은 Terraform Plan이 없으므로 Preview를 승인 대상 Values 바이
 검증은 세 층으로 기록한다. **Infrastructure:** 클러스터 접근, Node Ready, 네트워크 경로, Controller/CSI, StorageClass/PVC Bound, Ingress/LB 준비. **Workload:** Deployment·StatefulSet·Pod Ready, 이미지 Pull, Service, ConfigMap/Secret 참조와 DB 접속. **Application:** 헬스·필요한 기능 테스트와 환경변수 매핑. 각 항목에 상태·대상 리소스·오류 코드·증거 참조를 둔다. 데이터 이전 전에는 DB 데이터가 없을 수 있으므로 인프라·서비스 준비용 검사와 데이터 이전 후 기능·정합성 검사를 별도 단계로 둔다. 필수 준비 검사 실패 시 `READY` 금지다. Sandbox 테스트 정의를 `target_endpoint`, 인증 참조, 테스트 데이터/정리 정책을 받는 실행 인터페이스로 재사용할 수 있으나 Production에서 데이터 변경 테스트를 자동 실행할지는 결정이 필요하다.
 
 Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참조·DB 준비 상태를, Traffic Migration에는 앱 Endpoint·Ingress/LB 주소·헬스 경로·전환 준비 상태를 넘긴다. 대상 DB가 준비됐다는 사실이 데이터 복사·CDC 완료를 의미하지 않는다. 외부 라우팅 변경·Envoy 가중치·DNS Cutover는 Traffic Migration에서 수행한다. Workflow는 Provisioning 결과를 참조해 다음 단계를 시작하지만 전체 Migration `COMPLETED`로 표시하지 않는다.
+
+**13 구현 (#53):** 위 제안 필드를 `ProvisioningResult` v1로 확정했다. 승인 실행 완료 시 업무 DB `provisioning_results`에 불변 저장하고, Workflow 이력에는 `plan_id`·`revision`·`status`만 남긴다. Data/Traffic Worker는 `get_migration_handoff` Activity로 자기 섹션과 진행 가능 여부를 읽고, 사용자는 읽기 전용 요약 API로 상태·앱 외부 주소·검사 결과만 본다. 검사 목록은 Provider별 고정 검사 순서와 첫 실패 코드에서 추론하며, 데이터 변경 기능 테스트는 항상 `NOT_RUN`(데이터 이전 후 실행)이다. 상세 결정은 [티켓 13](../../tickets/provisioning/13-result-handoff.md)에 있다.
 
 ## 12. Failure, retry, and rollback behavior
 
@@ -235,6 +237,8 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 | PostgreSQL PVC Pending | StorageClass·CSI·용량·Pod 이벤트 확인, READY 금지 |
 | Agent 연결 끊김 | 작업 ID·Agent 상태 유지, 재연결 후 조회. 중복 제출 억제 |
 | 헬스·DB·외부 접근 실패 | 실패 검사와 실제 리소스 상태 반환, Data/Traffic 진행 차단 |
+
+**14 구현 (#56):** 복구는 같은 Revision 재실행이 아니라 실제 상태 확인 후 새 Revision 승인으로만 한다. 인프라 복구 Plan은 같은 환경 State의 기존 자원을 NO_CHANGE로 유지하고 부족한 자원만 만든다(`RECOVERY_CONTINUATION`). Workflow 취소는 `UNKNOWN`/`EXECUTION_CANCELLED`로 기록하며 삭제로 표시하지 않는다. 결정 F1~F9와 실측 증거는 [티켓 14](../../tickets/provisioning/14-recovery-integration.md)에 있다.
 
 Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하지 않는다. 각 실행 단계는 작업 식별자·현재 대상 상태를 확인하고 같은 요청의 중복 실행을 억제한다. Production 취소·부분 실패의 자동 자원 정리 범위는 미정이며, 데이터가 들어간 PVC와 공유 네트워크는 특히 보존 여부를 먼저 판단한다. 트래픽 복귀는 Traffic Migration, DB 복구는 Data Migration의 설계 영역이다.
 
@@ -298,3 +302,7 @@ Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다.
 ### 빌드·Sandbox 순서 변경 (ADR-003, B-01)
 
 앞선 단계의 `Sandbox → 최종 Build` 설명은 [ADR-003](../../docs/decisions/ADR-003.md)으로 대체한다. 계획 입력은 Sandbox가 실제 실행한 Build 참조·이미지 Digest·플랫폼/설정 범위와 Build 출처를 요구하며 통과 후 재빌드하지 않는다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 S3→ECR 공통 빌더를 제공하며 현재 내부 v1 모델·테스트의 순서 전환은 후속 통합 작업이다.
+
+### Ticket 18 Plan 생성·게시와 Preview 조회 (#98)
+
+`cmp_worker.plan_publish.PlanPublisher`가 Migration별 Planning 입력 등록(`cmp_api.plan_inputs`)을 읽어 01A 검증 → 대상별 Plan·Preview → `publish_plan_revision`(입력 Digest 함께 저장)을 수행한다. ON_PREM은 Agent 등록·폐기·cluster UID를 확인한 뒤 04B 렌더·Chart 패키징(`cmp_providers.chart_package`)·12A Preview로 `WORKLOADS` Revision을, AWS/GCP는 05·06 저장 Plan으로 `INFRASTRUCTURE` Revision을 만든다. 같은 입력의 재실행은 최신 Revision을 재사용한다. 승인자는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/preview` 또는 `GET /provisioning/migrations/{migration_id}/plan`으로 Preview와 승인용 Digest를 본다. Temporal 연결은 §10과 [temporal-flow](../../docs/architecture/temporal-flow.md)를 따른다. AWS/GCP 워크로드 Plan 게시(09·11), `.env` 값 주입(20), S3 ArtifactStore(21)는 후속이다. 결정은 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05).

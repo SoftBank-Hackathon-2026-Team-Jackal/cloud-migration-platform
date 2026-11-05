@@ -127,6 +127,8 @@ class DatabaseOutputsV2(Contract):
     name: Text
     username: Text
     password_secret_ref: SecretRefV2
+    # Secret the deploying actor creates with the connection URL (ticket 19, U2/U4).
+    connection_url_secret_ref: SecretRefV2
 
 
 class RenderedDatabaseV2(Contract):

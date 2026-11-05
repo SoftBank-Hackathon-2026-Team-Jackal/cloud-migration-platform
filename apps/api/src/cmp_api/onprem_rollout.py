@@ -16,12 +16,14 @@ from cmp_contracts.onprem_rollout import (
     ROLLOUT_MODE,
     ProductionRolloutJob,
     RolloutApplication,
+    RolloutConnectionUrl,
     RolloutDatabase,
     rollout_job_id,
 )
 from cmp_contracts.plan import PlanManifest
 from cmp_contracts.shared_deployment_v2 import ApplicationValuesV2, SecretRefV2
 from cmp_providers.artifacts import sha256_bytes, verify_artifact_bytes
+from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
 from cmp_providers.plans import manifest_digest
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -163,12 +165,25 @@ def build_rollout_job(
     agent = session.get(RegisteredAgent, target.agent_id)
     if agent is None or agent.cluster_uid != target.cluster_ref.id:
         raise RolloutError("AGENT_TARGET_MISMATCH")
-    secret_refs = {
-        (env.source.name, env.source.key)
-        for env in application.env
-        if env.source.kind == "SECRET"
-        and env.source.name != database.database.secret_name  # DB Secret is prepared by Agent
+    url_secret = (connection_url_secret_name(database.release_name), URL_SECRET_KEY)
+    secret_sources = {
+        (env.source.name, env.source.key) for env in application.env if env.source.kind == "SECRET"
     }
+    secret_refs = {
+        ref
+        for ref in secret_sources
+        # DB password and URL Secrets are prepared by the Agent; the rest must already exist.
+        if ref[0] != database.database.secret_name and ref != url_secret
+    }
+    connection_url = (
+        RolloutConnectionUrl(
+            secret=SecretRefV2(name=url_secret[0], key=url_secret[1]),
+            database=database.database.name,
+            username=database.database.username,
+        )
+        if url_secret in secret_sources
+        else None
+    )
     job = ProductionRolloutJob(
         mode=ROLLOUT_MODE,
         job_id=rollout_job_id(manifest.plan.plan_id, manifest.plan.revision),
@@ -188,6 +203,7 @@ def build_rollout_job(
             password_secret=SecretRefV2(
                 name=database.database.secret_name, key=database.database.secret_key
             ),
+            connection_url=connection_url,
         ),
         application=RolloutApplication(
             release=application.release_name,
@@ -292,7 +308,39 @@ def resource_refs(job: ProductionRolloutJob, *, ready: bool) -> dict[str, str]:
             "database_secret": f"{job.database.password_secret.name}/"
             f"{job.database.password_secret.key}",
         }
+        # Ticket 13 R4: standard handoff keys (legacy keys above stay for ticket 12 readers).
+        refs |= {
+            "agent_id": job.agent_id,
+            "cluster_uid": job.cluster_uid,
+            "storage_class": job.storage_class,
+            "db_release": job.database.release,
+            "db_host": f"{job.database.release}.{ns}.svc",
+            "db_port": "5432",
+            "db_secret_ref": refs["database_secret"],
+            "app_release": job.application.release,
+            "app_port": str(job.application.port),
+            "app_health_path": job.application.health_path,
+            "app_internal_endpoint": f"http://{refs['application_endpoint']}",
+        }
     return refs
+
+
+def values_refs(session: Session, store: "ArtifactStore", plan_id: str, revision: int) -> dict:
+    """Ticket 13 R4: non-secret DB identity and replica count from the approved Values bytes."""
+    row = session.get(PlanRevision, (plan_id, revision))
+    if row is None:
+        return {}
+    try:
+        database, application = _values(store, PlanManifest.model_validate(row.manifest))
+    except RolloutError:
+        return {}
+    return {
+        "db_name": database.database.name,
+        "db_user": database.database.username,
+        "db_version": database.database.version,
+        "db_storage_size_gib": str(database.storage.size_gib),
+        "app_replicas": str(application.application.replicas),
+    }
 
 
 def outcome(job: AgentJob) -> dict | None:

@@ -1,0 +1,17 @@
+# Public HTTPS edge for the on-premises Agent (ticket 21, #100).
+# Certificate: ACME TLS-ALPN-01 on 443 only (no port 80 listener, no DNS API, no Route 53).
+{
+	auto_https disable_redirects
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$CMP_PUBLIC_HOST} {
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+	import agent-routes.caddy
+}

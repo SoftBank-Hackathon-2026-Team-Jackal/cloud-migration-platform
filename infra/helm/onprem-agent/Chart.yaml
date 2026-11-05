@@ -1,0 +1,7 @@
+apiVersion: v2
+name: onprem-agent
+description: Cloud Migration Platform on-premises Agent (outbound polling, approved K3s rollouts)
+type: application
+# Release workflow (agent-v*) overwrites version/appVersion and pins image.digest.
+version: 0.0.0-dev
+appVersion: "0.0.0-dev"

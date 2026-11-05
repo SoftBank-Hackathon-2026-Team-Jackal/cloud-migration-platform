@@ -1,6 +1,6 @@
 # Tasks: Provisioning
 
-이 파일은 Provisioning 구현 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 내부 v1 입력 계약·로컬 검증·대상별 구성 예시를 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증을 완료했다. 04A는 PR #21로 main에 반영됐다. B-01(#17)의 공통 빌드 모듈은 PR #18로 main에 반영됐고 Workflow/Worker 연결은 후속 통합 범위다. 01A(#1)는 최신 v2 입력/Planning 검증과 로컬 검사를 완료했다. 04B(#23)는 v2 다중 리소스 공통 Chart 렌더를 완료했다. 05는 실제 AWS Provider 저장 Plan·민감정보 제거 Preview를 로컬 검증 경로에서 완료했고 운영 승인은 별도 선행 조건이다. 06은 ADC·프로젝트를 확인한 실제 GCP Provider 저장 Plan·Preview를 로컬 State에서 검증해 완료했고 운영 승인은 별도 선행 조건이다. 07(#34)은 테스트 DB/Temporal·가짜 executor 기준으로 Plan Revision 승인·실행 차단을 완료했고 실제 클라우드 승인은 08/10의 선행 조건이다. 08(#2)은 승인된 S3 State 저장 Plan을 실제 AWS에 Apply해 EKS `cmp-target-aws`를 준비했다(09를 위해 유지). 09(#37)는 그 EKS에서 DB·앱·ALB 배포와 READY 판정을 실제로 검증했다. 10(#2)은 승인된 S3 State 저장 Plan을 실제 GCP에 Apply해 GKE `cmp-target-gke`를 준비했다(11을 위해 유지, 노드 SA 로그·지표 IAM 바인딩은 후속). 11(#43)은 그 GKE에서 DB·앱·GCE Ingress 배포와 READY 판정을 실제로 검증했다. 12(#36)는 승인된 ON_PREM Plan의 Agent 운영 배포·READY 판정을 격리 k3d로 검증해 완료했고, 실행 dispatch 연결은 08 소유 계약을 따른다. 사용자 지시에 따라 독립 티켓은 병렬 채팅에서 진행할 수 있다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
+이 파일은 Provisioning 구현 티켓 **초안 인덱스**다. 각 티켓의 상세 수용 기준·Test Seam·검증 방법은 연결된 파일에 있다. 01은 사용자 요청(2026-11-03, #5)에 따라 내부 v1 입력 계약·로컬 검증·대상별 구성 예시를 완료했다. CP-01은 PR #10으로 main에 반영됐다. 02는 PR #12로 main에 반영됐다. 03은 PR #14로 main에 반영됐다. 04는 사용자 승인 후 실제 격리 K3s 검증을 완료했다. 04A는 PR #21로 main에 반영됐다. B-01(#17)의 공통 빌드 모듈은 PR #18로 main에 반영됐고 Workflow/Worker 연결은 후속 통합 범위다. 01A(#1)는 최신 v2 입력/Planning 검증과 로컬 검사를 완료했다. 04B(#23)는 v2 다중 리소스 공통 Chart 렌더를 완료했다. 05는 실제 AWS Provider 저장 Plan·민감정보 제거 Preview를 로컬 검증 경로에서 완료했고 운영 승인은 별도 선행 조건이다. 06은 ADC·프로젝트를 확인한 실제 GCP Provider 저장 Plan·Preview를 로컬 State에서 검증해 완료했고 운영 승인은 별도 선행 조건이다. 07(#34)은 테스트 DB/Temporal·가짜 executor 기준으로 Plan Revision 승인·실행 차단을 완료했고 실제 클라우드 승인은 08/10의 선행 조건이다. 08(#2)은 승인된 S3 State 저장 Plan을 실제 AWS에 Apply해 EKS `cmp-target-aws`를 준비했다(09를 위해 유지). 09(#37)는 그 EKS에서 DB·앱·ALB 배포와 READY 판정을 실제로 검증했다. 10(#2)은 승인된 S3 State 저장 Plan을 실제 GCP에 Apply해 GKE `cmp-target-gke`를 준비했다(11을 위해 유지, 노드 SA 로그·지표 IAM 바인딩은 후속). 11(#43)은 그 GKE에서 DB·앱·GCE Ingress 배포와 READY 판정을 실제로 검증했다. 13(#53)은 세 Provider의 실행 결과를 공통 `ProvisioningResult`로 정규화해 저장하고 Data/Traffic Migration 인계·사용자 요약 API를 제공한다. 14(#56)는 취소·Worker 종료·응답 유실·Agent 재연결을 실제 EKS·GKE·k3d에서 주입해 새 Revision 복구와 중복 방지를 확인했다. 12(#36)는 승인된 ON_PREM Plan의 Agent 운영 배포·READY 판정을 격리 k3d로 검증해 완료했고, 실행 dispatch 연결은 08 소유 계약을 따른다. 18(#98)은 Planning 입력 등록 → 대상별 Plan·Preview 게시(ON_PREM `WORKLOADS`, AWS/GCP `INFRASTRUCTURE`) → 승인자 Preview 조회 → `MigrationWorkflow` 승인 대기·실행 결과를 SQLite·로컬 ArtifactStore·실제 Helm 패키징·가짜 Terraform·Temporal 테스트 서버로 연결했다(실제 클라우드 Plan·서버 실행은 미검증). 사용자 지시에 따라 독립 티켓은 병렬 채팅에서 진행할 수 있다. 나머지 `DRAFT`는 사용자 검토 전 실제 구현을 시작하지 않는다. 상태는 `DRAFT → TODO → IN_PROGRESS → DONE`을 기본으로 하고, 선행 작업이나 결정이 막히면 `BLOCKED`로 기록한다. 검토 후 구현 전 GitHub Issue를 생성하거나 기존 Issue를 연결하고 아래 번호를 기록한다. `DONE`은 [개발 워크플로](../../docs/engineering/development-workflow.md)의 문서·테스트·리뷰 조건을 모두 충족한 경우에만 사용한다.
 
 | ID·티켓 | 상태 | Blocked by | 관련 요구사항 | GitHub Issue | 완료 |
 | --- | --- | --- | --- | --- | --- |
@@ -23,8 +23,15 @@
 | [11 GCP GKE에 DB·앱 배포 및 연결 확인](../../tickets/provisioning/11-gcp-workloads.md) | DONE | 02, 03, 10 | PROV-010, 011, 012, 013, 018 | [#43](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/43) | ☑ |
 | [12 승인된 K3s Agent 운영 배포](../../tickets/provisioning/12-k3s-approved-rollout.md) | DONE | 04A, 07 | PROV-009, 015, 016, 017, 018 | [#36](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/36) | ☑ |
 | [12A 온프레미스 K3s Plan Preview 생성](../../tickets/provisioning/12a-onprem-preview.md) | DONE | 04B, 07, 12 | PROV-009, 014, 015, 021 | [#41](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/41) | ☑ |
-| [13 실제 검증 결과와 Migration 인계](../../tickets/provisioning/13-result-handoff.md) | DRAFT | 12 | PROV-018, 019, 020, 021 | 미생성 | ☐ |
-| [14 실패 복구와 세 대상 통합 검증](../../tickets/provisioning/14-recovery-integration.md) | DRAFT | 08, 09, 10, 11, 12, 13 | PROV-015, 016, 017, 018, 019, 021 | 미생성 | ☐ |
+| [13 실제 검증 결과와 Migration 인계](../../tickets/provisioning/13-result-handoff.md) | DONE | 12 | PROV-018, 019, 020, 021 | [#53](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/53) | ☑ |
+| [14 실패 복구와 세 대상 통합 검증](../../tickets/provisioning/14-recovery-integration.md) | DONE | 08, 09, 10, 11, 12, 13 | PROV-015, 016, 017, 018, 019, 021 | [#56](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/56) | ☑ |
+| [15 온프레미스 Agent 상시 실행과 설치 패키지](../../tickets/provisioning/15-agent-runtime-install.md) | DONE | 04A, 12 | PROV-009, 016, 017, 021 | [#69](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/69) | ☑ |
+| [16 터널 설정 교환 API와 결과 계약](../../tickets/provisioning/16-tunnel-config-exchange.md) | IN_PROGRESS (답변 대기 P1·P2 포함) | 13, 15 (중계 서버 조회 형식은 Traffic 확인) | PROV-009, 019, 020, 021 | [#70](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/70) | ☐ |
+| [17 Agent WireGuard 연결과 터널 노출 검증](../../tickets/provisioning/17-agent-wireguard-tunnel.md) | TODO | 15, 16 | PROV-009, 013, 017, 018, 021 | [#71](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/71) | ☐ |
+| [18 Plan 생성·게시와 Preview 조회 연결 (세 대상)](../../tickets/provisioning/18-onprem-plan-publish.md) | DONE | 01A, 04B, 05, 06, 07, 12, 12A, 15 | PROV-004, 005, 007, 008, 009, 014, 015, 021 | [#98](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/98) | ☑ |
+| [19 DB 연결 URL Secret 출력 (D-16)](../../tickets/provisioning/19-db-connection-url.md) | DONE | 01A, 04B, 09, 11, 12 | PROV-004, 005, 010, 012, 021 | [#79](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/79) | ☑ |
+| [20 업로드 .env를 대상 ConfigMap·Secret으로 생성](../../tickets/provisioning/20-env-config-injection.md) | TODO | 09, 11, 12, 18, 19 | PROV-004, 012, 016, 021 | [#99](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/99) | ☐ |
+| [21 데모 플랫폼에서 Provisioning 실행 환경 구성](../../tickets/provisioning/21-demo-provisioning-runtime.md) | IN_PROGRESS (로컬 완료, 서버 반영 승인·18 후 스모크 대기) | 15 | PROV-008, 009, 015, 016, 021 | [#100](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/100) | ☐ |
 
 ## 선행 관계
 
@@ -38,6 +45,8 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 01 + B-01 → 01A → 04B → 09 / 11 / 12
 01A → 05 / 06 / 07; 실제 Worker/Temporal 인계는 별도 통합 작업
 08, 09, 10, 11, 12, 13 → 14
+04A, 12 → 15 → 16 → 17   (외부 연결 가능한 온프레미스 Agent)
+12A, 15 → 18              (Agent가 실행할 ON_PREM Plan 게시)
 ```
 
 화살표는 주요 경로를 요약한다. 정확한 모든 `Blocked by`는 위 표와 각 티켓에 있다. `02`·`05`·`06`·`07`은 `CP-01`이 main에 반영된 뒤 의존성상 독립이지만 현재는 순차로 진행하며, AWS/GCP의 배포 경로는 공통 Helm 기반과 해당 인프라 준비가 끝나면 독립 진행할 수 있다. `13`은 K3s 경로로 결과 계약을 먼저 검증한다. AWS/GCP 실제 경로와의 연결은 `14`에서 확인한다.
@@ -48,6 +57,10 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 - Preview/승인 유지, DB 승인 기록+Signal, 범용 Outbox 보류는 ADR-002로 결정했다. 07의 실제 API URL·필드·인증/권한·응답 계약은 담당자와 합의한다. ADR-002는 P0 범위 결정이며 ADR-001 스캐폴드 결정과 충돌하지 않는다.
 - AWS/GCP 기존 네트워크 재사용 P0 제외와 중앙 S3 State+잠금은 결정했다. Node·신규 네트워크 Profile, Backend 실제 설정, 검증 계정/권한, Registry/Secret/TLS, Agent 완료 통지, 실패 후 정리는 관련 티켓의 결정 전제다.
 - 티켓 이력은 유지한다. 요구사항이 바뀌면 영향받는 티켓과 SDD를 함께 갱신하고, 전체 티켓을 다시 생성하지 않는다.
+
+## 온프레미스 외부 연결 (2026-11-05, 15~17)
+
+사용자 결정: 중계 서버안(Route 53 → AWS 중계 서버의 Envoy → WireGuard → 온프레미스 K3s)을 전제로, Provisioning 범위는 외부 연결이 가능한 온프레미스 Agent까지다. 15는 Agent 상시 실행·설치, 16은 Agent·중계 서버 사이 키·설정·상태를 전달하는 플랫폼 API와 ON_PREM 결과 계약(터널 목적지), 17은 Agent 쪽 WireGuard 연결과 터널 주소 노출·검증이다. 중계 서버 내부(Envoy 라우팅·가중치, WireGuard 서버 peer 반영), DNS, 사용자 공인 주소, TLS, 롤백은 Traffic 담당이다. Traffic 담당과 확인할 것: 중계 서버의 Agent 목록 조회 형식, 터널 CIDR·주소 배정, 중계 서버 EC2의 Terraform 생성 주체, UDP 차단 환경 대응. Planning의 Plan 게시 연결(`onprem_preview`·`publish_plan_revision` 운영 호출)은 18(#98)이 세 대상으로 넓혀 구현했다. 웹 Agent 등록 화면은 범위 밖이다.
 
 ## 현재 진행 방식
 

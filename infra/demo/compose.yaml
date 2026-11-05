@@ -55,6 +55,7 @@ services:
     build:
       context: ../..
       dockerfile: infra/demo/Dockerfile
+      target: api
     restart: unless-stopped
     depends_on:
       platform-db:
@@ -65,7 +66,16 @@ services:
       DATABASE_URL: postgresql+psycopg://platform:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD}@platform-db:5432/platform
       TEMPORAL_ADDRESS: temporal:7233
       AGENT_ENROLLMENT_ADMIN_KEY: ${AGENT_ENROLLMENT_ADMIN_KEY:?set AGENT_ENROLLMENT_ADMIN_KEY}
+      APPROVAL_ADMIN_KEY: ${APPROVAL_ADMIN_KEY:?set APPROVAL_ADMIN_KEY}
+      # Shared with the worker at the same paths (ticket 21): digest-named rollout bytes and Plan
+      # Revision directories `<plan_id>-r<revision>/`.
+      ARTIFACT_STORE_DIR: /opt/cmp/artifact-store
+      PROVISIONING_ARTIFACT_ROOT: /opt/cmp/plans
+    volumes:
+      - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
+      - /opt/cmp/data/plans:/opt/cmp/plans
     command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Loopback only; the public edge forwards /agents/* on the internal network.
     ports:
       - "127.0.0.1:8000:8000"
 
@@ -73,12 +83,49 @@ services:
     build:
       context: ../..
       dockerfile: infra/demo/Dockerfile
+      target: worker
     restart: unless-stopped
     depends_on:
+      platform-db:
+        condition: service_healthy
       temporal:
         condition: service_started
     environment:
+      DATABASE_URL: postgresql+psycopg://platform:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD}@platform-db:5432/platform
       TEMPORAL_ADDRESS: temporal:7233
+      ARTIFACT_STORE_DIR: /opt/cmp/artifact-store
+      PROVISIONING_ARTIFACT_ROOT: /opt/cmp/plans
+      # AWS: named profile backed by the EC2 instance role (ensure-secrets.sh); no static keys.
+      AWS_CONFIG_FILE: /run/cmp/aws/config
+      PROVISIONING_AWS_PROFILE: ${PROVISIONING_AWS_PROFILE:-cmp-demo-provisioning}
+      # GCP: operator-provided service-account key, activated by the entrypoint into tmpfs.
+      CMP_GCP_KEY_FILE: /run/cmp/gcp/key.json
+      CMP_GCP_PROJECT: ${CMP_GCP_PROJECT:-}
+      PROVISIONING_GCLOUD_CONFIGURATION: cmp-demo
     volumes:
+      - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
-    command: ["python", "-m", "cmp_worker.workers.run_all"]
+      - /opt/cmp/secrets/aws:/run/cmp/aws:ro
+      - /opt/cmp/secrets/gcp:/run/cmp/gcp:ro
+    tmpfs:
+      - /root/.config/gcloud:mode=0700
+      - /root/.aws:mode=0700
+      - /root/.kube:mode=0700
+
+  # Public HTTPS entry for the on-premises Agent (ticket 21). Opt-in: start.sh starts it only when
+  # CMP_PUBLIC_HOST is set. Only /agents/* is forwarded; everything else answers 404.
+  edge:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    profiles: ["public"]
+    depends_on:
+      - api
+    environment:
+      CMP_PUBLIC_HOST: ${CMP_PUBLIC_HOST:-}
+      CMP_API_UPSTREAM: api:8000
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./agent-routes.caddy:/etc/caddy/agent-routes.caddy:ro
+      - /opt/cmp/data/caddy:/data
+    ports:
+      - "443:443"

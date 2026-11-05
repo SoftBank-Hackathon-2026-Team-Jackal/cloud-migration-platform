@@ -1,7 +1,7 @@
 # Ticket 04 — 매니페스트·클러스터 리소스 스캔
 
 ## 상태
-IN_PROGRESS — 구현 완료, 리뷰 대기, Issue #50
+DONE — PR #54 병합, Issue #50
 
 ## 목적
 k8s 매니페스트에서 앱 실행 요구, 클라우드 의존 항목, 원본 DB 이미지, 변환 못 할 항목을 뽑는다.
@@ -44,6 +44,10 @@ fixture 매니페스트로 클라우드 의존 목록, 실행 요구, 원본 DB 
 - PostgreSQL 탐지는 이미지 이름에 `postgres`가 들어간 경우이며 `exporter`는 제외한다. 별칭 이미지는 놓칠 수 있다.
 - 모르는 어노테이션은 허용 접두사 목록(`kubernetes.io/`, `helm.sh/` 등) 기준이라 목록 밖의 일반 어노테이션이 모두 보고된다.
 
+## 보강 (Issue #75)
+- 실제 원본 매니페스트(`demo-api`)로 돌려 보고 빠진 부분을 보강했다: NetworkPolicy egress(앱 → 앱, 포트)를 `network_rules`로, 파드 템플릿 라벨을 `Workload.labels`로, ConfigMap 키(`configmaps`)와 `env`·`envFrom`·`secretKeyRef`로 주입되는 변수 이름(`Workload.env_names`)을 수집한다. 값은 읽지 않는다. DNS·다른 네임스페이스·CIDR egress는 앱 간 통신 의도가 아니라 제외한다.
+- `tests/fixtures/analysis/source-like/stack.yaml`(실제 파일이 아니라 같은 모양으로 새로 쓴 가짜 값 fixture)로 확인한다. 실제 파일 확인은 환경 변수 `CMP_REAL_SOURCE_YAML`로 경로를 줄 때만 도는 로컬 테스트다(저장소에는 넣지 않음).
+
 ## 관련 문서
 - [요구사항](../../specs/analysis-verification/spec.md) · [구현 계획](../../specs/analysis-verification/plan.md) · [티켓 목록](../../specs/analysis-verification/tasks.md)
 - [제품 정책](../../docs/product/policies.md) · [도메인 경계](../../docs/architecture/domain-boundaries.md) · [Temporal 흐름](../../docs/architecture/temporal-flow.md)
@@ -56,5 +60,5 @@ fixture 매니페스트로 클라우드 의존 목록, 실행 요구, 원본 DB 
 - [x] 수용 기준과 Test Seam 확인
 - [x] 관련 테스트 통과와 회귀 확인
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
-- [ ] 구현·계약 정합성 및 최종 리뷰
+- [x] 구현·계약 정합성 및 최종 리뷰
 - [x] 미검증 항목과 결과 증거 기록

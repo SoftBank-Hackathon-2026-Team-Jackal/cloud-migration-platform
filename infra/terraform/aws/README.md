@@ -18,6 +18,8 @@ uv run python scripts/plan_aws_eks.py /protected/input.json /protected/plan-arti
 
 Preview는 Terraform의 자원 종류·행위만 읽는다. `before`, `after`, `*_sensitive`, Output 값은 사용하지 않는다. 고정된 자원 이름과 검증한 Network·Node·API 접근 입력만 표시한다. 예상하지 못한 자원 종류나 행위는 Plan을 거절한다. `INFRASTRUCTURE` 범위는 앱·DB 배포까지 승인한다는 뜻이 아니다. ALB 미배포와 단일 NAT 제약도 경고로 표시한다.
 
+복구 Revision(티켓 14 F9): 같은 환경 State에 이전 Apply가 만든 자원이 있으면 그 자원은 `no-op`으로 유지되고 부족한 자원만 생성하는 Plan을 허용하며 Preview에 `RECOVERY_CONTINUATION` 경고가 붙는다. `update`·`delete`가 있는 Plan은 계속 거절한다.
+
 `tests/fixtures/terraform/aws-create-plan.json`은 실제 AWS Provider Plan에서 자원 종류·행위만 남긴 fixture다. 민감정보 제거 검사를 위한 가짜 값만 포함하며 실제 Plan 바이트·State·Provider 출력값은 없다. 티켓 06은 GCP 자원에 맞는 별도 fixture가 필요하다. 공통 Plan/Preview 계약 fixture만으로 Provider별 Plan 검사를 대체하지 않는다.
 
 AWS 자원을 변경하지 않는 정적 검사:

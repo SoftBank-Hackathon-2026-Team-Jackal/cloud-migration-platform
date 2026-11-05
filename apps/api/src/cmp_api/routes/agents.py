@@ -15,11 +15,13 @@ from cmp_api.agent_registry import (
     AgentJob,
     AgentRegistrationError,
     QueuedWork,
+    RegisteredAgent,
     authenticate_agent,
     create_enrollment,
     poll_job,
     redeem_enrollment,
     report_job,
+    revoke_agent,
 )
 from cmp_api.config import settings
 from cmp_api.db import SessionLocal
@@ -35,7 +37,7 @@ class Request(BaseModel):
 class EnrollmentRequest(Request):
     owner_id: Text
     agent_id: KubernetesName
-    cluster_uid: Text
+    cluster_uid: Text | None = None  # omitted: bound to the UID reported at registration
     ttl_seconds: int = Field(default=600, ge=1, le=3600)
 
 
@@ -79,6 +81,11 @@ class AgentStatus(Request):
     agent_id: str
     owner_id: str
     cluster_uid: str
+
+
+class AgentAdminStatus(AgentStatus):
+    last_seen_at: int | None
+    revoked: bool
 
 
 def get_session():
@@ -176,7 +183,7 @@ def submit_result(
             result={"code": report.code},
         )
     except AgentRegistrationError as exc:
-        code = 404 if str(exc) == "JOB_NOT_FOUND" else 409
+        code = {"JOB_NOT_FOUND": 404, "AGENT_UNAUTHORIZED": 403}.get(str(exc), 409)
         raise HTTPException(status_code=code, detail=str(exc)) from None
     return {"job_id": job_id, "accepted": True}
 
@@ -221,3 +228,39 @@ def job_artifact_bytes(
         status = 404 if exc.code == "ARTIFACT_NOT_FOUND" else 409
         raise HTTPException(status_code=status, detail=exc.code) from None
     return Response(content=content, media_type="application/octet-stream")
+
+
+def _admin_status(agent: RegisteredAgent) -> dict:
+    return {
+        "agent_id": agent.id,
+        "owner_id": agent.owner_id,
+        "cluster_uid": agent.cluster_uid,
+        "last_seen_at": agent.last_seen_at,
+        "revoked": agent.revoked_at is not None,
+    }
+
+
+@router.get(
+    "/agent-admin/agents/{agent_id}",
+    response_model=AgentAdminStatus,
+    dependencies=[Depends(require_admin)],
+)
+def operator_agent_status(agent_id: str, session: SessionDep):
+    """Operator view: last authenticated contact (epoch seconds) and revocation (ticket 15)."""
+    agent = session.get(RegisteredAgent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="AGENT_NOT_FOUND")
+    return _admin_status(agent)
+
+
+@router.post(
+    "/agent-admin/agents/{agent_id}/revoke",
+    response_model=AgentAdminStatus,
+    dependencies=[Depends(require_admin)],
+)
+def operator_revoke_agent(agent_id: str, session: SessionDep):
+    try:
+        revoke_agent(session, agent_id=agent_id)
+    except AgentRegistrationError:
+        raise HTTPException(status_code=404, detail="AGENT_NOT_FOUND") from None
+    return _admin_status(session.get(RegisteredAgent, agent_id))

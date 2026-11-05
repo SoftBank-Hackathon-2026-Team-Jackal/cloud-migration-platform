@@ -241,3 +241,42 @@ def test_controller_and_csi_prerequisites_are_reviewed_resources():
     names = {change.name for change in preview.changes}
     assert {"IAM OIDC 공급자", "EKS EBS CSI 애드온", "Load Balancer Controller IAM 정책"} <= names
     assert "ALB_NOT_DEPLOYED" in {issue.code for issue in preview.warnings}
+
+
+def _with_actions(payload: dict, action_for) -> dict:
+    data = json.loads(json.dumps(payload))
+    for change in data["resource_changes"]:
+        if change.get("mode") == "managed":
+            change["change"]["actions"] = [action_for(change["type"])]
+    return data
+
+
+def test_recovery_continuation_plan_after_earlier_apply_is_reviewable():
+    """Ticket 14 F9: a new Revision over this environment's own State may keep resources."""
+    payload = json.loads(AWS_PLAN_ACTIONS.read_text())
+    # A lost Apply left everything but the node group: those are unchanged, the rest is created.
+    partial = _with_actions(
+        payload, lambda kind: "create" if kind == "aws_eks_node_group" else "no-op"
+    )
+    preview = preview_from_plan(partial, request(), "a" * 64)
+    actions = {(c.name, c.action) for c in preview.changes}
+    assert ("VPC", "NO_CHANGE") in actions and ("관리형 노드 그룹", "CREATE") in actions
+    assert "RECOVERY_CONTINUATION" in {w.code for w in preview.warnings}
+
+    complete = _with_actions(payload, lambda kind: "no-op")
+    preview = preview_from_plan(complete, request(), "a" * 64)
+    assert {c.action for c in preview.changes} == {"NO_CHANGE"}
+    assert "RECOVERY_CONTINUATION" in {w.code for w in preview.warnings}
+
+
+def test_fresh_plan_has_no_recovery_warning_and_changes_are_still_rejected():
+    payload = json.loads(AWS_PLAN_ACTIONS.read_text())
+    assert "RECOVERY_CONTINUATION" not in {
+        w.code for w in preview_from_plan(payload, request(), "a" * 64).warnings
+    }
+    for action in ("update", "delete"):
+        changed = _with_actions(
+            payload, lambda kind, act=action: act if kind == "aws_vpc" else "no-op"
+        )
+        with pytest.raises(ProvisioningInputError, match="DESTRUCTIVE_PLAN"):
+            preview_from_plan(changed, request(), "a" * 64)

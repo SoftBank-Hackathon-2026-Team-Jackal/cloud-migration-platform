@@ -36,6 +36,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from cmp_api.db import Base
+from cmp_api.provisioning_results import add_result
 
 Decision = Literal["APPROVE", "REJECT"]
 EXECUTION_STEP = "PROVISION"
@@ -59,6 +60,22 @@ class PlanRevision(Base):
     manifest: Mapped[dict] = mapped_column(JSON, nullable=False)
     preview: Mapped[dict] = mapped_column(JSON, nullable=False)
     published_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class PlanPublication(Base):
+    """Input Digest of a published Revision; same-input re-runs reuse the latest (ticket 18, P3)."""
+
+    __tablename__ = "provisioning_plan_publications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["plan_id", "revision"],
+            ["provisioning_plan_revisions.plan_id", "provisioning_plan_revisions.revision"],
+        ),
+    )
+
+    plan_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
 class Approver(Base):
@@ -127,8 +144,14 @@ def latest_revision(session: Session, plan_id: str) -> int | None:
     )
 
 
-def publish_plan_revision(session: Session, manifest: PlanManifest, preview: Preview) -> None:
-    """Store an immutable Plan Revision. Planning integration calls this later; no HTTP route."""
+def publish_plan_revision(
+    session: Session,
+    manifest: PlanManifest,
+    preview: Preview,
+    *,
+    input_digest: str | None = None,
+) -> None:
+    """Store an immutable Plan Revision (ticket 18 Planning calls it with its input Digest)."""
     manifest = PlanManifest.model_validate(manifest.model_dump(mode="json"))
     preview = Preview.model_validate(preview.model_dump(mode="json"))
     current = latest_revision(session, manifest.plan.plan_id)
@@ -144,6 +167,15 @@ def publish_plan_revision(session: Session, manifest: PlanManifest, preview: Pre
             published_at=_now(),
         )
     )
+    if input_digest is not None:
+        session.flush()  # the Revision row first, for the publication foreign key
+        session.add(
+            PlanPublication(
+                plan_id=manifest.plan.plan_id,
+                revision=manifest.plan.revision,
+                input_digest=input_digest,
+            )
+        )
     session.commit()
 
 
@@ -362,9 +394,14 @@ def complete_execution(
     status: ExecutionStatus,
     code: str,
     resource_refs: dict[str, str],
+    step: str | None = None,
     now: datetime | None = None,
 ) -> dict:
-    """Record the provider result on a RUNNING marker. A finished marker is never rewritten."""
+    """Record the provider result on a RUNNING marker. A finished marker is never rewritten.
+
+    The same transaction stores the ProvisioningResult (ticket 13, R3). `step` is the provider
+    Activity that ended the run (the failed one, or the last one on success).
+    """
     record = session.get(PlanApproval, approval_id)
     marker = (
         session.get(PlanExecution, (record.plan_id, record.revision, EXECUTION_STEP))
@@ -378,5 +415,16 @@ def complete_execution(
         marker.code = code
         marker.resource_refs = {str(k): str(v) for k, v in resource_refs.items()}
         marker.finished_at = _now(now)
+        row = session.get(PlanRevision, (record.plan_id, record.revision))
+        add_result(
+            session,
+            row.manifest,
+            approval_id=record.id,
+            status=status,
+            code=code,
+            step=step,
+            refs=marker.resource_refs,
+            finished_at=marker.finished_at,
+        )
         session.commit()
     return {"status": marker.status, "code": marker.code or code}

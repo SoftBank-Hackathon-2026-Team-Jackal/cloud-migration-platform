@@ -11,6 +11,7 @@ kubectl/helm output, Values and Secret values are never reported.
 import argparse
 import base64
 import json
+import os
 import secrets
 import subprocess
 import tempfile
@@ -21,6 +22,7 @@ from cmp_contracts.onprem_rollout import ProductionRolloutJob
 from pydantic import ValidationError
 
 from cmp_providers.artifacts import verify_artifact_bytes
+from cmp_providers.database_url import connection_url
 from cmp_providers.remote_agent import AgentControlClient, AgentTransportError, _secret_file
 
 MANAGED = "cmp.dev/managed"
@@ -41,14 +43,68 @@ class ClusterUnavailable(RolloutAgentError):
         super().__init__("KUBERNETES_UNAVAILABLE", "UNKNOWN")
 
 
+SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+IN_CLUSTER_CONTEXT = "cmp-in-cluster"
+
+
 class ClusterTarget:
-    """Every kubectl/helm call uses the dedicated kubeconfig and explicit context."""
+    """Every kubectl/helm call uses a dedicated kubeconfig and explicit context: the operator's
+    file (host CLI) or one generated from the Pod's ServiceAccount (in-cluster, ticket 15 H1)."""
 
     def __init__(self, kubeconfig: Path, context: str, cluster_uid: str, helm_timeout: str = "5m"):
         if not Path(kubeconfig).is_file() or not context:
             raise RolloutAgentError("EXPLICIT_TARGET_REQUIRED")
         self.kubeconfig, self.context = Path(kubeconfig), context
         self.cluster_uid, self.helm_timeout = cluster_uid, helm_timeout
+
+    @classmethod
+    def in_cluster(
+        cls,
+        *,
+        cluster_uid: str | None = None,
+        helm_timeout: str = "5m",
+        service_account_dir: Path = SERVICE_ACCOUNT_DIR,
+        work_dir: Path | None = None,
+    ) -> "ClusterTarget":
+        """kubectl's implicit in-cluster fallback is not reliable across versions, so write an
+        explicit kubeconfig that references the token *file* (rotation-safe, value not copied)."""
+        host = os.environ.get("KUBERNETES_SERVICE_HOST")
+        port = os.environ.get("KUBERNETES_SERVICE_PORT")
+        token, ca = Path(service_account_dir) / "token", Path(service_account_dir) / "ca.crt"
+        if not host or not port or not token.is_file() or not ca.is_file():
+            raise RolloutAgentError("SERVICE_ACCOUNT_REQUIRED")
+        server = f"https://[{host}]:{port}" if ":" in host else f"https://{host}:{port}"
+        directory = Path(work_dir or Path(tempfile.gettempdir()) / "cmp-agent-kube")
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = directory / "config"
+        cluster = {"server": server, "certificate-authority": str(ca)}
+        config = {
+            "apiVersion": "v1",
+            "kind": "Config",
+            "clusters": [{"name": "in-cluster", "cluster": cluster}],
+            "users": [{"name": "agent", "user": {"tokenFile": str(token)}}],
+            "contexts": [
+                {"name": IN_CLUSTER_CONTEXT, "context": {"cluster": "in-cluster", "user": "agent"}}
+            ],
+            "current-context": IN_CLUSTER_CONTEXT,
+        }
+        descriptor = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(config, output)
+        return cls(path, IN_CLUSTER_CONTEXT, cluster_uid, helm_timeout)
+
+    def discover_cluster_uid(self) -> str:
+        """kube-system Namespace UID identifies the cluster; it is what registration binds."""
+        uid = ((self.get("namespace", "kube-system") or {}).get("metadata") or {}).get("uid")
+        if not uid:
+            raise ClusterUnavailable()
+        self.cluster_uid = uid
+        return uid
+
+    def delete_secret(self, name: str, namespace: str) -> None:
+        result = self.kubectl("delete", "secret", name, "-n", namespace, "--ignore-not-found")
+        if result.returncode:
+            raise ClusterUnavailable()
 
     def _exec(self, argv: list[str], content: bytes | None, timeout: int):
         try:
@@ -59,33 +115,12 @@ class ClusterTarget:
             raise ClusterUnavailable() from None
 
     def kubectl(self, *args: str, content: bytes | None = None, timeout: int = 40):
-        return self._exec(
-            [
-                "kubectl",
-                "--kubeconfig",
-                str(self.kubeconfig),
-                "--context",
-                self.context,
-                "--request-timeout=30s",
-                *args,
-            ],
-            content,
-            timeout,
-        )
+        explicit = ["--kubeconfig", str(self.kubeconfig), "--context", self.context]
+        return self._exec(["kubectl", *explicit, "--request-timeout=30s", *args], content, timeout)
 
     def helm(self, *args: str, timeout: int = 60):
-        return self._exec(
-            [
-                "helm",
-                "--kubeconfig",
-                str(self.kubeconfig),
-                "--kube-context",
-                self.context,
-                *args,
-            ],
-            None,
-            timeout,
-        )
+        explicit = ["--kubeconfig", str(self.kubeconfig), "--kube-context", self.context]
+        return self._exec(["helm", *explicit, *args], None, timeout)
 
     def get(self, kind: str, name: str, namespace: str | None = None) -> dict | None:
         args = ["get", kind, name, "-o", "json", "--ignore-not-found"]
@@ -143,6 +178,12 @@ class RolloutRunner:
             "data", {}
         ):
             raise RolloutAgentError("SECRET_REFERENCE_MISSING")
+        url = job.database.connection_url
+        if url is not None:
+            existing = self.target.get("secret", url.secret.name, job.namespace)
+            labels = ((existing or {}).get("metadata") or {}).get("labels") or {}
+            if existing is not None and labels.get(MANAGED) != "true":
+                raise RolloutAgentError("SECRET_NAME_CONFLICT")  # never overwrite a user Secret
 
     def _download(self, job: ProductionRolloutJob, workdir: Path) -> dict[str, Path]:
         paths = {}
@@ -188,6 +229,38 @@ class RolloutRunner:
                     "data": {ref.key: password},
                 }
             )
+        if job.database.connection_url is not None:
+            self._write_connection_url(job)
+
+    def _write_connection_url(self, job: ProductionRolloutJob) -> None:
+        """Ticket 19 (U2–U5): rebuilt from the current password on every rollout so it never
+        drifts; the URL and password stay inside the user's cluster."""
+        url, ref = job.database.connection_url, job.database.password_secret
+        encoded = (
+            (self.target.get("secret", ref.name, job.namespace) or {}).get("data") or {}
+        ).get(ref.key)
+        if not encoded:
+            raise RolloutAgentError("SECRET_REFERENCE_MISSING")
+        value = connection_url(
+            username=url.username,
+            password=base64.b64decode(encoded).decode("utf-8"),
+            host=f"{job.database.release}.{job.namespace}.svc",
+            port=5432,
+            database=url.database,
+        )
+        self.target.apply(
+            {
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "type": "Opaque",
+                "metadata": {
+                    "name": url.secret.name,
+                    "namespace": job.namespace,
+                    "labels": {MANAGED: "true"},
+                },
+                "data": {url.secret.key: base64.b64encode(value.encode()).decode()},
+            }
+        )
 
     def _install(self, job, release, chart, values, paths) -> None:
         marker = _marker(job, chart, values)
@@ -253,6 +326,10 @@ class RolloutRunner:
         self._workload_ready("deployment", app.release, ns)
         self._endpoints_ready(db.release, ns)
         self._endpoints_ready(app.release, ns)
+        if db.connection_url is not None:
+            secret = self.target.get("secret", db.connection_url.secret.name, ns) or {}
+            if db.connection_url.secret.key not in (secret.get("data") or {}):
+                raise RolloutAgentError("SECRET_REFERENCE_MISSING")
         probe = self.target.kubectl(
             "exec",
             "-n",

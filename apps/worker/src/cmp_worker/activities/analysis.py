@@ -1,6 +1,16 @@
-from cmp_contracts.analysis import AnalysisReport
+import asyncio
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
+from cmp_contracts.analysis import AnalysisReport, ReviewRecord
 from cmp_contracts.provisioning_v2 import RequirementsV2
+from cmp_scanners.source import SourceFetchError
+from pydantic import ValidationError
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
+
+from cmp_worker.analysis_pipeline import AnalysisPipeline
 
 
 @activity.defn
@@ -85,3 +95,117 @@ async def check_evidence(payload: dict) -> dict:
             "unverified_risks": ["Scaffold: no scan performed"],
         }
     ).model_dump(mode="json")
+
+
+@activity.defn
+async def record_review(payload: dict) -> dict:
+    """Stamp the user's decisions with the decision time. Immutable storage is decided in D-02."""
+    return ReviewRecord.model_validate({**payload, "decided_at": datetime.now(UTC)}).model_dump(
+        mode="json"
+    )
+
+
+async def _run(fn: Callable[..., Any], *args: Any) -> Any:
+    """Run a blocking pipeline step off the event loop; map deterministic input errors to
+    non-retryable failures so a bad repository or commit does not spin through retries."""
+    try:
+        return await asyncio.to_thread(fn, *args)
+    except SourceFetchError:
+        raise ApplicationError(
+            "Source could not be fetched", type="SOURCE_FETCH_FAILED", non_retryable=True
+        ) from None
+    except (ValueError, FileNotFoundError, ValidationError):
+        raise ApplicationError(
+            "Analysis input is invalid", type="ANALYSIS_INPUT_INVALID", non_retryable=True
+        ) from None
+
+
+class AnalysisActivities:
+    """Real analysis Activities (ticket 19). Same names as the scaffold ones, JSON in and out."""
+
+    def __init__(self, pipeline: AnalysisPipeline) -> None:
+        self.pipeline = pipeline
+
+    @activity.defn(name="fetch_source")
+    async def fetch_source(self, inp: dict) -> dict:
+        return await _run(self.pipeline.fetch_source, inp)
+
+    @activity.defn(name="scan_code")
+    async def scan_code(self, payload: dict) -> dict:
+        return await _run(self.pipeline.scan_code, payload["input"], payload["source"])
+
+    @activity.defn(name="scan_manifests")
+    async def scan_manifests(self, payload: dict) -> dict:
+        return await _run(self.pipeline.scan_manifests, payload["input"], payload["source"])
+
+    @activity.defn(name="scan_aws_infra")
+    async def scan_aws_infra(self, inp: dict) -> dict:
+        return await _run(self.pipeline.scan_aws_infra, inp)
+
+    @activity.defn(name="build_requirements")
+    async def build_requirements(self, payload: dict) -> dict:
+        return await _run(
+            self.pipeline.build_requirements,
+            payload["input"],
+            payload["source"],
+            payload["code_ref"],
+            payload["manifests_ref"],
+            payload["infra"],
+        )
+
+    @activity.defn(name="precheck")
+    async def precheck(self, payload: dict) -> dict:
+        return await _run(
+            self.pipeline.precheck,
+            payload["input"],
+            payload["source"],
+            payload["code_ref"],
+            payload["manifests_ref"],
+        )
+
+    @activity.defn(name="map_usage")
+    async def map_usage(self, payload: dict) -> dict:
+        return await _run(
+            self.pipeline.map_usage,
+            payload["input"],
+            payload["source"],
+            payload["code_ref"],
+            payload["manifests_ref"],
+            payload["built"],
+            payload["precheck"],
+        )
+
+    @activity.defn(name="check_evidence")
+    async def check_evidence(self, payload: dict) -> dict:
+        return await _run(
+            self.pipeline.check_evidence,
+            payload["input"],
+            payload["source"],
+            payload["built"],
+            payload["infra"],
+            payload["precheck"],
+            payload["mapped"],
+        )
+
+    @activity.defn(name="record_review")
+    async def record_review(self, payload: dict) -> dict:
+        migration_id = payload["migration_id"]
+        body = {k: v for k, v in payload.items() if k != "migration_id"}
+        record = ReviewRecord.model_validate({**body, "decided_at": datetime.now(UTC)})
+        ref = self.pipeline.store.put_json(
+            record, ref_id=f"review-{migration_id}", kind="review-record"
+        )
+        return {**record.model_dump(mode="json"), "review_ref": ref.model_dump()}
+
+    def all(self) -> list[Callable[..., Any]]:
+        return [
+            self.fetch_source,
+            self.scan_code,
+            self.scan_manifests,
+            self.scan_aws_infra,
+            self.build_requirements,
+            self.precheck,
+            self.map_usage,
+            self.check_evidence,
+            self.record_review,
+        ]

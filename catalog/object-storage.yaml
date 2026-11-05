@@ -1,0 +1,20 @@
+capability: object-storage
+title: 객체 저장(S3)
+usage_vocabulary: [파일 업로드, 정적 자산, presigned URL, 백업 저장]
+detect_rules:
+  - {source: CODE, pattern: "s3\\.|aws-sdk-go(-v2)?/service/s3|boto3.*s3|S3Client"}
+  - {source: MANIFEST, pattern: "s3://|\\.s3\\.amazonaws\\.com"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: 같은 S3를 그대로 쓴다}
+  - target: GCP
+    grade: API_DIFF
+    when: Cloud Storage로 엔드포인트·인증 변경이 필요하다
+  - target: ON_PREM
+    grade: PARTIAL
+    when: S3 호환 저장소가 필요하다
+    loses: [관리형 내구성, presigned URL 호환]
+known_differences:
+  - 첫 사이클에서는 원본 S3를 그대로 쓰는 KEEP으로 둔다(코드 수정은 후속).
+standard_tests:
+  - 원본 S3에 대한 읽기·쓰기가 허용된 경로로 동작한다.
+skill: null

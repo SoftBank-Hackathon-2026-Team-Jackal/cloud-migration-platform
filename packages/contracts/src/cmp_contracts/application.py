@@ -24,7 +24,7 @@ class SecretBinding(Contract):
 
 class DatabaseBinding(Contract):
     kind: Literal["DATABASE"]
-    field: Literal["host", "port", "name", "username", "secret_ref"]
+    field: Literal["host", "port", "name", "username", "secret_ref", "connection_url_secret_ref"]
 
 
 class EnvironmentBinding(Contract):
@@ -39,6 +39,9 @@ class DatabaseConnection(Contract):
     username: Text
     secret_name: KubernetesName | None
     secret_key: SecretKey
+    # Dynamic slot for the platform URL Secret (ticket 19). Omitted while unset so Values
+    # approved before this field existed keep their exact bytes.
+    url_secret_name: KubernetesName | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class ApplicationValues(Contract):

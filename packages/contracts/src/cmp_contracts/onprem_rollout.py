@@ -18,11 +18,24 @@ ReleaseName = Annotated[KubernetesName, Field(max_length=53)]
 ROLLOUT_MODE = "PRODUCTION_ROLLOUT"
 
 
+class RolloutConnectionUrl(Contract):
+    """Ticket 19: the Agent builds the URL in the cluster from the password Secret; only the
+    target Secret reference and non-secret parts cross this boundary."""
+
+    secret: SecretRefV2
+    database: Text
+    username: Text
+
+
 class RolloutDatabase(Contract):
     release: ReleaseName
     chart: ArtifactRef
     values: ArtifactRef
     password_secret: SecretRefV2
+    # Omitted when unset so jobs queued before ticket 19 keep identical payloads.
+    connection_url: RolloutConnectionUrl | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class RolloutApplication(Contract):

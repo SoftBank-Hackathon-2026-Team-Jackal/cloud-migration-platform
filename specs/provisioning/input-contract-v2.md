@@ -67,7 +67,7 @@ policy: {template_version: helm-v2}
 
 `requirements_ref={id,version,sha256}`가 가리키는 JSON은 `contract_version="2"`, `resources[]`, `network_intent[]`로 구성한다. 리소스마다 고유 `id`와 `kind`가 있다. P0는 `APPLICATION`, `POSTGRESQL`만 수용하고 다른 종류는 오류다. 최소 한 앱과 한 DB가 필요하다. 앱은 CPU millicores·메모리 MiB·복제 수·포트·헬스 경로를, PostgreSQL은 버전 16·DB 이름/사용자·CPU·메모리·PVC GiB와 `extensions`를 기록한다. 현재 확장 설치·검증은 없으므로 `extensions`가 비어 있지 않으면 계획 입력을 거절한다. DB 이미지는 이 요구를 만족하는 Digest를 후속 대상 구성에서 선택·검증하며 Profile이 요구 버전을 덮어쓰지 않는다.
 
-앱의 `env_bindings`는 `{resource_id,output}` 참조다. 현재 지원 출력은 PostgreSQL의 `host`, `port`, `name`, `username`, `password_secret_ref`뿐이다. 미존재 ID나 다른 종류의 출력 요청은 오류다. `network_intent`는 출발 리소스와 내부 리소스 또는 외부 호스트 목적지, 포트·프로토콜을 기록한다. Sandbox와 운영 Worker는 같은 의도를 각 환경 정책으로 변환한다. Sandbox의 원본 클라우드 차단 등 환경 전용 제약은 별도이며 이 입력 검증 함수는 NetworkPolicy를 만들지 않는다.
+앱의 `env_bindings`는 `{resource_id,output}` 참조다. 현재 지원 출력은 PostgreSQL의 `host`, `port`, `name`, `username`, `password_secret_ref`, `connection_url_secret_ref`다. `connection_url_secret_ref`는 `DATABASE_URL`처럼 연결 정보를 한 변수로 받는 앱용이다(D-16, [19](../../tickets/provisioning/19-db-connection-url.md)). 배포 실행 주체가 `postgresql://<user>:<password>@<host>:5432/<db>`(사용자·비밀번호·DB 이름 퍼센트 인코딩)를 Secret `<DB release>-url`/키 `url`에 만들고, 앱에는 그 Secret 참조만 주입한다. DSN(key=value) 형식과 자유 형식 템플릿은 지원하지 않는다. 미존재 ID나 다른 종류의 출력 요청은 오류다. `network_intent`는 출발 리소스와 내부 리소스 또는 외부 호스트 목적지, 포트·프로토콜을 기록한다. Sandbox와 운영 Worker는 같은 의도를 각 환경 정책으로 변환한다. Sandbox의 원본 클라우드 차단 등 환경 전용 제약은 별도이며 이 입력 검증 함수는 NetworkPolicy를 만들지 않는다.
 
 `analysis.source_refs`는 **APPLICATION ID별** SHA-256 이름의 S3 `.tar.gz` URI, 선택적 S3 Version ID, SHA-256을 담는다. 실제 파일 내용은 Build가 다운로드 후 검증한다. `.env` 외의 수정 설정 산출물이 실제로 있을 때만 `analysis.config_artifact_ref`를 사용하며, 이때 Sandbox가 같은 참조를 검증했다고 명시해야 한다.
 

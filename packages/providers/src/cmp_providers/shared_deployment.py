@@ -25,6 +25,7 @@ from pydantic import ValidationError
 from cmp_providers.app_renderer import ApplicationRenderError, render_application
 from cmp_providers.application import resolve_application
 from cmp_providers.artifacts import canonical_json_bytes
+from cmp_providers.database_url import URL_SECRET_KEY, connection_url_secret_name
 
 
 def _invalid(code: str) -> ProvisioningInputError:
@@ -130,6 +131,9 @@ def render_shared_deployment(
         resolved["DATABASE_HOST"] = service.host
     if "secret_ref" in dynamic:
         resolved["DATABASE_SECRET_NAME"] = db.password_secret_name
+    url_secret = connection_url_secret_name(request.release_names.db)
+    if "connection_url_secret_ref" in dynamic:
+        resolved["DATABASE_URL_SECRET_NAME"] = url_secret
     try:
         application_values_dict = resolve_application(application_template, resolved)
         database_manifest = _render_database(database_values, database_chart_dir, helm_bin)
@@ -146,6 +150,9 @@ def render_shared_deployment(
         "username": db.username,
         "secret_ref": SecretReference(
             secret_name=db.password_secret_name, secret_key=db.password_secret_key
+        ),
+        "connection_url_secret_ref": SecretReference(
+            secret_name=url_secret, secret_key=URL_SECRET_KEY
         ),
     }
     bindings = {

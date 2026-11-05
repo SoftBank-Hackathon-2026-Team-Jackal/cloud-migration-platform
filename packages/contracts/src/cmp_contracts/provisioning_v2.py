@@ -53,7 +53,10 @@ class DatabaseIdentity(Contract):
 
 class ResourceOutputBinding(Contract):
     resource_id: ResourceId
-    output: Literal["host", "port", "name", "username", "password_secret_ref"]
+    # connection_url_secret_ref: platform-made URL Secret for single-variable apps (D-16, #79).
+    output: Literal[
+        "host", "port", "name", "username", "password_secret_ref", "connection_url_secret_ref"
+    ]
 
 
 class ApplicationRequirement(Contract):

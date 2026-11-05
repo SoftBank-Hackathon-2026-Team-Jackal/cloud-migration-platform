@@ -1,0 +1,19 @@
+capability: pod-identity
+title: Pod 신원(IRSA·서비스 계정)
+usage_vocabulary: [클라우드 API 호출 권한, 서비스 계정]
+detect_rules:
+  - {source: MANIFEST, pattern: "eks\\.amazonaws\\.com/role-arn|kind: ServiceAccount|ServiceAccount/"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: IRSA 역할 연결을 그대로 쓴다}
+  - target: GCP
+    grade: API_DIFF
+    when: Workload Identity로 바꿔야 한다
+  - target: ON_PREM
+    grade: NONE
+    when: 클라우드 IAM 신원이 없다
+    loses: [Pod의 클라우드 API 권한]
+known_differences:
+  - 앱이 AWS API를 부르지 않으면 신원 연결은 필요 없다.
+standard_tests:
+  - 앱이 클라우드 API를 부르지 않는 경로가 정상 동작한다.
+skill: k8s-workload

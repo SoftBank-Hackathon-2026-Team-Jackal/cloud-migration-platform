@@ -10,7 +10,8 @@
 | --- | --- | --- |
 | `ArtifactRef`, `RenderedChart` | `cmp_contracts.artifact` | 불변 ID·버전·종류·바이트 크기·SHA-256 및 Chart/Values/Manifest 참조 |
 | `PostgresChartValues` | `cmp_contracts.chart` | Sandbox/Production 공통 DB 입력. 환경·Provider·Release·Namespace·이미지·DB·Pod 자원·StorageClass/PVC |
-| `DynamicBinding` | `cmp_contracts.chart` | 허용된 DB host/Secret 이름 위치와 값 출처 |
+| `DynamicBinding` | `cmp_contracts.chart` | 허용된 DB host/Secret 이름/URL Secret 이름 위치와 값 출처 |
+| `connection_url`, `connection_url_secret_name` | `cmp_providers.database_url` | DB 연결 URL 형식과 URL Secret 이름 규칙(19). Sandbox·운영 실행 주체가 함께 사용 |
 | `PlanManifest`, `Preview`, `ApprovalTarget` | `cmp_contracts.plan` | Plan/Revision·템플릿 버전·대상·실행 범위·산출물 연결, 표시 요약, 승인 대상 식별 |
 | `sha256_bytes`, `canonical_json_bytes`, `sha256_json`, `verify_artifact_bytes` | `cmp_providers.artifacts` | 순수 바이트/정규화 JSON Digest 및 조회한 실제 바이트 검증 |
 | `approval_issues`, `approval_target`, `verify_approval_target` | `cmp_providers.plans` | 계획 완전성·Preview 일치·기록된 승인 대상 및 요청 실행 범위 비교 |
@@ -42,7 +43,7 @@ Preview는 manifest Digest와 허용된 자원 변경 요약(종류·행위·이
 
 `ApprovalTarget`은 Plan ID·Revision·scope·manifest Digest·Preview Digest다. **승인 대상의 식별 정보이며 사용자 승인/권한의 증거가 아니다.** 07은 인증된 사용자·작업 권한·승인/거절 상태와 함께 이 값을 DB에 저장하고, 최신 활성 Plan·DB 승인 기록에서 읽은 값으로 실행 직전 비교해야 한다. 클라이언트가 보낸 ApprovalTarget만으로 실행하면 안 된다. 현재 구현은 DB 최신 Revision 조회, State drift 확인, 파일 재조회 또는 실제 실행을 수행하지 않는다.
 
-실행 scope는 정확히 일치해야 한다. INFRASTRUCTURE 승인을 WORKLOADS/FULL 실행에 재사용할 수 없으며 FULL 승인의 일부만 실행하려는 경우도 현재 함수는 별도 범위 승인을 요구한다. 변경된 target 계정/State, Spec·Plan·Chart/Values Digest, 이미지·템플릿·Revision 또는 Preview는 기존 승인 대상과 일치하지 않는다. 저장소에서 같은 Revision을 덮어쓰지 않고 새 Revision으로 발급하는 책임은 후속 Planning 저장 경계에 있다.
+실행 scope는 정확히 일치해야 한다. INFRASTRUCTURE 승인을 WORKLOADS/FULL 실행에 재사용할 수 없으며 FULL 승인의 일부만 실행하려는 경우도 현재 함수는 별도 범위 승인을 요구한다. 변경된 target 계정/State, Spec·Plan·Chart/Values Digest, 이미지·템플릿·Revision 또는 Preview는 기존 승인 대상과 일치하지 않는다. 저장소에서 같은 Revision을 덮어쓰지 않고 새 Revision으로 발급하는 책임은 Planning 저장 경계(18의 입력 Digest 판정)에 있다.
 
 ## DB Chart 입력과 동적 바인딩
 
@@ -50,7 +51,7 @@ Preview는 manifest Digest와 허용된 자원 변경 요약(종류·행위·이
 
 이름은 초기 구현에서 보수적인 Kubernetes label 형태, Secret key는 영숫자·점·밑줄·하이픈으로 제한한다. 이미지가 실제 PostgreSQL 16인지, Secret/PVC가 존재하는지는 렌더/실환경 검증에서 확인한다. DB Chart의 Helm 템플릿은 02에서 `infra/helm/postgres`에 구현했다. 사용법·렌더 제한은 [Helm 안내](../../infra/helm/README.md)를 따른다. 현재 Chart는 해결되지 않은 `registry_auth_ref`를 거절하며, 실제 Secret/StorageClass 존재·이미지 실행 검증은 후속 배포 경계다.
 
-동적 바인딩은 `database.host ← DATABASE_HOST`, `database.secret_name ← DATABASE_SECRET_NAME`만 지원한다. 이는 런타임 DB 연결을 쓰는 Values 템플릿의 자리이며 DB Chart에 host 필드를 추가한다는 뜻은 아니다. 대상 자리가 미리 존재하고 null이어야 한다. 비밀번호 원문 대신 생성된 Kubernetes Secret **이름**을 전달한다. 제공한 source key가 빠지거나 남으면, 경로가 중복되거나 source/target이 어긋나면 실패한다. 원본 템플릿은 변경하지 않는다.
+동적 바인딩은 `database.host ← DATABASE_HOST`, `database.secret_name ← DATABASE_SECRET_NAME`, `database.url_secret_name ← DATABASE_URL_SECRET_NAME`(19)만 지원한다. 마지막 자리는 선택 항목이라 미설정 시 직렬화에서 빠지며(이미 승인된 Values 바이트 유지), 앱이 `connection_url_secret_ref`를 쓸 때만 규칙이 생긴다. 이는 런타임 DB 연결을 쓰는 Values 템플릿의 자리이며 DB Chart에 host 필드를 추가한다는 뜻은 아니다. 대상 자리가 미리 존재하고 null이어야 한다. 비밀번호 원문 대신 생성된 Kubernetes Secret **이름**을 전달한다. 제공한 source key가 빠지거나 남으면, 경로가 중복되거나 source/target이 어긋나면 실패한다. 원본 템플릿은 변경하지 않는다.
 
 `verify_bound_values`는 실제 Values가 승인 템플릿에 승인된 참조만 채운 값과 정확히 일치하는지 검사한다. 이미지/Replica/임의 필드를 바꾸거나 주입된 DB 참조가 실제 결과와 달라지면 실패한다. 템플릿·바인딩 규칙의 실제 바이트는 호출 전에 승인된 ArtifactRef로 검증해야 한다.
 
@@ -97,4 +98,18 @@ identity = approval_target(manifest, preview)
 
 ## 온프레미스 Preview 생성 (12A)
 
-`cmp_providers.onprem_preview.onprem_preview(manifest, contents)`는 ON_PREM WORKLOADS/FULL 계획이 고정한 `database_values`·`application_values` 바이트를 `verify_artifact_bytes`로 확인하고 공통 `Preview`를 만든다. 보여 주는 내용은 기존 K3s·Agent·Namespace, DB StatefulSet·PVC, 앱 Deployment·Service, 외부 공개 없음, 적용 기본값(Namespace 생성, DB 비밀번호 Secret 생성)이다. 클러스터를 조회하지 않으므로 경고 `CLUSTER_STATE_NOT_INSPECTED`를 붙인다. 사용자 Secret은 이름·키만 `USER_SECRET_REQUIRED` 경고로 표시하고 환경변수·Secret 값은 넣지 않는다. Values의 대상·이미지가 manifest와 다르면 `errors`에 `VALUES_TARGET_MISMATCH`/`IMAGE_MISMATCH`를 넣어 `approval_issues`가 승인을 거절하게 한다. Digest 불일치·비 ON_PREM은 `ProvisioningInputError`로 Preview를 만들지 않는다. Planning 저장 경계와의 연결은 후속이다. 상세는 [12A 티켓](../../tickets/provisioning/12a-onprem-preview.md)을 따른다.
+15(#69)는 새 공유 계약을 만들지 않는다. 04A 등록 계약의 `cluster_uid`를 발급 시 선택으로 바꾸고 Agent 마지막 접속·폐기 상태를 추가했다. 상세는 [공통 배포 계약 §상시 실행·설치·폐기](onprem-shared-deployment.md#상시-실행설치폐기-15-69)를 따른다.
+
+`cmp_providers.onprem_preview.onprem_preview(manifest, contents)`는 ON_PREM WORKLOADS/FULL 계획이 고정한 `database_values`·`application_values` 바이트를 `verify_artifact_bytes`로 확인하고 공통 `Preview`를 만든다. 보여 주는 내용은 기존 K3s·Agent·Namespace, DB StatefulSet·PVC, 앱 Deployment·Service, 외부 공개 없음, 적용 기본값(Namespace 생성, DB 비밀번호 Secret 생성)이다. 클러스터를 조회하지 않으므로 경고 `CLUSTER_STATE_NOT_INSPECTED`를 붙인다. 사용자 Secret은 이름·키만 `USER_SECRET_REQUIRED` 경고로 표시하고 환경변수·Secret 값은 넣지 않는다. Values의 대상·이미지가 manifest와 다르면 `errors`에 `VALUES_TARGET_MISMATCH`/`IMAGE_MISMATCH`를 넣어 `approval_issues`가 승인을 거절하게 한다. Digest 불일치·비 ON_PREM은 `ProvisioningInputError`로 Preview를 만들지 않는다. Planning 저장 경계와의 연결은 18이 구현했다(아래 §18). 상세는 [12A 티켓](../../tickets/provisioning/12a-onprem-preview.md)을 따른다.
+
+## Provisioning 결과 인계 (13)
+
+`cmp_contracts.provisioning_result.ProvisioningResult` v1이 Provisioning → Data/Traffic Migration 인계 계약이다. `cmp_providers.provisioning_result`의 `build_provisioning_result`(실행 상태·코드·단계·refs → 결과), `handoff`(소비자별 뷰·`proceed`/`blocked_by`), `public_summary`(사용자 요약)는 순수 함수다. 저장·조회는 `cmp_api.provisioning_results`(`add_result`/`load_result`, 테이블 `provisioning_results`), Worker 진입점은 Activity `get_migration_handoff`, 사용자 조회는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`다. 필드·판정 규칙은 [티켓 13 결정 R1~R10](../../tickets/provisioning/13-result-handoff.md#착수-결정-2026-11-05)을 따른다. Provider 실행 refs의 표준 키(R4)는 이 결과의 입력이며 기존 키는 유지한다.
+
+## 터널 설정 교환 (16, 진행 중)
+
+`cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`가 추가됐다. `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합치며, Data 인계는 터널 경유 DB 접속 확인 뒤에만 진행한다. 중계 서버용 Agent 목록과 ON_PREM `external_endpoint`는 Traffic 담당 답변을 기다린다([티켓 16 답변 대기](../../tickets/provisioning/16-tunnel-config-exchange.md)).
+
+## Plan 생성·게시와 Preview 조회 (18)
+
+새 공유 모델은 `cmp_contracts.plan_publish`의 `PlanningInputRegistration`(Planning 입력 v2 + Provider별 대상 설정 + 선택 요구사항 바이트)과 `plan_id_for`(Migration당 Plan ID)뿐이다. 기존 `PlanManifest`·`Preview`·`approval_target`·`onprem_preview`·05/06 Plan 함수는 바꾸지 않고 호출한다. `publish_plan_revision`은 선택 인자 `input_digest`를 받아 같은 트랜잭션에 `provisioning_plan_publications`를 기록한다(기존 호출 동작은 그대로). `ProvisioningApprovalWorkflow` 요청은 선택 필드 `approval_timeout_seconds`를 받아 승인 없이 기간이 지나면 `EXPIRED/APPROVAL_EXPIRED`로 끝난다. 상세는 [18 티켓](../../tickets/provisioning/18-onprem-plan-publish.md#착수-결정-2026-11-05)을 따른다.

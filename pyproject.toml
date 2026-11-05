@@ -17,6 +17,7 @@ dependencies = [
   "alembic>=1.13,<2",
   "psycopg[binary]>=3.2,<4",
   "pyyaml>=6,<7",
+  "boto3>=1.35,<2",
 ]
 
 [project.optional-dependencies]
@@ -25,7 +26,7 @@ dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "httpx>=0.27,<1", "ruff>=0.8,
 [tool.setuptools]
 packages = [
   "cmp_api", "cmp_api.routes", "cmp_worker", "cmp_worker.workflows",
-  "cmp_worker.activities", "cmp_worker.workers", "cmp_contracts", "cmp_providers", "cmp_scanners", "cmp_traffic",
+  "cmp_worker.activities", "cmp_worker.workers", "cmp_contracts", "cmp_providers", "cmp_scanners", "cmp_agents", "cmp_testsuite", "cmp_traffic",
 ]
 
 [tool.setuptools.package-dir]
@@ -34,12 +35,18 @@ cmp_worker = "apps/worker/src/cmp_worker"
 cmp_contracts = "packages/contracts/src/cmp_contracts"
 cmp_providers = "packages/providers/src/cmp_providers"
 cmp_scanners = "packages/scanners/src/cmp_scanners"
+cmp_agents = "packages/agents/src/cmp_agents"
+cmp_testsuite = "packages/testsuite/src/cmp_testsuite"
 cmp_traffic = "packages/traffic/src/cmp_traffic"
+
+[tool.setuptools.package-data]
+cmp_agents = ["prompts/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = ["k3d: needs the dedicated local cmp-sandbox k3d cluster (set CMP_SANDBOX_KUBECONFIG)"]
 
 [tool.ruff]
 line-length = 100

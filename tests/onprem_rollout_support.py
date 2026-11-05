@@ -1,6 +1,5 @@
 """Builds a real approved ON_PREM Plan Revision with 04B-rendered Values and packaged Charts."""
 
-import subprocess
 from pathlib import Path
 
 from cmp_api.agent_registry import create_enrollment, redeem_enrollment
@@ -14,6 +13,7 @@ from cmp_api.approvals import (
 from cmp_api.onprem_rollout import LocalArtifactStore
 from cmp_contracts.plan import PlanManifest, Preview
 from cmp_providers.artifacts import canonical_json_bytes, sha256_json
+from cmp_providers.chart_package import package_chart as _package_chart
 from cmp_providers.plans import manifest_digest
 from cmp_providers.shared_deployment_v2 import render_shared_deployment_v2
 
@@ -33,6 +33,7 @@ def render_request(
     health_path="/health",
     port=8080,
     user_secret=True,
+    url_binding=False,
 ):
     env = {
         "DB_HOST": {"resource_id": "postgres-main", "output": "host"},
@@ -41,6 +42,11 @@ def render_request(
         "DB_USER": {"resource_id": "postgres-main", "output": "username"},
         "DB_PASSWORD": {"resource_id": "postgres-main", "output": "password_secret_ref"},
     }
+    if url_binding:  # ticket 19: single-variable connection URL
+        env["DATABASE_URL"] = {
+            "resource_id": "postgres-main",
+            "output": "connection_url_secret_ref",
+        }
     if user_secret:
         env["API_KEY"] = {"secret_ref": {"name": "demo-app-env", "key": "API_KEY"}}
     return {
@@ -80,15 +86,9 @@ def render_request(
 
 
 def package_chart(chart_dir: Path, out: Path) -> bytes:
-    out.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        ["helm", "package", str(chart_dir), "--destination", str(out)],
-        capture_output=True,
-        check=True,
-        timeout=60,
-    )
-    path = Path(result.stdout.decode().strip().rsplit(" ", 1)[-1])
-    return path.read_bytes()
+    """Production packaging (ticket 18 promoted it to `cmp_providers.chart_package`)."""
+    del out
+    return _package_chart(chart_dir)
 
 
 def build_artifacts(store: LocalArtifactStore, tmp: Path, **request) -> dict:

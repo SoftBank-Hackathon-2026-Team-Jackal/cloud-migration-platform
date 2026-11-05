@@ -1,0 +1,17 @@
+capability: network-policy
+title: 통신 규칙(앱 ↔ DB, 외부 호출)
+usage_vocabulary: [앱에서 DB로의 연결, 외부 API 호출, 서비스 간 호출]
+detect_rules:
+  - {source: CODE, pattern: "EXTERNAL_HOST|http\\.(Get|Post|NewRequest)"}
+  - {source: MANIFEST, pattern: "NetworkPolicy|SecurityGroup|security group"}
+grade_rules:
+  - {target: AWS, grade: DIRECT, when: 통신 의도를 NetworkPolicy로 옮긴다}
+  - {target: GCP, grade: DIRECT, when: 통신 의도를 NetworkPolicy로 옮긴다}
+  - {target: ON_PREM, grade: DIRECT, when: 통신 의도를 NetworkPolicy로 옮긴다}
+known_differences:
+  - 외부 진입(인터넷 → 앱)은 network_intent에 자리가 없어 분석 결과에 따로 기록한다(D-15).
+  - 대상 CIDR·보안 그룹 ID는 요구사항에 넣지 않는다.
+standard_tests:
+  - 앱에서 DB로의 연결이 성공한다.
+  - 의도에 없는 외부 호출은 차단되고 기록된다.
+skill: network
