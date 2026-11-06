@@ -5,7 +5,8 @@
 #   1) bootstrap.yaml을 백업하고, cluster_target을 정적 설정에서 빼 CDS 파일(/etc/envoy/cds/cds.json)로 옮긴다.
 #      지금의 대상 설정이 그대로 첫 CDS 값이라 트래픽이 가는 곳은 달라지지 않는다.
 #   2) relay-worker에 TRAFFIC_CDS_PATH를 켠다(이전이 넘긴 주소가 터널 대역 안일 때만 대상을 바꾼다).
-#   3) Envoy 컨테이너를 다시 띄우고(몇 초) 관리 포트와 대상 클러스터를 확인한다.
+#   3) Envoy 컨테이너를 다시 띄우고(몇 초) 관리 포트가 살아 있고 대상 클러스터가 파일에서 올라왔는지 확인한다.
+#      (대상이 지금 건강한지는 보지 않는다: 이전이 시작될 때 새 대상으로 바뀌고 그때 헬스를 확인한다.)
 #      확인에 실패하면 백업 bootstrap으로 자동으로 되돌린다.
 #
 # 먼저 서버의 /opt/cmp/lib(cmp_traffic, cmp_worker)가 이 저장소의 같은 커밋이어야 한다.
@@ -45,7 +46,7 @@ PY
     sleep 1
     if [[ "$(curl -s -m 2 http://127.0.0.1:9901/ready || true)" == LIVE ]] \
        && curl -s -m 2 http://127.0.0.1:9901/config_dump | grep -q '"dynamic_active_clusters"' \
-       && curl -s -m 2 http://127.0.0.1:9901/clusters | grep -q 'cluster_target::.*health_flags::healthy'; then
+       && curl -s -m 2 http://127.0.0.1:9901/clusters | grep -q 'cluster_target::'; then
       ok=1; break
     fi
   done
