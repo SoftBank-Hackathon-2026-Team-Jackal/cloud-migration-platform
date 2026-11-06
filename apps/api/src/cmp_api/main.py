@@ -10,6 +10,7 @@ from cmp_api.routes.approvals import router as approval_router
 from cmp_api.routes.cloud_teardown import router as cloud_teardown_router
 from cmp_api.routes.connections import router as connection_router
 from cmp_api.routes.env_files import router as env_file_router
+from cmp_api.routes.migration_report import router as migration_report_router
 from cmp_api.routes.migrations import router as migration_router
 from cmp_api.routes.onprem_rollout import router as rollout_router
 from cmp_api.routes.plan_inputs import router as plan_input_router
@@ -53,6 +54,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Cloud Migration Platform", version="0.1.0", lifespan=lifespan)
 app.include_router(migration_router)
+app.include_router(migration_report_router)  # ticket 62
 app.include_router(agent_router)
 app.include_router(agent_job_router)
 app.include_router(cloud_teardown_router)  # ticket 53
