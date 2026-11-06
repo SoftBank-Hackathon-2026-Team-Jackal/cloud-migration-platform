@@ -21,6 +21,7 @@ Temporal에서 트래픽 전환을 Activity로 실행하고 `traffic.snapshot`�
 - [x] Activity가 Temporal에서 실행되고 단계마다 snapshot 필드가 만들어진다(가짜 Activity 시험).
 - [x] 롤백 Activity가 원본 100%로 되돌린다.
 - [x] 실제 중계 서버(EC2) + WireGuard 터널 + 온프레 역할 VM에서 정상 전환·롤백 시험(ADR-006 기록).
+- [x] 중계 서버 WireGuard peer 동기화: 플랫폼 `GET /relays/{relay_id}/agents`(RelayAgentList) 형식에 맞춰 단위 시험(`python -m cmp_traffic.peers`). 실제 플랫폼에 중계 서버를 등록해 받아 보는 시험은 남았다.
 - [ ] 상위 Workflow 연결(인계값 형식 확정 후), 컨트롤러와 중계 서버가 다른 호스트일 때의 설정 배포는 릴레이 워커(전용 큐)로 구현했고, 실제 중계 서버 호스트에서의 실행 시험이 남았다.
 
 ## 관련 문서

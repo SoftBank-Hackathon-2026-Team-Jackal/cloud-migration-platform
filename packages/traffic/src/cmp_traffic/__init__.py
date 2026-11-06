@@ -6,6 +6,7 @@ from .contracts import (
     StepOutcome,
     TrafficPolicy,
 )
+from .handover import handover_from_result
 from .shifter import (
     ObserverPort,
     ProxyPort,
@@ -28,6 +29,7 @@ __all__ = [
     "TrafficShifter",
     "check_handover",
     "evaluate_step",
+    "handover_from_result",
     "p99_limit",
     "weights_for",
 ]

@@ -1,0 +1,18 @@
+# 중계 서버에서 WireGuard peer를 플랫폼 Agent 목록과 맞추는 상시 프로세스(예시, #125).
+# 사용: /etc/cmp/peer-sync.env 에 PLATFORM_URL, RELAY_ID, RELAY_CREDENTIAL 을 적고(권한 600),
+#       이 파일을 /etc/systemd/system/ 에 복사해 `systemctl enable --now peer-sync`.
+# 단서: 아직 실제 중계 서버에서 돌려 보지 않았다. 자격증명은 환경 파일에만 두고 로그에 남기지 않는다.
+[Unit]
+Description=Sync WireGuard peers from the platform Agent list
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/cmp/peer-sync.env
+# wg 명령은 root(또는 CAP_NET_ADMIN)가 필요하다.
+ExecStart=/usr/bin/python3 -m cmp_traffic.peers
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
