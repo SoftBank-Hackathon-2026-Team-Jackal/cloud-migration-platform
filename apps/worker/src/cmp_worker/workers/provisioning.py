@@ -7,6 +7,7 @@ from cmp_worker.activities.approval import ApprovalActivities
 from cmp_worker.activities.aws_infra import AwsInfraActivities
 from cmp_worker.activities.aws_workloads_cli import build_aws_workloads_activities
 from cmp_worker.activities.cloud_teardown import build_cloud_teardown_activities
+from cmp_worker.activities.gcp_connection import verify_gcp_connection
 from cmp_worker.activities.gcp_infra import GcpInfraActivities
 from cmp_worker.activities.gcp_workloads_cli import build_gcp_workloads_activities
 from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
@@ -59,5 +60,6 @@ def create_worker(client: Client) -> Worker:
             teardown.plan_cloud_destroy,
             teardown.apply_cloud_destroy,
             emit_migration_event,  # ticket 24: Workflow-side event emission
+            verify_gcp_connection,  # ticket 48: GCP_TARGET connection check
         ],
     )

@@ -10,15 +10,12 @@ is the recorded one.
 import json
 import os
 import shutil
-import subprocess
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from tempfile import mkdtemp
 
 from cmp_contracts.plan import PlanManifest, Preview
+from cmp_contracts.provisioning import ProvisioningInputError
 from pydantic import ValidationError
 
 from cmp_providers.artifacts import verify_artifact_bytes
@@ -30,6 +27,7 @@ from cmp_providers.aws_apply import (
     subprocess_runner,
     template_evidence,
 )
+from cmp_providers.gcp_adc import adc_principal
 from cmp_providers.gcp_preview import GcpPlanInput
 from cmp_providers.resources import resource_root
 from cmp_providers.terraform_events import apply_runner, is_stale
@@ -48,20 +46,10 @@ AdcLookup = Callable[[dict[str, str]], str | None]
 
 
 def default_adc_email(env: dict[str, str]) -> str | None:
-    """Email of the gcloud user ADC principal; None when it cannot be verified."""
+    """Verified ADC principal (ticket 48 rules); None when it cannot be verified."""
     try:
-        token = subprocess.run(
-            ["gcloud", "auth", "application-default", "print-access-token"],
-            env=env,
-            capture_output=True,
-            check=True,
-            timeout=60,
-        ).stdout.strip()
-        body = urllib.parse.urlencode({"access_token": token.decode("ascii")}).encode()
-        request = urllib.request.Request("https://oauth2.googleapis.com/tokeninfo", data=body)
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return json.load(response).get("email")
-    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError, urllib.error.URLError):
+        return adc_principal(env)
+    except ProvisioningInputError:
         return None
 
 

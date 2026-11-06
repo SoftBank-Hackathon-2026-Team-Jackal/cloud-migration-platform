@@ -5,9 +5,6 @@ import os
 import re
 import shutil
 import subprocess
-import urllib.error
-import urllib.parse
-import urllib.request
 from ipaddress import IPv4Network, ip_network
 from pathlib import Path
 from tempfile import mkdtemp
@@ -26,6 +23,7 @@ from cmp_contracts.provisioning import (
 from pydantic import Field
 
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes
+from cmp_providers.gcp_adc import adc_principal
 from cmp_providers.plans import manifest_digest
 from cmp_providers.resources import resource_root
 
@@ -258,21 +256,10 @@ def _verify_adc(expected_email: str, work: Path, env: dict[str, str]) -> None:
         _reject(
             "ADC_SOURCE_UNSUPPORTED",
             "adc",
-            "This local runner requires gcloud user ADC, not an override credential file.",
+            "This runner reads the gcloud ADC well-known file, not an override credential file.",
         )
-    token = _run(["gcloud", "auth", "application-default", "print-access-token"], work, env).strip()
-    if not token:
-        _reject("ADC_UNAVAILABLE", "adc", "Google ADC token is unavailable.")
-    try:
-        body = urllib.parse.urlencode({"access_token": token.decode("ascii")}).encode()
-        with urllib.request.urlopen(
-            urllib.request.Request("https://oauth2.googleapis.com/tokeninfo", data=body),
-            timeout=15,
-        ) as response:
-            identity = json.load(response)
-    except (OSError, ValueError, UnicodeError, urllib.error.HTTPError):
-        _reject("ADC_CHECK_FAILED", "adc", "Google ADC identity could not be verified.")
-    if identity.get("email") != expected_email:
+    # Ticket 48: service-account key, WIF and user ADC (cmp_providers.gcp_adc).
+    if adc_principal(env, cwd=work) != expected_email:
         _reject("ADC_PRINCIPAL_MISMATCH", "adc", "Google ADC principal does not match expectation.")
 
 

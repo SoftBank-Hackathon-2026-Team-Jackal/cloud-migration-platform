@@ -53,6 +53,7 @@
 | [54 빌드 중 인스턴스 메타데이터 자격 노출 차단](../../tickets/provisioning/54-build-isolation.md) | IN_PROGRESS (로컬 완료, 리뷰·서버 반영 승인 대기) | 28, B-01 | PROV-001, 021 | [#189](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/189) | ☐ |
 | [50 Provisioning 인계 조회 방식과 Traffic Handover 정합 (#128 선행)](../../tickets/provisioning/50-handoff-contract.md) | IN_PROGRESS (로컬 완료, 리뷰·이상헌님 확인 대기) | 13, 16, 25, 49 | PROV-018, 019, 020, 021 | [#185](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/185) | ☐ |
 | [55 샌드박스 결과(EnvPlan·정리 상태·검증 대상)를 Plan에 반영](../../tickets/provisioning/55-sandbox-results-into-plan.md) | IN_PROGRESS (로컬 완료, 리뷰 대기. 생산 쪽 필드는 박승철님 협의 필요) | 15, 18, 44, ENV-04, ENV-05 | PROV-002, 004, 021 | [#190](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/190) | ☐ |
+| [48 GCP 대상 플랫폼 주체와 GCP 연결 확인 (B-06·B-07·D-07)](../../tickets/provisioning/48-gcp-target-principal.md) | IN_PROGRESS (로컬 완료, 리뷰·SA 생성·키 배치·서버 반영 승인 대기) | 06, 10, 21, 23, 46 | PROV-003, 007, 021, 022 | [#183](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/183) | ☐ |
 
 ## 선행 관계
 
