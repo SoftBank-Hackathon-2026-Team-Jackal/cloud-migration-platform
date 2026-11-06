@@ -37,6 +37,8 @@ class AgentPeer(BaseModel):
     tunnel_ip: str
     allowed_ips: list[str]
     allowed_ports: list[int] = Field(default_factory=list)
+    # 티켓 74: 그중 K3s API 포트(중계 서버 TCP 전달 대상). 예전 플랫폼·꺼짐·폐기면 None.
+    kube_api_port: int | None = None
     revoked: bool
 
     @field_validator("public_key")
@@ -153,9 +155,11 @@ class PeerSyncer:
         tunnel_cidr: str,
         interface: str = "wg0",
         allow_empty: bool = False,
+        forwards: Callable[[AgentList], object] | None = None,
     ) -> None:
         self.source, self.wg = source, wg
         self.tunnel_cidr, self.interface, self.allow_empty = tunnel_cidr, interface, allow_empty
+        self.forwards = forwards  # 티켓 74: peer 적용 뒤 K3s API 전달 파일을 맞춘다(없으면 끔)
         self.version: str | None = None
 
     def sync_once(self) -> PeerPlan | None:
@@ -167,6 +171,8 @@ class PeerSyncer:
         )
         for argv in wg_commands(plan, self.interface):
             self.wg.run(argv)
+        if self.forwards is not None:
+            self.forwards(listing)  # 목록 검증(plan_peer_changes)을 통과한 뒤에만
         self.version = listing.list_version  # 모두 적용된 뒤에만 버전을 올린다
         return plan
 
@@ -268,6 +274,16 @@ def config_from_env(env: Mapping[str, str]) -> dict:
         "tunnel_cidr": env.get("TUNNEL_CIDR", "10.200.0.0/24"),
         "interface": env.get("WG_INTERFACE", "wg0"),
         "interval": float(env.get("SYNC_INTERVAL", "30")),
+        # 티켓 74: 리슨 주소(중계 서버 사설 IP)를 줄 때만 K3s API 전달 파일을 쓴다.
+        "kube_forward": (
+            {
+                "bind_ip": env["KUBE_FORWARD_BIND_IP"],
+                "directory": env.get("KUBE_FORWARD_DIR", "/etc/envoy-kube"),
+                "base_port": int(env.get("KUBE_FORWARD_BASE_PORT", "16400")),
+            }
+            if env.get("KUBE_FORWARD_BIND_IP")
+            else None
+        ),
     }
 
 
@@ -277,11 +293,23 @@ def main() -> int:
     except ValueError as exc:
         print(f"설정 오류: {exc}", file=sys.stderr)
         return 2
+    forwards = None
+    if config["kube_forward"]:
+        from .kube_forward import KubeForwardFiles  # peers만 쓰는 서버는 yaml 없이도 돈다
+
+        try:
+            forwards = KubeForwardFiles(
+                tunnel_cidr=config["tunnel_cidr"], **config["kube_forward"]
+            ).apply
+        except ValueError as exc:
+            print(f"설정 오류: {exc}", file=sys.stderr)
+            return 2
     syncer = PeerSyncer(
         HttpAgentSource(config["url"], token=config["token"]),
         WgCli(config["interface"]),
         config["tunnel_cidr"],
         config["interface"],
+        forwards=forwards,
     )
     run_sync_loop(syncer, config["interval"])
     return 0

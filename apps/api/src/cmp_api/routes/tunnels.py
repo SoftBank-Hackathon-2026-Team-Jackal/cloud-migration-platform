@@ -101,6 +101,8 @@ class RelayAgent(BaseModel):
     tunnel_ip: str
     allowed_ips: list[str]  # WireGuard peer AllowedIPs: the Agent's /32
     allowed_ports: list[int]  # empty when revoked
+    # Ticket 74: which of `allowed_ports` is the K3s API (relay TCP forward); null when off/revoked.
+    kube_api_port: int | None = None
     revoked: bool  # true: remove this peer
 
 

@@ -2,6 +2,9 @@
 # 중계 서버 스택(cmp-demo-relay, #200)을 만들거나 갱신한다. 다른 스택은 건드리지 않는다.
 #   deploy-relay-stack.sh --plan   # 변경 세트만 만들고 보여 준다(적용하지 않음)
 #   deploy-relay-stack.sh          # 스택을 만들거나 갱신한다
+#   KUBE_API_FORWARD_SOURCE_SG=sg-… deploy-relay-stack.sh --plan
+#                                  # 티켓 74: 데모 서버 보안 그룹에서만 K3s API 전달 포트(16402-16654) 허용
+#                                  # (값을 주지 않으면 스택의 이전 값을 그대로 쓴다. 기본은 닫힘)
 # 서버 안 설정(WireGuard·Envoy)은 만든 뒤 setup-relay.sh를 SSM으로 실행한다.
 set -euo pipefail
 
@@ -31,6 +34,11 @@ subnet="$(param SubnetId)"
 
 extra=()
 [[ "$mode" == --plan ]] && extra=(--no-execute-changeset)
+overrides=(VpcId="$vpc" SubnetId="$subnet")
+if [[ -n "${KUBE_API_FORWARD_SOURCE_SG:-}" ]]; then
+  [[ "$KUBE_API_FORWARD_SOURCE_SG" =~ ^sg-[0-9a-f]+$ ]] || { echo "Unexpected security group id" >&2; exit 2; }
+  overrides+=(KubeApiForwardSourceSecurityGroupId="$KUBE_API_FORWARD_SOURCE_SG")
+fi
 aws cloudformation deploy \
   --profile "$profile" --region "$region" \
   --stack-name "$stack" \
@@ -38,5 +46,5 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM \
   --no-fail-on-empty-changeset \
   ${extra[@]+"${extra[@]}"} \
-  --parameter-overrides VpcId="$vpc" SubnetId="$subnet" \
+  --parameter-overrides "${overrides[@]}" \
   --tags Project=cloud-migration-platform Purpose=hackathon-demo-relay
