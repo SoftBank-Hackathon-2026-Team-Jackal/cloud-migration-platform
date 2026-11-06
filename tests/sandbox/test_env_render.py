@@ -1,6 +1,7 @@
 """ENV-06: the Sandbox builds the app's env from `env_file_ref` + EnvPlan with `render_env`."""
 
 import json
+import shutil
 from datetime import UTC, datetime
 
 import pytest
@@ -8,7 +9,16 @@ from cmp_contracts.env_plan import EnvPlan, EnvPlanEntry
 from cmp_providers.env_file import InMemoryEnvFileStore
 from cmp_worker.sandbox_deploy import SandboxCapabilities, SandboxError, SandboxImages
 
-from .test_deploy import APP, ENV_SECRET_VALUE, PG, FakeRunner, make_service, requirements, stdin_of
+from .test_deploy import (
+    APP,
+    ENV_SECRET_VALUE,
+    PG,
+    ROOT,
+    FakeRunner,
+    make_service,
+    requirements,
+    stdin_of,
+)
 
 VALUE = "feature-value-that-must-not-leak"
 
@@ -81,10 +91,15 @@ def test_every_variable_reaches_the_app_as_a_secret_reference(tmp_path):
     result = prepare(FakeRunner(), store, ref, plan)
     app = next(r for r in result.request["resources"] if r["kind"] == "APPLICATION")
     db = result.releases["orders-db"]
-    ref_of = {k: v["secret_ref"] for k, v in app["env_bindings"].items()}
+    bindings = app["env_bindings"]
+    ref_of = {k: v["secret_ref"] for k, v in bindings.items() if "secret_ref" in v}
     assert ref_of["DB_HOST"] == {"name": f"{db}-conn", "key": "host"}
-    assert ref_of["DB_PASSWORD"] == {"name": f"{db}-auth", "key": "password"}
-    assert ref_of["DATABASE_URL"] == {"name": f"{db}-url", "key": "url"}
+    # ENV-04 E4: password/URL keys use the DB output binding, never the `-url` Secret directly
+    assert bindings["DB_PASSWORD"] == {"resource_id": "orders-db", "output": "password_secret_ref"}
+    assert bindings["DATABASE_URL"] == {
+        "resource_id": "orders-db",
+        "output": "connection_url_secret_ref",
+    }
     assert ref_of["FEATURE_X"] == {
         "name": f"{result.releases['orders-api']}-env",
         "key": "FEATURE_X",
@@ -214,3 +229,79 @@ def test_the_sandbox_and_production_render_the_same_except_for_the_database_refe
     assert [e.secret_ref for e in sandbox.env if e.name == "DB_HOST"] != [
         e.secret_ref for e in production.env if e.name == "DB_HOST"
     ]
+
+
+# ------------------------------------------------------------------ shared renderer (E4)
+
+
+def _secret_refs(result) -> dict[str, tuple[str, str]]:
+    """The app's final `secretKeyRef`s (name, key) from the shared v2 renderer's Helm Values."""
+    app = next(r for r in result.resources if r.kind == "APPLICATION")
+    return {
+        e.name: (e.source.name, e.source.key)
+        for e in app.helm_values.env
+        if e.source.kind == "SECRET"
+    }
+
+
+def _render(request):
+    from cmp_providers.shared_deployment_v2 import render_shared_deployment_v2
+
+    return render_shared_deployment_v2(
+        request,
+        database_chart_dir=ROOT / "infra/helm/postgres",
+        application_chart_dir=ROOT / "infra/helm/application",
+    )
+
+
+def test_an_env_file_sandbox_passes_the_shared_renderer_with_e4_references(tmp_path, caplog):
+    """Demo regression: `.env` with DATABASE_URL used to fail with SECRET_NAME_CONFLICT."""
+    if shutil.which("helm") is None:
+        pytest.skip("helm is not installed")
+    store, ref, plan = world(tmp_path)
+    result = prepare(FakeRunner(), store, ref, plan)
+    rendered = _render(result.request)
+    db, app = result.releases["orders-db"], result.releases["orders-api"]
+    assert _secret_refs(rendered) == {
+        "DATABASE_URL": (f"{db}-url", "url"),
+        "DB_PASSWORD": (f"{db}-auth", "password"),
+        "DB_HOST": (f"{db}-conn", "host"),
+        "FEATURE_X": (f"{app}-env", "FEATURE_X"),
+    }
+    flat = rendered.model_dump_json() + "".join(r.manifest_yaml for r in rendered.resources)
+    assert VALUE not in flat and VALUE not in caplog.text
+
+
+def test_the_sandbox_and_production_end_at_the_same_secret_references(tmp_path):
+    """Same EnvPlan → same final `secretKeyRef` for the password/URL keys in both paths."""
+    if shutil.which("helm") is None:
+        pytest.skip("helm is not installed")
+    from cmp_contracts.shared_deployment_v2 import SecretRefV2
+    from cmp_providers.env_file import DbOutputRefs, database_outputs, preview_env
+    from cmp_worker.plan_publish import _env_binding
+
+    store, ref, plan = world(tmp_path)
+    sandbox = prepare(FakeRunner(), store, ref, plan)
+    db, app = sandbox.releases["orders-db"], sandbox.releases["orders-api"]
+    outputs = database_outputs(
+        release=db, namespace=sandbox.namespace, name="ordersdb", username="ordersuser",
+        password_secret_ref=SecretRefV2(name=f"{db}-auth", key="password"),
+    )  # fmt: skip
+    previewed = preview_env(
+        store, plan, ref, DbOutputRefs.from_outputs(outputs, database_release=db), app_release=app
+    )
+    entries_by_key = {e.key: e for e in plan.entries}
+    production = json.loads(json.dumps(sandbox.request))
+    production["environment"] = "PRODUCTION"
+    target = next(r for r in production["resources"] if r["kind"] == "APPLICATION")
+    target["env_bindings"] = {
+        item.name: _env_binding(entries_by_key[item.name], item, "orders-db")
+        for item in previewed.env
+    }
+    sandbox_refs, production_refs = (
+        _secret_refs(_render(sandbox.request)),
+        _secret_refs(_render(production)),
+    )
+    assert sandbox_refs == production_refs
+    assert sandbox_refs["DATABASE_URL"] == (f"{db}-url", "url")
+    assert sandbox_refs["DB_PASSWORD"] == (f"{db}-auth", "password")

@@ -29,6 +29,12 @@ ENV-03(`render_env`), ENV-05(EnvPlan).
 - [x] 샌드박스가 `env_file_ref`로 앱 env를 만들고 워커 로컬 파일이 필요 없다.
 - [x] 같은 입력에서 구축(ENV-04)과 `PASS`·`EXCLUDED` 결과가 같고 DB 출력만 다르다.
 - [x] 원문 값이 Sandbox 로그·이벤트·Temporal 이력에 없다.
+- [x] 앱 env 바인딩이 ENV-04 E4를 따른다: PASS → `<app>-env`, REPLACED host·port·name·username → `<db>-conn`, REPLACED `password_secret_ref`·`connection_url_secret_ref` → DB 출력 바인딩(`{"resource_id", "output"}`). 최종 `secretKeyRef`가 구축과 같다.
+
+## 수정 기록 (2026-11-07)
+- 현상: 데모 실제 실행에서 `.env`(DATABASE_URL 포함)를 올리면 `sbx_apply`가 `resources.1.env_bindings.<env>: SECRET_NAME_CONFLICT`로 실패했다.
+- 원인: `_render_app_env`가 모든 키를 Secret 참조로 넘겨 DATABASE_URL이 플랫폼 관리 `<db>-url` Secret을 직접 참조했다. 공통 렌더러는 이를 막는다(티켓 19 U2, 의도된 보호).
+- 수정: 비밀번호·URL 키만 DB 출력 바인딩으로 넘긴다(구축 `plan_publish._env_binding`과 같은 규칙). 공통 렌더러 검사·운영 경로·Secret 생성(`-auth`·`-url`·`-conn`·`-env`)은 그대로다.
 
 ## Test Seam
 기존 샌드박스 테스트 + InMemory `.env` 저장소.

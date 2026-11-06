@@ -77,6 +77,8 @@ LABEL_EXPIRES = "cmp.sandbox/expires-at"
 ANNOTATION_CONTENT = "cmp.sandbox/content-sha256"
 BASELINE_PATH = "/var/lib/postgresql/data/cmp-baseline.dump"
 DEFAULT_TTL = timedelta(hours=2)
+# EnvPlan bindings that reach the app as a DB output binding (same set as `plan_publish`).
+DB_OUTPUT_BINDINGS = {"password_secret_ref", "connection_url_secret_ref"}
 _NAMESPACE = re.compile(r"^cmp-sbx-[a-z0-9][a-z0-9-]*$")
 _ENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
@@ -532,8 +534,16 @@ class SandboxService:
             s.name: s.reveal()
             for s in deployment_secrets(rendered, outputs, database_release=db_release)
         }
+        # ENV-04 E4: password/URL keys use the DB output binding, as Production does
+        # (`plan_publish._env_binding`); `-env`/`-conn` keys stay Secret references. A direct
+        # Secret reference to the platform `-url` Secret is refused by the shared renderer.
+        replaced = {e.key: e.binding for e in env_plan.entries if e.disposition == "REPLACED"}
         bindings = {
-            item.name: {"secret_ref": item.secret_ref.model_dump(mode="json")}
+            item.name: (
+                {"resource_id": db.id, "output": replaced[item.name]}
+                if replaced.get(item.name) in DB_OUTPUT_BINDINGS
+                else {"secret_ref": item.secret_ref.model_dump(mode="json")}
+            )
             for item in rendered.env
         }
         return values, bindings
