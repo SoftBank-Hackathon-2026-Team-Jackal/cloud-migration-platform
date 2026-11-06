@@ -9,6 +9,8 @@ from cmp_api.event_stream import StatusUnavailable
 from cmp_api.main import app
 from cmp_api.migration_events import DbEventEmitter
 from cmp_api.routes.migrations import get_event_sessions, get_status_reader
+from cmp_data import cutover_events
+from cmp_data.contracts import ReadinessPolicy
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -296,3 +298,86 @@ PLAN_STEP = {
 PLAN_READY = {"plan_id": "p1", "revision": 1}
 APPROVAL_REQUIRED = {"excluded": [], "rollback_policy": "KEEP_SOURCE"}
 TRAFFIC_READY = {"state": "running", "lag_ms": 0, "longest_tx_ms": 0, "commits_per_sec": 0}
+
+
+OUTCOME_SWITCHED = {
+    "result": "switched",
+    "active": "target",
+    "pause_ms": 110,
+    "steps": [{"id": "pause", "ms": 3, "window": "pause"}, {"id": "resume", "ms": 1, "window": "pause"}],
+    "replication": {"direction": "reverse", "lag_ms": None},
+}
+
+
+def report_with_outcomes(sessions, clock, *outcomes):
+    run = Run(sessions, clock)
+    run.at(0, "analysis.done", "analysis", "done", {})
+    for n, outcome in enumerate(outcomes, start=1):
+        run.at(n, "cutover.outcome", "verification", "running", outcome)
+    return client_with(sessions, phase("verification")).get(f"/migrations/{MID}/report")
+
+
+def test_report_without_cutover_outcome_has_null_field(sessions, clock):
+    body = report_with_outcomes(sessions, clock).json()
+    assert body["cutover_outcome"] is None
+    assert body["results"]["cutover"] == []
+
+
+def test_report_carries_the_cutover_outcome_in_the_web_shape(sessions, clock):
+    body = report_with_outcomes(sessions, clock, OUTCOME_SWITCHED).json()
+    assert body["cutover_outcome"] == OUTCOME_SWITCHED
+
+
+def test_report_keeps_only_the_latest_cutover_outcome(sessions, clock):
+    refused = {
+        "result": "refused",
+        "reason": "SWITCHOVER_FAILED",
+        "message": SECRET,
+        "active": "source",
+        "pause_ms": None,
+        "replication": {"direction": "forward", "lag_ms": None},
+    }
+    rolled_back = {**OUTCOME_SWITCHED, "active": "source", "held_requests": 2, "failed_requests": 0}
+    body = report_with_outcomes(sessions, clock, refused, OUTCOME_SWITCHED, rolled_back).json()
+    assert body["cutover_outcome"] == rolled_back
+
+
+def test_report_cutover_outcome_never_copies_the_free_text_message(sessions, clock):
+    # The event contract already forbids unknown keys; `message` (executor detail) is free text.
+    refused = {
+        "result": "refused",
+        "reason": "SWITCHOVER_FAILED",
+        "message": SECRET,
+        "active": "source",
+        "pause_ms": None,
+        "steps": [{"id": "pause", "ms": 0, "window": "pause"}],
+        "replication": {"direction": "forward", "lag_ms": 5},
+    }
+    response = report_with_outcomes(sessions, clock, refused)
+    assert response.json()["cutover_outcome"] == {
+        "result": "refused",
+        "reason": "SWITCHOVER_FAILED",
+        "active": "source",
+        "pause_ms": None,
+        "steps": [{"id": "pause", "ms": 0, "window": "pause"}],
+        "replication": {"direction": "forward", "lag_ms": 5},
+    }
+    assert "hunter2" not in response.text
+
+
+def test_report_reads_the_outcome_the_data_workflow_emits(sessions, clock):
+    # The publisher (`cmp_data.cutover_events.run_events`) and the report agree on the keys.
+    result = {"switched": True, "write_pause_ms": 7, "verify_ok": None, "tables": [],
+              "steps": [{"id": "pause", "ms": 0.4, "start_ms": 0, "window": "pause"}]}  # fmt: skip
+    drafts = cutover_events.run_events(
+        result, attempt=1, came_from="source", going_to="target", policy=ReadinessPolicy()
+    )
+    outcome = next(d.data for d in drafts if d.type == "cutover.outcome")
+    body = report_with_outcomes(sessions, clock, outcome).json()
+    assert body["cutover_outcome"] == {
+        "result": "switched",
+        "active": "target",
+        "pause_ms": 7,
+        "steps": [{"id": "pause", "ms": 0.4, "start_ms": 0, "window": "pause"}],
+        "replication": {"direction": "reverse", "lag_ms": None},
+    }

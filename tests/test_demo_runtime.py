@@ -211,13 +211,16 @@ def test_web_is_internal_only_and_reaches_the_api_over_the_compose_network():
 
 def test_web_is_built_in_real_sse_mode_against_the_public_origin():
     # NEXT_PUBLIC_* values are compiled into the browser bundle, so they are build args, not
-    # runtime environment. cloud-migration-web's Dockerfile declares these three ARGs (default
+    # runtime environment. cloud-migration-web's Dockerfile declares these ARGs (default
     # mock/wait/empty). The browser calls the same origin, which the edge sends to the API.
     web = _compose()["services"]["web"]
     assert web["build"]["args"] == {
         "NEXT_PUBLIC_API_MODE": "sse",
         "NEXT_PUBLIC_SSE_START": "source",
         "NEXT_PUBLIC_API_BASE": "https://${CMP_PUBLIC_HOST:-localhost}",
+        # Ticket 77: the web's real-mode screens backed by platform APIs that exist (report #240,
+        # traffic rollback/retry #245). sandbox.retry has no platform API and stays off.
+        "NEXT_PUBLIC_SSE_CAPABILITIES": "${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry}",
     }
     for name in web["build"]["args"]:
         assert name not in web["environment"], name

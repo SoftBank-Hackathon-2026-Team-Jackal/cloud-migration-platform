@@ -11,12 +11,14 @@ from cmp_contracts.queues import MIGRATION_QUEUE, WORKFLOW_QUEUE
 from cmp_data import DataMigrationRequest
 from cmp_data import tunnel as wg
 from cmp_data.handoff import DataMigrationInput, endpoints
+from cmp_api.migration_events import InMemoryEmitter
 from cmp_worker.activities import data_tunnel as dt
+from cmp_worker.events import configure_emitter
 from cmp_worker.workflows.data_migration import DataMigrationWorkflow
 from pydantic import ValidationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
 
 from .test_data_workflow import ARGS, Fakes, wait_phase
@@ -193,6 +195,23 @@ def test_establish_waits_for_the_target_lb_then_points_the_source_at_it(clusters
     dumped = json.dumps([made["source"].applied, made["target"].applied, result])
     assert target_private not in dumped
     assert made["source"].secrets[(wg.NAMESPACE, wg.name(MID))]["private"] not in dumped
+
+
+
+
+async def test_tunnel_activity_tells_the_web_it_is_building_the_tunnel(clusters) -> None:
+    # Provisioning 77: the source NLB takes 2-3 minutes; the web shows `data.phase` "tunnel"
+    # meanwhile, like dm_precheck emits "preflight" when it starts.
+    emitter = InMemoryEmitter()
+    previous = configure_emitter(emitter)
+    try:
+        payload = {"request": request().model_dump(mode="json"), "tunnel": TUNNEL}
+        await ActivityEnvironment().run(dt.dm_tunnel, payload)
+    finally:
+        configure_emitter(previous)
+    assert [(e.type, e.phase, e.data) for e in emitter.events] == [
+        ("data.phase", "data_copy", {"phase": "tunnel"})
+    ]
 
 
 @pytest.mark.parametrize("config", [TUNNEL, REVERSE_TUNNEL])

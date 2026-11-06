@@ -429,7 +429,8 @@ class DataPreflightData(WebModel):
 
 
 class DataPhaseData(WebModel):
-    phase: Literal["preflight", "blocked", "schema", "copy", "catchup", "streaming"]
+    # "tunnel" (Provisioning 77): dm_tunnel is building the replication tunnel (source NLB 2-3 min).
+    phase: Literal["tunnel", "preflight", "blocked", "schema", "copy", "catchup", "streaming"]
 
 
 class DataLsnData(WebModel):
