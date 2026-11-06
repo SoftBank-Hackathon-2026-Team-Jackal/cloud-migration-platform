@@ -49,6 +49,12 @@ def report(config: Settings) -> dict[str, str]:
         result["build"] = _error(exc)
     result["llm"] = "on" if build_llm_factory(config) is not None else "off"
     result["env_store"] = "on" if optional_env_file_store() is not None else "off"
+    try:  # ON_PREM rollout jobs are built in the worker from the API's registry settings
+        from cmp_api.onprem_rollout import configured_platform_registry
+
+        result["platform_ecr_registry"] = "on" if configured_platform_registry() else "off"
+    except ValueError as exc:
+        result["platform_ecr_registry"] = _error(exc)
     return result
 
 
