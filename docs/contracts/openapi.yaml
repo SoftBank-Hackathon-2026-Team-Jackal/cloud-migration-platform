@@ -953,6 +953,114 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/approvers/{approver_id}/credential:
+    post:
+      tags:
+      - provisioning approval
+      summary: Rotate Approver
+      description: Issue a new credential once; the previous one is rejected (401)
+        from now on.
+      operationId: rotate_approver_provisioning_approvers__approver_id__credential_post
+      parameters:
+      - name: approver_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Approver Id
+      - name: x-approval-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Approval-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproverCredential'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - provisioning approval
+      summary: Revoke Approver
+      description: Revoke without a replacement; rotate again to re-enable the same
+        approver.
+      operationId: revoke_approver_provisioning_approvers__approver_id__credential_delete
+      parameters:
+      - name: approver_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Approver Id
+      - name: x-approval-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Approval-Admin-Key
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/approvers/{approver_id}/migrations:
+    post:
+      tags:
+      - provisioning approval
+      summary: Grant Approver
+      description: Add Migration IDs this approver may decide (the credential is unchanged).
+      operationId: grant_approver_provisioning_approvers__approver_id__migrations_post
+      parameters:
+      - name: approver_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Approver Id
+      - name: x-approval-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Approval-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproverGrant'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproverGrants'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/plans/{plan_id}/revisions/{revision}/approvals:
     post:
       tags:
@@ -2373,6 +2481,37 @@ components:
       - approver_id
       - credential
       title: ApproverCredential
+    ApproverGrant:
+      properties:
+        migration_ids:
+          items:
+            type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          type: array
+          minItems: 1
+          title: Migration Ids
+      additionalProperties: false
+      type: object
+      required:
+      - migration_ids
+      title: ApproverGrant
+    ApproverGrants:
+      properties:
+        approver_id:
+          type: string
+          title: Approver Id
+        migration_ids:
+          items:
+            type: string
+          type: array
+          title: Migration Ids
+      additionalProperties: false
+      type: object
+      required:
+      - approver_id
+      - migration_ids
+      title: ApproverGrants
     ApproverRegistration:
       properties:
         approver_id:
