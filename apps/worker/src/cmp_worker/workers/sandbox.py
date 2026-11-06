@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cmp_contracts.queues import SANDBOX_QUEUE
+from cmp_providers.ecr_pull import PlatformRegistry, boto3_minter
 from temporalio.client import Client
 from temporalio.worker import Worker
 
@@ -30,6 +31,8 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
     """
     # Imported here, not at module level: reading the settings must not happen when a Workflow
     # sandbox imports this module (the settings read files, which a Workflow may not do).
+    from cmp_api.env_store import optional_env_file_store
+
     from cmp_worker.config import settings
     from cmp_worker.llm_factory import build_llm_factory
 
@@ -68,12 +71,20 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
             build_store=InMemoryBuildStore(),
         )
     uploader = None
+    pull_registry = minter = None
     if build_settings is not None:
+        # Ticket 26: images the real build pushes are in the platform ECR, which needs a pull Secret.
+        host, _, repository = build_settings.ecr_repository.partition("/")
+        pull_registry = PlatformRegistry.parse(host, repository)
+        minter = boto3_minter(build_settings.aws_profile)
         archives = build.archive_store
         bucket = build_settings.source_bucket
         uploader = lambda bundle: upload_suite(archives, bucket, bundle)
     return SandboxLoopActivities(
         suite_uploader=uploader,
+        pull_registry=pull_registry,
+        token_minter=minter,
+        env_store=optional_env_file_store(),  # ENV-06: None until the platform store is set
         service=service,
         store=LocalArtifactStore(config.analysis_artifact_store_dir),
         workspace_root=workspace_root,

@@ -20,10 +20,26 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from cmp_contracts.provisioning import Image
+from cmp_contracts.env_plan import EnvPlan
+from cmp_contracts.provisioning import ContentRef, Image
 from cmp_contracts.provisioning_v2 import RequirementsV2
-from cmp_contracts.shared_deployment_v2 import SharedDeploymentRequestV2
+from cmp_contracts.shared_deployment_v2 import SecretRefV2, SharedDeploymentRequestV2
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url, connection_url_secret_name
+from cmp_providers.ecr_pull import (
+    PULL_SECRET,
+    EcrPullError,
+    EcrTokenMinter,
+    PlatformRegistry,
+    dockerconfigjson,
+)
+from cmp_providers.env_file import (
+    DbOutputRefs,
+    EnvFileError,
+    EnvFileStore,
+    database_outputs,
+    deployment_secrets,
+    render_env,
+)
 from cmp_providers.shared_deployment_v2 import render_shared_deployment_v2
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -320,6 +336,9 @@ class SandboxService:
         ttl: timedelta = DEFAULT_TTL,
         update_env: bool = False,
         network: bool = False,
+        env_plan: EnvPlan | None = None,
+        env_file_ref: ContentRef | None = None,
+        env_store: EnvFileStore | None = None,
     ) -> SandboxPlan:
         started = now or datetime.now(UTC)
         expires_at = int((started + ttl).timestamp())
@@ -357,21 +376,41 @@ class SandboxService:
         app_env_values: dict[str, dict[str, str]] = {}
         for app in apps:
             bindings: dict[str, Any] = {}
-            for name, binding in app.env_bindings.items():
-                bindings[name] = binding.model_dump(mode="json")
-                needs_url = needs_url or binding.output == "connection_url_secret_ref"
-            wanted = [n for n in env_names if n not in bindings]
             env_secret = f"{releases[app.id]}-env"
             extra = proxy_env(list(releases.values())) if network else {}
-            wanted = [*wanted, *[n for n in extra if n not in bindings and n not in wanted]]
-            if wanted:
-                app_env_values[env_secret] = {
-                    **_env_values(env_file, [n for n in wanted if n not in extra]),
-                    **extra,
-                }
-                secret_names.append(env_secret)
-                for name in wanted:
-                    bindings[name] = {"secret_ref": {"name": env_secret, "key": name}}
+            if env_plan is not None:
+                # ENV-06: the same `render_env` the Production step uses; only the DB refs differ.
+                rendered_values, bindings = self._render_app_env(
+                    env_plan, env_file_ref, env_store, db, db_release, namespace,
+                    password_secret, releases[app.id],
+                )  # fmt: skip
+                needs_url = needs_url or any(
+                    e.binding == "connection_url_secret_ref" for e in env_plan.entries
+                )
+                for name, values in rendered_values.items():
+                    app_env_values[name] = values
+                    if name not in secret_names:
+                        secret_names.append(name)
+                if extra:
+                    app_env_values[env_secret] = {**app_env_values.get(env_secret, {}), **extra}
+                    if env_secret not in secret_names:
+                        secret_names.append(env_secret)
+                    for name in extra:
+                        bindings.setdefault(name, {"secret_ref": {"name": env_secret, "key": name}})
+            else:
+                for name, binding in app.env_bindings.items():
+                    bindings[name] = binding.model_dump(mode="json")
+                    needs_url = needs_url or binding.output == "connection_url_secret_ref"
+                wanted = [n for n in env_names if n not in bindings]
+                wanted = [*wanted, *[n for n in extra if n not in bindings and n not in wanted]]
+                if wanted:
+                    app_env_values[env_secret] = {
+                        **_env_values(env_file, [n for n in wanted if n not in extra]),
+                        **extra,
+                    }
+                    secret_names.append(env_secret)
+                    for name in wanted:
+                        bindings[name] = {"secret_ref": {"name": env_secret, "key": name}}
             if app.id not in images.applications:
                 raise SandboxError("APPLICATION_IMAGE_MISSING")
             resources.append(
@@ -445,6 +484,87 @@ class SandboxService:
             env_updated=env_updated,
             network_intent=[n.model_dump(mode="json") for n in requirements.network_intent],
         )
+
+    @staticmethod
+    def _render_app_env(
+        env_plan: EnvPlan,
+        env_file_ref: ContentRef | None,
+        env_store: EnvFileStore | None,
+        db: Any,
+        db_release: str,
+        namespace: str,
+        password_secret: str,
+        app_release: str,
+    ) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
+        """Secrets to create (name → data) and the app's `secretKeyRef` bindings. Codes only."""
+        if env_file_ref is None or env_store is None:
+            raise SandboxError("ENV_FILE_STORE_UNCONFIGURED")
+        outputs = database_outputs(
+            release=db_release, namespace=namespace, name=db.database.name,
+            username=db.database.username,
+            password_secret_ref=SecretRefV2(name=password_secret, key="password"),
+        )  # fmt: skip
+        try:
+            rendered = render_env(
+                env_store, env_plan, env_file_ref,
+                DbOutputRefs.from_outputs(outputs, database_release=db_release),
+                app_release=app_release,
+            )  # fmt: skip
+        except EnvFileError as exc:
+            raise SandboxError(exc.code) from None
+        if rendered.decisions:
+            raise SandboxError(rendered.decisions[0].code)
+        values = {
+            s.name: s.reveal()
+            for s in deployment_secrets(rendered, outputs, database_release=db_release)
+        }
+        bindings = {
+            item.name: {"secret_ref": item.secret_ref.model_dump(mode="json")}
+            for item in rendered.env
+        }
+        return values, bindings
+
+    # ---------------------------------------------------------------------- pull secret
+
+    def apply_pull_secret(
+        self,
+        plan: SandboxPlan,
+        registry: PlatformRegistry | None,
+        minter: EcrTokenMinter | None,
+    ) -> str | None:
+        """Ticket 26: a short-lived ECR pull Secret for the platform registry's images.
+
+        None when no image is in ECR. The token goes to the cluster on standard input only and is
+        never kept; the `default` account refers to the Secret, as the GKE workloads do."""
+        uris = [r["image"]["uri"] for r in plan.request["resources"]]
+        try:
+            host = PlatformRegistry.require(registry, uris)
+            if host is None:
+                return None
+            if minter is None:
+                raise EcrPullError("ECR_TOKEN_UNAVAILABLE")
+            credential = minter.mint(registry)
+        except EcrPullError as exc:
+            raise SandboxError(exc.code) from None
+        labels = self._labels(plan.run_id, plan.expires_at)
+        secret = {
+            "apiVersion": "v1", "kind": "Secret", "type": "kubernetes.io/dockerconfigjson",
+            "metadata": {"name": PULL_SECRET, "namespace": plan.namespace, "labels": labels},
+            "stringData": {
+                ".dockerconfigjson": dockerconfigjson(host, credential.username, credential.reveal())
+            },
+        }  # fmt: skip
+        account = {
+            "apiVersion": "v1", "kind": "ServiceAccount",
+            "metadata": {"name": "default", "namespace": plan.namespace},
+            "imagePullSecrets": [{"name": PULL_SECRET}],
+        }  # fmt: skip
+        for manifest in (secret, account):
+            self.cluster.kubectl(
+                "apply", "--server-side", f"--field-manager={FIELD_MANAGER}", "--force-conflicts",
+                "-f", "-", stdin=json.dumps(manifest).encode(),
+            )  # fmt: skip
+        return PULL_SECRET
 
     # -------------------------------------------------------------------------- apply
 

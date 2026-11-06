@@ -34,6 +34,9 @@ def build_pipeline(config: Settings = default_settings) -> AnalysisPipeline | No
     """Real analysis steps need a result store and a workspace; otherwise the scaffold runs."""
     if not config.analysis_artifact_store_dir or not config.analysis_workspace_root:
         return None
+    # Imported here: reading the platform settings must not happen when a Workflow imports this.
+    from cmp_api.env_store import optional_env_file_store
+
     resources = Path(config.analysis_resources_dir) if config.analysis_resources_dir else _REPO_ROOT
     region = config.analysis_aws_region
     return AnalysisPipeline(
@@ -43,6 +46,7 @@ def build_pipeline(config: Settings = default_settings) -> AnalysisPipeline | No
         catalog_dir=resources / "catalog",
         allow_local_repositories=config.analysis_allow_local_repositories,
         source_resolver=build_source_resolver(config.source_token_resolver),
+        env_store=optional_env_file_store(),  # ENV-05: None until the platform store is set
         llm_factory=build_llm_factory(config),  # None unless Claude is switched on (ADR-004)
         aws_clients_factory=lambda inp: make_clients(
             get_session(inp.credential_ref or "", region=region)

@@ -157,3 +157,48 @@ def test_the_start_input_carries_planning_settings_only_when_given_and_rejects_t
             planning_json=json.dumps({**settings, "env_file": "typo"}),
         )  # fmt: skip
     assert "secret" not in json.dumps(given["planning"]).lower()
+
+
+# ------------------------------------------------------------------ ENV-05: env_plan
+
+
+def env_plan_for(args):
+    from cmp_contracts.env_plan import EnvPlan, EnvPlanEntry
+
+    return EnvPlan(
+        env_file_ref=args["settings"].env_file_ref,
+        entries=[EnvPlanEntry(key="APP_MODE", disposition="PASS")],
+    )
+
+
+def test_the_approved_env_plan_goes_into_the_registration():
+    args, content = evidence()
+    plan = env_plan_for(args)
+    registration = assemble_registration(**args, env_plan=plan)
+    assert registration.env_plan == plan
+    check_with_planning(registration, content)
+    assert assemble_registration(**args).env_plan is None  # nothing changes without a plan
+
+
+def test_a_plan_for_another_env_file_is_not_handed_over():
+    from cmp_contracts.env_plan import EnvPlan
+
+    args, _ = evidence()
+    other = EnvPlan(env_file_ref=ContentRef(**ref("env", "9"), sha256="1" * 64), entries=[])
+    with pytest.raises(HandoffError) as exc:
+        assemble_registration(**args, env_plan=other)
+    assert exc.value.code == "ENV_PLAN_REF_MISMATCH"
+
+
+def test_the_env_file_reference_may_come_from_the_start_request_instead_of_the_settings():
+    args, _ = evidence()
+    settings = args["settings"]
+    bare = PlanningSettings(
+        target_selection=settings.target_selection, target=settings.target
+    )  # no env_file_ref here: the parent copies the start request's reference into it
+    assert bare.env_file_ref is None
+    with pytest.raises(HandoffError) as exc:
+        assemble_registration(**{**args, "settings": bare})
+    assert exc.value.code == "ENV_FILE_REF_MISSING"
+    given = bare.model_copy(update={"env_file_ref": settings.env_file_ref})
+    assemble_registration(**{**args, "settings": given})

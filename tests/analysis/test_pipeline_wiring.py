@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from cmp_contracts.queues import ANALYSIS_QUEUE, SANDBOX_QUEUE, WORKFLOW_QUEUE
+from cmp_providers.env_file import InMemoryEnvFileStore
 from cmp_worker.activities.analysis import AnalysisActivities
 from cmp_worker.workers.build import create_worker as build_worker
 from cmp_worker.workers.migration import create_activity_worker, create_workflow_worker
@@ -67,7 +68,7 @@ async def review(env, workflow_id):
 async def run_pipeline(
     repo, script, *, settings=None, name="a", planning=None, env_file_ref=None, histories=None
 ):
-    pipeline = make(repo, name, llm_factory=mapping_llm(*ROWS))
+    pipeline = make(repo, name, llm_factory=mapping_llm(*ROWS), env_store=ENV_STORE)
     async with (
         await WorkflowEnvironment.start_time_skipping(
             test_server_existing_path=os.environ.get("CMP_TEST_SERVER_PATH")
@@ -314,7 +315,9 @@ async def test_without_planning_settings_nothing_is_handed_over(repo):
 
 # ------------------------------------------------------------------ ENV-02: env_file_ref
 
-ENV_REF = {"id": "envf-" + "a" * 32, "version": "2", "sha256": "b" * 64}
+# The analysis reads key names through this store (ENV-05), so the reference must resolve in it.
+ENV_STORE = InMemoryEnvFileStore()
+ENV_REF = ENV_STORE.put(b"APP_MODE=prod\n", file_id="envf-" + "a" * 32).model_dump(mode="json")
 
 
 def _patches(history) -> set[str]:

@@ -91,6 +91,10 @@ def assemble_sandbox_input(
     suite = Suite(name=f"standard-{migration_id}", cases=standard_cases(api))
     suite_ref = store.put(dump_bundle(suite), ref_id=f"suite-{migration_id}", kind="test-suite")
     review = analysis.get("review") or {}
+    env_plan_ref = None
+    if analysis.get("assembly_ref"):
+        assembly = store.get_json(ArtifactRef.model_validate(analysis["assembly_ref"]))
+        env_plan_ref = assembly.get("env_plan_ref")  # ENV-05: set when `.env` came by reference
     return {
         "migration_id": migration_id,
         "run_id": settings.run_id or default_run_id(migration_id),
@@ -101,6 +105,7 @@ def assemble_sandbox_input(
         "storage_class": settings.storage_class,
         "env_names": settings.env_names,
         "env_file": settings.env_file,
+        **({"env_plan_ref": env_plan_ref} if env_plan_ref else {}),
         **(
             {"env_file_ref": settings.env_file_ref.model_dump(mode="json")}
             if settings.env_file_ref

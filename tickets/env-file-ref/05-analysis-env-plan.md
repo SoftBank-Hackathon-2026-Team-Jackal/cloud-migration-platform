@@ -4,7 +4,7 @@
 박승철님 (분석)
 
 ## 상태
-DRAFT — 담당자 검토 전. 분석 쪽 티켓 체계에 옮길지 담당자가 정한다.
+DONE — Issue #197 (ENV-06·분석 26과 한 PR). 구현 완료, 리뷰 후 병합
 
 ## 목적
 분석이 클론한 저장소 안의 `.env*` 파일 대신 사용자가 올린 `.env`(`env_file_ref`)에서 키 이름을 읽고, 코드가 읽는 키와 대조해 키마다 처리 규칙(EnvPlan)을 낸다.
@@ -27,11 +27,11 @@ ENV-02(입력 전달), ENV-03(`resolve_env_names`, EnvPlan 계약).
 - 제외: 값 읽기(분석은 값을 보지 않는다), 렌더(ENV-03), 샌드박스 적용(ENV-06)
 
 ## 수용 기준
-- [ ] `env_file_ref`가 있으면 저장소 파일이 아니라 참조에서 키 이름을 읽는다.
-- [ ] 합의된 바인딩 표의 키가 같은 `binding`으로 `REPLACED`다.
-- [ ] `DB_DSN`류는 `UNREPRESENTABLE`이다.
-- [ ] EnvPlan에서 계산한 `EnvExceptions`가 기존 결과와 같다.
-- [ ] 분석 Activity가 값을 읽지 않는다(InMemory 저장소의 `read_values` 호출 0회).
+- [x] `env_file_ref`가 있으면 저장소 파일이 아니라 참조에서 키 이름을 읽는다.
+- [x] 합의된 바인딩 표의 키가 같은 `binding`으로 `REPLACED`다.
+- [x] `DB_DSN`류는 `UNREPRESENTABLE`이다.
+- [x] EnvPlan에서 계산한 `EnvExceptions`가 기존 결과와 같다.
+- [x] 분석 Activity가 값을 읽지 않는다(InMemory 저장소의 `read_values` 호출 0회).
 
 ## Test Seam
 기존 분석 스캐너 테스트 + ENV-03의 InMemory 저장소.

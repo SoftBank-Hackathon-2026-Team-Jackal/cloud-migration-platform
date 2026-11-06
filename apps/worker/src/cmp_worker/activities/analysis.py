@@ -5,6 +5,7 @@ from typing import Any
 
 from cmp_contracts.analysis import AnalysisReport, ReviewRecord
 from cmp_contracts.provisioning_v2 import RequirementsV2
+from cmp_providers.env_file import EnvFileError
 from cmp_scanners.source import SourceFetchError
 from pydantic import ValidationError
 from temporalio import activity
@@ -116,6 +117,11 @@ async def _run(fn: Callable[..., Any], *args: Any) -> Any:
         # A missing, revoked or refused token will not fix itself on a retry.
         raise ApplicationError(
             "Source access was refused", type=exc.code, non_retryable=True
+        ) from None
+    except EnvFileError as exc:
+        # An expired, missing or unconfigured `.env` will not fix itself on a retry (ENV-05).
+        raise ApplicationError(
+            "The uploaded .env could not be used", type=exc.code, non_retryable=True
         ) from None
     except SourceFetchError:
         raise ApplicationError(

@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from cmp_contracts.analysis import AnalysisReport
+from cmp_contracts.env_plan import EnvPlan
 from cmp_contracts.plan_publish import PlanningInputRegistration, TargetSettings
 from cmp_contracts.provisioning import ContentRef, VersionRef
 from cmp_contracts.provisioning_v2 import (
@@ -49,7 +50,8 @@ class PlanningSettings(BaseModel):
 
     target_selection: TargetSelectionV2
     target: TargetSettings
-    env_file_ref: ContentRef
+    # Left out, the start request's reference is used (the parent copies it in, ENV-02).
+    env_file_ref: ContentRef | None = None
     template_version: str = "v2"
 
 
@@ -64,9 +66,14 @@ def assemble_registration(
     mapping_ref: ContentRef,
     settings: PlanningSettings,
     expected_target_ref: VersionRef | None = None,
+    env_plan: EnvPlan | None = None,
 ) -> PlanningInputRegistration:
     if not builds or any(b.status != "SUCCEEDED" or not b.image_digest for b in builds):
         raise HandoffError("BUILD_EVIDENCE_MISSING")
+    if settings.env_file_ref is None:
+        raise HandoffError("ENV_FILE_REF_MISSING")
+    if env_plan is not None and env_plan.env_file_ref != settings.env_file_ref:
+        raise HandoffError("ENV_PLAN_REF_MISMATCH")
     if expected_target_ref is not None and expected_target_ref != settings.target_selection.ref:
         raise HandoffError("TARGET_SELECTION_CHANGED")
     workloads = [
@@ -126,6 +133,7 @@ def assemble_registration(
             contract_version="1",
             planning_request=request,
             target=settings.target,
+            env_plan=env_plan,
         )
     except (ValueError, ValidationError):
         raise HandoffError("PROJECTION_REJECTED") from None

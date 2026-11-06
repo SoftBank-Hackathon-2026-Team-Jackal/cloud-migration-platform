@@ -116,3 +116,25 @@ def test_object_storage_kept_at_the_source_becomes_an_allowed_s3_host():
     ]
     assert keep_hosts(report([row("postgres", "MIGRATE")]), "ap-northeast-2") == []
     assert keep_hosts(None, "ap-northeast-2") == []
+
+
+def test_the_env_plan_the_analysis_made_travels_to_the_sandbox_as_a_reference(repo):
+    from cmp_providers.env_file import InMemoryEnvFileStore
+
+    store = InMemoryEnvFileStore()
+    pipeline = make(repo, "plan", env_store=store)
+    ref = store.put(b"DB_HOST=x\nAPP_MODE=prod\n")
+    inp = analysis_input(repo, env_file_ref=ref.model_dump(mode="json"))
+    source, _, _, _, built = run_to_requirements(pipeline, inp)
+    analysis = {
+        "report": {"migration_id": inp["migration_id"]},
+        "requirements": built["requirements_ref"],
+        "review": None,
+        "source": {"workspace": source["workspace"], "commit": source["commit"]},
+        "assembly_ref": built["assembly_ref"],
+    }
+    result = assemble_sandbox_input(analysis, SandboxSettings(), pipeline.store)
+    assert result["env_plan_ref"]["kind"] == "env-plan"
+    other = make(repo, "none")
+    plain = assemble_sandbox_input(analysed(other, repo), SandboxSettings(), other.store)
+    assert "env_plan_ref" not in plain
