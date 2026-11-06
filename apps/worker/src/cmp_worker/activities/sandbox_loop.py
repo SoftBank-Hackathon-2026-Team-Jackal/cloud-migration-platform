@@ -73,8 +73,19 @@ from cmp_worker.sandbox_deploy import (
     SandboxPlan,
     SandboxService,
 )
+from cmp_worker.sandbox_events import (
+    NO_CHECKS,
+    Steps,
+    build_result,
+    checks_data,
+    emit,
+    fix_lines,
+    requirements_fix_lines,
+    tests_data,
+)
 from cmp_worker.sandbox_handoff import sandbox_outcome
 from cmp_worker.sandbox_judge import judge
+from cmp_worker.sandbox_network import allowlist
 
 SuiteRunner = Callable[[SandboxPlan, ArtifactRef, LocalArtifactStore], SuiteResult]
 Builder = Callable[[str, dict[str, Any]], Image]
@@ -227,6 +238,30 @@ class SandboxLoopActivities:
     @activity.defn(name="sbx_build")
     async def sbx_build(self, payload: dict) -> dict:
         """Build every application image from the current source."""
+        ctx = payload.get("events")
+        attempt = payload.get("attempt", 1)
+        await self._build_check(ctx, attempt, "running")
+        try:
+            out = await self._build(payload)
+        except ApplicationError as exc:
+            await self._build_check(ctx, attempt, "failed")
+            await emit(ctx, "build.result", build_result(attempt, images=None, error_code=exc.type),
+                       step="build", state="failed")  # fmt: skip
+            raise
+        error = out.get("build_error")
+        await self._build_check(ctx, attempt, "failed" if error else "done")
+        data = build_result(
+            attempt, images=out.get("images"), reused=out.pop("_reused", False), error_code=error
+        )
+        await emit(ctx, "build.result", data, step="build", state="failed" if error else "done")
+        return out
+
+    @staticmethod
+    async def _build_check(ctx: dict | None, attempt: int, state: str) -> None:
+        data = {"id": "build", "state": state, "attempt": attempt}
+        await emit(ctx, "build.check", data, step="build", state=state)
+
+    async def _build(self, payload: dict) -> dict:
         requirements = self._requirements(payload["requirements_ref"])
         with_evidence = getattr(self.build, "build_with_evidence", None)
         if with_evidence is not None:
@@ -254,6 +289,7 @@ class SandboxLoopActivities:
             )
         images: dict[str, Any] = {}
         attempts = []
+        reused: list[bool] = []
         try:
             for resource in requirements.resources:
                 if resource.kind != "APPLICATION":
@@ -266,6 +302,7 @@ class SandboxLoopActivities:
                     attempt=payload.get("attempt", 1),
                 )
                 images[resource.id] = image.model_dump(mode="json")
+                reused.append(bool(getattr(result, "reused", False)))
                 attempts.append(to_build_attempt(result, migration_id=migration_id))
         except BuildFailed as exc:
             return {"images": None, "build_error": exc.code, "failure_class": exc.failure_class}
@@ -279,6 +316,7 @@ class SandboxLoopActivities:
             "images": images,
             "source_sha256": source_sha256,
             "builds_ref": builds_ref.model_dump(mode="json"),
+            "_reused": bool(reused) and all(reused),  # for the event only; removed before return
         }
 
     @activity.defn(name="sbx_prepare")
@@ -311,6 +349,14 @@ class SandboxLoopActivities:
             )
         except SandboxError as exc:
             return {"plan": None, "sandbox_error": exc.code}
+        if payload.get("previous_plan") is None:  # the namespace is made once per run
+            minutes = max(1, round((plan.expires_at - datetime.now(UTC).timestamp()) / 60))
+            env = {
+                "namespace": plan.namespace,
+                "expires_minutes": minutes,
+                "egress_allowed": len(allowlist(plan.network_intent, inp.keep_hosts)),
+            }
+            await emit(payload.get("events"), "sandbox.env", env, step="env", state="done")
         return {"plan": plan.model_dump(mode="json"), "sandbox_error": None}
 
     @activity.defn(name="sbx_apply")
@@ -320,11 +366,18 @@ class SandboxLoopActivities:
         plan = SandboxPlan.model_validate(payload["plan"])
         previous = payload.get("previous_plan")
         result: dict[str, Any] = {"sandbox_error": None, "baseline": None, "actions": {}}
+        steps = Steps(payload.get("events"))
+        # The manifests were rendered by `sbx_prepare`; this run starts from that rendered plan.
+        await steps.start("render")
+        await steps.done()
         try:
+            await steps.start("apply")
             self.service.apply_pull_secret(plan, self.pull_registry, self.token_minter)
             if previous is None:
                 self.service.apply_sandbox(plan)
                 self.service.apply_network(plan, inp.keep_hosts)
+                await steps.done()
+                await steps.start("ready")
                 self.service.check_sandbox(plan)
                 self.service.snapshot_baseline(plan)
                 result["baseline"] = "SAVED"
@@ -333,6 +386,8 @@ class SandboxLoopActivities:
                     SandboxPlan.model_validate(previous), plan, payload["attempt"]
                 )
                 self.service.apply_network(plan, inp.keep_hosts)
+                await steps.done()
+                await steps.start("ready")
                 self.service.check_sandbox(plan)
                 # A failed first attempt may have left no baseline behind; take one now.
                 need = record.baseline == "LOST" or not payload.get("baseline_ok")
@@ -340,8 +395,10 @@ class SandboxLoopActivities:
                     self.service.snapshot_baseline(plan)
                 result["baseline"] = "SAVED" if need else "KEPT"
                 result["record"] = record.model_dump(mode="json")
+            await steps.done()
         except SandboxError as exc:
             result["sandbox_error"] = exc.code
+            await steps.fail()
         return result
 
     @activity.defn(name="sbx_verify")
@@ -363,26 +420,41 @@ class SandboxLoopActivities:
         }
         if code is not None:
             reasons = [f"SANDBOX:{code}"]
-            return {**base, "verdict": {"passed": False, "reasons": reasons}, "results": []}
+            return {
+                **base, "verdict": {"passed": False, "reasons": reasons}, "results": [],
+                "checks": dict(NO_CHECKS),
+            }  # fmt: skip
+        ctx = payload.get("events")
+        steps = Steps(ctx)
+        suite_ref = ArtifactRef.model_validate(payload["suite_ref"])
+        if ctx:
+            cases = load_bundle(self.store.get(suite_ref)).cases
+            await emit(ctx, "sandbox.tests", tests_data(cases), step="tests", state="done")
         try:
+            await steps.start("test")
             if payload.get("reset"):
                 self.service.reset_test_data(plan)
-            suite_ref = ArtifactRef.model_validate(payload["suite_ref"])
             suite = self.suite_runner(plan, suite_ref, self.store)
             egress = self.service.egress_records(plan)
         except SandboxError as exc:
+            await steps.fail()
             return {
-                **base, "sandbox_error": exc.code, "results": [],
+                **base, "sandbox_error": exc.code, "results": [], "checks": dict(NO_CHECKS),
                 "verdict": {"passed": False, "reasons": [f"SANDBOX:{exc.code}"]},
             }  # fmt: skip
+        await steps.done()
+        await steps.start("judge")
         verdict = judge(results=suite, egress=egress, source_hosts=set(inp.source_hosts))
+        await (steps.done() if verdict.passed else steps.fail())
+        results = [
+            {"id": r.id, "status": r.status, **({"reason": r.reason} if r.reason else {})}
+            for r in suite.results
+        ]  # a reason is a code (status numbers, field names), never response content
         return {
             **base,
             "verdict": verdict.model_dump(mode="json"),
-            "results": [
-                {"id": r.id, "status": r.status, **({"reason": r.reason} if r.reason else {})}
-                for r in suite.results
-            ],  # a reason is a code (status numbers, field names), never response content
+            "results": results,
+            "checks": checks_data(results, egress, verdict.reasons),
         }
 
     @activity.defn(name="sbx_classify")
@@ -443,9 +515,13 @@ class SandboxLoopActivities:
             fixed = apply_requirements_fix(requirements, outcome.requirements_fix)
             data, _ = canonical_requirements(fixed)
             ref = self.store.put(data, ref_id="requirements", kind="requirements")
+            fix_ids = await self._emit_fixes(
+                payload, [(None, requirements_fix_lines(outcome.requirements_fix))]
+            )
             return {
                 "status": "PROPOSED", "kind": "REQUIREMENTS", "reason": outcome.requirements_fix.reason,
                 "requirements_ref": ref.model_dump(mode="json"), "row_changes": changes,
+                **fix_ids,
             }  # fmt: skip
         fix = outcome.code_fix
         digest = self.store.put(
@@ -455,11 +531,34 @@ class SandboxLoopActivities:
         target = self.workspace_root / f"fix-{digest[:16]}"
         if not target.exists():
             shutil.copytree(workspace, target, ignore=shutil.ignore_patterns(".git"))
+        shown = [(c.path, fix_lines(workspace, c.path, c.content)) for c in fix.files]
         changed = apply_code_fix(target, fix)
+        fix_ids = await self._emit_fixes(payload, shown)
         return {
             "status": "PROPOSED", "kind": "CODE", "reason": fix.reason, "changed": changed,
-            "source": {"workspace": str(target)},
+            "source": {"workspace": str(target)}, **fix_ids,
         }  # fmt: skip
+
+    @staticmethod
+    async def _emit_fixes(payload: dict, shown: list[tuple[str | None, list[dict]]]) -> dict:
+        """One `build.fix` per fixed file (or one for a requirements fix); their IDs go back to
+        the Workflow for `sandbox.attempt.fix_ids`. Nothing without an events context."""
+        ctx = payload.get("events")
+        if not ctx:
+            return {}
+        classification = payload["classification"]
+        why = (classification.get("reasons") or [classification["failure_class"]])[0]
+        ids = []
+        for n, (path, lines) in enumerate(shown, start=1):
+            fix_id = f"fix-{ctx['attempt']}-{n}"
+            data = {
+                "id": fix_id, "check": classification["failure_class"].lower(), "lines": lines,
+                "why": why, "evidence": path or "requirements",
+                **({"file": path} if path else {}),
+            }  # fmt: skip
+            await emit(ctx, "build.fix", data, step="fix", state=fix_id)
+            ids.append(fix_id)
+        return {"fix_ids": ids}
 
     @activity.defn(name="sbx_ai_tests")
     async def sbx_ai_tests(self, payload: dict) -> dict:

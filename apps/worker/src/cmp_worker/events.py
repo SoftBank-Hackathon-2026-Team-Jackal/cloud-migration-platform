@@ -10,6 +10,7 @@ raises for bad input or storage failure: it returns None and leaves an operation
 """
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 from cmp_api.migration_events import Actor, EventEmitter, NullEmitter
@@ -31,18 +32,21 @@ def current_emitter() -> EventEmitter:
     return _emitter
 
 
-def _actor() -> Actor:
+def _actor(across_retries: bool = False) -> Actor:
     if workflow.in_workflow():
         raise RuntimeError("emit_event is not allowed in Workflow code; use an Activity")
     if activity.in_activity():
         info = activity.info()
-        return Actor(
+        actor = Actor(
             source="activity",
             workflow_id=info.workflow_id or "-",
             activity_id=info.activity_id,
             attempt=info.attempt,
             activity=info.activity_type,
         )
+        # The attempt is part of the idempotency hash; leaving it out keeps one event per key
+        # when Temporal runs the same Activity again (sandbox loop, ticket Provisioning 59).
+        return replace(actor, attempt=0) if across_retries else actor
     return Actor(source="worker")
 
 
@@ -55,10 +59,12 @@ def emit_event(
     *,
     progress: float | None = None,
     idempotency_key: str | None = None,
+    across_retries: bool = False,
 ) -> MigrationEvent | None:
     """Store one event. `type`/`phase`/`status`/`data` use web names; backend names listed in
     `cmp_contracts.events.to_web` are translated. `idempotency_key` distinguishes repeated
-    events of the same type within one Activity attempt (default: the data Digest)."""
+    events of the same type within one Activity attempt (default: the data Digest).
+    `across_retries=True` keeps one event per key across Temporal retries of the Activity."""
     return _emitter.emit(
         migration_id,
         type,
@@ -67,7 +73,7 @@ def emit_event(
         data,
         progress=progress,
         idempotency_key=idempotency_key,
-        actor=_actor(),
+        actor=_actor(across_retries),
     )
 
 
@@ -80,9 +86,10 @@ async def emit_event_async(
     *,
     progress: float | None = None,
     idempotency_key: str | None = None,
+    across_retries: bool = False,
 ) -> MigrationEvent | None:
     """`emit_event` for an async Activity body: the DB write runs in a thread."""
-    actor = _actor()
+    actor = _actor(across_retries)
     return await asyncio.to_thread(
         _emitter.emit,
         migration_id,
