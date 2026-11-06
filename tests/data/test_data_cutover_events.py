@@ -61,6 +61,45 @@ def test_mismatch_marks_the_table_and_fails_verification() -> None:
     assert totals["checksum"]["state"] == "failed"
 
 
+def test_verify_totals_follow_the_web_order() -> None:
+    """웹 script.ts DATA_VERIFY_TIMELINE: rows running → rows done → checksum running → checksum done."""
+    tables = [
+        {"table": "messages", "source_rows": 10, "target_rows": 10, "match": True},
+        {"table": "rooms", "source_rows": 2, "target_rows": 2, "match": True},
+    ]
+    result = {"switched": True, "write_pause_ms": 9, "verify_ok": True, "steps": [],
+              "tables": tables}  # fmt: skip
+    drafts = ce.run_events(result, attempt=1, came_from="source", going_to="target", policy=POLICY)
+    check(drafts)
+    verify = [(d.status, d.data) for d in drafts if d.type == "data.verify"]
+    assert verify == [
+        ("running", {"name": "rows", "state": "running"}),
+        ("running", {"name": "rows", "state": "done", "source": 12, "target": 12}),
+        ("running", {"name": "checksum", "state": "running"}),
+        ("done", {"name": "checksum", "state": "done"}),
+    ]
+    # 테이블별 결과(cutover.verify) 뒤에 합계가 온다
+    types = [d.type for d in drafts]
+    assert types.index("data.verify") > max(i for i, t in enumerate(types) if t == "cutover.verify")
+    assert len({d.key for d in drafts}) == len(drafts)
+
+
+def test_failed_verify_totals_end_failed() -> None:
+    tables = [{"table": "messages", "source_rows": 10, "target_rows": 7, "match": False}]
+    result = {"switched": True, "write_pause_ms": 9, "verify_ok": False, "steps": [],
+              "tables": tables}  # fmt: skip
+    drafts = ce.run_events(result, attempt=1, came_from="source", going_to="target", policy=POLICY)
+    verify = [
+        (d.status, d.data["name"], d.data["state"]) for d in drafts if d.type == "data.verify"
+    ]
+    assert verify == [
+        ("running", "rows", "running"),
+        ("failed", "rows", "failed"),
+        ("running", "checksum", "running"),
+        ("failed", "checksum", "failed"),
+    ]
+
+
 def test_verify_none_sends_no_table_results() -> None:
     result = {"switched": True, "write_pause_ms": 4, "verify_ok": None, "steps": []}
     drafts = ce.run_events(result, attempt=1, came_from="source", going_to="target", policy=POLICY)

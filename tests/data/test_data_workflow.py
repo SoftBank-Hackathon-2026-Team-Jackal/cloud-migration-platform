@@ -95,6 +95,16 @@ async def wait_phase(handle, phase, tries=200):
     raise AssertionError(f"phase {phase} not reached")
 
 
+async def wait_announced(fakes, tries=200):
+    """phase가 streaming이 된 뒤 첫 감시 주기에 전환 계획을 알린다. 그 전에 전환 신호를 보내면
+    알림보다 전환이 먼저 처리돼 호출 순서가 달라지므로, 첫 알림을 기다린 뒤 신호를 보낸다."""
+    for _ in range(tries):
+        if "dm_announce_cutover:True" in fakes.calls:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("cutover not announced")
+
+
 async def test_replicates_until_streaming_then_switches_rolls_back_and_finishes() -> None:
     fakes = Fakes()
     async with await WorkflowEnvironment.start_time_skipping() as env:
@@ -102,6 +112,7 @@ async def test_replicates_until_streaming_then_switches_rolls_back_and_finishes(
         async with workers[0], workers[1]:
             await wait_phase(handle, "streaming")
             assert (await handle.query(DataMigrationWorkflow.db_gate))["writer"] == "source"
+            await wait_announced(fakes)
             await handle.signal(DataMigrationWorkflow.switchover)
             await wait_phase(handle, "switched")
             gate = await handle.query(DataMigrationWorkflow.db_gate)
@@ -138,6 +149,7 @@ async def test_refused_switchover_keeps_the_source_as_writer() -> None:
         workers, handle = await start(env, fakes)
         async with workers[0], workers[1]:
             await wait_phase(handle, "streaming")
+            await wait_announced(fakes)
             await handle.signal(DataMigrationWorkflow.switchover)
             for _ in range(200):
                 status = await handle.query(DataMigrationWorkflow.status)

@@ -197,7 +197,7 @@ async def test_sample_emits_web_valid_data_events(dbs, emitter) -> None:
     result = await run(dm.dm_sample, REQUEST)
     assert result["phase"] == "copy"
     events = emitted(emitter)
-    assert [t for t, _ in events] == ["data.phase", "data.lsn", "data.table"]
+    assert [t for t, _ in events] == ["data.phase", "data.lsn", "data.table", "data.progress"]
     for event_type, data in events:
         validate_data(event_type, data)
     assert events[2][1] == {
@@ -206,6 +206,83 @@ async def test_sample_emits_web_valid_data_events(dbs, emitter) -> None:
         "rows_total": 500,
         "state": "copying",
     }
+
+
+def _sync(dbs, tables, totals, *, lag=None) -> None:
+    dbs["dst"].sync = {"tables": tables, "target_lsn": "0/10"}
+    dbs["src"].source = {"source_lsn": "0/20", "lag_bytes": lag, "rows_total": totals}
+
+
+def progress_events(emitter) -> list:
+    return [e for e in emitter.events if e.type == "data.progress"]
+
+
+async def test_sample_reports_copy_progress_from_the_same_sample(dbs, emitter) -> None:
+    """복제 감시 한 번 = data.progress 한 번. 행 수는 data.table과 같은 값(새 조회 없음)."""
+    _sync(
+        dbs,
+        [
+            {"name": "public.messages", "state": "d", "rows_copied": 300},
+            {"name": "public.rooms", "state": "r", "rows_copied": 100},
+        ],
+        {"public.messages": 900, "public.rooms": 100},
+        lag=4096,
+    )
+    await run(dm.dm_sample, REQUEST)
+    [event] = progress_events(emitter)
+    assert event.phase == "data_copy" and event.status == "running"
+    assert event.data == {
+        "step": "dump",
+        "rows": 400,
+        "total_rows": 1000,
+        "lag_ms": None,
+        "writes_per_sec": 0.0,
+        "dump_percent": 40.0,
+    }
+    validate_data("data.progress", event.data)
+    assert emitted(emitter)[-1][0] == "data.progress"  # 웹 틱처럼 lsn·table 뒤에 온다
+
+
+@pytest.mark.parametrize(
+    ("states", "lag", "step", "status", "percent"),
+    [
+        ([], None, "dump", "running", 0.0),  # 구독했지만 아직 테이블 없음(schema)
+        (["r", "r"], None, "cdc", "running", 100.0),  # 복사 끝, 지연 모름(catchup)
+        (["r", "r"], 10, "ready", "done", 100.0),  # streaming
+    ],
+)
+async def test_progress_step_follows_the_replication_phase(
+    dbs, emitter, states, lag, step, status, percent
+) -> None:
+    tables = [{"name": f"public.t{i}", "state": s, "rows_copied": 50} for i, s in enumerate(states)]
+    _sync(dbs, tables, {f"public.t{i}": 50 for i in range(len(states))}, lag=lag)
+    await run(dm.dm_sample, REQUEST)
+    [event] = progress_events(emitter)
+    assert (event.data["step"], event.status, event.data["dump_percent"]) == (step, status, percent)
+    validate_data("data.progress", event.data)
+
+
+async def test_progress_percent_stays_in_range_with_estimated_totals(dbs, emitter) -> None:
+    # rows_total은 원본 n_live_tup(근사치)이라 복사한 행이 더 클 수 있다.
+    _sync(dbs, [{"name": "public.m", "state": "d", "rows_copied": 130}], {"public.m": 100})
+    await run(dm.dm_sample, REQUEST)
+    [event] = progress_events(emitter)
+    assert event.data["dump_percent"] == 100.0
+    _sync(dbs, [{"name": "public.m", "state": "d", "rows_copied": 0}], {})
+    await run(dm.dm_sample, REQUEST)
+    assert progress_events(emitter)[-1].data["dump_percent"] == 0.0
+
+
+async def test_progress_is_not_duplicated_on_re_emit_and_has_no_secrets(dbs, emitter) -> None:
+    await run(dm.dm_subscribe, REQUEST)
+    _sync(dbs, [{"name": "public.m", "state": "d", "rows_copied": 5}], {"public.m": 10})
+    env = ActivityEnvironment()
+    await env.run(dm.dm_sample, REQUEST)
+    await env.run(dm.dm_sample, REQUEST)  # 같은 Activity 시도의 재발행은 한 줄로 남는다
+    assert len(progress_events(emitter)) == 1
+    [password] = dbs["dst"].secrets.values()
+    dumped = json.dumps([e.data for e in emitter.events])
+    assert password not in dumped and "password" not in dumped and "10.0.0.1" not in dumped
 
 
 async def test_missing_kubeconfig_is_a_non_retryable_configuration_error(monkeypatch) -> None:

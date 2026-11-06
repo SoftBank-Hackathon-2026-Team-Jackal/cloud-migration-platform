@@ -113,7 +113,10 @@ Helm heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`)은 Temp
 | `data.lsn` | 1초 주기 | `pg_current_wal_lsn()` → `source_lsn`, 대상 replay LSN → `target_lsn`, 슬롯 지연 → `lag_bytes`, `lag_ms`(없으면 null) | `{"source_lsn":"0/3000148","target_lsn":"0/3000100","lag_bytes":72,"lag_ms":null}` |
 | `data.table` | 테이블 상태가 바뀔 때 | `pg_subscription_rel.srsubstate`(i→waiting, d→copying, f·s·r→copied), 복사 행 수 | `{"name":"messages","rows_copied":1200,"rows_total":5000,"state":"copying"}` |
 | `data.readiness` | 1초 주기 | `readiness.py`: `longest_xact_ms`·`lock_waiters`(자동 변환)·`commits_per_sec`·`ready` | `{"longest_xact_ms":35,"lock_waiters":0,"commits_per_sec":41.5,"ready":true}` |
-| `data.progress`·`data.verify` | 덤프·검증 단계 | 행 수·체크섬 | `[없음]` |
+| `data.progress` | `dm_sample`(동기화 감시) 끝, `data.table` 다음. **발행 중**(Provisioning 63, `cmp_data.progress_event`) | 같은 샘플: 단계(schema·copy→`dump`, catchup→`cdc`, streaming→`ready`), 테이블 `rows_copied`·`rows_total` 합, 복사 %(0~100), `lag_ms`(없으면 null), `writes_per_sec`=0(실제 값은 `data.readiness`) | `{"step":"dump","rows":400,"total_rows":1000,"lag_ms":null,"writes_per_sec":0.0,"dump_percent":40.0}` |
+| `data.verify` | `dm_switchover` 전환 뒤 스냅샷 비교(실행기 `verify` checksum·light). **발행 중**(데이터 07, 순서는 Provisioning 63) | `rows` running → `rows` 결과(원본·대상 행 수 합) → `checksum` running → `checksum` 결과. 비교 안 함(`none`)이면 없음 | `{"name":"rows","state":"done","source":12,"target":12}` |
+
+데이터 복제 진행·검증(Provisioning 63, 데이터 범위 대행): `data.progress`는 새 DB 조회 없이 `dm_sample`이 읽은 같은 샘플로 계산해 샘플마다 한 번 낸다(멱등 키 `progress:{step}:{rows}`, `ready`면 status done). 바이트는 계약에 없어 `data.lsn.lag_bytes`로만 간다. `data.verify`는 복제 중에는 정확한 비교가 없어(n_live_tup 근사치) 내지 않고, 전환 뒤 실제 비교 결과를 웹 `DATA_VERIFY_TIMELINE` 순서로 낸다(결과가 한 번에 오므로 running은 결과 직전에 함께 나간다). 테이블 이름·행 수·상태만 담고 비밀번호·연결 문자열은 담지 않는다.
 
 ### 트래픽 (상헌님) — `phase: traffic`
 
@@ -171,7 +174,7 @@ uv run python -m cmp_worker.poc_bridge watch --migration-id <id> \
 | 샌드박스 | `sbx_apply`가 버리는 `apply_network` 반환값(namespace·TTL·egress) 살리기, `BuildResult`를 `sbx_build`에 연결, `sandbox.tests` 출처별 개수와 `checks`(`calls_in_mapping` 등) 값을 만드는 코드, `run` 번호 규칙(웹 `[가정]`) |
 | 계획(매핑) | `MappingRow`에 대상 서비스(`after`)와 노드 분류(`kind`) 값 없음 |
 | 계획 게시·승인·구축(민서) | `plan.preview`(Preview `changes[]`→`resources`, `{resource_type, action, name, quantity, size}` → `{id, group, name, detail:"", size, change}`; 원본·대상 환경·보안 규칙·env 재매핑 값은 Preview에 없음), `approval.required`, ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |
-| 데이터 | 플랫폼 `copy_data` 구현 전체, `data.progress`(총 행 수·덤프 %), `data.verify`(행 수·체크섬), PoC `source_lsn`/`target_lsn` 샘플링(패널 `NODE_SQL`에 `pg_current_wal_lsn()` 추가 필요), 테이블 총 행 수 |
+| 데이터 | 플랫폼 `copy_data` 구현 전체, `data.progress.writes_per_sec`·`lag_ms` 실측(지금 0·null), 복제 ready 시점 행 수 검증(정확한 비교는 전환 뒤만), PoC `source_lsn`/`target_lsn` 샘플링(패널 `NODE_SQL`에 `pg_current_wal_lsn()` 추가 필요), 테이블 총 행 수 |
 | 트래픽 | 플랫폼 `shift_traffic` 구현 전체, `traffic.prepare`·`traffic.snapshot` 필드 확정(#61–#63), 중계 방식(PoC HAProxy, 웹은 Envoy 가정). **롤백 기준 결정 필요: #61의 "직전 안전 값으로 되돌림" vs #63의 "원본 100%로 되돌림" — 상헌님 결정** |
 | 전환 | 플랫폼 전환 Activity, 두 번째 승인(`approval.required gate: cutover`), 웹 6단계 모델과 PoC fast 순서 차이(3·4·6 동시) — 웹 표시 조정(민서), `cutover.result`의 `fail`·`loss` 측정(PoC `fault`의 `FAULT_RESULT`로 채울 수 있음) |
 | 인계 | `cutover.handover`(`dns`·`origin`·`access`)를 만드는 코드 없음 |
