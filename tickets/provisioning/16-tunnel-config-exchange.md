@@ -120,7 +120,7 @@ Agent와 중계 서버가 플랫폼을 통해 서로의 공개키·주소를 얻
 - 업무 DB `cmp_api.tunnels`(Alembic `20261105_03`): `agent_tunnels`(공개키·터널 IP, 재등록·키 교체에도 같은 IP), `relay_servers`(endpoint·공개키·자격 증명 digest), `tunnel_settings`(설정 버전), `agent_tunnel_status`(최신 터널 상태).
 - API(`cmp_api.routes.tunnels`, Agent는 기존 Bearer 자격 증명·폐기 Agent 거절, 실패는 기존 규칙대로 403):
   - `PUT /agents/{agent_id}/tunnel/key` — WireGuard 공개키(Base64 32바이트)만 받음, 알 수 없는 필드(예: `private_key`) 거절 → `tunnel_ip`·`config_version`
-  - `GET /agents/{agent_id}/tunnel/config` — 중계 서버 목록 `[{relay_id, endpoint, public_key}]`, 터널 IP, AllowedIPs(터널 대역), MTU 1420, PersistentKeepalive 25, 노출 포트(5432 + READY ON_PREM 앱 포트), 설정 버전. 키 미등록이면 404 `TUNNEL_KEY_NOT_REGISTERED`
+  - `GET /agents/{agent_id}/tunnel/config` — 중계 서버 목록 `[{relay_id, endpoint, public_key}]`, 터널 IP, AllowedIPs(터널 대역), MTU 1420, PersistentKeepalive 25, 노출 포트(5432 + READY ON_PREM 앱 포트, 73: 켜면 K3s API 포트)와 `kube_api_port`, 설정 버전. 키 미등록이면 404 `TUNNEL_KEY_NOT_REGISTERED`
   - `POST /agents/{agent_id}/tunnel/status` — 마지막 handshake 시각, 터널 경유 앱 헬스·DB 접속 결과. 다른 터널 IP는 409 `TUNNEL_IP_MISMATCH`
   - `PUT /tunnel-admin/relays/{relay_id}` (운영자 키) — 첫 등록 201 + 자격 증명 원문 1회, 재등록 200(자격 증명 미표시), 등록·갱신마다 설정 버전 +1
 - 인계(T2·T6·T7): `get_migration_handoff`가 ON_PREM 결과를 읽을 때 그 Agent의 최신 터널 상태를 합친다. Data는 터널 경유 DB 접속 성공 보고 뒤에만 진행하고 `database.tunnel_endpoint = 터널IP:5432`를 채운다. 그 전에는 `TUNNEL_DB_NOT_VERIFIED`. 저장된 결과는 바꾸지 않는다. Traffic은 P2 답변 전이라 계속 `EXTERNAL_ENDPOINT_UNAVAILABLE`.

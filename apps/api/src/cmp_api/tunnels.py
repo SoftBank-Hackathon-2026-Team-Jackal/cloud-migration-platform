@@ -71,6 +71,7 @@ class TunnelStatus(Base):
     app_health_ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
     db_connect_ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
     code: Mapped[str | None] = mapped_column(String(64))  # ticket 17 W8 failure code
+    kube_api_ok: Mapped[bool | None] = mapped_column(Boolean)  # ticket 73; None = not exposed
     reported_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -151,9 +152,20 @@ def _app_ports(session: Session) -> dict[str, set[int]]:
     return ports
 
 
+def kube_api_port() -> int | None:
+    """Ticket 73: tunnel port of the K3s API, None while not enabled."""
+    return settings.tunnel_kube_api_port if settings.tunnel_expose_kube_api else None
+
+
+def _ports(app_ports: set[int]) -> list[int]:
+    kube = kube_api_port()
+    return sorted({DB_PORT} | app_ports | ({kube} if kube else set()))
+
+
 def exposed_ports(session: Session, agent_id: str) -> list[int]:
-    """T5: PostgreSQL plus the app ports of this Agent's READY ON_PREM results."""
-    return sorted({DB_PORT} | _app_ports(session).get(agent_id, set()))
+    """T5: PostgreSQL, the app ports of this Agent's READY ON_PREM results and (ticket 73) the
+    K3s API port when enabled."""
+    return _ports(_app_ports(session).get(agent_id, set()))
 
 
 def relay_peers(session: Session) -> list[dict]:
@@ -177,7 +189,7 @@ def relay_agent_list(session: Session) -> dict:
     agents = []
     for tunnel, revoked_at in rows:
         revoked = revoked_at is not None
-        ports = [] if revoked else sorted({DB_PORT} | app_ports.get(tunnel.agent_id, set()))
+        ports = [] if revoked else _ports(app_ports.get(tunnel.agent_id, set()))
         agents.append(
             {
                 "agent_id": tunnel.agent_id,
@@ -203,6 +215,7 @@ def agent_config(session: Session, agent_id: str) -> dict:
         "mtu": MTU,
         "persistent_keepalive": PERSISTENT_KEEPALIVE,
         "exposed_ports": exposed_ports(session, agent_id),
+        "kube_api_port": kube_api_port(),
         "config_version": config_version(session),
     }
 
@@ -216,6 +229,7 @@ def record_status(
     app_health_ok: bool,
     db_connect_ok: bool,
     code: str | None = None,
+    kube_api_ok: bool | None = None,
 ) -> None:
     tunnel = session.get(AgentTunnel, agent_id)
     if tunnel is None:
@@ -225,7 +239,7 @@ def record_status(
     status = session.get(TunnelStatus, agent_id) or TunnelStatus(agent_id=agent_id)
     status.tunnel_ip, status.last_handshake_at = tunnel_ip, last_handshake_at
     status.app_health_ok, status.db_connect_ok = app_health_ok, db_connect_ok
-    status.code = code
+    status.code, status.kube_api_ok = code, kube_api_ok
     status.reported_at = _now()
     session.add(status)
     session.commit()
@@ -260,6 +274,7 @@ def tunnel_view(session: Session, agent_id: str | None, *, now: int | None = Non
         "db_connect_ok": status.db_connect_ok,
         "last_handshake_at": status.last_handshake_at,
         "code": status.code,
+        "kube_api_ok": status.kube_api_ok,  # ticket 73: diagnostics only, not a handoff gate
         "reported_at": status.reported_at,  # ticket 67: only reports after the rollout count
         "stale": stale,
         "fresh_until": fresh_until,

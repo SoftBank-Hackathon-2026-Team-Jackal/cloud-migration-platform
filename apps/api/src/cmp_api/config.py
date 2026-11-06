@@ -1,4 +1,4 @@
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # missed 15 s Agent reports) and its WireGuard handshake is within Reject-After-Time (180 s).
     tunnel_status_ttl_seconds: int = 60
     tunnel_handshake_stale_seconds: int = 180
+    # Ticket 73 (ADR-007 step 2): expose the K3s API on every Agent tunnel IP so the data worker
+    # can reach the target cluster with a kubeconfig through the relay. Off by default; the Agent
+    # forwards this port to `kubernetes.default.svc:443`.
+    tunnel_expose_kube_api: bool = False
+    tunnel_kube_api_port: int = Field(default=6443, ge=1, le=65535)
     # Ticket 67: how long an ON_PREM traffic handover lookup waits for this rollout's tunnel
     # health check (cut to the Activity timeout), and how often it reads the tunnel status.
     traffic_handover_wait_seconds: int = 180

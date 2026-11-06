@@ -2,7 +2,9 @@
 
 The Agent is the WireGuard *client*: it connects outbound to the relay server (Traffic owns the
 relay, its WireGuard server and Envoy) and exposes the app port and PostgreSQL 5432 only on its
-tunnel IP, forwarding to the K3s Services. Runs as the `tunnel` container of the Agent Pod, in the
+tunnel IP, forwarding to the K3s Services. Ticket 73 (ADR-007 step 2): when the platform names a
+`kube_api_port`, that port forwards to the K3s API (`kubernetes.default.svc:443`) for the data
+worker's kubeconfig; the Agent only relays TCP (TLS and authentication stay end to end). Runs as the `tunnel` container of the Agent Pod, in the
 Pod network namespace (no hostNetwork), with NET_ADMIN only.
 
 Loop (W5~W7): register the public key → read the tunnel config → apply interface/peer when the
@@ -43,6 +45,8 @@ from cmp_providers.remote_agent import AgentControlClient, AgentTransportError
 
 INTERFACE = "wg0"
 DB_PORT = 5432
+KUBE_API_HOST = "kubernetes.default.svc"  # ticket 73: in-cluster DNS of `default/kubernetes`
+KUBE_API_TARGET_PORT = 443
 STALE_AFTER = 180  # WireGuard Reject-After-Time: no handshake for this long means no session
 UNAUTHORIZED_EXIT = 2
 KEY_SECRET = "cmp-agent-wireguard"
@@ -303,6 +307,23 @@ def postgres_ready(ip: str, port: int = DB_PORT, timeout: float = 5) -> bool:
         return False
 
 
+def tcp_connect_ok(ip: str, port: int, timeout: float = 5) -> bool:
+    """Ticket 73: the K3s API port accepts a TCP connection through the tunnel address."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def kube_api_port(config: dict) -> int | None:
+    """Ticket 73: the configured K3s API port, None when absent or unusable."""
+    value = config.get("kube_api_port")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 1 <= value <= 65535 and value != DB_PORT else None
+
+
 # --- forwarders (W2/W3) -----------------------------------------------------------------------
 
 
@@ -523,6 +544,8 @@ class TunnelManager:
         discover: Callable[[list[int]], tuple[dict[int, Forward], list[str]]],
         http_ok: Callable[[str, int, str], bool] = http_health_ok,
         db_ok: Callable[[str, int], bool] = postgres_ready,
+        tcp_ok: Callable[[str, int], bool] = tcp_connect_ok,
+        expose_kube_api: bool = False,
         clock: Callable[[], float] = time.time,
         log: Callable[[dict], None] = lambda event: None,
         stale_after: int = STALE_AFTER,
@@ -530,6 +553,8 @@ class TunnelManager:
         self.agent_id, self.credential, self.client = agent_id, credential, client
         self.keys, self.link, self.forwarders, self.discover = keys, link, forwarders, discover
         self.http_ok, self.db_ok, self.clock, self.log = http_ok, db_ok, clock, log
+        # Ticket 73: the cluster owner's chart value; without it `kube_api_port` is ignored.
+        self.tcp_ok, self.expose_kube_api = tcp_ok, expose_kube_api
         self.stale_after = stale_after
         self.private_key: bytes | None = None
         self.applied: TunnelPlan | None = None
@@ -570,7 +595,7 @@ class TunnelManager:
             self._apply(plan)
             self.log({"event": "tunnel_recover", "action": "INTERFACE_RECREATED"})
 
-    def _report(self, tunnel_ip, handshake, app_ok, db_ok, code) -> dict:
+    def _report(self, tunnel_ip, handshake, app_ok, db_ok, code, kube_ok=None) -> dict:
         report = {
             "tunnel_ip": tunnel_ip,
             "last_handshake_at": handshake,
@@ -578,10 +603,14 @@ class TunnelManager:
             "db_connect_ok": db_ok,
             "code": code,
         }
+        if kube_ok is not None:  # ticket 73: only sent when exposed (older platforms forbid it)
+            report["kube_api_ok"] = kube_ok
         self.client.report_tunnel_status(
             agent_id=self.agent_id, credential=self.credential, report=report
         )
         event = {"event": "tunnel", "code": code, "app_health_ok": app_ok, "db_connect_ok": db_ok}
+        if kube_ok is not None:
+            event["kube_api_ok"] = kube_ok
         if event != self.last_event:  # log changes only
             self.log(event | {"last_handshake_at": handshake})
             self.last_event = event
@@ -605,10 +634,16 @@ class TunnelManager:
 
         ports = sorted({int(p) for p in config.get("exposed_ports") or []})
         self.ports = ports
+        # Never an app Service port, even when this cluster's owner keeps it closed.
+        named = kube_api_port(config)
+        service_ports = [p for p in ports if p != named]
+        kube = named if self.expose_kube_api else None
         try:
-            forwards, codes = self.discover(ports)
+            forwards, codes = self.discover(service_ports)
         except RolloutAgentError:
             forwards, codes = {}, ["KUBERNETES_UNAVAILABLE"]
+        if kube is not None:
+            forwards = forwards | {kube: Forward(kube, KUBE_API_HOST, KUBE_API_TARGET_PORT, None)}
         try:
             self.forwarders.apply(plan.tunnel_ip, {plan.relay_ip, plan.tunnel_ip}, forwards)
         except TunnelAgentError as exc:
@@ -625,12 +660,15 @@ class TunnelManager:
             except TunnelAgentError:
                 self.applied = None
 
-        app_ports = [p for p in ports if p != DB_PORT]
+        app_ports = [p for p in service_ports if p != DB_PORT]
         app_ok = bool(app_ports) and all(
             p in forwards and self.http_ok(plan.tunnel_ip, p, forwards[p].health_path)
             for p in app_ports
         )
         db_ok = DB_PORT in forwards and self.db_ok(plan.tunnel_ip, DB_PORT)
+        kube_ok = None
+        if kube is not None:  # diagnostics only: never changes `code` (ticket 73)
+            kube_ok = fresh and kube in forwards and self.tcp_ok(plan.tunnel_ip, kube)
         if not fresh:
             code = "HANDSHAKE_MISSING"
         elif codes:
@@ -643,7 +681,9 @@ class TunnelManager:
             code = "DB_CONNECT_FAILED"
         else:
             code = None
-        return self._report(plan.tunnel_ip, handshake, fresh and app_ok, fresh and db_ok, code)
+        return self._report(
+            plan.tunnel_ip, handshake, fresh and app_ok, fresh and db_ok, code, kube_ok
+        )
 
     def shutdown(self) -> None:
         self.forwarders.close()
@@ -732,6 +772,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=["auto", "kernel", "userspace"], default="auto")
     parser.add_argument("--interval-seconds", type=float, default=15)
     parser.add_argument("--wake-file", help="signal file the agent container writes (ticket 66)")
+    parser.add_argument(
+        "--expose-kube-api",
+        action="store_true",
+        help="forward the platform's kube_api_port to kubernetes.default.svc:443 (ticket 73)",
+    )
     args = parser.parse_args(argv)
 
     stop = threading.Event()
@@ -770,6 +815,7 @@ def main(argv: list[str] | None = None) -> int:
         forwarders=TcpForwarders(),
         discover=lambda ports: discover_forwards(view, ports),
         log=_log,
+        expose_kube_api=args.expose_kube_api,
     )
     wake = (lambda: read_wake(args.wake_file)) if args.wake_file else None
     return run_tunnel(manager, wait=stop.wait, interval=args.interval_seconds, log=_log, wake=wake)

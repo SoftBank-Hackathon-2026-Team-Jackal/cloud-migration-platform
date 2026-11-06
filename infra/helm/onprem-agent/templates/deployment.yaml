@@ -107,6 +107,10 @@ spec:
             - {{ .Values.tunnel.intervalSeconds | quote }}
             - --wake-file
             - /var/run/cmp-wake/job
+            {{- if .Values.tunnel.exposeKubeApi }}
+            # Ticket 73: forward the platform's kube_api_port to the K3s API Service.
+            - --expose-kube-api
+            {{- end }}
           env:
             - name: HOME
               value: /tmp

@@ -5827,6 +5827,11 @@ components:
             type: integer
           type: array
           title: Exposed Ports
+        kube_api_port:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Kube Api Port
         config_version:
           type: integer
           title: Config Version
@@ -5891,6 +5896,11 @@ components:
             pattern: ^[A-Z][A-Z0-9_]{0,63}$
           - type: 'null'
           title: Code
+        kube_api_ok:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Kube Api Ok
       additionalProperties: false
       type: object
       required:

@@ -524,3 +524,56 @@ def test_tunnel_view_reports_staleness_and_fresh_until():
     assert tunnel_freshness(status, now=1131) == (True, 1130)
     status.last_handshake_at = None
     assert tunnel_freshness(status, now=1100) == (True, None)
+
+
+# --- Ticket 73 (#299): K3s API port on the Agent tunnel (ADR-007 step 2) ----------------------
+
+
+def test_kube_api_port_is_off_by_default(client, db):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    onprem_ready(db)
+    body = client.get("/agents/agent-001/tunnel/config", headers=headers).json()
+    assert body["kube_api_port"] is None
+    assert body["exposed_ports"] == [5432, 8080]
+
+
+def test_enabled_kube_api_port_is_exposed_to_the_agent_and_the_relay(client, db, monkeypatch):
+    monkeypatch.setattr(settings, "tunnel_expose_kube_api", True)
+    monkeypatch.setattr(settings, "tunnel_kube_api_port", 16443)
+    credential = put_relay(client).json()["credential"]
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    onprem_ready(db)
+    body = client.get("/agents/agent-001/tunnel/config", headers=headers).json()
+    assert body["kube_api_port"] == 16443
+    assert body["exposed_ports"] == [5432, 8080, 16443]
+    listed = relay_list(client, credential=credential).json()["agents"][0]
+    assert listed["allowed_ports"] == [5432, 8080, 16443]
+
+
+def test_revoked_agent_gets_no_kube_api_port_on_the_relay(client, db, monkeypatch):
+    from cmp_api.agent_registry import revoke_agent
+
+    monkeypatch.setattr(settings, "tunnel_expose_kube_api", True)
+    credential = put_relay(client).json()["credential"]
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    with db() as s:
+        revoke_agent(s, agent_id="agent-001")
+    listed = relay_list(client, credential=credential).json()["agents"][0]
+    assert listed["allowed_ports"] == []
+
+
+def test_kube_api_check_is_stored_apart_from_the_handoff_checks(client, db):
+    from cmp_api.tunnels import tunnel_view
+
+    headers = onprem_verified(client, db, kube_api_ok=False)
+    with db() as s:
+        view = tunnel_view(s, "agent-001")
+    assert view["kube_api_ok"] is False
+    assert view["code"] is None  # app/DB handoff stays healthy
+    assert handoff(db, "TRAFFIC_MIGRATION")["proceed"] is True
+    assert report(client, headers).status_code == 202  # omitted = not exposed
+    with db() as s:
+        assert tunnel_view(s, "agent-001")["kube_api_ok"] is None
