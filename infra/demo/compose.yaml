@@ -192,6 +192,13 @@ services:
       # without the file stops the worker at start-up (SANDBOX_KUBECONFIG_NOT_FOUND).
       SANDBOX_KUBECONFIG: ${SANDBOX_KUBECONFIG:-}
       SANDBOX_PREBUILT_IMAGES: ${SANDBOX_PREBUILT_IMAGES:-}
+      # Provisioning 72 (ADR-007 단계 6): cluster access of the data-migration Activities. The AWS
+      # profile is `cmp-demo-data-migration` (ensure-secrets.sh writes it from DATA_MIGRATION_ROLE_ARN);
+      # KUBECONFIG access reads <dir>/<kubeconfig_ref>.yaml from the read-only mount
+      # /opt/cmp/secrets/data-migration → /run/cmp/data-migration. Empty: EKS/kubeconfig access fails
+      # closed (no default profile, DbAccessNotConfigured).
+      DATA_MIGRATION_AWS_PROFILE: ${DATA_MIGRATION_AWS_PROFILE:-}
+      DATA_MIGRATION_KUBECONFIG_DIR: ${DATA_MIGRATION_KUBECONFIG_DIR:-}
       # Claude (ADR-004): off unless LLM_ENABLED=true and a key is set; spend ledger and kill
       # switch (`touch /opt/cmp/data/llm/disabled`) live on the host.
       LLM_ENABLED: ${LLM_ENABLED:-false}
@@ -208,6 +215,7 @@ services:
       - /opt/cmp/data/aws-connections:/run/cmp/aws-connections:ro
       - /opt/cmp/secrets/gcp:/run/cmp/gcp:ro
       - /opt/cmp/secrets/sandbox:/run/cmp/sandbox:ro
+      - /opt/cmp/secrets/data-migration:/run/cmp/data-migration:ro
       # Ticket 28: builds run on the host daemon. Whoever holds this socket is root-equivalent on
       # the host; only the worker gets it (production: rootless BuildKit, see README).
       - /var/run/docker.sock:/var/run/docker.sock

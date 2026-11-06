@@ -832,3 +832,26 @@ def test_worker_clis_come_before_the_platform_source():
     copies = [line for line in api_stage.splitlines() if line.startswith("COPY ")]
     assert copies and all(line in worker_stage for line in copies)
     assert "COPY apps" not in text.split("FROM base AS api", 1)[0]  # base holds only the lock file
+
+
+def test_worker_gets_data_migration_cluster_access_names_with_empty_defaults():
+    """Provisioning 72 (#298, ADR-007 단계 6): the data-migration Activities read these two names.
+    Empty keeps today's behavior: no profile (EKS fails closed) and no kubeconfig directory
+    (`DbAccessNotConfigured`). The kubeconfig directory is a read-only secrets mount."""
+    worker = _env("worker")
+    assert worker["DATA_MIGRATION_AWS_PROFILE"] == "${DATA_MIGRATION_AWS_PROFILE:-}"
+    assert worker["DATA_MIGRATION_KUBECONFIG_DIR"] == "${DATA_MIGRATION_KUBECONFIG_DIR:-}"
+    assert "DATA_MIGRATION_AWS_PROFILE" not in _env("api")
+    assert _mount_targets("worker")["/run/cmp/data-migration"] == "/opt/cmp/secrets/data-migration"
+    assert (
+        "/opt/cmp/secrets/data-migration:/run/cmp/data-migration:ro"
+        in _compose()["services"]["worker"]["volumes"]
+    )
+    assert '"$secrets_dir/data-migration"' in (DEMO / "ensure-secrets.sh").read_text()
+    example = _runtime_example()
+    assert example["DATA_MIGRATION_AWS_PROFILE"] == ""
+    assert example["DATA_MIGRATION_KUBECONFIG_DIR"] == ""
+    check = (DEMO / "runtime-check.sh").read_text()
+    for name in ("DATA_MIGRATION_AWS_PROFILE", "DATA_MIGRATION_KUBECONFIG_DIR"):
+        assert name in check, name
+    assert "data_migration_kubeconfig_files=" in check
