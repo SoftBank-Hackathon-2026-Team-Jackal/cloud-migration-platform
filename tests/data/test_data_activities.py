@@ -254,9 +254,7 @@ async def test_sample_reports_copy_progress_from_the_same_sample(dbs, emitter) -
 async def test_progress_step_follows_the_replication_phase(
     dbs, emitter, states, lag, step, status, percent
 ) -> None:
-    tables = [
-        {"name": f"public.t{i}", "state": s, "rows_copied": 50} for i, s in enumerate(states)
-    ]
+    tables = [{"name": f"public.t{i}", "state": s, "rows_copied": 50} for i, s in enumerate(states)]
     _sync(dbs, tables, {f"public.t{i}": 50 for i in range(len(states))}, lag=lag)
     await run(dm.dm_sample, REQUEST)
     [event] = progress_events(emitter)

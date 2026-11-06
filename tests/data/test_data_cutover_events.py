@@ -89,7 +89,9 @@ def test_failed_verify_totals_end_failed() -> None:
     result = {"switched": True, "write_pause_ms": 9, "verify_ok": False, "steps": [],
               "tables": tables}  # fmt: skip
     drafts = ce.run_events(result, attempt=1, came_from="source", going_to="target", policy=POLICY)
-    verify = [(d.status, d.data["name"], d.data["state"]) for d in drafts if d.type == "data.verify"]
+    verify = [
+        (d.status, d.data["name"], d.data["state"]) for d in drafts if d.type == "data.verify"
+    ]
     assert verify == [
         ("running", "rows", "running"),
         ("failed", "rows", "failed"),
