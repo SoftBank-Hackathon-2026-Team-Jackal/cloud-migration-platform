@@ -128,8 +128,8 @@ def test_pull_profile_assumes_the_pull_role_from_the_instance_role(tmp_path):
     config = _secrets(tmp_path, f"PLATFORM_ECR_PULL_ROLE_ARN={arn}\n")
     block = config.split("[profile cmp-demo-ecr-pull]\n", 1)[1].split("[", 1)[0]
     assert f"role_arn = {arn}\n" in block
-    assert "source_profile = cmp-demo-build\n" in block
-    assert "credential_source" not in block
+    assert "credential_source = Ec2InstanceMetadata\n" in block
+    assert "source_profile" not in block
 
 
 def test_no_pull_profile_until_the_role_exists(tmp_path):

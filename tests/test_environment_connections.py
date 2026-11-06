@@ -626,7 +626,8 @@ def test_role_registration_renders_an_assume_role_profile_for_existing_code(clie
     section = profiles[f"profile {ref}"]
     assert section["role_arn"] == ROLE
     assert section["external_id"] == created["external_id"]
-    assert section["source_profile"] == "cmp-platform"
+    assert section["credential_source"] == "Ec2InstanceMetadata"
+    assert "source_profile" not in section
     assert section["region"] == "ap-northeast-2"
     assert "aws_access_key_id" not in section and "aws_session_token" not in section
 

@@ -86,7 +86,7 @@ services:
       CONNECTION_PLATFORM_PRINCIPAL_ARN: ${CONNECTION_PLATFORM_PRINCIPAL_ARN:-}
       CONNECTION_TEMPLATE_BASE_URL: ${CONNECTION_TEMPLATE_BASE_URL:-}
       # Ticket 46 (#181): the API writes the generated connection profiles (`cmp-conn-*`, whose
-      # source_profile is cmp-demo-build = the instance role) here; the worker reads the same file.
+      # credential_source = the instance role, as cmp-demo-build) here; the worker reads the same file.
       CONNECTION_AWS_CONFIG_FILE: /run/cmp/aws-connections/config
       CONNECTION_AWS_BASE_CONFIG_FILE: /run/cmp/aws/config
       # K3s Agent ECR pull tokens. Ticket 47 (B-09): cmp-demo-ecr-pull (pull-only role) once

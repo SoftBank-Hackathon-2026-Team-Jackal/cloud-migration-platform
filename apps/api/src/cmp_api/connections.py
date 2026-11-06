@@ -10,6 +10,7 @@ Each AWS connection with a role resolves to a generated named profile `cmp-conn-
 Nothing secret is stored: Role ARN, External ID and verification metadata only.
 """
 
+import configparser
 import os
 import re
 import secrets
@@ -384,11 +385,34 @@ def agent_summaries(session: Session, *, now: int | None = None) -> list[dict]:
 # ------------------------------------------------------------------------------ credential_ref
 
 
+def _platform_source(base: str, platform_profile: str) -> str:
+    """How a generated profile gets the platform's credentials.
+
+    botocore refuses `source_profile` pointing at a profile that has only `credential_source`
+    ("The source profile ... must have credentials"), which is how the demo instance-role profile
+    is written. Such a profile is inlined as the same `credential_source`; any other platform
+    profile (static keys, its own role, process, SSO) stays a `source_profile`."""
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        parser.read_string(base)
+    except configparser.Error:
+        return f"source_profile = {platform_profile}\n"
+    section = (
+        parser[f"profile {platform_profile}"]
+        if parser.has_section(f"profile {platform_profile}")
+        else {}
+    )
+    if "credential_source" in section and "role_arn" not in section:
+        return f"credential_source = {section['credential_source']}\n"
+    return f"source_profile = {platform_profile}\n"
+
+
 def render_aws_config(
     connections: list[EnvironmentConnection], *, base: str, platform_profile: str
 ) -> str:
     """Shared AWS config: the platform's own profiles, then one assume-role profile per role."""
     parts = [base.rstrip("\n") + "\n"] if base.strip() else []
+    source = _platform_source(base, platform_profile)
     for connection in connections:
         ref = credential_ref(connection)
         if ref is None:
@@ -398,7 +422,7 @@ def render_aws_config(
             f"[profile {ref}]\n"
             f"role_arn = {connection.role_arn}\n"
             f"external_id = {connection.external_id}\n"
-            f"source_profile = {platform_profile}\n"
+            f"{source}"
             f"role_session_name = {ref}\n"
             f"duration_seconds = {PROFILE_SESSION_SECONDS}\n"
             f"region = {connection.region}\n"

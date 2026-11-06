@@ -67,7 +67,9 @@ aws_config="$secrets_dir/aws/config"
   if [[ -n "$pull_role_arn" ]]; then
     printf '[profile cmp-demo-ecr-pull]\n'
     printf 'role_arn = %s\n' "$pull_role_arn"
-    printf 'source_profile = cmp-demo-build\n'
+    # Same instance role as cmp-demo-build, inlined: botocore refuses a source_profile that has
+    # only credential_source ("must have credentials").
+    printf 'credential_source = Ec2InstanceMetadata\n'
     printf 'role_session_name = cmp-demo-ecr-pull\n'
     printf 'region = %s\n' "$region"
   fi
