@@ -74,5 +74,5 @@ make-data-kubeconfig.py delete --context C --namespace NS   → Role·ClusterRol
 시험용 Namespace `cmp-dm75-check`에 postgres:16 StatefulSet을 두고 `apply --server https://127.0.0.1:<k3d 포트>`(k3d 인증서 SAN에도 `kubernetes.default.svc`가 있다)로 발급했다. 결과는 위 수용 기준. 확인 뒤 `delete`, `cmp-dm75-check`·`cmp-data-tunnel` Namespace를 지웠고 남긴 것은 없다. 기존 `cmp-app`·`cmp-system`은 건드리지 않았다.
 
 ## 남은 일
-- 중계 서버 주소·포트 규칙(74)이 정해지면 `--server`에 넣어 발급, 서버 `/opt/cmp/secrets/data-migration/<ref>.yaml`로 복사(승인 필요), 서버에서 `/readyz` 확인
+- `--server https://<중계 서버 사설 IP>:<16400+터널 IP 마지막 옥텟>`(74 R4)로 발급, 서버 `/opt/cmp/secrets/data-migration/<ref>.yaml`로 복사(승인 필요), 서버에서 `/readyz` 확인
 - Agent Chart 연동(R10), 7단계 웹 시작 입력의 `target_kubeconfig_ref`

@@ -210,6 +210,28 @@ bash infra/demo/deploy-data-migration-stack.sh          # 스택 + RBAC(임시 k
 docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-data-migration --query Arn --output text   # .../assumed-role/cmp-demo-data-migration/...
 ```
 
+## 온프레미스 k3d API 경로: 중계 서버 TCP 전달 (티켓 74, ADR-007 4단계)
+
+데모 서버 worker가 맥 k3d API에 닿는 경로다. 트래픽 영역(중계 서버)을 Provisioning이 대행했다(이상헌님 공유 필요). 사용자 HTTP 경로 Envoy(8080·9901)는 바꾸지 않고, 중계 서버에 **전달 전용 Envoy**(`envoy-kube`, 관리 127.0.0.1:9902)를 하나 더 둔다.
+
+```text
+worker(172.31.15.223) → 중계 서버 사설 IP:16400+터널 호스트 번호 → Agent 터널 IP:kube_api_port(6443) → kubernetes.default.svc:443
+                        (예: 172.31.2.84:16402 → 10.200.0.2:6443, 출발지 10.200.0.1)
+```
+
+- kubeconfig(티켓 75): `server: https://<중계 서버 사설 IP>:<16400 + 터널 IP 마지막 옥텟>`, `tls-server-name: kubernetes.default.svc`. 규칙은 [티켓 74](../../tickets/provisioning/74-relay-kube-api-forward.md).
+- 전제: 플랫폼 `TUNNEL_EXPOSE_KUBE_API=true`, Agent Chart `tunnel.exposeKubeApi=true`(티켓 73).
+
+### 반영 (각 단계 사용자 승인 필요)
+
+```sh
+KUBE_API_FORWARD_SOURCE_SG=<데모 서버 SG> bash infra/relay/deploy-relay-stack.sh --plan   # TCP 16402-16654, 데모 서버 SG만
+KUBE_API_FORWARD_SOURCE_SG=<데모 서버 SG> bash infra/relay/deploy-relay-stack.sh
+# 중계 서버(SSM): /opt/cmp/lib 갱신 뒤
+sudo infra/relay/enable-kube-api-forward.sh            # 사설 IP는 IMDSv2, 또는 BIND_IP=172.31.2.84
+curl -s 127.0.0.1:9902/listeners                         # kube_api_16402::172.31.2.84:16402
+```
+
 ## 환경 연결 Launch Stack (#205, 티켓 23b)
 
 AWS 연결 생성 응답의 `launch_stack_url`(ADR-005)은 api가 `CONNECTION_PLATFORM_PRINCIPAL_ARN`과 `CONNECTION_TEMPLATE_BASE_URL`을 모두 받아야 만들어진다. 둘 중 하나라도 비면 `null`이다(이전 동작).

@@ -302,6 +302,7 @@ def test_relay_lists_agents_with_keys_tunnel_ips_and_ports(client, db):
             "tunnel_ip": "10.200.0.2",
             "allowed_ips": ["10.200.0.2/32"],
             "allowed_ports": [5432, 8080],
+            "kube_api_port": None,  # ticket 74: off by default
             "revoked": False,
         }
     ]
@@ -550,6 +551,7 @@ def test_enabled_kube_api_port_is_exposed_to_the_agent_and_the_relay(client, db,
     assert body["exposed_ports"] == [5432, 8080, 16443]
     listed = relay_list(client, credential=credential).json()["agents"][0]
     assert listed["allowed_ports"] == [5432, 8080, 16443]
+    assert listed["kube_api_port"] == 16443  # ticket 74: the relay knows which port is the API
 
 
 def test_revoked_agent_gets_no_kube_api_port_on_the_relay(client, db, monkeypatch):
@@ -563,6 +565,7 @@ def test_revoked_agent_gets_no_kube_api_port_on_the_relay(client, db, monkeypatc
         revoke_agent(s, agent_id="agent-001")
     listed = relay_list(client, credential=credential).json()["agents"][0]
     assert listed["allowed_ports"] == []
+    assert listed["kube_api_port"] is None  # ticket 74: the relay drops the forward
 
 
 def test_kube_api_check_is_stored_apart_from_the_handoff_checks(client, db):

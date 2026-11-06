@@ -197,6 +197,7 @@ def relay_agent_list(session: Session) -> dict:
                 "tunnel_ip": tunnel.tunnel_ip,
                 "allowed_ips": [f"{tunnel.tunnel_ip}/32"],
                 "allowed_ports": ports,
+                "kube_api_port": None if revoked else kube_api_port(),  # ticket 74
                 "revoked": revoked,
             }
         )

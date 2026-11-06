@@ -155,7 +155,7 @@ UDP가 막힌 네트워크(행사장 Wi-Fi 등) 대체 터널은 아직 없다(T
 ```bash
 # 1. Agent가 앱을 배포해 대상 Namespace가 생긴 뒤(없으면 kubeconfig만 쓰고 종료 코드 3 → 배포 뒤 bind)
 python3 infra/onprem-agent/make-data-kubeconfig.py apply --context k3d-cmp-local \
-  --namespace <대상 앱 Namespace> --server https://<중계 서버 사설 IP>:<포트> --ref <kubeconfig_ref> --duration 12h
+  --namespace <대상 앱 Namespace> --server https://<중계 서버 사설 IP>:<16400+터널 IP 마지막 옥텟> --ref <kubeconfig_ref> --duration 12h
 python3 infra/onprem-agent/make-data-kubeconfig.py bind --context k3d-cmp-local --namespace <ns> --wait-namespace 900
 # 2. 권한이 표만큼인지(impersonation)
 python3 infra/onprem-agent/make-data-kubeconfig.py verify --context k3d-cmp-local --namespace <ns>
@@ -163,6 +163,7 @@ python3 infra/onprem-agent/make-data-kubeconfig.py verify --context k3d-cmp-loca
 python3 infra/onprem-agent/make-data-kubeconfig.py delete --context k3d-cmp-local --namespace <ns>
 ```
 
+- 서버 포트 규칙은 [74 티켓](../../tickets/provisioning/74-relay-kube-api-forward.md) R4다(예: 터널 IP 10.200.0.2 → 16402).
 - 파일은 `~/.config/cmp/data-migration/<ref>.yaml`(0600)이다. 토큰은 화면에 나오지 않고 만료 시각만 나온다.
 - kubeconfig는 `tls-server-name: kubernetes.default.svc`와 클러스터 CA(`kube-root-ca.crt`)를 쓴다. k3s 인증서 SAN에 터널·중계 서버 IP가 없어서다(73 K8). `insecure-skip-tls-verify`는 쓰지 않는다.
 - 이 경로는 Chart `tunnel.exposeKubeApi=true`·플랫폼 `TUNNEL_EXPOSE_KUBE_API=true`(§7)와 중계 서버 전달(74)이 있어야 서버에서 닿는다. 서버 배치와 확인은 [데모 README](../../infra/demo/README.md)의 `DATA_MIGRATION_KUBECONFIG_DIR` 줄을 따른다.

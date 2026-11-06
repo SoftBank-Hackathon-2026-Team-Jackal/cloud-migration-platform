@@ -26,6 +26,27 @@ Parameters:
   UserPort:
     Type: Number
     Default: 8080
+  # Ticket 74: TCP forward from the demo server worker to each Agent's K3s API port
+  # (relay private IP:16400 + tunnel host number). Off by default; set exactly one source.
+  KubeApiForwardSourceSecurityGroupId:
+    Type: String
+    Default: ''
+    Description: Security group of the demo server (cmp-demo-control-plane). Empty = closed.
+  KubeApiForwardSourceCidr:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^([0-9]{1,3}\.){3}[0-9]{1,3}/32$'
+    Description: Demo server private IP as /32 (alternative to the security group). Empty = closed.
+  KubeApiForwardFromPort:
+    Type: Number
+    Default: 16402
+  KubeApiForwardToPort:
+    Type: Number
+    Default: 16654
+
+Conditions:
+  KubeApiFromSecurityGroup: !Not [!Equals [!Ref KubeApiForwardSourceSecurityGroupId, '']]
+  KubeApiFromCidr: !Not [!Equals [!Ref KubeApiForwardSourceCidr, '']]
 
 Resources:
   InstanceRole:
@@ -78,6 +99,23 @@ Resources:
           ToPort: 80
           CidrIp: 0.0.0.0/0
           Description: Certificate challenge and redirect to HTTPS
+        # Ticket 74: never 0.0.0.0/0. Envoy (envoy-kube) also binds only the private IP.
+        - !If
+          - KubeApiFromSecurityGroup
+          - IpProtocol: tcp
+            FromPort: !Ref KubeApiForwardFromPort
+            ToPort: !Ref KubeApiForwardToPort
+            SourceSecurityGroupId: !Ref KubeApiForwardSourceSecurityGroupId
+            Description: K3s API forward from the demo server worker (ticket 74)
+          - !Ref AWS::NoValue
+        - !If
+          - KubeApiFromCidr
+          - IpProtocol: tcp
+            FromPort: !Ref KubeApiForwardFromPort
+            ToPort: !Ref KubeApiForwardToPort
+            CidrIp: !Ref KubeApiForwardSourceCidr
+            Description: K3s API forward from the demo server worker (ticket 74)
+          - !Ref AWS::NoValue
       SecurityGroupEgress:
         - IpProtocol: '-1'
           CidrIp: 0.0.0.0/0
