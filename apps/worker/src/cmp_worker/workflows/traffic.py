@@ -10,7 +10,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
-    from cmp_contracts.queues import MIGRATION_QUEUE
+    from cmp_contracts.queues import MIGRATION_QUEUE, WORKFLOW_QUEUE
     from cmp_traffic import (
         Handover,
         Sample,
@@ -24,6 +24,10 @@ with workflow.unsafe.imports_passed_through():
 
     from cmp_worker.activities import traffic
 
+# #129: with a `migration_id` in the request every published snapshot is also stored as a
+# `traffic.snapshot` event, so the web traffic screen shows the real shift (SSE).
+EVENTS_PATCH = "traffic-events-v1"
+EVENT_STATUS = {"complete": "done", "rolledback": "failed"}  # everything else is `running`
 ZERO = {"requests": 0, "failed": 0, "p99_ms": 0.0}
 QUEUE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 
@@ -35,6 +39,7 @@ class TrafficShiftWorkflow:
         self.snapshot: dict = {}
         self.events: list[dict] = []
         self.queue = MIGRATION_QUEUE
+        self.migration_id: str | None = None
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -54,7 +59,9 @@ class TrafficShiftWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=attempts),
         )
 
-    def _publish(self, policy, weights, step, baseline, observed, left, phase, **extra) -> None:
+    async def _publish(
+        self, policy, weights, step, baseline, observed, left, phase, **extra
+    ) -> None:
         self.snapshot = build_snapshot(
             phase=phase,
             policy=policy,
@@ -65,6 +72,29 @@ class TrafficShiftWorkflow:
             observe_left_seconds=left,
             **extra,
         )
+        await self._emit(phase)
+
+    async def _emit(self, phase: str) -> None:
+        """Store the current snapshot as a web event. Observation only: it never changes the shift."""
+        if not self.migration_id or not workflow.patched(EVENTS_PATCH):
+            return
+        try:
+            await workflow.execute_activity(
+                "emit_migration_event",
+                {
+                    "migration_id": self.migration_id,
+                    "type": "traffic.snapshot",
+                    "phase": "traffic",
+                    "status": EVENT_STATUS.get(phase, "running"),
+                    "data": self.snapshot,
+                },
+                task_queue=WORKFLOW_QUEUE,  # the Workflow worker also hosts `emit_migration_event`
+                start_to_close_timeout=timedelta(seconds=30),
+                schedule_to_close_timeout=timedelta(minutes=2),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+        except ActivityError:
+            pass
 
     def _result(self, status: str, weights: dict, reason: str = "") -> dict:
         if reason:
@@ -77,7 +107,7 @@ class TrafficShiftWorkflow:
             await self._call(traffic.traffic_rollback, {}, timeout_s=60, attempts=5)
         except ActivityError as exc:
             return self._result("FAILED", safe, f"{reason}; rollback 실패: {exc.cause}")
-        self._publish(
+        await self._publish(
             policy, safe, step, baseline, None, 0, "rolledback",
             decision="rollback", notes=[{"key": "gateFail", "params": {}}],
         )  # fmt: skip
@@ -90,6 +120,8 @@ class TrafficShiftWorkflow:
         if not isinstance(queue, str) or not QUEUE_NAME.fullmatch(queue):
             raise ApplicationError("invalid relay_queue name", non_retryable=True)
         self.queue = queue
+        migration_id = request.get("migration_id")
+        self.migration_id = migration_id if isinstance(migration_id, str) and migration_id else None
         policy = TrafficPolicy.model_validate(request.get("policy") or {})
         handover = Handover.model_validate(request["handover"])
         db_gate_ok = request.get("db_gate_ok")
@@ -116,7 +148,9 @@ class TrafficShiftWorkflow:
                 return await self._rollback(policy, baseline, step, "취소 요청")
 
             weights = weights_for(step)
-            self._publish(policy, weights, step, baseline, None, policy.observe_seconds, "applying")
+            await self._publish(
+                policy, weights, step, baseline, None, policy.observe_seconds, "applying"
+            )
             try:
                 await self._call(
                     traffic.traffic_set_weight, {"weights": weights}, timeout_s=60, attempts=2
@@ -130,7 +164,7 @@ class TrafficShiftWorkflow:
             total = Sample(requests=0, failed=0, p99_ms=0)
             streak = 0
             while True:
-                self._publish(
+                await self._publish(
                     policy, weights, step, baseline, total, policy.observe_seconds, "observing"
                 )
                 try:
@@ -151,7 +185,7 @@ class TrafficShiftWorkflow:
                     p99_ms=window.p99_ms,
                 )
                 outcome = evaluate_step(policy, baseline, total, workflow.time() - began, streak)
-                self._publish(policy, weights, step, baseline, total, 0, "gate")
+                await self._publish(policy, weights, step, baseline, total, 0, "gate")
                 if outcome.decision != "hold":
                     break
                 if self.cancel_requested:
@@ -162,7 +196,7 @@ class TrafficShiftWorkflow:
             current = weights
             decision = "done" if step == policy.steps[-1] else "advance"
             self.events.append({"step": step, "decision": decision})
-            self._publish(
+            await self._publish(
                 policy, weights, step, baseline, total, 0,
                 "complete" if decision == "done" else "gate", decision=decision,
             )  # fmt: skip
