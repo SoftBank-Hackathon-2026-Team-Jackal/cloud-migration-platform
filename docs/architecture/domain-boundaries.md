@@ -68,7 +68,7 @@ Sandbox는 변환 오류를 사전에 찾는 곳이다. **Sandbox 성공은 실�
 
 PostgreSQL 논리 복제가 모든 DB 객체나 변경을 자동 처리한다고 가정하지 않는다. 실제 DB Cutover, 쓰기 제어, 역방향 복제 및 Cutover 후 복구 절차는 **확인 필요**다. Traffic Migration은 데이터 동기화와 전환 가능 여부를 전달받아야 한다.
 
-AWS→온프레미스 K3s에서는 Data Migration이 복제 시작 전 [Migration Network Preflight](../../specs/migration-network-preflight/spec.md)를 호출하고 통과 여부를 판정한다. Provisioning은 CIDR·대상 DB/Agent 접근 참조를 제공한다. 온프레미스 Agent는 허용된 검사 작업을 실제 복제 경로에서 실행하고 결과를 보고한다. Traffic Migration은 Preflight 결과를 전환 조건의 참고 정보로 소비하지만 사용자→앱 경로와 앱 헬스는 별도로 검증한다. 복제 중 지연·WAL 누적 감시는 Data Migration의 책임이다.
+AWS→온프레미스 K3s에서는 Data Migration이 복제 시작 전 [Migration Network Preflight](../../specs/migration-network-preflight/spec.md)를 호출하고 통과 여부를 판정한다. Provisioning은 CIDR·대상 DB/Agent 접근 참조를 제공한다. 온프레미스 Agent는 허용된 검사 작업을 실제 복제 경로에서 실행하고 결과를 보고한다. Traffic Migration은 Preflight 결과를 전환 조건의 참고 정보로 소비하지만 사용자→앱 경로와 앱 헬스는 별도로 검증한다. 복제 중 지연·WAL 누적 감시는 Data Migration의 책임이다. 복제 경로는 Agent 터널·중계 서버가 아니라 데이터 게이트웨이(입구는 원본 클러스터 쪽)다. 중계 서버는 사용자 HTTP와 Worker의 대상 Kubernetes API 접근만 전달한다([ADR-007](../decisions/ADR-007.md)).
 
 ## 7. Traffic Migration Worker
 

@@ -38,7 +38,7 @@
 - DM-014 전환 순간 옛 주 DB에 쓰는 클라이언트는 모두 PgBouncer를 거쳐야 한다. 직접 붙은 세션이 하나라도 있으면 전환 실행기가 거절한다(`DIRECT_CLIENTS`, 시작할 때와 PAUSE 직전). 앱 연결을 PgBouncer로 바꾼 뒤에는 rollout 완료뿐 아니라 옛 Pod가 모두 사라질 때까지 기다린다. 근거: EKS 시험에서 종료 중이던 옛 앱 Pod(SIGTERM 무시)가 전환 뒤 12초 동안 옛 주 DB에 직접 써서 커밋된 쓰기 594건이 새 주 DB에 없었다(롤백 검증 불일치로 발견).
 - DM-012 대상 DB의 `wal_level`이 logical이 아니면(Provisioning 27(#151) 이후 플랫폼 렌더러는 기본으로 logical을 넣으므로, 이 처리는 그 이전 배포·외부 DB를 위한 예비 경로다) 준비 단계에서 `ALTER SYSTEM`으로 바꾸고 Pod를 한 번 재시작한다. 역방향 복제(롤백)의 발행자가 되기 위해서다. 이 시점의 대상 DB에는 사용자가 없다.
 - DM-013 구독자는 전용 역할 `cmp_repl`(LOGIN REPLICATION, public 스키마 SELECT)로 발행 DB에 접속한다. 비밀번호는 Worker가 만들어 구독자 쪽 Secret(`cmp-<키>-<fwd|rev>`)에 두고 SQL은 stdin으로만 넘긴다.
-- DM-011 복제 경로는 WireGuard다(결정 2026-11-05). 정방향은 대상 DB(구독자)가 원본 DB로, 역방향은 원본 DB가 대상 DB로 터널을 통해 접속한다. 전환 뒤 PgBouncer도 터널을 통해 대상 DB로 붙는다. ON_PREM은 기존 Agent 터널(`tunnel_endpoint`, #71)과 MNP Preflight를 쓴다. AWS·GCP 대상의 터널 구성은 PoC 2단계(EC2 ↔ GCE, MTU 1420)와 Traffic 중계 서버 터널(ADR-006) 방식을 따른다.
+- DM-011 복제 경로는 WireGuard다(결정 2026-11-05). 정방향은 대상 DB(구독자)가 원본 DB로, 역방향은 원본 DB가 대상 DB로 터널을 통해 접속한다. 전환 뒤 PgBouncer도 터널을 통해 대상 DB로 붙는다. AWS·GCP 대상의 터널 구성은 PoC 2단계(EC2 ↔ GCE, MTU 1420)와 Traffic 중계 서버 터널(ADR-006) 방식을 따른다. ON_PREM(NAT 뒤 K3s)은 같은 데이터 게이트웨이(`cmp_data.tunnel`)를 쓰되 **입구(UDP LoadBalancer)를 원본 클러스터 쪽에 두고 대상 게이트웨이가 밖으로 접속한다**(2안, [ADR-007](../../docs/decisions/ADR-007.md), 결정 2026-11-07). 입구는 대상 공인 IP에서 오는 UDP만 받는다. Worker는 Agent 터널 + 중계 서버를 거친 kubeconfig(권한을 좁힌 ServiceAccount, `target_kubeconfig_ref`)로 대상 K3s API에 붙는다. 대안(1안, 이전 문구): 기존 Agent 터널(`tunnel_endpoint`, #71) + 중계 서버 + 원본 VPC 피어링으로 복제 데이터가 중계 서버를 지나는 경로. 고객 VPC 변경·플랫폼 인프라 경유 때문에 채택하지 않았다.
 
 ## Acceptance criteria
 

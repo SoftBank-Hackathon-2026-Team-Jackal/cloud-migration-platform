@@ -55,6 +55,21 @@ PoC 스크립트와의 대응:
 - 전환 중 marker 미도착·체크섬 불일치: 쓰기를 원래 주체로 재개하고 전환하지 않는다(PoC와 같음).
 - 전환 뒤 롤백: 역방향 복제로 같은 절차를 반대로 실행한다. 트래픽 롤백과는 별개다(ADR-006 한계).
 
+## ON_PREM 복제 경로 (2안, ADR-007)
+
+NAT 뒤 K3s 대상은 [ADR-007](../../docs/decisions/ADR-007.md)을 따른다. `dm_path`는 같은 게이트웨이 매니페스트를 쓰되 입구 Service(UDP LoadBalancer)를 **원본 클러스터**에 두고, 허용 대역을 대상 공인 IP로 둔다. 대상 게이트웨이가 `PEER_ENDPOINT`(원본 NLB 주소)로 접속한다. Worker의 대상 접근은 `target_kubeconfig_ref`(Agent 터널 + 중계 서버 경유, 좁힌 ServiceAccount)다.
+
+| 단계 | 내용 | 담당·티켓 |
+| --- | --- | --- |
+| 1 | PoC: 원본 EKS UDP NLB ↔ 맥 k3d 게이트웨이로 실제 복제·전환 | Provisioning 69 |
+| 2 | Agent가 k3d API 포트를 터널에 노출 | Provisioning |
+| 3 | 게이트웨이 입구 방향 옵션(`tunnel.py`) | 티켓 67 |
+| 4 | 중계 서버 TCP 전달(worker → k3d API) | 트래픽 담당 확인 |
+| 5 | k3d kubeconfig용 ServiceAccount | Provisioning |
+| 6 | 원본 쪽 수정 5개(compose `DATA_MIGRATION_AWS_PROFILE`, marker 표 비교 제외, cutover 이미지 빌드, 실패 시 슬롯 정리, 체크섬 UTC) | 데이터 담당 확인 |
+| 7 | 웹 시작 입력 연결 | Provisioning |
+| 8 | 웹 화면·report | Provisioning |
+
 ## Verification
 
 - ticket 01: `uv run pytest tests/data`, `make check`
