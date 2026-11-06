@@ -378,6 +378,7 @@ async def dm_sample(payload: dict) -> dict:
     return {
         "phase": sync_phase(snap, req.policy),
         "lag_bytes": snap.lag_bytes,
+        "lag_ms": snap.lag_ms,  # #234: traffic.ready reads it from the `status` Query
         "tables": len(snap.tables),
         "tables_ready": sum(1 for t in snap.tables if t.state == "r"),
     }

@@ -2199,6 +2199,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /migrations/{migration_id}/traffic/rollback:
+    post:
+      tags:
+      - traffic actions
+      summary: Rollback Traffic
+      description: 전환 중(적용·관찰·판정)일 때 원본 100%로 되돌리라고 요청한다.
+      operationId: rollback_traffic_migrations__migration_id__traffic_rollback_post
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficActionAccepted'
+        '404':
+          description: MIGRATION_NOT_FOUND
+        '409':
+          description: TRAFFIC_NOT_RUNNING or TRAFFIC_ACTION_NOT_ALLOWED
+        '503':
+          description: TRAFFIC_UNAVAILABLE
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /migrations/{migration_id}/traffic/retry:
+    post:
+      tags:
+      - traffic actions
+      summary: Retry Traffic
+      description: 되돌린 뒤 기다리는 동안 첫 단계부터 다시 전환하라고 요청한다.
+      operationId: retry_traffic_migrations__migration_id__traffic_retry_post
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficActionAccepted'
+        '404':
+          description: MIGRATION_NOT_FOUND
+        '409':
+          description: TRAFFIC_NOT_RUNNING or TRAFFIC_ACTION_NOT_ALLOWED
+        '503':
+          description: TRAFFIC_UNAVAILABLE
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -5338,6 +5404,31 @@ components:
       additionalProperties: false
       type: object
       title: TeardownRequest
+    TrafficActionAccepted:
+      properties:
+        migration_id:
+          type: string
+          title: Migration Id
+        workflow_id:
+          type: string
+          title: Workflow Id
+        action:
+          type: string
+          enum:
+          - rollback
+          - retry
+          title: Action
+        signal:
+          type: string
+          title: Signal
+      additionalProperties: false
+      type: object
+      required:
+      - migration_id
+      - workflow_id
+      - action
+      - signal
+      title: TrafficActionAccepted
     Transfer:
       properties:
         bytes:
