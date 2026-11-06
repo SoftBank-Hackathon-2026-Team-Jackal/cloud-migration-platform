@@ -34,7 +34,7 @@ with workflow.unsafe.imports_passed_through():
         WORKFLOW_QUEUE,
         approval_workflow_id,
     )
-    from cmp_data.handoff import DataMigrationInput, target_endpoint
+    from cmp_data.handoff import DataMigrationInput, endpoints
     from cmp_traffic import TrafficShiftInput
 
     from cmp_worker.activities.analysis import analyze_project
@@ -316,25 +316,29 @@ class MigrationWorkflow:
             start_to_close_timeout=timedelta(minutes=1),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
-        target, code = target_endpoint(view, parsed)
-        if target is None:
+        migration_id = workflow.info().workflow_id
+        # ticket 10: `tunnel`이 있으면 양쪽 peer_host가 플랫폼 WireGuard 게이트웨이 주소가 된다
+        source, target, code = endpoints(view, parsed, migration_id)
+        if source is None or target is None:
             self.failure_code = code
             self.data_migration = {"phase": "blocked", "failure_code": code}
             return "data_blocked"
-        migration_id = workflow.info().workflow_id
+        child_args = {
+            "request": {
+                "migration_id": migration_id,
+                "source": source.model_dump(mode="json"),
+                "target": target.model_dump(mode="json"),
+            },
+            "app": parsed.app,
+            "settings": parsed.settings,
+            "sample_interval_s": parsed.sample_interval_s,
+            "monitor_interval_s": parsed.monitor_interval_s,
+        }
+        if parsed.tunnel is not None:
+            child_args["tunnel"] = parsed.tunnel.model_dump(mode="json")
         child = await workflow.start_child_workflow(
             DataMigrationWorkflow.run,
-            {
-                "request": {
-                    "migration_id": migration_id,
-                    "source": parsed.source.model_dump(mode="json"),
-                    "target": target.model_dump(mode="json"),
-                },
-                "app": parsed.app,
-                "settings": parsed.settings,
-                "sample_interval_s": parsed.sample_interval_s,
-                "monitor_interval_s": parsed.monitor_interval_s,
-            },
+            child_args,
             id=f"data-{migration_id}",
             task_queue=WORKFLOW_QUEUE,
             parent_close_policy=workflow.ParentClosePolicy.ABANDON,

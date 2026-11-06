@@ -2,7 +2,7 @@ from cmp_contracts.queues import MIGRATION_QUEUE, WORKFLOW_QUEUE
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from cmp_worker.activities import data_cutover, data_migration, traffic
+from cmp_worker.activities import data_cutover, data_migration, data_tunnel, traffic
 from cmp_worker.activities.migration import copy_data, shift_traffic, verify_target
 from cmp_worker.activities.network_preflight import build_network_preflight_activities
 from cmp_worker.workflows.analysis import AnalysisWorkflow
@@ -42,6 +42,7 @@ def create_activity_worker(client: Client) -> Worker:
             data_cutover.dm_route_app,
             data_cutover.dm_switchover,
             data_cutover.dm_announce_cutover,
+            data_tunnel.dm_tunnel,  # ticket 10: WireGuard 복제 경로
         ],
     )
 
