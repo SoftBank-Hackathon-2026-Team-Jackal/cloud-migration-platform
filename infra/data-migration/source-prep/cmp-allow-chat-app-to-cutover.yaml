@@ -1,0 +1,27 @@
+# 원본 chat-app → cmp-cutover(PgBouncer) TCP 6432 허용.
+# 데이터 Workflow의 route_app이 chat-secrets DATABASE_URL을 cmp-pgbouncer.chat-source.svc:6432로
+# 바꾸고 chat-app을 재시작한다. 원본 chat-app-egress는 chat-db:5432·DNS만 허용하므로 이 정책이 없으면
+# 새 chat-app Pod가 DB에 못 붙는다. NetworkPolicy는 허용이 합쳐지므로 기존 정책은 건드리지 않는다.
+# 되돌리기: kubectl -n chat-source delete networkpolicy cmp-allow-chat-app-to-cutover
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cmp-allow-chat-app-to-cutover
+  namespace: chat-source
+  labels:
+    app.kubernetes.io/managed-by: cmp
+    app.kubernetes.io/part-of: cmp-data-migration
+spec:
+  podSelector:
+    matchLabels:
+      app: chat-app
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cmp-cutover
+      ports:
+        - protocol: TCP
+          port: 6432
