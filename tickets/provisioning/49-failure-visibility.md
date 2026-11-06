@@ -107,7 +107,12 @@ Blocked by: 07, 18, 22, 24 (main 반영). 같은 파일을 44(시작 요청)·50
   - Temporal FAILED → 보고한 `ACTIVITY_FAILED` 유지
   - 닫힌 실행은 phase와 상관없이 running 아님
   - 실행 중 + worker 없음 → 10초 안에 오류
-- 로컬 compose 실측과 `make check` 결과는 PR 본문에 적는다.
+- `make check`: 2012 passed, 9 skipped. OpenAPI는 바뀌지 않았다.
+- 로컬 compose 실측: 데모 compose + 점검 D 하네스를 쓰고, 끝난 뒤 컨테이너·볼륨·이미지를 지웠다. R1(`plan_failed`) 뒤 `docker compose stop worker`를 하고 확인했다.
+  - 상태 API: `phase=plan_failed`, `failure_code=PLANNING_INPUT_MISSING`, `failure_phase=planning`, `execution_status=COMPLETED`. query 제한 때문에 응답에 약 4초가 걸린다.
+  - SSE: snapshot `status=failed`, `phase=planning`이고 약 4초 뒤 닫혔다.
+  - worker 없이 실행 중인 Workflow: 상태 API는 5.0초에 503(이전 30초), SSE 첫 snapshot은 5.1초(이전 15초 무응답).
+- 남은 것: worker가 없을 때 응답에 query 제한(5초)만큼 시간이 더 걸린다. 응답 지연을 없애려면 describe 결과를 캐시하는 등 별도 설계가 필요하다(이 후속의 범위 밖).
 
 ## 완료 체크리스트
 - [x] RED → GREEN 테스트
