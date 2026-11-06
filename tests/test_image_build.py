@@ -314,3 +314,33 @@ def test_buildx_command_is_shared_with_the_imds_smoke(tmp_path):
     assert command[:3] == ["docker", "buildx", "build"]
     assert command[command.index("--network") + 1] == "default"
     assert command[-1] == str(tmp_path)
+
+
+def test_aws_calls_use_the_configured_build_profile_only_for_aws(monkeypatch, tmp_path):
+    """Ticket 47 (B-20): no global worker AWS_PROFILE, so the Build module names its profile."""
+    from cmp_worker import image_build
+
+    path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n"})
+    calls, _ = mock_aws_docker(monkeypatch, path)
+    seen = []
+    real = image_build.subprocess.run
+
+    def spy(command, **kwargs):
+        seen.append((command[0], (kwargs.get("env") or {}).get("AWS_PROFILE")))
+        return real(command, **kwargs)
+
+    monkeypatch.setattr(image_build.subprocess, "run", spy)
+    profiled = ImageBuilder(builder().context, aws_profile="cmp-demo-build")
+    profiled.build(source_uri(path))
+    assert calls
+    aws = {profile for tool, profile in seen if tool == "aws"}
+    assert aws == {"cmp-demo-build"}
+    assert {profile for tool, profile in seen if tool == "docker"} <= {None}
+
+
+def test_build_adapter_passes_the_settings_profile_to_the_builder():
+    from cmp_worker.build_wiring import BuildSettings, ImageBuildAdapter
+
+    settings = BuildSettings.from_values("b", ECR, "l", "linux/amd64", "cmp-demo-build")
+    adapter = ImageBuildAdapter(settings, archive_store=None, build_store=None)
+    assert adapter.builder_factory(builder().context)._aws_profile == "cmp-demo-build"

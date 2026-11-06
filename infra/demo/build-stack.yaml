@@ -36,6 +36,15 @@ Parameters:
     Type: Number
     Default: 7
     MinValue: 1
+  # Ticket 47 (B-08): other AWS accounts whose platform-built EKS node roles may pull. The
+  # operator adds a target connection's account here (deploy-build-stack.sh
+  # CMP_ECR_PULL_ACCOUNT_IDS). Empty: no repository policy (same-account nodes need none).
+  PullAccountIds:
+    Type: CommaDelimitedList
+    Default: ''
+
+Conditions:
+  HasPullAccounts: !Not [!Equals [!Join ['', !Ref PullAccountIds], '']]
 
 Rules:
   ReleasesStayReadOnly:
@@ -60,6 +69,26 @@ Resources:
         ScanOnPush: true
       EncryptionConfiguration:
         EncryptionType: AES256
+      # Ticket 47 (B-08): cross-account pull for the node role Terraform creates
+      # (infra/terraform/aws `${name}-eks-node`, connection clusters are named cmp-*), only in the
+      # listed accounts. The node role has AmazonEC2ContainerRegistryPullOnly in its own account.
+      RepositoryPolicyText: !If
+        - HasPullAccounts
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: TargetEksNodesPull
+              Effect: Allow
+              Principal: '*'
+              Action:
+                - ecr:BatchGetImage
+                - ecr:GetDownloadUrlForLayer
+                - ecr:BatchCheckLayerAvailability
+              Condition:
+                StringEquals:
+                  aws:PrincipalAccount: !Ref PullAccountIds
+                ArnLike:
+                  aws:PrincipalArn: arn:aws:iam::*:role/cmp-*-eks-node
+        - !Ref AWS::NoValue
       LifecyclePolicy:
         LifecyclePolicyText: !Sub |
           {"rules": [{"rulePriority": 1,
@@ -119,6 +148,49 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${SourcePrefix}/*'
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${SuitePrefix}/*'
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${LogPrefix}/*'
+          # Ticket 47 (B-09): pull tokens for user clusters come from the pull-only role.
+          - Sid: AssumeEcrPullRole
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !GetAtt EcrPullRole.Arn
+
+  # Ticket 47 (B-09, 41 D4): a registry token works with its issuer's ECR permissions. Tokens handed
+  # to K3s Agents (api) and GKE pull Secrets (worker) are minted with this role, so whoever reads
+  # the cluster Secret can pull from this repository only, never push.
+  EcrPullRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cmp-demo-ecr-pull
+      Description: Pull-only ECR tokens for user clusters (ticket 47)
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${InstanceRoleName}'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: cmp-demo-ecr-pull
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EcrLogin
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: EcrPullOnly
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchCheckLayerAvailability
+                Resource: !GetAtt BuildRepository.Arn
+      Tags:
+        - Key: Project
+          Value: cloud-migration-platform
+        - Key: Purpose
+          Value: hackathon-demo-ecr-pull
 
   # Ticket 23b (#205), ADR-005: the instance role is the platform principal of environment
   # connections (API CONNECTION_PLATFORM_AWS_PROFILE=cmp-demo-build). Cross-account AssumeRole needs
@@ -157,5 +229,7 @@ Outputs:
     Value: !GetAtt BuildRepository.RepositoryUri
   BuildPolicyName:
     Value: cmp-demo-build
+  PullRoleArn:
+    Value: !GetAtt EcrPullRole.Arn
   SourceBucket:
     Value: !Ref DeployBucketName

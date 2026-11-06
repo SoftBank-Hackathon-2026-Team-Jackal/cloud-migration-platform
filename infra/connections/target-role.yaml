@@ -1,13 +1,20 @@
-# Cloud Migration Platform - target (EKS new build) connection role. Ticket 23, ADR-005.
+# Cloud Migration Platform - target (EKS new build) connection role. Tickets 23, 47; ADR-005.
 # Created by the user in the target AWS account from the platform's quick-create link.
 # Trust: the platform principal with the platform-issued External ID only.
-# Scope (where IAM supports it):
-#   - creates must carry the platform's Terraform tag (aws:RequestTag/cmp:managed-by),
-#   - changes/deletes only on resources carrying that tag (aws:ResourceTag/cmp:managed-by),
-#   - IAM writes only on roles/policies named with ResourcePrefix, PassRole only to EKS/EC2,
-#   - explicit deny for IAM users, access keys and changes to this role itself.
-# Actions that IAM cannot tag-scope (e.g. CreateRoute, AuthorizeSecurityGroupEgress) are limited
-# to the ec2 resource-tag condition where AWS evaluates it. Real Apply with this role is unverified.
+# Scope (v2, ticket 47; reviewed call list: packages/providers/src/cmp_providers/aws_target_access.py):
+#   - EC2 creates carry the Terraform tag in the request (aws:RequestTag/cmp:managed-by) and may
+#     only use parents (VPC, subnet, Elastic IP) that already carry it; tags can be added at
+#     creation only (ec2:CreateAction), never to a user's existing resource,
+#   - EC2 changes/deletes only on resources carrying that tag (aws:ResourceTag/cmp:managed-by),
+#   - EKS writes only on clusters named with ResourcePrefix that carry the tag; user kubectl access
+#     is STANDARD access entries with the cluster admin policy only,
+#   - IAM writes/reads only on roles/policies named with ResourcePrefix and EKS OIDC providers;
+#     only the reviewed AWS managed policies (or prefixed ones) can be attached; no inline policy;
+#     PassRole only to EKS/EC2,
+#   - explicit deny for IAM users, access keys, the platform connection tag on any role, instance
+#     user data, and changes to this role itself.
+# Checked offline (tests/test_aws_target_access.py) and with IAM simulate-custom-policy
+# (infra/connections/simulate-target-role.py). A real Apply with this role is still unverified.
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Cloud Migration Platform target build role (cross-account AssumeRole with External ID)
 Parameters:
@@ -22,8 +29,9 @@ Parameters:
   ResourcePrefix:
     Type: String
     Default: cmp-
-    Description: Name prefix of IAM roles/policies the platform's Terraform creates
-    AllowedPattern: "^[a-z][a-z0-9-]{1,19}$"
+    Description: Name prefix of the clusters and IAM roles/policies the platform's Terraform creates
+    AllowedValues:
+      - cmp-
   ManagedByTag:
     Type: String
     Default: terraform
@@ -55,50 +63,94 @@ Resources:
   TargetBuild:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      Description: Create and manage only platform-tagged EKS, VPC and IAM resources
+      Description: Create and manage only platform-tagged VPC network resources
       Roles:
         - Ref: ConnectionRole
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: Read
+          # Read-only. ec2:Describe* keeps provider refresh working across versions; user data is
+          # denied below. ELB reads let cleanup find load balancers the controller created.
+          - Sid: ReadNetwork
             Effect: Allow
             Action:
               - ec2:Describe*
-              - eks:Describe*
-              - eks:List*
               - elasticloadbalancing:Describe*
-              - iam:Get*
-              - iam:List*
               - sts:GetCallerIdentity
             Resource: "*"
-          - Sid: CreateTagged
+          # New resources carry the Terraform tag. One statement per group so that a parent type
+          # (vpc, subnet, elastic-ip) never passes on the request tag alone.
+          - Sid: CreateTaggedNetwork
             Effect: Allow
             Action:
               - ec2:AllocateAddress
               - ec2:CreateInternetGateway
+              - ec2:CreateVpc
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:elastic-ip/*"
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:internet-gateway/*"
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc/*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          - Sid: CreateTaggedInVpc
+            Effect: Allow
+            Action:
+              - ec2:CreateRouteTable
+              - ec2:CreateSecurityGroup
+              - ec2:CreateSubnet
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:route-table/*"
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:security-group/*"
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:subnet/*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          - Sid: CreateTaggedNatGateway
+            Effect: Allow
+            Action: ec2:CreateNatGateway
+            Resource:
+              Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:natgateway/*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          - Sid: CreateInTaggedParents
+            Effect: Allow
+            Action:
               - ec2:CreateNatGateway
               - ec2:CreateRouteTable
               - ec2:CreateSecurityGroup
               - ec2:CreateSubnet
-              - ec2:CreateVpc
-              - eks:CreateAddon
-              - eks:CreateCluster
-              - eks:CreateNodegroup
-            Resource: "*"
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:elastic-ip/*"
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:subnet/*"
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc/*"
             Condition:
               StringEquals:
-                aws:RequestTag/cmp:managed-by:
+                aws:ResourceTag/cmp:managed-by:
                   Ref: ManagedByTag
+          # Tags only as part of the create call above, never on an existing resource.
           - Sid: TagOnCreate
             Effect: Allow
-            Action:
-              - ec2:CreateTags
+            Action: ec2:CreateTags
             Resource: "*"
             Condition:
               StringEquals:
                 aws:RequestTag/cmp:managed-by:
                   Ref: ManagedByTag
+                ec2:CreateAction:
+                  - AllocateAddress
+                  - AuthorizeSecurityGroupEgress
+                  - AuthorizeSecurityGroupIngress
+                  - CreateInternetGateway
+                  - CreateNatGateway
+                  - CreateRouteTable
+                  - CreateSecurityGroup
+                  - CreateSubnet
+                  - CreateVpc
           - Sid: ChangeTagged
             Effect: Allow
             Action:
@@ -107,6 +159,7 @@ Resources:
               - ec2:AuthorizeSecurityGroupEgress
               - ec2:AuthorizeSecurityGroupIngress
               - ec2:CreateRoute
+              - ec2:CreateTags
               - ec2:DeleteInternetGateway
               - ec2:DeleteNatGateway
               - ec2:DeleteRoute
@@ -123,25 +176,144 @@ Resources:
               - ec2:ReleaseAddress
               - ec2:RevokeSecurityGroupEgress
               - ec2:RevokeSecurityGroupIngress
-              - eks:DeleteAddon
-              - eks:DeleteCluster
-              - eks:DeleteNodegroup
-              - eks:TagResource
-              - eks:UntagResource
-              - eks:UpdateAddon
-              - eks:UpdateClusterConfig
-              - eks:UpdateClusterVersion
-              - eks:UpdateNodegroupConfig
-              - eks:UpdateNodegroupVersion
             Resource: "*"
             Condition:
               StringEquals:
                 aws:ResourceTag/cmp:managed-by:
                   Ref: ManagedByTag
+          # Sub-resources AWS also authorizes these calls against. They are never tagged, and the
+          # same call still needs the tagged security group / Elastic IP above.
+          - Sid: SubResourcesOfTagged
+            Effect: Allow
+            Action:
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:DisassociateAddress
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:security-group-rule/*"
+              - Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:network-interface/*"
+          - Sid: NeverUserData
+            Effect: Deny
+            Action:
+              - ec2:DescribeInstanceAttribute
+              - ec2:DescribeLaunchTemplateVersions
+            Resource: "*"
+  # Second policy: one managed policy is limited to 6,144 characters (ticket 47).
+  TargetCluster:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Create and manage only platform-named EKS clusters and IAM roles/policies
+      Roles:
+        - Ref: ConnectionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ReadEksAccount
+            Effect: Allow
+            Action:
+              - eks:DescribeAddonConfiguration
+              - eks:DescribeAddonVersions
+              - eks:DescribeClusterVersions
+              - eks:ListAccessPolicies
+              - eks:ListClusters
+            Resource: "*"
+          - Sid: ReadPlatformEks
+            Effect: Allow
+            Action:
+              - eks:Describe*
+              - eks:List*
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:cluster/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:nodegroup/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:addon/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:access-entry/${ResourcePrefix}*"
+          - Sid: ReadPlatformIam
+            Effect: Allow
+            Action:
+              - iam:GetOpenIDConnectProvider
+              - iam:GetPolicy
+              - iam:GetPolicyVersion
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:ListAttachedRolePolicies
+              - iam:ListInstanceProfilesForRole
+              - iam:ListOpenIDConnectProviderTags
+              - iam:ListPolicyTags
+              - iam:ListPolicyVersions
+              - iam:ListRolePolicies
+              - iam:ListRoleTags
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/oidc.eks.*"
+          - Sid: CreateTaggedCluster
+            Effect: Allow
+            Action: eks:CreateCluster
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          - Sid: ChangePlatformEks
+            Effect: Allow
+            Action:
+              - eks:CreateAddon
+              - eks:CreateNodegroup
+              - eks:DeleteAccessEntry
+              - eks:DeleteAddon
+              - eks:DeleteCluster
+              - eks:DeleteNodegroup
+              - eks:DisassociateAccessPolicy
+              - eks:UpdateAccessEntry
+              - eks:UpdateAddon
+              - eks:UpdateClusterConfig
+              - eks:UpdateClusterVersion
+              - eks:UpdateNodegroupConfig
+              - eks:UpdateNodegroupVersion
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:cluster/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:nodegroup/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:addon/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:access-entry/${ResourcePrefix}*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/cmp:managed-by:
+                  Ref: ManagedByTag
+          # Tags on the platform's own EKS resources only (also used while creating them).
+          - Sid: TagPlatformEks
+            Effect: Allow
+            Action:
+              - eks:TagResource
+              - eks:UntagResource
+            Resource:
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:cluster/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:nodegroup/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:addon/${ResourcePrefix}*"
+              - Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:access-entry/${ResourcePrefix}*"
+          # Ticket 47 (B-10): the user's kubectl access to the new cluster.
+          - Sid: UserAccessEntries
+            Effect: Allow
+            Action: eks:CreateAccessEntry
+            Resource:
+              Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:cluster/${ResourcePrefix}*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/cmp:managed-by:
+                  Ref: ManagedByTag
+                eks:accessEntryType: STANDARD
+          - Sid: UserAccessAdminPolicyOnly
+            Effect: Allow
+            Action: eks:AssociateAccessPolicy
+            Resource:
+              Fn::Sub: "arn:${AWS::Partition}:eks:*:${AWS::AccountId}:access-entry/${ResourcePrefix}*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/cmp:managed-by:
+                  Ref: ManagedByTag
+                eks:policyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
           - Sid: PlatformIamOnly
             Effect: Allow
             Action:
-              - iam:AttachRolePolicy
               - iam:CreateOpenIDConnectProvider
               - iam:CreatePolicy
               - iam:CreatePolicyVersion
@@ -152,16 +324,32 @@ Resources:
               - iam:DeleteRole
               - iam:DeleteRolePolicy
               - iam:DetachRolePolicy
-              - iam:PutRolePolicy
               - iam:TagOpenIDConnectProvider
               - iam:TagPolicy
               - iam:TagRole
+              - iam:UntagOpenIDConnectProvider
+              - iam:UntagPolicy
               - iam:UntagRole
               - iam:UpdateAssumeRolePolicy
+              - iam:UpdateOpenIDConnectProviderThumbprint
             Resource:
               - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ResourcePrefix}*"
               - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ResourcePrefix}*"
               - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/oidc.eks.*"
+          - Sid: AttachReviewedPoliciesOnly
+            Effect: Allow
+            Action: iam:AttachRolePolicy
+            Resource:
+              Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ResourcePrefix}*"
+            Condition:
+              ArnLike:
+                iam:PolicyARN:
+                  - Fn::Sub: "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy"
+                  - Fn::Sub: "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+                  - Fn::Sub: "arn:${AWS::Partition}:iam::aws:policy/AmazonEKS_CNI_Policy"
+                  - Fn::Sub: "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
+                  - Fn::Sub: "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+                  - Fn::Sub: "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ResourcePrefix}*"
           - Sid: PassPlatformRolesToEks
             Effect: Allow
             Action: iam:PassRole
@@ -190,6 +378,17 @@ Resources:
               - iam:CreateUser
               - iam:UpdateAccessKey
             Resource: "*"
+          # The platform principal may assume roles carrying this tag (its AssumeRole policy);
+          # never let the platform mint such a role in the user's account.
+          - Sid: NeverPlatformConnectionTag
+            Effect: Deny
+            Action:
+              - iam:CreateRole
+              - iam:TagRole
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestTag/cmp:managed-by: cloud-migration-platform
           - Sid: NeverChangeThisRole
             Effect: Deny
             Action:
@@ -199,6 +398,8 @@ Resources:
               - iam:DetachRolePolicy
               - iam:PutRolePermissionsBoundary
               - iam:PutRolePolicy
+              - iam:TagRole
+              - iam:UntagRole
               - iam:UpdateAssumeRolePolicy
             Resource:
               Fn::GetAtt: [ConnectionRole, Arn]

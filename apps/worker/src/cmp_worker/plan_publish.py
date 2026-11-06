@@ -290,8 +290,10 @@ class PlanPublisher:
         aws_template_dir: Path | None = None,
         gcp_template_dir: Path | None = None,
         env_store: EnvFileStore | None = None,
+        platform_egress_cidrs: tuple[str, ...] = (),
     ):
         self._sessions = session_factory
+        self._egress = tuple(platform_egress_cidrs)
         self._store = store
         self._cloud_root = Path(cloud_artifact_root) if cloud_artifact_root else None
         self._aws_profile = aws_profile
@@ -555,6 +557,7 @@ class PlanPublisher:
                 aws_profile=self._aws_profile or "",
                 template_dir=self._aws_template,
                 backend_mode="S3",
+                platform_egress_cidrs=self._egress,  # ticket 47 (D-10)
             )
         return lambda request: plan_gcp_infrastructure(
             request,

@@ -210,7 +210,7 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 ### 29 이미지 pull 전략 (#153)
 
-플랫폼만 AWS 권한을 갖는다. EKS는 노드 역할(`AmazonEC2ContainerRegistryPullOnly`)로 받는다. K3s는 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/image-pull`로 플랫폼이 발급한 단기 ECR 토큰을 받아 `cmp-ecr-pull`을 만들고, TTL 절반이 지나면 갱신한다. GKE는 실행마다 Secret을 새 토큰으로 다시 쓰고, 플랫폼 측 6시간 Schedule이 승인된 배포의 Secret만 다시 쓴다. 플랫폼 레지스트리·저장소는 `PLATFORM_ECR_REGISTRY`·`PLATFORM_ECR_REPOSITORIES`로 정한다. ON_PREM pull 실패는 `IMAGE_PULL_FAILED`. 결정 I1~I11은 [티켓 29](../../tickets/provisioning/29-image-pull-strategy.md)에 있다. 데모 서버에서는 api가 `/opt/cmp/.env`의 `PLATFORM_ECR_REGISTRY`와 인스턴스 역할 프로필 `cmp-demo-build`(`CONNECTION_PLATFORM_AWS_PROFILE`)로 이 설정을 받는다([티켓 41](../../tickets/provisioning/41-demo-ecr-pull-wiring.md)).
+플랫폼만 AWS 권한을 갖는다. EKS는 노드 역할(`AmazonEC2ContainerRegistryPullOnly`)로 받는다. K3s는 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/image-pull`로 플랫폼이 발급한 단기 ECR 토큰을 받아 `cmp-ecr-pull`을 만들고, TTL 절반이 지나면 갱신한다. GKE는 실행마다 Secret을 새 토큰으로 다시 쓰고, 플랫폼 측 6시간 Schedule이 승인된 배포의 Secret만 다시 쓴다. 플랫폼 레지스트리·저장소는 `PLATFORM_ECR_REGISTRY`·`PLATFORM_ECR_REPOSITORIES`로 정한다. ON_PREM pull 실패는 `IMAGE_PULL_FAILED`. 결정 I1~I11은 [티켓 29](../../tickets/provisioning/29-image-pull-strategy.md)에 있다. 데모 서버에서는 api가 `/opt/cmp/.env`의 `PLATFORM_ECR_REGISTRY`와 인스턴스 역할 프로필 `cmp-demo-build`(`CONNECTION_PLATFORM_AWS_PROFILE`)로 이 설정을 받는다([티켓 41](../../tickets/provisioning/41-demo-ecr-pull-wiring.md)). [티켓 47](../../tickets/provisioning/47-aws-target-access.md)부터 K3s·GKE 토큰은 pull 전용 역할 `cmp-demo-ecr-pull`(이 저장소 pull만)로 발급하고, 다른 계정 EKS 노드 역할(`cmp-*-eks-node`)은 빌드 스택 매개변수 `PullAccountIds`에 넣은 계정만 저장소 정책으로 pull한다. 새 EKS는 access entry(`API` 인증 모드)로 사용자 관리자 주체에게 kubectl 접근을 준다.
 
 ### 12A 온프레미스 Preview (#41)
 

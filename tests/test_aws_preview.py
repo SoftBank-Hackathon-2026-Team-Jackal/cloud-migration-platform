@@ -22,7 +22,7 @@ def request() -> AwsPlanInput:
     return AwsPlanInput.model_validate(
         {
             "migration_id": "migration-001",
-            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "aws-eks-v3"},
+            "plan": {"plan_id": "plan-001", "revision": 1, "template_version": "aws-eks-v4"},
             "environment_id": "demo-001",
             "account_id": "123456789012",
             "region": "ap-northeast-2",
@@ -109,12 +109,18 @@ def test_saved_plan_and_redacted_preview_agree(tmp_path, monkeypatch):
     assert preview.manifest_digest == manifest_digest(manifest)
     assert not approval_issues(manifest, preview)
     assert manifest.scope == "INFRASTRUCTURE"
-    assert manifest.plan.template_version == "aws-eks-v3"
+    assert manifest.plan.template_version == "aws-eks-v4"
     assert {change.resource_type for change in preview.changes} == {"NETWORK", "CLUSTER", "NODE"}
     shown = " ".join(change.size or "" for change in preview.changes)
     assert "10.20.1.0/24" in shown and "t3.large" in shown
     assert "203.0.113.10/32" in shown and "단일 NAT" in shown
-    assert {warning.code for warning in preview.warnings} == {"ALB_NOT_DEPLOYED", "SINGLE_NAT_AZ"}
+    # Ticket 47: no user admin principal and no configured platform egress in this fixture.
+    assert {warning.code for warning in preview.warnings} == {
+        "ALB_NOT_DEPLOYED",
+        "SINGLE_NAT_AZ",
+        "NO_USER_CLUSTER_ACCESS",
+        "PLATFORM_EGRESS_UNCHECKED",
+    }
     assert "TOP_SECRET_NEVER_SHOW" not in (stored / "preview.json").read_text()
     assert "TOP_SECRET_NEVER_SHOW" not in (stored / "manifest.json").read_text()
     evidence = json.loads((stored / "evidence.json").read_text())

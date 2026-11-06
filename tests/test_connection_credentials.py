@@ -488,7 +488,8 @@ def test_api_writes_and_worker_reads_the_same_connection_config():
     assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
     assert env["CONNECTION_PLATFORM_PRINCIPAL_ARN"] == "${CONNECTION_PLATFORM_PRINCIPAL_ARN:-}"
     assert env["CONNECTION_TEMPLATE_BASE_URL"] == "${CONNECTION_TEMPLATE_BASE_URL:-}"
-    assert env["PLATFORM_ECR_AWS_PROFILE"] == "cmp-demo-build"
+    # Ticket 47 (B-09): the pull-only profile from /opt/cmp/.env, the build profile until then.
+    assert env["PLATFORM_ECR_AWS_PROFILE"] == "${PLATFORM_ECR_AWS_PROFILE:-cmp-demo-build}"
 
 
 def run_ensure_secrets(tmp_path, env_lines=""):
