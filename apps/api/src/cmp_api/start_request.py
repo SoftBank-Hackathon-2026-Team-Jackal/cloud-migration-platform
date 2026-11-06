@@ -17,6 +17,8 @@ from cmp_contracts.migration import MigrationRequest, StartSource, StartTarget
 from cmp_contracts.plan_publish import TargetSettings
 from cmp_contracts.provisioning import ContentRef, ProvisioningInputError
 from cmp_contracts.provisioning_v2 import TargetSelectionV2
+from cmp_data.cutover import CutoverSettings, SourceApp
+from cmp_data.handoff import DataMigrationInput
 from cmp_providers.aws_preview import AwsPlanInput, validate_aws_input
 from cmp_providers.gcp_preview import GcpPlanInput, terraform_variables
 from pydantic import TypeAdapter, ValidationError
@@ -263,6 +265,23 @@ def sandbox_settings(value: str | None) -> dict | None:
     return parsed or None
 
 
+def data_migration_settings(value: str | None) -> dict | None:
+    """Data-migration ticket 08: the server's `DataMigrationInput` JSON or None when unset.
+
+    Same value as the CLI's `--data-migration` (source DB, source app, cutover settings, target
+    tunnel address). Checked here, nested `app`/`settings` included, so a bad value refuses the
+    start instead of failing after provisioning. The value is never echoed in the refusal."""
+    if not value:
+        return None
+    try:
+        parsed = DataMigrationInput.model_validate_json(value)
+        SourceApp.model_validate(parsed.app)
+        CutoverSettings.model_validate(parsed.settings)
+    except (ValidationError, ValueError):
+        raise StartRefused("DATA_MIGRATION_SETTINGS_INVALID", 503) from None
+    return parsed.model_dump(mode="json")
+
+
 def start_input(
     request: MigrationRequest,
     source: StartSource,
@@ -270,12 +289,15 @@ def start_input(
     env_ref: ContentRef,
     scope_fields: dict | None = None,
     sandbox: dict | None = None,
+    data_migration: dict | None = None,
 ) -> dict:
     """S10: the `build_start_input` shape (CLI) for a public GitHub source.
 
     06B: `scope_fields` (from `scope_analysis_fields`) fills the cluster, region, credential
     profile, role ARNs and the confirmed scope; without it the analysis input is as before.
-    `sandbox` (ticket 57) is the server's rehearsal shape, the CLI's `--sandbox`."""
+    `sandbox` (ticket 57) is the server's rehearsal shape, the CLI's `--sandbox`.
+    `data_migration` (data-migration ticket 08) is the CLI's `--data-migration`; without it the
+    data step stays the scaffold, as before."""
     analysis = AnalysisInput(
         migration_id=request.project_id,
         repository=f"https://github.com/{source.full_name}.git",
@@ -289,4 +311,5 @@ def start_input(
         "sandbox": sandbox,
         "planning": planning,
         "env_file_ref": env_ref.model_dump(mode="json"),
+        **({"data_migration": data_migration} if data_migration else {}),
     }

@@ -124,6 +124,7 @@ def api(db, env_store, catalog, monkeypatch):
     monkeypatch.setattr(migration_routes, "get_temporal_client", get_client)
     monkeypatch.setattr(settings, "planning_target_profiles_file", str(catalog))
     monkeypatch.setattr(settings, "web_start_sandbox_settings", None)
+    monkeypatch.setattr(settings, "web_start_data_migration", None)
     app.dependency_overrides[migration_routes.get_env_file_store_factory] = lambda: (
         lambda: env_store
     )
@@ -656,3 +657,72 @@ def test_finals_onprem_start_is_planned_approved_and_handed_to_the_agent(
         profile["namespace"],
         profile["storage_class"],
     )
+
+
+# --- data-migration ticket 08: the data step's input for web starts ----------------------------
+
+# The demo chat app on the source EKS (no secrets: the app's DB URL stays in its own Secret).
+DATA_MIGRATION = {
+    "source": {"access": "AWS_EKS", "cluster_name": "cmp-demo-source",
+               "region": "ap-northeast-2", "namespace": "chat-source", "pod": "chat-db-0",
+               "peer_host": "10.200.0.10", "local_host": "chat-db.chat-source.svc",
+               "dbname": "chat"},
+    "app": {"namespace": "chat-source", "deployment": "chat-app", "url_secret": "chat-db-url"},
+    "settings": {"image": "example.invalid/cmp-cutover@sha256:" + "0" * 64},
+    "target_peer_host": "10.200.0.20",
+}  # fmt: skip
+
+
+def test_without_server_data_migration_the_data_step_stays_scaffold(api, env_ref, agent):
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    assert "data_migration" not in temporal.started[0]["data"]
+
+
+def test_server_data_migration_reaches_the_start_input_as_the_cli_would(
+    api, env_ref, agent, monkeypatch
+):
+    from cmp_data.handoff import DataMigrationInput
+
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(DATA_MIGRATION))
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    data = temporal.started[0]["data"]
+    # What `MigrationWorkflow` hands `_data_migration` (the `data-<id>` child).
+    given = DataMigrationInput.model_validate(data["data_migration"])
+    assert given.source.pod == "chat-db-0" and given.target_peer_host == "10.200.0.20"
+    cli = build_start_input(
+        project_id="demo",
+        repository=data["analysis"]["repository"],
+        commit=COMMIT,
+        planning_json=json.dumps(data["planning"]),
+        env_file_ref_json=json.dumps(data["env_file_ref"]),
+        data_migration_json=json.dumps(DATA_MIGRATION),
+    )
+    assert data == cli
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not json",
+        "[1]",
+        json.dumps({**DATA_MIGRATION, "password": "never-shown"}),  # unknown field
+        json.dumps({**DATA_MIGRATION, "app": {"namespace": "chat-source"}}),  # app incomplete
+        json.dumps({**DATA_MIGRATION, "settings": {}}),  # no cutover image
+    ],
+)
+def test_unusable_server_data_migration_refuses_the_start(api, env_ref, agent, monkeypatch, value):
+    monkeypatch.setattr(settings, "web_start_data_migration", value)
+    client, temporal = api
+    response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
+    assert (response.status_code, code_of(response)) == (503, "DATA_MIGRATION_SETTINGS_INVALID")
+    assert temporal.started == []
+    assert "never-shown" not in response.text
+
+
+def test_server_data_migration_leaves_the_scaffold_start_alone(api, monkeypatch):
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(DATA_MIGRATION))
+    client, temporal = api
+    assert client.post("/migrations", json={"project_id": "demo"}).status_code == 202
+    assert temporal.started[0]["data"] == "demo"

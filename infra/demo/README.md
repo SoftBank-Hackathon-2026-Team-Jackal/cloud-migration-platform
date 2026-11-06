@@ -252,6 +252,7 @@ docker exec cmp-demo-worker-1 sh -c 'grep -c "^\[profile cmp-conn-" "$AWS_CONFIG
 | `LLM_ENABLED=true`, `ANTHROPIC_API_KEY` | worker | 꺼짐 | Claude 사용. 원장 `/opt/cmp/data/llm/ledger.json`, 즉시 중지 `touch /opt/cmp/data/llm/disabled` |
 | `PLANNING_TARGET_PROFILES_FILE=/opt/cmp/config/target-profiles.json` | api | 파일 없음 → 실제 시작 503 `TARGET_PROFILES_UNCONFIGURED` | 웹 `target.profile`이 고르는 대상 설정(44) |
 | `WEB_START_SANDBOX_SETTINGS` | api | 빈 값 → 리허설은 헬스 테스트만 | 웹 실제 시작의 `sandbox`(SandboxSettings JSON 객체, CLI `--sandbox`와 같다)로 표준 DB 쓰기→읽기·재시작 후 유지 테스트까지 돈다(티켓 57). 데모 앱(demo-app) 값은 `runtime.env.example`의 줄 그대로(작은따옴표 유지). JSON 객체가 아니면 실제 시작이 503 `SANDBOX_SETTINGS_INVALID`. 다른 앱은 그 앱의 쓰기 모양을 따로 적는다 |
+| `WEB_START_DATA_MIGRATION` | api | 빈 값 → 데이터 단계는 scaffold | 웹 실제 시작의 `data_migration`(DataMigrationInput JSON 객체, CLI `--data-migration`과 같다)으로 구축 뒤 CDC 복제·DB 전환 승인(`approve?gate=cutover`)까지 실제로 돈다(data-migration 티켓 08). 원본 DB·앱·전환 설정·대상 터널 주소만 담고 비밀값은 없다. 검증에 실패하면 실제 시작이 503 `DATA_MIGRATION_SETTINGS_INVALID`. worker에 kubectl과 원본·대상 클러스터 접근(EKS·GKE 자격 증명 또는 `DATA_MIGRATION_KUBECONFIG_DIR`)이 있어야 한다 |
 
 지금 데모 서버에는 Sandbox 클러스터가 없다(분석 D-08: Sandbox는 로컬 k3d). 그래서 분석만 실제로 켜면 실제 시작은 Sandbox 첫 단계(`sbx_build`)에서 멈춘다. 어떤 경로를 켤지는 박승철님과 정한다(티켓 45 협의 필요).
 

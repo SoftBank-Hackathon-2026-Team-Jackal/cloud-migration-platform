@@ -41,7 +41,11 @@ paths:
         `TARGET_PROFILES_UNCONFIGURED`, `SANDBOX_SETTINGS_INVALID` (the server''s
         rehearsal shape is
 
-        not a JSON object) or the `.env` store codes. Nothing starts on a refusal.'
+        not a JSON object), `DATA_MIGRATION_SETTINGS_INVALID` (the server''s data-migration
+        input is
+
+        not a valid `DataMigrationInput`) or the `.env` store codes. Nothing starts
+        on a refusal.'
       operationId: start_migration_migrations_post
       requestBody:
         content:
