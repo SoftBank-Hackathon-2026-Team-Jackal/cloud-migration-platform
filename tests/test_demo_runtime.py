@@ -525,10 +525,11 @@ def test_worker_analysis_sandbox_and_llm_settings_default_to_the_scaffold():
 
 
 def test_runtime_example_values_point_at_the_mounted_worker_paths():
-    example, worker = _runtime_example(), _env("worker")
+    example, worker, api = _runtime_example(), _env("worker"), _env("api")
     targets = _mount_targets("worker")
     for name in example:
-        assert f"${{{name}:-" in str(worker.get(name)), name  # every example line is consumed
+        consumer = api if name == "WEB_START_SANDBOX_SETTINGS" else worker  # ticket 57: API only
+        assert f"${{{name}:-" in str(consumer.get(name)), name  # every example line is consumed
     # Planning reads the analysis results from the same store (runbook: same directory).
     assert example["ANALYSIS_ARTIFACT_STORE_DIR"] == worker["ARTIFACT_STORE_DIR"]
     assert targets["/opt/cmp/analysis-workspaces"] == "/opt/cmp/data/analysis-workspaces"
@@ -693,3 +694,52 @@ def test_worker_image_keeps_git_for_the_real_analysis_source_fetch():
     purge = re.search(r"apt-get purge -y ([^;]+);", worker_stage)
     assert purge and "git" not in purge.group(1).split()
     assert "git --version" in (DEMO / "start.sh").read_text()
+
+
+# --- ticket 57 (#228): the rehearsal's default write/read shape for web starts ----------------
+
+
+def test_web_start_sandbox_settings_are_an_api_value_off_by_default():
+    # Server environment only (no app path in code); empty keeps the health-only rehearsal.
+    assert _env("api")["WEB_START_SANDBOX_SETTINGS"] == "${WEB_START_SANDBOX_SETTINGS:-}"
+    assert "WEB_START_SANDBOX_SETTINGS" not in _env("worker")
+
+
+def test_runtime_example_sandbox_settings_match_the_demo_app_write_api():
+    import json
+
+    from cmp_testsuite.standard import AppApi, standard_cases
+    from cmp_worker.sandbox_input import SandboxSettings
+
+    raw = _runtime_example()["WEB_START_SANDBOX_SETTINGS"]
+    # Single quotes: docker compose reads the JSON literally (no `$` interpolation).
+    assert raw.startswith("'") and raw.endswith("'")
+    value = json.loads(raw[1:-1])
+    settings = SandboxSettings.model_validate(value)  # the worker accepts it as is
+    # demo-app main.go: POST /api/messages {client_msg_id, author, body} answers 201 with the row
+    # (server-made `id`), the same client_msg_id again answers 200 with the stored row; there is
+    # no GET by id, so the read-back is the idempotent re-send.
+    assert settings.write_path == "/api/messages"
+    assert settings.write_status == 201
+    assert settings.id_from_response == "id"
+    assert settings.value_field == "body"
+    assert settings.read_back == "REPEAT_WRITE"
+    assert set(settings.write_body or {}) == {"client_msg_id", "author", "body"}
+    api = AppApi(health_path="/healthz", **value)
+    assert [case.id for case in standard_cases(api)] == [
+        "std-health",
+        "std-db-roundtrip",
+        "std-survives-db-restart",
+    ]
+
+
+def test_api_runtime_report_names_the_web_start_sandbox_state(monkeypatch):
+    from cmp_api.config import settings
+    from cmp_api.runtime_report import report
+
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", None)
+    assert report()["web_start_sandbox"] == "off"
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", '{"write_path": "/api/x"}')
+    assert report()["web_start_sandbox"] == "on"
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", "[1]")
+    assert report()["web_start_sandbox"] == "error:SANDBOX_SETTINGS_INVALID"

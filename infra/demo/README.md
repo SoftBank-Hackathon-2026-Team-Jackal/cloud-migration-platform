@@ -60,7 +60,7 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `/provisioning/*` | API | 브라우저의 Plan 미리보기·승인. 승인자 Bearer, 승인자 등록·Plan 입력은 `APPROVAL_ADMIN_KEY` |
 | 그 밖의 모든 경로 | 웹 화면(`web:3000`) | `/`, `/settings`, `/api/*`(웹 서버 경로) 등 |
 
-`/migrations`에서 누구나 이전을 시작할 수 있다(실제 시작은 대상 프로필·업로드한 `.env`가 있어야 하고, 없으면 422/503으로 거절된다). `/migrations/{id}/approve`(scaffold Signal)는 실제 경로의 Plan 승인을 대신하지 못하지만, `/migrations/{id}/cancel`·조회·로그는 Workflow ID(UUID)를 아는 사람이면 부를 수 있다. 데모가 끝나면 인증을 붙이거나 이 경로를 다시 닫는다.
+`/migrations`에서 누구나 이전을 시작할 수 있다(실제 시작은 대상 프로필·업로드한 `.env`가 있어야 하고, 없으면 422/503으로 거절된다). `/migrations/{id}/approve`(scaffold Signal)는 실제 경로의 Plan 승인을 대신하지 못하지만, `/migrations/{id}/cancel`·조회·로그는 Workflow ID(UUID)를 아는 사람이면 부를 수 있다. 데모가 끝나면 인증을 붙이거나 이 경로를 다시 닫는다. 이 무인증 공개는 데모 한정으로 감수한다는 결정이다(흐름 점검 N11 공백, [티켓 57](../../tickets/provisioning/57-demo-edge-sse-routes.md) E4). 운영 전환 전에는 사용자 인증(웹 로그인과 API 확인)이 먼저다.
 - Temporal gRPC(`/temporal.api.*`, `/grpc.health.v1.Health/*`) → `temporal:7233`. **`CMP_TEMPORAL_ALLOWED_IP`(`/opt/cmp/.env`)에 적은 주소에서 온 요청만** 통과한다(중계 서버 `cmp-demo-relay`의 워커용). 설정하지 않으면 사용할 수 없는 문서용 주소(`192.0.2.1/32`)라 아무도 못 붙는다. 중계 서버 워커는 `TEMPORAL_ADDRESS=<CMP_PUBLIC_HOST>:443`, `TEMPORAL_TLS=true`로 접속한다.
 
 운영자·Agent 등록·터널 관리 API(`/agent-admin/*`, `/agent-enrollments`, `/tunnel-admin/*`, `/provisioning-admin/*`, `/connections`, `/env-files`)와 `/docs`, `/openapi.json`은 에지가 API로 넘기지 않으므로 계속 SSM 포트 포워딩으로만 쓴다(웹 서버 코드가 내부망에서 `http://api:8000`을 부를 뿐, 받은 경로를 그대로 전달하지 않는다). `/agent-enrollments`, `/docs` 같은 경로를 인터넷에서 열면 API가 아니라 웹이 404를 돌려준다. Traffic 중계 서버(별도 호스트, DNS 전환 P0 제외)와 포트·도메인을 공유하지 않는다.
@@ -68,6 +68,46 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 웹 컨테이너(`web`)는 포트를 열지 않고(`expose: 3000`) 에지 뒤에서만 받는다. 웹은 **`AGENT_ENROLLMENT_ADMIN_KEY`를 받지 않는다**: 웹의 `/api/agents` 경로는 아직 사용자 로그인이 없어서, 공개 웹이 이 키를 가지면 누구나 Agent 등록을 만들 수 있다. 키 없이는 연결 관리 화면이 목업 데이터로 동작한다. 로그인 확인이 생기면 운영자가 `/opt/cmp/web.env`에 넣는다.
 
 웹은 **실제 모드로 빌드**된다(#225). `NEXT_PUBLIC_*`는 빌드 때 화면 코드에 들어가므로 compose `web.build.args`에 둔다: `NEXT_PUBLIC_API_MODE=sse`, `NEXT_PUBLIC_SSE_START=source`(고른 저장소가 있을 때만 `POST /migrations`), `NEXT_PUBLIC_API_BASE=https://<CMP_PUBLIC_HOST>`(같은 출처). sse 빌드는 웹의 연결·Agent 화면 기본값도 실제 API로 바꾸므로, compose가 `PLATFORM_CONNECTIONS=${WEB_PLATFORM_CONNECTIONS:-mock}`으로 지금의 목업 화면을 유지한다. 실제 연결 화면을 쓰려면 `/opt/cmp/.env`에 `WEB_PLATFORM_CONNECTIONS=real`, `/opt/cmp/web.env`에 운영자 키를 둔다(위 주의 참고). 빌드 인자는 활성 플랫폼 릴리스의 compose에서 오므로 **플랫폼 배포(Deploy demo·`release.sh`)를 먼저 하고 `release-web.sh`로 웹을 다시 빌드**한다.
+
+### 데모 승인자 토큰 (웹 `PLATFORM_APPROVER_TOKEN`)
+
+승인 API(`POST /provisioning/plans/{plan_id}/revisions/{rev}/approvals`, `.../approvals/{id}/delivery`)와 Plan 미리보기·결과 조회는 승인자 Bearer가 없거나 틀리면 401 `APPROVER_AUTH_REQUIRED`다. 브라우저는 토큰을 갖지 않고, 웹 서버(BFF)가 `/opt/cmp/web.env`의 `PLATFORM_APPROVER_TOKEN`으로 대신 붙인다. 승인자는 데모용 1명(`demo-approver`)만 둔다.
+
+- **Migration 권한**: 승인 권한은 승인자에게 등록된 `migration_id` 목록이다(티켓 07 D2, 판정 규칙은 그대로). 데모 이전은 시작할 때마다 새 ID(`migration-<uuid>`)를 받으므로, **이전을 시작한 뒤 승인 전에** 운영자가 그 ID를 같은 승인자에게 추가(`grant`)한다. 추가하지 않으면 그 이전의 미리보기·승인은 403 `APPROVER_FORBIDDEN`이다. 토큰은 바뀌지 않으므로 웹은 다시 만들 필요가 없다.
+- **주의**: 웹이 이 토큰을 가지면, 웹에서 승인 버튼을 누를 수 있는 사람은 누구나 이 승인자로 승인한다. 대회 데모 동안만 두고 끝나면 폐기한다. 실제 사용자 인증은 후속이다.
+- 스크립트 `infra/demo/approver-token.py`(표준 라이브러리만)는 서버 내부 API(`127.0.0.1:8000`)를 부른다. 운영자 키는 환경변수 `APPROVAL_ADMIN_KEY` 또는 숨김 프롬프트로만 받는다(인자 금지). 발급한 토큰은 한 번만 쓴다: `--env-file`이면 그 파일(0600)에 `PLATFORM_APPROVER_TOKEN=` 줄을 바꿔 넣고 화면에 찍지 않으며, 없으면 stdout에 한 줄만 낸다. DB에는 SHA-256 digest만 있어서 잃어버린 토큰은 다시 볼 수 없다(교체한다).
+
+```bash
+# SSM 세션에서 (root). 키 값은 히스토리·프로세스 인자에 남지 않는다(셸 내장 export로 환경변수에만 둔다).
+sudo -i
+cd /opt/cmp/releases/$(cat /opt/cmp/current-revision)
+compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml --profile public)
+export "$(grep '^APPROVAL_ADMIN_KEY=' /opt/cmp/.env)"
+
+# 1. 생성 + 웹 env에 넣기 (한 번만. 이미 있으면 409 APPROVER_EXISTS → 3번 교체를 쓴다)
+#    --migration은 필수다. 아직 이전이 없으면 리허설 이전의 ID나 자리표시(demo-placeholder)를 넣는다.
+python3 infra/demo/approver-token.py create demo-approver --migration demo-placeholder --env-file /opt/cmp/web.env
+"${compose[@]}" up -d --force-recreate web    # 웹이 web.env를 다시 읽는다(이미지 재빌드 불필요)
+
+# 2. 이전마다 권한 추가(grant): 웹에서 시작한 뒤 Plan이 게시되면 가장 최근 Migration ID를 추가한다.
+mid="$("${compose[@]}" exec -T platform-db psql -U platform -d platform -Atc \
+  "select migration_id from provisioning_plan_revisions order by published_at desc limit 1")"
+python3 infra/demo/approver-token.py grant demo-approver --migration "$mid"
+
+# 3. 교체(rotate): 새 토큰 발급, 이전 토큰은 즉시 401. 웹을 다시 만들기 전까지는 웹 승인도 401이다.
+python3 infra/demo/approver-token.py rotate demo-approver --env-file /opt/cmp/web.env
+"${compose[@]}" up -d --force-recreate web
+
+# 4. 폐기(revoke): 대체 토큰 없이 무효화. 승인자 행·권한·지난 승인 기록은 남는다(다시 쓰려면 3번).
+python3 infra/demo/approver-token.py revoke demo-approver
+sed -i '/^PLATFORM_APPROVER_TOKEN=/d' /opt/cmp/web.env && "${compose[@]}" up -d --force-recreate web
+
+# 확인: 토큰 없이는 401 (토큰 값은 찍지 않는다)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/provisioning/plans/p/revisions/1/approvals/a/delivery   # 401
+unset APPROVAL_ADMIN_KEY
+```
+
+같은 일을 HTTP로 하면(모두 `X-Approval-Admin-Key` 필요, 틀리면 403): 생성 `POST /provisioning/approvers` `{approver_id, migration_ids}` → 201 `{approver_id, credential}`, 권한 추가 `POST /provisioning/approvers/{approver_id}/migrations` `{migration_ids}` → 200 `{approver_id, migration_ids}`, 교체 `POST /provisioning/approvers/{approver_id}/credential` → 200 `{approver_id, credential}`, 폐기 `DELETE /provisioning/approvers/{approver_id}/credential` → 204. 없는 승인자는 404 `APPROVER_NOT_FOUND`. 이 경로는 `/provisioning/*`라 에지로도 열려 있지만 운영자 키 없이는 403이므로, 키는 위처럼 SSM 세션 안에서만 쓴다.
 
 웹 화면은 이 저장소가 아니라 `cloud-migration-web`에서 온다. 노트북에서 `bash infra/demo/release-web.sh <웹 저장소 경로>`로 올리면 `releases/web-<sha>.tar.gz`로 올라가고(인스턴스 역할은 `releases/*`만 읽을 수 있다), 서버에서 `/opt/cmp/web/<sha>`로 풀려 `/opt/cmp/web/current`가 가리키며 `web` 서비스가 다시 만들어진다. 이후 플랫폼 릴리스(`start.sh`)도 `/opt/cmp/web/current/Dockerfile`이 있으면 웹을 함께 올린다.
 
@@ -209,6 +249,7 @@ docker exec cmp-demo-worker-1 sh -c 'grep -c "^\[profile cmp-conn-" "$AWS_CONFIG
 | `SANDBOX_PREBUILT_IMAGES` | worker | 빈 값 | 실제 루프의 앱 이미지(Digest 고정 JSON). `BUILD_*`가 모두 있으면 대신 실제 빌드 |
 | `LLM_ENABLED=true`, `ANTHROPIC_API_KEY` | worker | 꺼짐 | Claude 사용. 원장 `/opt/cmp/data/llm/ledger.json`, 즉시 중지 `touch /opt/cmp/data/llm/disabled` |
 | `PLANNING_TARGET_PROFILES_FILE=/opt/cmp/config/target-profiles.json` | api | 파일 없음 → 실제 시작 503 `TARGET_PROFILES_UNCONFIGURED` | 웹 `target.profile`이 고르는 대상 설정(44) |
+| `WEB_START_SANDBOX_SETTINGS` | api | 빈 값 → 리허설은 헬스 테스트만 | 웹 실제 시작의 `sandbox`(SandboxSettings JSON 객체, CLI `--sandbox`와 같다)로 표준 DB 쓰기→읽기·재시작 후 유지 테스트까지 돈다(티켓 57). 데모 앱(demo-app) 값은 `runtime.env.example`의 줄 그대로(작은따옴표 유지). JSON 객체가 아니면 실제 시작이 503 `SANDBOX_SETTINGS_INVALID`. 다른 앱은 그 앱의 쓰기 모양을 따로 적는다 |
 
 지금 데모 서버에는 Sandbox 클러스터가 없다(분석 D-08: Sandbox는 로컬 k3d). 그래서 분석만 실제로 켜면 실제 시작은 Sandbox 첫 단계(`sbx_build`)에서 멈춘다. 어떤 경로를 켤지는 박승철님과 정한다(티켓 45 협의 필요).
 
@@ -219,10 +260,11 @@ docker exec cmp-demo-worker-1 sh -c 'grep -c "^\[profile cmp-conn-" "$AWS_CONFIG
 ```sh
 # 1. 이 커밋을 main에 병합한 뒤 GitHub Actions Deploy demo(또는 bash infra/demo/release.sh HEAD).
 #    start.sh의 ensure-secrets.sh가 ENV_FILE_ENCRYPTION_KEY를 없을 때만 만들고 /opt/cmp/data/{env-files,analysis-workspaces,llm}을 만든다.
-# 2. (SSM 세션) 카탈로그: 예시를 복사해 실제 계정·프로젝트·State 버킷 값을 넣는다. 비밀 없음.
+# 2. (SSM 세션) 카탈로그. 결선 데모 기본은 ON_PREM 하나뿐인 target-profiles.demo.json이다(웹 기본 대상
+#    onprem-k3s-basic). GCP·AWS 시작은 분석 뒤가 아니라 시작에서 422 TARGET_PROFILE_NOT_FOUND로 거절된다.
+#    AWS_TARGET 연결·GCP 키가 준비된 뒤에만 예시(target-profiles.example.json)를 복사해 실제 계정·프로젝트·State 값을 넣는다. 비밀 없음.
 sudo install -d -m 755 /opt/cmp/config
-sudo install -m 644 /opt/cmp/releases/<SHA>/infra/demo/target-profiles.example.json /opt/cmp/config/target-profiles.json
-sudo vi /opt/cmp/config/target-profiles.json
+sudo install -m 644 /opt/cmp/releases/<SHA>/infra/demo/target-profiles.demo.json /opt/cmp/config/target-profiles.json
 # 3. (SSM 세션, 선택) 빌드 값: deploy-build-stack.sh가 출력한 다섯 줄(PLATFORM_ECR_REGISTRY, BUILD_*)을 /opt/cmp/.env에 추가.
 # 4. (SSM 세션, 선택, 협의 후) 분석·Sandbox·Claude 줄을 runtime.env.example에서 골라 /opt/cmp/.env에 추가.
 #    Sandbox는 kubeconfig를 /opt/cmp/secrets/sandbox/kubeconfig(root, 0600)에 먼저 둔다.
@@ -244,7 +286,7 @@ sudo bash /opt/cmp/releases/$(cat /opt/cmp/current-revision)/infra/demo/runtime-
 | `container=` | api·worker·temporal·DB가 `Up`, DB는 `(healthy)` |
 | `alembic=` | 그 커밋의 head(`… (head)`) |
 | worker `analysis=`·`sandbox=`·`build=`·`llm=`·`env_store=` | `real`/`scaffold`, `on`/`off`. `error:<CODE>`면 설정이 잘못됐다(예: `BUILD_SETTINGS_INCOMPLETE`, `SANDBOX_KUBECONFIG_NOT_FOUND`) |
-| api `env_store=`·`target_profiles=`·`connection_link=`·`platform_ecr_registry=` | `on`, 카탈로그 이름 목록(`error:TARGET_PROFILES_UNCONFIGURED`면 파일 없음), 링크·레지스트리 `on` |
+| api `env_store=`·`target_profiles=`·`connection_link=`·`platform_ecr_registry=`·`web_start_sandbox=` | `on`, 카탈로그 이름 목록(`error:TARGET_PROFILES_UNCONFIGURED`면 파일 없음), 링크·레지스트리 `on`, 리허설 기본 모양 `on`(`error:SANDBOX_SETTINGS_INVALID`면 JSON이 아니다) |
 | `imds_guard_rules=1`, `imds_guard_service=enabled` | 티켓 54 빌드 IMDS 차단 |
 | `missing=` | 비어 있어야 한다(compose 필수 키) |
 | `optional_unset=` | 아직 켜지 않은 선택 기능 이름 |

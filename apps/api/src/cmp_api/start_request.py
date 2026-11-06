@@ -239,17 +239,36 @@ def planning_settings(
     }
 
 
+def sandbox_settings(value: str | None) -> dict | None:
+    """Ticket 57: the server's rehearsal shape (`SandboxSettings` JSON) or None when unset.
+
+    Only "is a JSON object" is checked here; the worker validates the fields when it assembles
+    the Sandbox input. The value is never echoed in the refusal.
+    """
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        raise StartRefused("SANDBOX_SETTINGS_INVALID", 503) from None
+    if not isinstance(parsed, dict):
+        raise StartRefused("SANDBOX_SETTINGS_INVALID", 503)
+    return parsed or None
+
+
 def start_input(
     request: MigrationRequest,
     source: StartSource,
     planning: dict,
     env_ref: ContentRef,
     scope_fields: dict | None = None,
+    sandbox: dict | None = None,
 ) -> dict:
     """S10: the `build_start_input` shape (CLI) for a public GitHub source.
 
     06B: `scope_fields` (from `scope_analysis_fields`) fills the cluster, region, credential
-    profile, role ARNs and the confirmed scope; without it the analysis input is as before."""
+    profile, role ARNs and the confirmed scope; without it the analysis input is as before.
+    `sandbox` (ticket 57) is the server's rehearsal shape, the CLI's `--sandbox`."""
     analysis = AnalysisInput(
         migration_id=request.project_id,
         repository=f"https://github.com/{source.full_name}.git",
@@ -259,7 +278,7 @@ def start_input(
     return {
         "project_id": request.project_id,
         "analysis": analysis.model_dump(mode="json"),
-        "sandbox": None,
+        "sandbox": sandbox,
         "planning": planning,
         "env_file_ref": env_ref.model_dump(mode="json"),
     }
