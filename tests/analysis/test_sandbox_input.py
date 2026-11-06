@@ -188,3 +188,74 @@ def test_the_pipeline_stores_the_routes_the_application_registers(repo):
     pipeline, base = analysis_with_assembly(repo, "routes")
     doc = pipeline.store.get_json(ArtifactRef.model_validate(base["assembly_ref"]))
     assert isinstance(doc["http_routes"], list)  # empty is fine when the fixture has none
+
+
+# --- ticket 30: security probes are an opt-in part of the standard suite ----------------------
+
+
+def probe_analysis(store):
+    from cmp_contracts.provisioning_v2 import RequirementsV2
+    from cmp_testsuite.bundle import sha256_of  # noqa: F401
+
+    requirements = RequirementsV2.model_validate(
+        {
+            "contract_version": "2",
+            "resources": [
+                {
+                    "id": "api", "kind": "APPLICATION", "replicas": 1, "cpu_millicores": 100,
+                    "memory_mib": 128, "port": 8080, "health_path": "/healthz", "env_bindings": {},
+                },
+                {
+                    "id": "db", "kind": "POSTGRESQL", "version": "16", "extensions": [],
+                    "database": {"name": "app", "username": "app"}, "cpu_millicores": 250,
+                    "memory_mib": 512, "storage_gib": 1,
+                },
+            ],
+            "network_intent": [
+                {"source_resource_id": "api", "destination_resource_id": "db", "port": 5432}
+            ],
+        }
+    )  # fmt: skip
+    ref = store.put(
+        requirements.model_dump_json().encode(), ref_id="requirements-x", kind="requirements"
+    )
+    return {
+        "report": {"report_ref": None, "migration_id": "mig-1"},
+        "requirements": ref.model_dump(mode="json"),
+        "review": None,
+        "source": {"workspace": "/ws", "commit": "c" * 40},
+    }
+
+
+def suite_ids(store, result):
+    suite = load_bundle(store.get(ArtifactRef.model_validate(result["suite_ref"])))
+    return [c.id for c in suite.cases]
+
+
+def test_probes_are_off_by_default_and_the_suite_is_as_before(repo):
+    pipeline = make(repo)
+    result = assemble_sandbox_input(
+        probe_analysis(pipeline.store), SandboxSettings(), pipeline.store
+    )
+    assert suite_ids(pipeline.store, result) == ["std-health"]
+
+
+def test_probes_come_into_the_suite_when_asked(repo):
+    pipeline = make(repo)
+    settings = SandboxSettings(security_probes=True)
+    result = assemble_sandbox_input(probe_analysis(pipeline.store), settings, pipeline.store)
+    # The stored bundle lists cases by id, so the probes come before `std-health`.
+    assert suite_ids(pipeline.store, result) == [
+        "sec-db-allowed-api-db",
+        "sec-db-outsider-db",
+        "std-health",
+    ]
+
+
+def test_the_suite_with_probes_has_the_same_hash_for_the_same_input(repo):
+    pipeline = make(repo)
+    settings = SandboxSettings(security_probes=True)
+    analysis = probe_analysis(pipeline.store)
+    one = assemble_sandbox_input(analysis, settings, pipeline.store)
+    two = assemble_sandbox_input(analysis, settings, pipeline.store)
+    assert one["suite_ref"] == two["suite_ref"]

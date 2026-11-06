@@ -1,59 +1,47 @@
 # Ticket 30 — Sandbox 보안 프로브
 
 ## 상태
-DRAFT — 사용자 검토 전. Issue 미생성.
+IN_PROGRESS — DB 접근 프로브는 구현·자동 테스트 완료(2026-11-06). 실제 k3d 확인은 환경이 있을 때(`CMP_SANDBOX_KUBECONFIG`) 남음. 평문 DB 거절·운영용 경로 차단 프로브와 `security-posture` Skill은 대상이 없어 후속. Issue 번호는 사용자가 발행한 뒤 기록한다.
 
 ## 목적
-승인된 보강과 대상 기본 통신 규칙이 Sandbox에서 실제로 동작하는지, 그리고 앱 기능이 유지되는지를 테스트 묶음 케이스로 증명한다. 같은 묶음을 Production에서 다시 돌릴 수 있게 한다.
+승인된 통신 의도와 기본 차단 NetworkPolicy가 Sandbox에서 실제로 동작하는지 시험 Pod로 증명한다. 원본에서는 클러스터 안 모든 Pod가 DB에 닿았는데 대상에서는 앱만 닿는다는 것을 "표시"가 아니라 "시험 결과"로 보여 준다.
 
 ## 관련 요구사항
 AV-023, AV-012, AV-013
 
 ## 선행 작업
-Blocked by: 12, 13, 24, 28. 보강 적용(대상 구성 반영)은 Provisioning 합의 전이므로, 이 티켓은 **Sandbox 안에서 우리가 만드는 NetworkPolicy와 연결 설정** 범위에서 프로브를 정의한다.
+Blocked by: 12, 13, 24, 28 (병합됨).
 
 ## 설계 원칙: 앱 전용 테스트를 묶음에 미리 넣지 않는다
-어떤 앱에도 쓸 수 있어야 한다. 프로브는 **앱 중립 템플릿**이고, 대상(어느 리소스·어느 경로)은 **분석 결과와 승인 기록에서만** 받는다. 경로·포트·리소스 이름을 템플릿에 적지 않는다. 기대값은 사람이나 AI가 앱을 보고 쓰지 않고, 아래 출처에서만 나온다(27-B와 같은 원칙).
+어떤 앱에도 쓸 수 있어야 한다. 프로브는 앱 중립 템플릿이고 대상(리소스, 포트, 허용 출발지)은 요구사항의 `network_intent`에서만 받는다. 기대값은 사람이나 AI가 앱을 보고 쓰지 않고 그 의도에서만 나온다(27-B와 같은 원칙). 대상이 없으면 케이스를 만들지 않고 사유를 남긴다.
 
-| 템플릿 | 대상을 받는 곳 | 기대값의 출처 |
-| --- | --- | --- |
-| 비허용 Pod의 DB 접속 차단 | `RequirementsV2`의 PostgreSQL 리소스 | `network_intent`에 없는 출발지는 막혀야 한다(허용 목록의 보수) |
-| 허용된 앱 Pod의 DB 접속 성공 | 같은 리소스와 `network_intent`의 허용 출발지 | 허용 항목이면 성공해야 한다 |
-| 평문 DB 연결 거절 | 보강이 승인된 DB 연결 | 승인 기록(`ReviewRecord`)에 SSL 강제가 있으면 평문은 거절 |
-| 외부에서 지정된 경로 차단 | 분석이 근거와 함께 "운영용"으로 표시하고 사용자가 확정한 경로(`Evidence` 필수) | 차단 승인 기록 |
-| 앱 기능 유지 | 기존 표준·AI 테스트 묶음 | 기존 규칙 그대로 |
-
-- 해당 대상이 분석에 없으면 그 템플릿은 만들지 않고 사유(`NO_TARGET`)를 남긴다. 승인된 보강이 없으면 보강 검증 템플릿도 만들지 않는다.
-- 묶음은 Sandbox 배포 직후 분석·승인 기록에서 한 번 조립하고 해시로 고정한다. Fixer 개입 전이다(27-B의 기록 고정 시점과 같음).
+## 구현 (DB 접근 프로브)
+- **묶음 모델:** `ProbeStep`(`NETWORK_PROBE`): 출발지 역할 `ALLOWED_CLIENT`(출발 리소스를 이름으로 지정)/`OUTSIDER`, 대상 리소스, 포트, 기대 `CONNECTS`/`BLOCKED`. 이 단계가 없는 기존 묶음은 바이트와 SHA-256이 그대로다(고정 해시 테스트).
+- **러너:** 연결은 러너가 열지 않고 호출자가 준 구현(`probes`)을 쓴다. 기대와 다르면 `PROBE_MISMATCH expected=… actual=…`, 구현이 없거나 구현이 깨지면 `PROBE_UNAVAILABLE`로 실패한다(통과로 넘어가지 않음).
+- **케이스 생성(`cmp_testsuite/security.py`, 순수 함수):** 요구사항의 DB마다, 그 DB로 가는 TCP 통신 의도의 출발 리소스는 `ALLOWED_CLIENT`/`CONNECTS`, 의도 밖 Pod는 `OUTSIDER`/`BLOCKED`. 포트는 의도의 값이다. 대상이 없는 템플릿은 사유 코드로 남긴다: `DB_SSL_REJECT`(`TARGET_DB_SSL_NOT_CONFIGURED`), `ADMIN_PATH_BLOCKED`(`ADMIN_PATH_NOT_CONFIRMED`), DB가 없거나(`NO_DATABASE_IN_REQUIREMENTS`) DB로 가는 의도가 없으면(`NO_INTENT_TO_DATABASE`).
+- **Sandbox 구현(`SandboxService.network_probe`):** Namespace 안에 시험 Pod(Sandbox 프록시와 같은 고정 이미지, 비특권, 환경변수·서비스 어카운트 토큰 없음)를 만들어 TCP 접속을 시도하고 종료 상태로 판정한다. 허용 출발지는 출발 리소스의 인스턴스 라벨을 달아 의도의 정책이 그 리소스로 보게 한다. 외부 Pod는 라벨이 없어 Namespace의 기본 차단이 DB에 닿기 전에 막으므로, **DB 쪽 수신 규칙만 판정하도록** DB로 나가는 임시 egress 정책을 함께 만든다. Pod와 임시 정책은 어떤 종료 경로에서도 지운다.
+- **설정:** `SandboxSettings.security_probes`(기본 꺼짐). 켜진 때만 표준 묶음에 프로브 케이스가 더해지고, 꺼져 있으면 지금과 똑같다. 케이스는 `READ_ONLY`이고 `covers=["network-policy"]`다.
 
 ## 작업 범위
-- 포함
-  - 위 템플릿을 케이스로 만드는 순수 함수(입력: `AnalysisReport`, 승인 기록, 서비스 목록)와 시험 Pod 실행기. 케이스는 `READ_ONLY`.
-  - **`security-posture` Skill**(`skills/security-posture/SKILL.md`, `examples/`): Tester가 프로브 대상을 고를 때 쓰는 방법 지침. 판단이 필요한 구간만 맡는다: 분석 결과에서 DB 클라이언트 Pod·리소스 식별, 외부로 열린 경로 중 운영용 후보를 근거(`파일:줄`)와 함께 제안, 외부 부수효과가 있는 경로 제외. 기대값과 판정은 다루지 않는다(코드가 `network_intent`·승인 기록에서 계산). 근거가 없거나 불확실하면 제안하지 않고 `NO_TARGET`으로 남기도록 지침에 명시한다. `examples/`에는 모양이 서로 다른 두 앱의 분석 결과와 기대 제안을 둔다(앱 중립 검증용 픽스처 겸용).
-  - Skill 등록: 카탈로그 항목의 `skill:` 연결, Tester의 허용 Skill 목록(plan §2.9)에 추가. 새 도구는 만들지 않고 기존 `list_routes`·`get_snippet`·`load_skill`을 쓴다.
-  - 실행 위치: 시험 Pod는 Sandbox Namespace 안에서 만들고 정리 단계(`finally`)에서 반드시 지운다(AV-016).
-  - 결과: 프로브별 사유 코드와 판정을 테스트 결과에 싣고, 판정은 객관적 신호로만 낸다(AV-014).
-  - 케이스는 해시 고정 묶음에 들어가며 `include=READ_ONLY`로 Production에서 재실행 가능.
-- 제외: 배포된 대상의 원본 대비 최종 비교(Provisioning 배포 후), 비HTTP 우회 경로 탐지, 감사 로그·백업 프로브.
+- 포함: 위 구현, 테스트, runbook.
+- 제외: 평문 DB 연결 거절 프로브(대상 DB에 SSL이 없음, D-18), 운영용 경로 외부 차단 프로브(사용자 확정 필요, 29-B), `security-posture` Skill(이번 프로브는 요구사항에서 결정적으로 만들어져 모델 판단이 필요 없음. 운영용 경로 후보 제안이 필요해질 때), 배포된 대상에서의 재실행, 비HTTP 우회 경로 탐지.
 
 ## 수용 기준
-- [ ] 템플릿에 특정 앱의 경로·포트·리소스 이름이 없다. 서로 다른 모양의 분석 결과 두 가지(예: DB가 하나인 앱, DB 리소스 이름과 포트가 다른 앱)로 케이스를 만들면 대상만 달라진다.
-- [ ] `security-posture` Skill이 `SKILL.md` 형식(언제 쓰는지·조사 절차·판단 기준·대상별 차이·수정 패턴·테스트 패턴)을 따르고, 기대값을 쓰도록 하는 문구가 없다. Tester가 `load_skill`로 읽을 수 있다.
-- [ ] 가짜 LLM으로 두 앱 픽스처에서 근거가 확인되는 후보만 제안되고, 근거가 틀린 후보는 기존 근거 검사로 거절된다. 실제 Claude 호출은 비용 승인 후 1회로 확인한다.
-- [ ] 분석에 해당 대상이 없으면 케이스를 만들지 않고 `NO_TARGET`이 남는다. 승인되지 않은 보강은 검증 케이스가 없다.
-- [ ] 기대값은 `network_intent`와 승인 기록에서만 나온다. 케이스에 사람이 쓴 리터럴 기대값이 없다.
-- [ ] 기본 차단 상태에서 비허용 Pod의 DB 접속은 실패하고 허용된 앱 Pod의 접속은 성공한다.
-- [ ] SSL 강제가 승인된 연결에서 평문 연결 시도가 거절되고 앱 기능 테스트는 통과한다.
-- [ ] 사용자가 확정한 경로를 외부에서 호출하면 차단 상태가 확인된다.
-- [ ] 시험 Pod가 어떤 종료 경로에서도 정리된다.
-- [ ] 같은 입력이면 같은 묶음 해시가 나온다.
+- [x] 프로브 단계가 묶음에 들어가고 왕복된다. 이 단계가 없는 기존 묶음의 SHA-256은 그대로다.
+- [x] 러너가 기대와 다른 답에 `PROBE_MISMATCH`, 구현이 없거나 깨지면 `PROBE_UNAVAILABLE`로 실패한다.
+- [x] 케이스가 `network_intent`에서만 만들어진다: DB로 가는 통신 의도마다 허용 출발지 `CONNECTS`, DB마다 의도 밖 Pod `BLOCKED`. 포트는 의도의 값이고 리소스 ID는 케이스 ID로 쓸 수 있게 바뀐다. 기대값에 사람이 쓴 값이 없다.
+- [x] 대상이 없는 템플릿은 케이스를 만들지 않고 사유가 남는다.
+- [x] Sandbox 구현은 시험 Pod와 임시 정책을 어떤 종료 경로(통과, 실패, 대기 시간 초과)에서도 지운다. 비특권이고 비밀 값이 없다.
+- [x] `security_probes`가 꺼져 있으면 묶음이 지금과 같고, 켜면 같은 입력에서 같은 묶음과 같은 해시가 나온다.
+- [ ] 실제 k3d에서 허용 출발지는 연결되고 외부 Pod는 차단되며 시험 Pod가 남지 않는다(`tests/integration/sandbox/test_k3d.py`, `CMP_SANDBOX_KUBECONFIG` 필요. 이 변경에서는 실행하지 못함).
 
 ## 테스트 전략
-- 제안 Test Seam: 프로브 케이스 생성 순수 함수와 작은 가짜 서버·가짜 kubectl 호출 기록, 실제 k3d `cmp-sandbox`에서 Go 데모 앱 1회. 잡는 것: 케이스 구성, 차단·허용 구분, 정리. 못 잡는 것: 프록시를 우회하는 비HTTP 경로.
-- 실행: `uv run pytest tests/testsuite tests/sandbox -q`, 실제 확인은 runbook 절차(k3d)로 1회.
+- Test Seam: 묶음 모델·러너(가짜 probe 구현), 순수 케이스 생성, `SandboxService`(기록하는 `FakeRunner`), 입력 조립. 잡는 것: 판정 코드, 케이스 구성, 정리, 하위 호환. 못 잡는 것: 실제 CNI에서의 NetworkPolicy 동작(실제 k3d 1회).
+- 실행: `uv run pytest tests/testsuite tests/sandbox/test_network_probe.py tests/analysis/test_sandbox_input.py -q`, 이후 `make check`. 실제: `CMP_SANDBOX_KUBECONFIG=~/.kube/cmp-sandbox.yaml uv run pytest tests/integration/sandbox -m k3d`
 
 ## 문서
-spec AV-012/AV-023 비고, runbook(보안 프로브 절)을 같은 PR에서 갱신한다.
+spec AV-023, runbook(보안 프로브), tasks.md를 같은 PR에서 갱신한다.
 
 ## 결정 대기
-- DB SSL 강제의 Sandbox 구현 방식(PostgreSQL 이미지 인증서·설정을 어디서 공급하는가). 공통 렌더 v2가 지원하지 않으면 Provisioning에 요청이 필요하다.
+- 실제 k3d 확인(환경 필요).
+- 평문 DB 거절 프로브는 DB SSL 공급 방식(D-18)이 정해진 뒤, 운영용 경로 프로브는 29-B의 사용자 확정 뒤에 추가한다.

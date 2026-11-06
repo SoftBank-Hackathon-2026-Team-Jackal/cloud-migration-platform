@@ -10,9 +10,18 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from cmp_testsuite.bundle import SuiteError, load_bundle, sha256_of
-from cmp_testsuite.model import ActionStep, CaseResult, HttpStep, SuiteCase, SuiteResult
+from cmp_testsuite.model import (
+    ActionStep,
+    CaseResult,
+    HttpStep,
+    ProbeStep,
+    SuiteCase,
+    SuiteResult,
+)
 
 Actions = dict[str, Callable[[], None]]
+# True when a connection was made. The runner judges the answer; it opens nothing itself.
+Probes = Callable[[ProbeStep], bool]
 _VAR = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 _TIMEOUT = 15
 _RETRY_PAUSE = 2.0
@@ -115,6 +124,18 @@ def _check(step: HttpStep, status: int, body: bytes, variables: dict[str, str]) 
         variables[name] = str(_pick(document, path))
 
 
+def _probe(step: ProbeStep, probes: Probes | None) -> None:
+    if probes is None:
+        raise _Fail("PROBE_UNAVAILABLE")
+    try:
+        connected = probes(step)
+    except Exception:  # noqa: BLE001 - a broken probe is a failed case, not a crashed run
+        raise _Fail("PROBE_UNAVAILABLE") from None
+    actual = "CONNECTS" if connected else "BLOCKED"
+    if actual != step.expect:
+        raise _Fail(f"PROBE_MISMATCH expected={step.expect} actual={actual}")
+
+
 def run_case(
     case: SuiteCase,
     base_url: str,
@@ -122,11 +143,16 @@ def run_case(
     headers: dict[str, str] | None = None,
     actions: Actions | None = None,
     variables: dict[str, str] | None = None,
+    probes: Probes | None = None,
 ) -> CaseResult:
     variables = dict(variables or {})
     recover_until = 0.0
     try:
         for step in case.steps:
+            if isinstance(step, ProbeStep):
+                _probe(step, probes)
+                recover_until = 0.0
+                continue
             if isinstance(step, ActionStep):
                 do = (actions or {}).get(step.action)
                 if do is None:
@@ -155,6 +181,7 @@ def run_suite(
     actions: Actions | None = None,
     include_external: bool = False,
     variables: dict[str, str] | None = None,
+    probes: Probes | None = None,
 ) -> SuiteResult:
     """Refuses to run when the stored bytes no longer match the pinned SHA-256.
 
@@ -187,6 +214,13 @@ def run_suite(
             results.append(CaseResult(id=case.id, status="SKIPPED", reason="NOT_READ_ONLY"))
         else:
             results.append(
-                run_case(case, base_url, headers=headers, actions=actions, variables=variables)
+                run_case(
+                    case,
+                    base_url,
+                    headers=headers,
+                    actions=actions,
+                    variables=variables,
+                    probes=probes,
+                )
             )
     return SuiteResult(suite_sha256=suite_ref.sha256, results=results)

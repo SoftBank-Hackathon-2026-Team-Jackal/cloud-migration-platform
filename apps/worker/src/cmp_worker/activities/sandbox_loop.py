@@ -30,7 +30,7 @@ from cmp_providers.env_file import EnvFileStore
 from cmp_scanners.masking import mask_text
 from cmp_scanners.routes import scan_go_routes
 from cmp_testsuite import SuiteResult, load_bundle, run_suite
-from cmp_testsuite.model import HttpStep
+from cmp_testsuite.model import HttpStep, ProbeStep
 from cmp_testsuite.record import RECORDED_PREFIX, Fetch, record_probe
 from cmp_testsuite.runner import run_case
 from cmp_testsuite.validate import CaseRunner, pin_suite, validate_tests
@@ -130,6 +130,21 @@ def stack_in_app_code(logs: str, workspace: Path | str | None) -> bool:
     return any(Path(m.group(1)).name in names for m in _FILE_REF.finditer(logs))
 
 
+def probe_runner(service: SandboxService, plan: SandboxPlan) -> Callable[[ProbeStep], bool]:
+    """The suite's network probes, run from short-lived Pods in this Sandbox (ticket 30)."""
+
+    def run(step: ProbeStep) -> bool:
+        return service.network_probe(
+            plan,
+            role=step.role,
+            source_resource_id=step.source_resource_id,
+            target_resource_id=step.target_resource_id,
+            port=step.port,
+        )
+
+    return run
+
+
 def make_proxy_suite_runner(service: SandboxService) -> SuiteRunner:
     """Run the pinned suite from outside the cluster through `kubectl proxy`."""
 
@@ -141,6 +156,7 @@ def make_proxy_suite_runner(service: SandboxService) -> SuiteRunner:
                 proxy + service.service_path(plan, app["id"]),
                 store=store,
                 actions={"RESTART_DATABASE": lambda: service.restart_database(plan)},
+                probes=probe_runner(service, plan),
                 variables={"health_path": app["health_path"]},
             )
 

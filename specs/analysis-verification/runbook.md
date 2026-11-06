@@ -90,6 +90,10 @@ DB 쓰기·읽기와 재시작 후 유지 테스트는 앱이 쓰기를 받는 �
 - 테스트 실패 사유 코드(`STATUS_MISMATCH expected=200 actual=503` 같은 상태·필드 값)는 Sandbox 결과의 테스트별 `reason`에서 본다.
 - 이 모양은 앱마다 사람이 적어야 해서 일반적이지 않다. 후보를 자동으로 고르는 방식은 만들었다가 후보가 앱 하나뿐이라 제거했고, 일반화는 소스 근거를 쓰는 AI 테스트로 간다.
 
+### 보안 프로브 (티켓 30)
+
+`--sandbox '{"security_probes": true}'`(웹 시작이면 서버의 Sandbox 기본 설정)로 켜면 표준 묶음에 DB 접근 프로브가 더해진다. 요구사항의 통신 의도에서 만들어지고(앱 전용 값 없음), Sandbox가 시험 Pod로 접속을 시도해 판정한다: 의도에 적힌 출발지는 DB에 연결되고, 그 밖의 Pod는 차단되어야 통과한다. 케이스 ID는 `sec-db-allowed-<출발 리소스>-<DB>`, `sec-db-outsider-<DB>`이고 결과에 `PROBE_MISMATCH expected=… actual=…`(기대와 다름)나 `PROBE_UNAVAILABLE`(시험을 못 돌림, 통과가 아님)이 사유로 실린다. 시험 Pod(`cmp-probe-…`)는 끝나면 지워지고 남아 있으면 Sandbox 정리 때 Namespace와 함께 사라진다. 이 클러스터는 NetworkPolicy를 적용하는 CNI여야 의미가 있다(k3d 기본은 적용). 평문 DB 거절과 운영용 경로 차단 프로브는 아직 없다(대상 DB에 SSL이 없고 운영 경로는 사용자 확정이 없음).
+
 ### AI 생성 테스트
 
 `--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다(실제 Claude 호출이므로 비용 승인이 먼저다. 모델이 설정되지 않았으면 `LLM_NOT_CONFIGURED`로 건너뛴다).
