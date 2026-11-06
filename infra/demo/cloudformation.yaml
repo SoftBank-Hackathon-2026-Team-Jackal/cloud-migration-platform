@@ -214,7 +214,12 @@ Resources:
         HttpTokens: required
         HttpEndpoint: enabled
         # Ticket 21: the worker container reaches the instance role through the Docker bridge (one extra hop).
+        # Ticket 54: build RUN steps share that hop on docker0, so the host drops docker0 -> IMDS
+        # (infra/demo/build-imds-guard.sh, installed by start.sh). UserData is unchanged on purpose:
+        # changing it stops and starts the instance.
         HttpPutResponseHopLimit: 2
+        # The guard is IPv4-only; keep the IPv6 endpoint (fd00:ec2::254) off. Same as the default.
+        HttpProtocolIpv6: disabled
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:

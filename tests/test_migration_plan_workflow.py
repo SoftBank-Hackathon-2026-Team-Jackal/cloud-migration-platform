@@ -26,7 +26,7 @@ PLAN = {"plan_id": "plan-test", "revision": 1}
 
 
 class FakeProvisioning:
-    def __init__(self, publish=None, decision="APPROVE"):
+    def __init__(self, publish=None, decision="APPROVE", traffic=None):
         self.publish = publish or {
             "status": "PUBLISHED",
             "code": "PLAN_PUBLISHED",
@@ -38,6 +38,9 @@ class FakeProvisioning:
         }
         self.decision = decision
         self.calls = []
+        # Ticket 50: what `get_traffic_handover` returns (a dict, or an Exception it raises).
+        self.traffic = traffic or traffic_handoff(PLAN)
+        self.handover_requests = []
 
     def worker(self, client):
         @activity.defn(name="publish_migration_plan")
@@ -83,11 +86,42 @@ class FakeProvisioning:
         return Worker(
             client,
             task_queue=PROVISIONING_QUEUE,
-            activities=[publish, claim, execute, complete, scaffold],
+            activities=[publish, claim, execute, complete, scaffold, handover_fake(self)],
         )
 
     def names(self):
         return [name for name, _ in self.calls]
+
+
+def traffic_handoff(plan):
+    """A proceeding ticket 50 `TrafficHandoff` for `plan`."""
+    return {
+        "contract_version": "1",
+        **plan,
+        "provider": "ON_PREM",
+        "proceed": True,
+        "blocked_by": [],
+        "handover": {
+            "status": "READY",
+            "ready": True,
+            "external_endpoint": "http://10.200.0.2:8080",
+            "health_path": "/health",
+            "port": 8080,
+        },
+    }
+
+
+def handover_fake(fake):
+    """Ticket 50: fake `get_traffic_handover`; records requests in `fake.handover_requests`."""
+
+    @activity.defn(name="get_traffic_handover")
+    async def handover(request: dict) -> dict:
+        fake.handover_requests.append(request)
+        if isinstance(fake.traffic, Exception):
+            raise fake.traffic
+        return fake.traffic
+
+    return handover
 
 
 async def wait_phase(handle, phase):

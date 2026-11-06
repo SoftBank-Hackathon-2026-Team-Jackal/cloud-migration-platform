@@ -37,10 +37,14 @@ def migration_status(state: dict | None, last: MigrationEvent | None) -> str:
     """Web `MigrationStatus` from the Workflow query (E11), or from the last event without one."""
     if state is not None:
         phase = state.get("phase")
+        # D-19: a closed run is never running or waiting, whatever phase it last reported.
+        closed = state.get("execution_status") not in (None, "RUNNING")
         if phase == "scaffold_complete":
             return "done"
         if phase == "cancelled":
             return "cancelled"
+        if closed:
+            return "failed"  # closed but not done/cancelled: plan_failed, failed, unknown, ...
         if phase == "awaiting_approval" or state.get("review_pending"):
             return "waiting"
         if phase in RUNNING_PHASES:
