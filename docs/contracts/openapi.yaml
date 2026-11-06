@@ -3126,7 +3126,6 @@ components:
           additionalProperties:
             type: boolean
           type: object
-          minProperties: 1
           title: Required
         operational:
           items:
@@ -3146,7 +3145,8 @@ components:
       - analysis_version
       - required
       title: ConfirmRequest
-      description: 모든 매핑 행의 필수 여부(행 ID → true/false). 빠진 행이나 모르는 행은 거절된다.
+      description: 모든 매핑 행의 필수 여부(행 ID → true/false). 빠진 행이나 모르는 행은 거절된다. 행이 없으면(보안
+        승인만 남은 경우) 빈 객체.
     ConnectionDetail:
       properties:
         connection_id:

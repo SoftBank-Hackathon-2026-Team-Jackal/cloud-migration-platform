@@ -173,11 +173,36 @@ def test_a_decision_not_yet_seen_is_still_accepted_as_pending(client) -> None:
     assert response.status_code == 202 and response.json()["phase"] == "PENDING"
 
 
+def test_an_empty_confirmation_is_sent_when_only_a_security_approval_is_left(client) -> None:
+    """No mapping rows, only a lowered security level: there is nothing to mark required, so the
+    confirmation is empty and the gate moves on to the approval (the CLI note says this was untried)."""
+    fake = FakeControl(VIEW, moved(**WAITING_APPROVAL))
+    body = {"analysis_version": "1", "required": {}}
+    response = client(fake).post(PATH + "/confirm", json=body)
+    assert response.status_code == 202 and response.json()["pending"] == "approve_losses"
+    assert fake.signals[0][2]["required"] == {}
+
+
+def test_the_real_gate_accepts_an_empty_confirmation_when_it_has_no_rows() -> None:
+    from cmp_worker.review_gate import ReviewGate
+
+    judgement = {
+        "criterion": "EXTERNAL_HTTPS", "source_state": "PROTECTED", "target_state": "UNPROTECTED",
+        "verdict": "LOWER", "weak_source": False, "reasons": ["TARGET_ENTRY_WITHOUT_TLS"],
+        "suggestion": None,
+    }  # fmt: skip
+    gate = ReviewGate({"id": "analysis", "version": "1"}, [], security=[judgement])
+    assert gate.confirm(
+        {"analysis_ref": {"id": "analysis", "version": "1"}, "required": {}, "actor": "a"}
+    )
+    assert gate.phase == "WAITING_APPROVAL"
+    assert gate.view()["pending"] == "approve_losses"
+
+
 @pytest.mark.parametrize(
     "body",
     [
         {"analysis_version": "1"},  # no decisions
-        {"analysis_version": "1", "required": {}},
         {"analysis_version": "1", "required": {"a": "yes"}},  # strict: bool only
         {**CONFIRM, "extra": 1},
         {"required": {"a": True}},  # version is required

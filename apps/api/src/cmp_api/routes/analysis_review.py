@@ -103,10 +103,10 @@ class Request(BaseModel):
 
 
 class ConfirmRequest(Request):
-    """모든 매핑 행의 필수 여부(행 ID → true/false). 빠진 행이나 모르는 행은 거절된다."""
+    """모든 매핑 행의 필수 여부(행 ID → true/false). 빠진 행이나 모르는 행은 거절된다. 행이 없으면(보안 승인만 남은 경우) 빈 객체."""
 
     analysis_version: str = Field(min_length=1, max_length=64)
-    required: dict[str, bool] = Field(min_length=1)
+    required: dict[str, bool]  # may be empty: no mapping rows, only a security approval is left
     operational: list[str] = Field(default_factory=list)
     actor: str | None = Field(default=None, min_length=1, max_length=100)
 
