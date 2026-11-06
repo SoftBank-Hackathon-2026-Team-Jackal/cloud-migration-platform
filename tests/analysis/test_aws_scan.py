@@ -1,3 +1,4 @@
+import dataclasses
 import inspect
 import json
 import re
@@ -7,6 +8,7 @@ from urllib.parse import quote
 import boto3
 import pytest
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from botocore.stub import Stubber
 from cmp_scanners import aws_infra
 from cmp_scanners.aws_infra import (
@@ -400,3 +402,83 @@ def test_a_named_profile_makes_a_session(tmp_path, monkeypatch):
     config.write_text(f"[profile demo-source]\nregion = {REGION}\n")
     monkeypatch.setenv("AWS_CONFIG_FILE", str(config))
     assert get_session("demo-source").profile_name == "demo-source"
+
+
+# ------------------------------------------------------------- CloudTrail limits (fix)
+
+
+class EndlessTrail:
+    """A LookupEvents fake that always has another page of 50 events."""
+
+    def __init__(self):
+        self.calls = []
+
+    def lookup_events(self, **params):
+        self.calls.append(params)
+        events = [{"EventSource": "s3.amazonaws.com", "EventName": "GetObject"}] * 50
+        return {"Events": events, "NextToken": f"t{len(self.calls)}"}
+
+
+class FailingTrail:
+    def __init__(self, code):
+        self.code = code
+        self.calls = 0
+
+    def lookup_events(self, **params):
+        self.calls += 1
+        raise ClientError(
+            {"Error": {"Code": self.code, "Message": "secret aws text"}}, "LookupEvents"
+        )
+
+
+def with_trail(trail):
+    clients, stubs = build_clients()
+    stub_happy(stubs)
+    stubs.pop("cloudtrail")
+    activate(stubs)
+    return dataclasses.replace(clients, cloudtrail=trail)
+
+
+def test_cloudtrail_stops_paging_at_the_event_limit_and_paces_its_pages():
+    trail = EndlessTrail()
+    sleeps = []
+    result = scan(with_trail(trail), sleep=sleeps.append)
+    assert len(trail.calls) == 10  # ceil(500 / 50)
+    assert sleeps == [0.5] * 9  # between pages, never after the last one
+    assert result.cloudtrail_status == "COLLECTED" and result.cloudtrail_error is None
+    assert [(e.event_name, e.count) for e in result.cloudtrail] == [("GetObject", 500)]
+
+
+def test_a_small_event_limit_asks_for_one_short_page():
+    trail = EndlessTrail()
+    scan(with_trail(trail), cloudtrail_max_events=20)
+    assert len(trail.calls) == 1 and trail.calls[0]["MaxResults"] == 20
+
+
+@pytest.mark.parametrize(
+    ("aws_code", "code"),
+    [
+        ("ThrottlingException", "THROTTLED"),
+        ("AccessDeniedException", "PERMISSION_DENIED"),
+        ("InvalidLookupAttributesException", "AWS_ERROR"),
+    ],
+)
+def test_a_failed_cloudtrail_read_keeps_the_infrastructure_and_is_marked(aws_code, code):
+    trail = FailingTrail(aws_code)
+    result = scan(with_trail(trail))
+    assert result.cloudtrail == []
+    assert (result.cloudtrail_status, result.cloudtrail_error) == ("NOT_COLLECTED", code)
+    assert result.vpcs and result.subnets and result.security_groups and result.load_balancers
+    assert result.role_policies
+    assert "secret aws text" not in result.model_dump_json()
+    assert trail.calls == (4 if code == "THROTTLED" else 1)
+
+
+def test_scans_stored_before_the_status_field_read_as_collected():
+    clients, stubs = build_clients()
+    stub_happy(stubs)
+    activate(stubs)
+    stored = scan(clients).model_dump(mode="json")
+    stored.pop("cloudtrail_status")
+    stored.pop("cloudtrail_error")
+    assert aws_infra.AwsInfraScan.model_validate(stored).cloudtrail_status == "COLLECTED"
