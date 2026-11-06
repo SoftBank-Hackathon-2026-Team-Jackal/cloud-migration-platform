@@ -39,6 +39,10 @@ class ActionStep(_Strict):
     """A step the HTTP client cannot do; the caller supplies the implementation."""
 
     action: Literal["RESTART_DATABASE"]
+    # After the action the next HTTP step is sent again for this many seconds while the app answers
+    # 5xx or does not answer (an app that is told to "retry with the same ID" while its database
+    # comes back). Any other answer, such as a 201 for lost data, is judged at once.
+    recover_seconds: int = Field(default=0, ge=0, le=300)
 
 
 Step = HttpStep | ActionStep  # told apart by `action`; extra fields are forbidden

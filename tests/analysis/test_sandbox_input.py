@@ -138,3 +138,53 @@ def test_the_env_plan_the_analysis_made_travels_to_the_sandbox_as_a_reference(re
     other = make(repo, "none")
     plain = assemble_sandbox_input(analysed(other, repo), SandboxSettings(), other.store)
     assert "env_plan_ref" not in plain
+
+
+def test_an_app_shape_in_the_settings_reaches_the_pinned_suite(repo):
+    pipeline = make(repo, "shape")
+    settings = SandboxSettings(
+        write_path="/api/messages",
+        write_body={
+            "client_msg_id": "std-{{run_id}}",
+            "author": "cmp-test",
+            "body": "value-{{run_id}}",
+        },
+        write_status=201,
+        id_from_response="id",
+        value_field="body",
+        read_back="REPEAT_WRITE",
+    )
+    result = assemble_sandbox_input(analysed(pipeline, repo), settings, pipeline.store)
+    suite = load_bundle(pipeline.store.get(ArtifactRef.model_validate(result["suite_ref"])))
+    roundtrip = next(c for c in suite.cases if c.id == "std-db-roundtrip")
+    assert roundtrip.steps[0].expect.status == 201 and roundtrip.steps[1].expect.status == 200
+    again = assemble_sandbox_input(analysed(pipeline, repo), settings, pipeline.store)
+    assert again["suite_ref"] == result["suite_ref"]  # the same shape gives the same hash
+
+
+def test_an_unknown_read_back_is_refused_so_a_typo_cannot_change_nothing():
+    with pytest.raises(ValidationError):
+        SandboxSettings(write_path="/w", read_back="POLL")
+
+
+# ------------------------------------------------- ticket 27, layer 2: the shape is found, not typed
+
+
+def analysis_with_assembly(repo, name):
+    pipeline = make(repo, name)
+    inp = analysis_input(repo)
+    source, _, _, _, built = run_to_requirements(pipeline, inp)
+    base = {
+        "report": {"migration_id": inp["migration_id"]},
+        "requirements": built["requirements_ref"],
+        "review": None,
+        "source": {"workspace": source["workspace"], "commit": source["commit"]},
+        "assembly_ref": built["assembly_ref"],
+    }
+    return pipeline, base
+
+
+def test_the_pipeline_stores_the_routes_the_application_registers(repo):
+    pipeline, base = analysis_with_assembly(repo, "routes")
+    doc = pipeline.store.get_json(ArtifactRef.model_validate(base["assembly_ref"]))
+    assert isinstance(doc["http_routes"], list)  # empty is fine when the fixture has none

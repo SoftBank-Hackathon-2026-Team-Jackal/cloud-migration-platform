@@ -344,7 +344,10 @@ class SandboxLoopActivities:
         return {
             **base,
             "verdict": verdict.model_dump(mode="json"),
-            "results": [{"id": r.id, "status": r.status} for r in suite.results],
+            "results": [
+                {"id": r.id, "status": r.status, **({"reason": r.reason} if r.reason else {})}
+                for r in suite.results
+            ],  # a reason is a code (status numbers, field names), never response content
         }
 
     @activity.defn(name="sbx_classify")

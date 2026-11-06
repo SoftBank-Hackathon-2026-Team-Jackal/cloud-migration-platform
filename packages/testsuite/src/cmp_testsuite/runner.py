@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -14,6 +15,7 @@ from cmp_testsuite.model import ActionStep, CaseResult, HttpStep, SuiteCase, Sui
 Actions = dict[str, Callable[[], None]]
 _VAR = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 _TIMEOUT = 15
+_RETRY_PAUSE = 2.0
 
 
 class _Fail(Exception):
@@ -67,6 +69,26 @@ def _call(
         raise _Fail("REQUEST_FAILED") from None
 
 
+def _call_recovering(
+    base_url: str,
+    step: HttpStep,
+    headers: dict[str, str],
+    variables: dict[str, str],
+    recover_until: float,
+) -> tuple[int, bytes]:
+    """`_call`, sent again while the app is still coming back (5xx or no answer) until the deadline."""
+    while True:
+        try:
+            status, body = _call(base_url, step, headers, variables)
+        except _Fail as exc:
+            if str(exc) != "REQUEST_FAILED" or time.monotonic() >= recover_until:
+                raise
+        else:
+            if status < 500 or time.monotonic() >= recover_until:
+                return status, body
+        time.sleep(_RETRY_PAUSE)
+
+
 def _check(step: HttpStep, status: int, body: bytes, variables: dict[str, str]) -> None:
     expect = step.expect
     if expect.status is not None and status != expect.status:
@@ -102,6 +124,7 @@ def run_case(
     variables: dict[str, str] | None = None,
 ) -> CaseResult:
     variables = dict(variables or {})
+    recover_until = 0.0
     try:
         for step in case.steps:
             if isinstance(step, ActionStep):
@@ -109,8 +132,12 @@ def run_case(
                 if do is None:
                     raise _Fail(f"ACTION_UNAVAILABLE {step.action}")
                 do()
+                recover_until = (
+                    time.monotonic() + step.recover_seconds if step.recover_seconds else 0.0
+                )
                 continue
-            status, body = _call(base_url, step, headers or {}, variables)
+            status, body = _call_recovering(base_url, step, headers or {}, variables, recover_until)
+            recover_until = 0.0  # the wait covers the one step that follows the action
             _check(step, status, body, variables)
     except _Fail as exc:
         return CaseResult(id=case.id, status="FAILED", reason=str(exc))

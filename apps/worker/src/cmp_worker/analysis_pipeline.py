@@ -49,6 +49,7 @@ from cmp_scanners.manifests import ManifestScan
 from cmp_scanners.manifests import scan_manifests as run_manifest_scan
 from cmp_scanners.masking import mask_text
 from cmp_scanners.network import build_network, merge_network_intents
+from cmp_scanners.routes import scan_go_routes
 from cmp_scanners.source import fetch_source as checkout_source
 
 from cmp_worker.artifact_store import ArtifactRef, ArtifactStore
@@ -206,6 +207,7 @@ class AnalysisPipeline:
             "dockerfile": check_dockerfile(source["workspace"]).model_dump(mode="json"),
             "network": network.model_dump(mode="json") if network else None,
             "database_images": database_images,
+            "http_routes": [r.model_dump(mode="json") for r in scan_go_routes(source["workspace"])],
             **({"env_plan_ref": env_plan_ref} if env_plan_ref is not None else {}),
         }
         return {

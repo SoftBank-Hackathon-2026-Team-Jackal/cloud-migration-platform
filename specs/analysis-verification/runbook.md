@@ -77,6 +77,19 @@ uv run python scripts/sandbox_ctl.py cleanup --all --confirm DELETE-ALL  # 전�
 
 전용 클러스터(`k3d-cmp-sandbox`)의 `cmp-sbx-*`만 다룬다. 워커가 죽어 남은 만료 Sandbox는 `cleanup`을 주기적으로(예: 15분마다 cron·launchd) 실행해 지운다. 출력에는 네임스페이스·실행 ID·만료 시각만 나온다.
 
+### 표준 테스트의 쓰기 모양 (티켓 27)
+
+DB 쓰기·읽기와 재시작 후 유지 테스트는 앱이 쓰기를 받는 모양을 알아야 한다. 모양을 주지 않으면 헬스 테스트만 돈다. 모양은 `--sandbox`에 설정으로 준다(Go 데모 앱 예시).
+
+```bash
+--sandbox '{"write_path": "/api/messages", "write_body": {"client_msg_id": "std-{{run_id}}", "author": "cmp-test", "body": "value-{{run_id}}"}, "write_status": 201, "id_from_response": "id", "value_field": "body", "read_back": "REPEAT_WRITE"}'
+```
+
+- `REPEAT_WRITE`는 쓰기가 멱등인 앱(같은 키 재전송에 200과 저장된 행)을 위한 읽기 방식이다. 같은 쓰기를 다시 보내 같은 ID와 같은 본문이 오는지로 저장을, DB 재시작 뒤에 오는지로 유지를 확인한다. 케이스마다 쓰기 키가 달라서 첫 쓰기는 항상 새 행이다.
+- "DB 재시작 후 유지" 테스트는 재시작 직후 앱이 5xx를 주거나 답이 없는 동안(최대 60초) 같은 요청을 다시 보낸다(데모 앱은 재시작 직후 "같은 ID로 재시도하라"는 503을 준다). 데이터를 잃어 바로 201이 오면 기다리지 않고 실패한다.
+- 테스트 실패 사유 코드(`STATUS_MISMATCH expected=200 actual=503` 같은 상태·필드 값)는 Sandbox 결과의 테스트별 `reason`에서 본다.
+- 이 모양은 앱마다 사람이 적어야 해서 일반적이지 않다. 후보를 자동으로 고르는 방식은 만들었다가 후보가 앱 하나뿐이라 제거했고, 일반화는 소스 근거를 쓰는 AI 테스트로 간다.
+
 ### AI 생성 테스트
 
 `--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다. 원본 쪽 테스트 자원(D-09)이 연결되어 있지 않으면 모델을 부르지 않고 결과 `ai_tests.reason`에 `ORIGIN_UNAVAILABLE`이 남는다(비용 0). 지금은 원본 자원이 없어 항상 이 경우다.
