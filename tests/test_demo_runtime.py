@@ -395,6 +395,15 @@ def test_api_platform_registry_settings_default_to_disabled():
     assert PlatformRegistry.parse("", "cmp-platform-builds") is None
 
 
+def test_worker_gets_the_same_platform_registry_settings_as_the_api():
+    # The worker builds ON_PREM rollout jobs (execute_on_prem_plan → build_rollout_job), which
+    # read cmp_api settings; without these an ECR app image is IMAGE_REGISTRY_NOT_ALLOWED.
+    api, worker = _env("api"), _env("worker")
+    for name in ("PLATFORM_ECR_REGISTRY", "PLATFORM_ECR_REPOSITORIES"):
+        assert name in worker, name
+        assert worker[name] == api[name], name
+
+
 def _run_deploy_build_stack(tmp_path, uri: str) -> subprocess.CompletedProcess:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -580,6 +589,24 @@ def test_worker_runtime_report_names_real_or_scaffold_paths_only(tmp_path, monke
     assert real["analysis"] == "real"
     assert real["sandbox"] == "error:SANDBOX_KUBECONFIG_NOT_FOUND"
     assert real["build"] == "error:BUILD_SETTINGS_INCOMPLETE"
+
+
+def test_worker_runtime_report_names_the_rollout_platform_registry_state(monkeypatch):
+    from cmp_api.config import settings as api_settings
+    from cmp_worker.config import Settings
+    from cmp_worker.runtime_report import report
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    host = "714066696240.dkr.ecr.ap-northeast-2.amazonaws.com"
+    monkeypatch.setattr(api_settings, "platform_ecr_registry", None)
+    assert report(Settings(_env_file=None))["platform_ecr_registry"] == "off"
+    monkeypatch.setattr(api_settings, "platform_ecr_registry", host)
+    on = report(Settings(_env_file=None))["platform_ecr_registry"]
+    assert on == "on"
+    assert host not in "".join(report(Settings(_env_file=None)).values())
+    monkeypatch.setattr(api_settings, "platform_ecr_registry", "not a registry")
+    bad = report(Settings(_env_file=None))["platform_ecr_registry"]
+    assert bad == "error:PLATFORM_REGISTRY_INVALID"
 
 
 def test_api_runtime_report_names_store_catalog_and_link_state(tmp_path, monkeypatch):

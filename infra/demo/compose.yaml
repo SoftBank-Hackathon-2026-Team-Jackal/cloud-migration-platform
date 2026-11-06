@@ -93,7 +93,8 @@ services:
       # /opt/cmp/.env has the deploy-build-stack.sh lines; until then the build profile (41).
       PLATFORM_ECR_AWS_PROFILE: ${PLATFORM_ECR_AWS_PROFILE:-cmp-demo-build}
       # Platform registry for ON_PREM rollout jobs, from /opt/cmp/.env (deploy-build-stack.sh
-      # prints it). Empty keeps the pre-ticket-29 behavior (no platform registry).
+      # prints it). Empty keeps the pre-ticket-29 behavior (no platform registry). The worker
+      # gets the same two lines (it builds the rollout jobs; the api mints the pull tokens).
       PLATFORM_ECR_REGISTRY: ${PLATFORM_ECR_REGISTRY:-}
       PLATFORM_ECR_REPOSITORIES: ${PLATFORM_ECR_REPOSITORIES:-cmp-platform-builds}
       # Ticket 44 (#179): target profile catalog for web starts (shape:
@@ -157,6 +158,11 @@ services:
       PROVISIONING_GCLOUD_CONFIGURATION: cmp-demo
       # Ticket 47 (B-09, 41 D4): GKE pull Secret tokens, same pull profile as the api.
       PLATFORM_ECR_AWS_PROFILE: ${PLATFORM_ECR_AWS_PROFILE:-cmp-demo-build}
+      # ON_PREM rollout jobs are built here (execute_on_prem_plan → build_rollout_job), which
+      # reads the API settings: without the same registry, ECR app images are refused with
+      # IMAGE_REGISTRY_NOT_ALLOWED. Same /opt/cmp/.env source as the api.
+      PLATFORM_ECR_REGISTRY: ${PLATFORM_ECR_REGISTRY:-}
+      PLATFORM_ECR_REPOSITORIES: ${PLATFORM_ECR_REPOSITORIES:-cmp-platform-builds}
       # Ticket 28 (#152): the Build module. Names only, from /opt/cmp/.env (deploy-build-stack.sh
       # prints them); all empty keeps the pre-built images. Ticket 47 (B-20): the Build module
       # passes BUILD_AWS_PROFILE to its own `aws` calls; no global AWS_PROFILE.
