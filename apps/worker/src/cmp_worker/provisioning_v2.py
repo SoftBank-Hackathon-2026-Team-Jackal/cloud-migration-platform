@@ -300,6 +300,7 @@ def prepare_plan_v2(payload: dict, *, requirements_bytes: bytes) -> PlanningResu
             image_uri=builds[resource_id].image_uri,
             image_digest=builds[resource_id].image_digest,
             platform=validated[resource_id].platform,
+            platforms=list(builds[resource_id].platforms),  # ticket 58
         )
         for resource_id in sorted(applications)
     ]

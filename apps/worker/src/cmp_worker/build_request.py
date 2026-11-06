@@ -16,7 +16,7 @@ from cmp_contracts.provisioning import Platform, VersionRef
 from cmp_contracts.provisioning_v2 import BuildEvidenceV2, S3ArchiveRef
 from pydantic import BaseModel, ConfigDict
 
-from cmp_worker.image_build import BuildContext, BuildOutcome, ImageBuilder
+from cmp_worker.image_build import BuildContext, BuildOutcome, ImageBuilder, _Platforms
 
 _ATTEMPT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$")
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
@@ -26,7 +26,10 @@ _REPACKAGE = {
     "SOURCE_DIGEST_MISMATCH", "SOURCE_METADATA_INVALID",
 }  # fmt: skip
 _INFRA = {"LOG_UPLOAD_INVALID", "LOG_UPLOAD_FAILED"}
-_BUILD = {"EXTERNAL_COMMAND_FAILED", "BUILD_DIGEST_MISSING", "BUILD_DIGEST_INVALID"}
+_BUILD = {
+    "EXTERNAL_COMMAND_FAILED", "BUILD_DIGEST_MISSING", "BUILD_DIGEST_INVALID",
+    "BUILD_INDEX_INVALID", "BUILD_INDEX_PLATFORM_MISMATCH",  # ticket 58: manifest list
+}  # fmt: skip
 
 
 def classify_failure(code: str) -> tuple[str, str]:
@@ -53,22 +56,22 @@ class _Strict(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
 
-class BuildTarget(_Strict):
-    """Where to build: worker configuration plus the platform from target capabilities."""
+class BuildTarget(_Platforms, _Strict):
+    """Where to build: worker configuration plus the platforms (ticket 58: one or a list)."""
 
     migration_id: str
     ecr_repository: str
     log_bucket: str
-    platform: Platform
+    platforms: list[Platform]
 
 
-class BuildResult(_Strict):
+class BuildResult(_Platforms, _Strict):
     status: Literal["SUCCEEDED", "FAILED"]
     resource_id: str
     attempt_id: str
     attempts: int
     reused: bool = False
-    platform: Platform
+    platforms: list[Platform]  # ticket 58: every platform in the image (`platform`: the first)
     source_ref: S3ArchiveRef
     image_uri: str | None = None
     image_digest: str | None = None
@@ -79,7 +82,9 @@ class BuildResult(_Strict):
 
 
 class BuildStore(Protocol):
-    def find(self, resource_id: str, source_sha256: str, platform: str) -> BuildResult | None: ...
+    def find(
+        self, resource_id: str, source_sha256: str, platforms: list[str]
+    ) -> BuildResult | None: ...
 
     def save(self, result: BuildResult) -> None: ...
 
@@ -92,20 +97,23 @@ class InMemoryBuildStore:
         self._reusable: dict[tuple[str, str, str], BuildResult] = {}
         self._lock = threading.Lock()
 
-    def find(self, resource_id: str, source_sha256: str, platform: str) -> BuildResult | None:
-        return self._reusable.get((resource_id, source_sha256, platform))
+    def find(
+        self, resource_id: str, source_sha256: str, platforms: list[str]
+    ) -> BuildResult | None:
+        return self._reusable.get((resource_id, source_sha256, ",".join(platforms)))
 
     def save(self, result: BuildResult) -> None:
         with self._lock:
             # The Build module's image tag includes the platform, so one attempt may build several.
-            key = (result.resource_id, result.attempt_id, result.platform)
+            key = (result.resource_id, result.attempt_id, ",".join(result.platforms))
             existing = self._by_attempt.get(key)
             if existing is not None and existing != result:
                 raise ValueError("a saved build result cannot be changed")
             self._by_attempt[key] = result
             if result.status == "SUCCEEDED":
                 self._reusable.setdefault(
-                    (result.resource_id, result.source_ref.sha256, result.platform), result
+                    (result.resource_id, result.source_ref.sha256, ",".join(result.platforms)),
+                    result,
                 )
 
 
@@ -141,13 +149,13 @@ def _normalize(
         and _DIGEST.fullmatch(digest) is not None
         and outcome.image_uri == f"{target.ecr_repository}@{digest}"
         and outcome.source_ref == source
-        and outcome.platform == target.platform
+        and outcome.platforms == target.platforms
     )
     common = {
         "resource_id": outcome.resource_id,
         "attempt_id": outcome.attempt_id,
         "attempts": attempts,
-        "platform": target.platform,
+        "platforms": target.platforms,
         "source_ref": source,
         "log": outcome.log.uri if outcome.log else None,
     }
@@ -179,7 +187,7 @@ def request_build(
     heartbeat_interval: float = 10.0,
 ) -> BuildResult:
     attempt_id = make_attempt_id(run_id, attempt)
-    hit = store.find(resource_id, source.sha256, target.platform)
+    hit = store.find(resource_id, source.sha256, target.platforms)
     if hit is not None:
         return hit.model_copy(update={"reused": True, "attempts": 0})
     context = BuildContext(
@@ -187,7 +195,7 @@ def request_build(
         resource_id=resource_id,
         attempt_id=attempt_id,
         ecr_repository=target.ecr_repository,
-        platform=target.platform,
+        platforms=target.platforms,
         log_bucket=target.log_bucket,
     )
     builder = builder_factory(context)
@@ -207,7 +215,7 @@ def request_build(
 def to_build_evidence(result: BuildResult) -> BuildEvidenceV2:
     """Planning-facing evidence; `result_ref` is derived from the result's content."""
     content = result.model_dump_json(exclude={"reused", "attempts"})
-    platform_tag = result.platform.replace("/", "-")
+    platform_tag = "_".join(platform.replace("/", "-") for platform in result.platforms)
     ref = VersionRef(
         id=f"build-{result.resource_id}-{result.source_ref.sha256[:12]}-{platform_tag}",
         version=hashlib.sha256(content.encode()).hexdigest()[:16],
@@ -220,5 +228,5 @@ def to_build_evidence(result: BuildResult) -> BuildEvidenceV2:
         source_ref=result.source_ref,
         image_uri=result.image_uri,
         image_digest=result.image_digest,
-        platforms=[result.platform] if succeeded else [],
+        platforms=list(result.platforms) if succeeded else [],
     )

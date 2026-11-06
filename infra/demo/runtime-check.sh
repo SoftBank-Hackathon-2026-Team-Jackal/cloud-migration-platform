@@ -22,6 +22,32 @@ docker exec cmp-demo-api-1 python -m cmp_api.runtime_report 2>/dev/null \
 echo "imds_guard_rules=$(iptables -S DOCKER-USER 2>/dev/null | grep -c cmp-build-imds-guard || true)"
 echo "imds_guard_service=$(systemctl is-enabled cmp-build-imds-guard.service 2>/dev/null || echo missing)"
 
+# Ticket 58: whether the worker's builder can build each platform, and whether BUILD_PLATFORM fits
+# (state words only, never the value). The first BUILD_PLATFORM entry is the Sandbox's
+# architecture, which is this host's.
+echo "build_binfmt_service=$(systemctl is-enabled cmp-build-binfmt.service 2>/dev/null || echo missing)"
+builder="$(docker exec cmp-demo-worker-1 docker buildx inspect default 2>/dev/null \
+  | sed -n 's/^Platforms: *//p' | head -n 1 | tr -d ' ')"
+for arch in amd64 arm64; do
+  if [[ -z "$builder" ]]; then state=unavailable
+  elif [[ ",$builder," == *",linux/$arch,"* ]]; then state=yes
+  else state=no; fi
+  echo "builder_$arch=$state"
+done
+wanted="$(sed -n 's/^BUILD_PLATFORM=//p' "$env_file" 2>/dev/null | tail -n 1 | tr -d ' "')"
+if [[ -z "$wanted" ]]; then
+  echo "build_platforms_supported=unset"
+else
+  supported=yes
+  IFS=, read -ra platforms <<<"$wanted"
+  for platform in "${platforms[@]}"; do
+    [[ ",$builder," == *",$platform,"* ]] || supported=no
+  done
+  echo "build_platforms_supported=$supported"
+  case "$(uname -m)" in x86_64) host=linux/amd64 ;; aarch64) host=linux/arm64 ;; *) host=unknown ;; esac
+  echo "build_platform_first_is_host=$([[ "${platforms[0]}" == "$host" ]] && echo yes || echo no)"
+fi
+
 # `.env` names (values are never read into the output).
 names="$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' "$env_file" 2>/dev/null | sort -u | tr '\n' ' ')"
 echo "env_names=${names% }"

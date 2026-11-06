@@ -16,7 +16,7 @@ from typing import Any
 from cmp_contracts.provisioning import Image
 from cmp_contracts.provisioning_v2 import S3ArchiveRef
 from cmp_contracts.verification import BuildAttempt, BuildLogRef
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
 
 from cmp_worker.build_request import (
     BuildResult,
@@ -25,7 +25,7 @@ from cmp_worker.build_request import (
     request_build,
     to_build_evidence,
 )
-from cmp_worker.image_build import ImageBuilder
+from cmp_worker.image_build import ImageBuilder, _Platforms, parse_platforms
 from cmp_worker.source_archive import ArchiveStore, SourceArchiveError, package_source
 
 
@@ -38,13 +38,15 @@ class BuildFailed(Exception):
         self.failure_class = failure_class
 
 
-class BuildSettings(BaseModel):
+class BuildSettings(_Platforms):
+    """`platforms` (ticket 58): `BUILD_PLATFORM`, one value or a comma list. The first entry is
+    the Sandbox's own architecture; the built image (a manifest list) carries all of them."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     source_bucket: str
     ecr_repository: str
     log_bucket: str
-    platform: str
     aws_profile: str | None = None
 
     @classmethod
@@ -66,7 +68,7 @@ class BuildSettings(BaseModel):
             source_bucket=source_bucket,
             ecr_repository=ecr_repository,
             log_bucket=log_bucket,
-            platform=platform,
+            platforms=parse_platforms(platform),  # BUILD_PLATFORM_INVALID: a settings error
             aws_profile=aws_profile,
         )
 
@@ -117,14 +119,14 @@ class ImageBuildAdapter:
                 migration_id=migration_id,
                 ecr_repository=self.settings.ecr_repository,
                 log_bucket=self.settings.log_bucket,
-                platform=self.settings.platform,
+                platforms=self.settings.platforms,
             ),
             store=self.build_store,
             builder_factory=self.builder_factory,
         )
         if result.status != "SUCCEEDED":
             raise BuildFailed(result.error_code or "BUILD_FAILED", result.failure_class or "BUILD")
-        return Image(uri=result.image_uri, platforms=[result.platform]), result
+        return Image(uri=result.image_uri, platforms=list(result.platforms)), result
 
 
 def to_build_attempt(result: BuildResult, *, migration_id: str) -> BuildAttempt:
@@ -136,7 +138,8 @@ def to_build_attempt(result: BuildResult, *, migration_id: str) -> BuildAttempt:
         result_ref=evidence.result_ref,
         status=result.status,
         source_ref=result.source_ref,
-        platform=result.platform,
+        platform=result.platform,  # the Sandbox's architecture (first configured)
+        platforms=list(result.platforms),
         image_uri=result.image_uri,
         image_digest=result.image_digest,
         log=BuildLogRef(uri=result.log) if result.log else None,

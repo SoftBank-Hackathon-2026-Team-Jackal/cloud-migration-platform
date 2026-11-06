@@ -162,8 +162,11 @@ def run_checks(
             if build
             else Check("build", WARN, "BUILD_* unset: pre-built images only, no build evidence")
         )
-    except ValueError:
-        out.append(Check("build", FAIL, "BUILD_SETTINGS_INCOMPLETE"))
+    except ValueError as exc:  # BUILD_SETTINGS_INCOMPLETE or, ticket 58, BUILD_PLATFORM_INVALID
+        code = str(exc)
+        out.append(
+            Check("build", FAIL, code if code.startswith("BUILD_") else "BUILD_SETTINGS_INVALID")
+        )
 
     if not config.llm_enabled:
         out.append(Check("llm", WARN, "LLM_ENABLED is off: mapping and fixing will not run"))

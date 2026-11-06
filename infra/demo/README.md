@@ -149,7 +149,7 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 | --- | --- |
 | ECR 저장소 | `cmp-platform-builds` (`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-platform-builds`), `IMMUTABLE`, 푸시 시 스캔, 태그 없는 이미지만 7일 뒤 만료, 스택 삭제 시 보존 |
 | 인스턴스 역할 인라인 정책 | `cmp-demo-build`: `ecr:GetAuthorizationToken`, 그 저장소의 pull·push, 배포 버킷 `sources/`·`tests/`·`builds/`의 `GetObject`·`PutObject`, 버킷 `ListBucket`. `releases/`는 읽기 전용 그대로 |
-| worker 설정 | `BUILD_ECR_REPOSITORY`·`BUILD_SOURCE_BUCKET`·`BUILD_LOG_BUCKET`·`BUILD_PLATFORM`(`/opt/cmp/.env`, 비면 사전 빌드 이미지), `BUILD_AWS_PROFILE=cmp-demo-build`(인스턴스 역할 프로필). 티켓 47(B-20): Build 모듈이 자기 `aws` 호출에 이 프로필을 직접 넘기고, worker 전역 `AWS_PROFILE`은 없다 |
+| worker 설정 | `BUILD_ECR_REPOSITORY`·`BUILD_SOURCE_BUCKET`·`BUILD_LOG_BUCKET`·`BUILD_PLATFORM`(`/opt/cmp/.env`, 비면 사전 빌드 이미지. 티켓 58: 기본 안내 `linux/amd64,linux/arm64`, 첫 항목이 샌드박스(이 호스트) 아키텍처), `BUILD_AWS_PROFILE=cmp-demo-build`(인스턴스 역할 프로필). 티켓 47(B-20): Build 모듈이 자기 `aws` 호출에 이 프로필을 직접 넘기고, worker 전역 `AWS_PROFILE`은 없다 |
 | ECR pull 전용 역할 (티켓 47, B-09) | `cmp-demo-ecr-pull`(이 스택): `ecr:GetAuthorizationToken` + 이 저장소의 pull 세 동작만. 인스턴스 역할만 Assume. `ensure-secrets.sh`가 `.env`의 `PLATFORM_ECR_PULL_ROLE_ARN`이 있으면 프로필 `cmp-demo-ecr-pull`(`credential_source = Ec2InstanceMetadata`, 인스턴스 역할이 바로 Assume)을 쓴다. K3s·GKE pull Secret을 읽은 사람은 이 저장소 pull만 가능하고 push는 거부된다 |
 | 교차 계정 pull (티켓 47, B-08) | 매개변수 `PullAccountIds`(기본 빈 값 = 저장소 정책 없음)에 대상 연결 계정을 넣으면 저장소 정책이 그 계정의 `arn:aws:iam::*:role/cmp-*-eks-node`(Terraform 노드 역할)에게 pull 세 동작만 허용한다. `CMP_ECR_PULL_ACCOUNT_IDS=<id>[,<id>] bash infra/demo/deploy-build-stack.sh --plan`으로 바꾸고, 비우면 이전 값을 유지한다. 같은 계정은 필요 없다 |
 | api 설정 (#176, 티켓 41·46) | `PLATFORM_ECR_REGISTRY`(`/opt/cmp/.env`, 비면 꺼짐)·`PLATFORM_ECR_REPOSITORIES`(기본 `cmp-platform-builds`), `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build`, AWS 설정 파일 읽기 전용 마운트. K3s Agent의 `GET /agents/{agent_id}/jobs/{job_id}/image-pull` 토큰을 이 프로필(인스턴스 역할)로 발급한다 |
@@ -158,6 +158,8 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 **소켓 위험**: Docker 소켓을 가진 컨테이너는 호스트 root와 같은 권한이다. worker에만 주며, 빌드하는 앱 Dockerfile의 `RUN`도 호스트 데몬에서 실행된다. 대회용 단일 호스트에서만 허용한다. 운영급 대안은 rootless BuildKit을 별도 서비스로 두고 worker가 `BUILDKIT_HOST`(TLS)로만 접속하거나, 빌드를 CodeBuild·Kaniko 같은 격리 실행으로 옮기는 것이다. rootless BuildKit도 `RUN`이 호스트를 거쳐 나가므로 아래 IMDS 차단은 따로 필요하다.
 
 **빌드의 인스턴스 메타데이터 차단 (#189, 티켓 54)**: 내장 BuildKit의 `RUN`은 기본 bridge `docker0`에서 돌고, IMDS hop limit 2(티켓 21) 때문에 사용자 Dockerfile이 `169.254.169.254`에서 인스턴스 역할 자격을 꺼낼 수 있다(로컬 가짜 IMDS로 재현). `start.sh`가 worker를 올리기 전에 `sh infra/demo/build-imds-guard.sh install`을 실행한다. 이 스크립트는 `DOCKER-USER` 맨 앞에 `-i docker0 -d 169.254.169.254/32 -j DROP`을 넣고, `cmp-build-imds-guard.service`가 Docker가 시작될 때마다(재부팅 포함) 다시 넣는다. 규칙이 없으면 릴리스가 실패한다. compose 서비스(worker·api)는 자기 bridge(`br-*`)에 있어 인스턴스 역할을 그대로 쓴다. 빌드 모듈은 `--network default`를 고정하고 entitlement를 주지 않아 `RUN --network=host`(규칙 우회)는 거부된다. VPC DNS(`169.254.169.253`) 등 다른 주소와 인터넷 통신은 막지 않는다. IPv6 IMDS는 템플릿에서 꺼 둔다(`HttpProtocolIpv6: disabled`).
+
+**멀티 아키텍처 빌드 (#278, 티켓 58)**: `BUILD_PLATFORM=linux/amd64,linux/arm64`이면 Build 모듈이 플랫폼마다 같은 내장 builder(`docker0`, 위 IMDS 차단 그대로)로 빌드하고 `docker buildx imagetools create`로 매니페스트 목록을 push한다. Plan의 노드 조건은 두 아키텍처를 모두 허용한다(Apple Silicon k3d 같은 arm64 대상). x86_64 호스트에서 arm64를 빌드하려면 QEMU binfmt가 필요하다. `start.sh`가 `sh infra/demo/build-binfmt.sh install`로 `tonistiigi/binfmt`(digest 고정, 네트워크 없음)를 실행하고, `cmp-build-binfmt.service`가 Docker가 시작될 때마다(재부팅 포함) 다시 등록한다. `.env`의 `BUILD_PLATFORM`에 arm64가 있으면 설치 실패가 릴리스 실패다. 에뮬레이션 빌드는 느리다(티켓 58 미검증 항목).
 
 ### 반영 (각 단계 사용자 승인 필요)
 
@@ -179,6 +181,7 @@ docker exec cmp-demo-api-1 python -c 'from cmp_api.onprem_rollout import configu
 docker exec cmp-demo-worker-1 python -c 'from cmp_api.onprem_rollout import configured_platform_registry as r; print(r() is not None)'   # True (worker가 rollout 작업을 만든다)
 docker exec cmp-demo-worker-1 sh -c 'docker version --format "{{.Server.Version}}"; docker buildx version'
 iptables -S DOCKER-USER | grep cmp-build-imds-guard; systemctl is-enabled cmp-build-imds-guard.service   # 규칙 1줄, enabled (티켓 54)
+systemctl is-enabled cmp-build-binfmt.service; docker exec cmp-demo-worker-1 docker buildx inspect default | grep Platforms   # enabled, linux/arm64 포함 (티켓 58)
 docker buildx build --network default --no-cache --progress plain /opt/cmp/releases/<SHA>/infra/demo/imds-probe 2>&1 | grep 'imds_probe token'   # token_put=000 role_list=000, 빌드 성공
 docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-build --query Arn --output text   # .../cmp-demo-control-plane-InstanceRole-.../i-...
 # 티켓 47: pull 전용 토큰(api·worker 모두). worker는 공유 연결 파일을 읽으므로 api가 다시 시작된 뒤에 보인다(B-23)

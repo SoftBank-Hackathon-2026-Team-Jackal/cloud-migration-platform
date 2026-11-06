@@ -70,3 +70,4 @@ result = builder.build("s3://source-bucket/migration-001/<sha256>.tar.gz")
 - 병합 후 입력 경계 정정: `ImageBuilder(context).build(source_uri)`로 소스 산출물 필드는 URI 하나가 됐다. 작업/시도 ID·아키텍처·ECR/로그 설정은 빌더 준비 맥락으로 분리했다. 새 `attempt_id`가 별도 이미지 태그를 사용하고 동일 시도는 재사용하는지 검증했다. 이 수정의 `make check`는 pytest 197개와 Ruff 검사를 통과했다.
 - 후속 [Issue #1](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/1)에서 다중 APPLICATION 대응을 위해 Builder 맥락에 `resource_id`를 추가하고 선택적 소스 S3 Version ID를 공개 호출에 열었다. 위 원래 #17 수용/검증 기록은 당시 범위를 나타내며 후속 변경의 실 AWS 검증을 뜻하지 않는다.
 - 후속 [54](54-build-isolation.md)(#189): 빌드 명령에 `--network default`를 고정하고 `BUILDX_BUILDER`를 지워, `RUN`이 호스트의 IMDS 차단 규칙이 걸린 `docker0`에서만 돈다. 공개 호출(`ImageBuilder`)은 그대로다.
+- 후속 [58](58-multiarch-build.md)(#278): `BuildContext.platforms`(목록)를 받는다. 여러 플랫폼이면 플랫폼마다 같은 내장 builder로 빌드한 뒤 `docker buildx imagetools create`로 매니페스트 목록을 만들고 그 Digest와 `platforms`를 돌려준다. 하나면 이전과 같다. `platform=` 단일 입력도 받는다.

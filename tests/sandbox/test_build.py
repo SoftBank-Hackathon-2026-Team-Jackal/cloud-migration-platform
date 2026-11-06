@@ -82,7 +82,7 @@ def test_a_different_platform_resource_or_source_builds_again():
         [None],
         store=store,
         calls=calls,
-        target=TARGET.model_copy(update={"platform": "linux/arm64"}),
+        target=TARGET.model_copy(update={"platforms": ["linux/arm64"]}),
     )
     run([None], store=store, calls=calls, resource_id="worker")
     assert len(calls) == 3

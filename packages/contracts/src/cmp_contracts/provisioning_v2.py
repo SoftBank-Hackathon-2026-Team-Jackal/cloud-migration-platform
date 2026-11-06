@@ -183,7 +183,17 @@ class ValidatedImageV2(Contract):
     source_ref: S3ArchiveRef
     image_uri: ImageUri
     image_digest: ImageDigest
-    platform: Platform
+    platform: Platform  # the platform the Sandbox validated
+    # Ticket 58: every platform the built image supports (the Build evidence's list). The Plan's
+    # node affinity allows these. Older inputs without it read as `[platform]`.
+    platforms: list[Platform] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def platforms_before_58(cls, data):
+        if isinstance(data, dict) and "platforms" not in data and "platform" in data:
+            data = {**data, "platforms": [data["platform"]]}
+        return data
 
 
 class ProvisioningSpecV2(Contract):

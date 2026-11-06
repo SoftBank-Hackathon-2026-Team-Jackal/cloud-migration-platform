@@ -12,11 +12,11 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 from cmp_contracts.provisioning_v2 import S3ArchiveRef
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _ECR = re.compile(
     r"^(?P<account>[0-9]{12})\.dkr\.ecr\.(?P<region>[a-z0-9-]+)\.amazonaws\.com"
@@ -37,6 +37,51 @@ _MAX_FILES = 20000
 BUILD_NETWORK = "default"
 # Selecting another builder (e.g. a docker-container or remote BuildKit) would leave `docker0`.
 _BUILDER_SELECTORS = ("BUILDX_BUILDER",)
+# Ticket 58: the platforms an image may be built for. One build runs per platform on the daemon's
+# own builder (QEMU/binfmt for the non-native one); several are joined into one manifest list.
+PLATFORMS = ("linux/amd64", "linux/arm64")
+
+
+def parse_platforms(value: str | list[str] | tuple[str, ...]) -> list[str]:
+    """`BUILD_PLATFORM`: one platform or a comma list, in order (the first is the Sandbox's).
+
+    Unknown, repeated or empty entries: `BUILD_PLATFORM_INVALID` (a settings error)."""
+    if isinstance(value, str):
+        parts = value.split(",")
+    else:
+        parts = list(value) if isinstance(value, (list, tuple)) else [value]
+    items = [part.strip() if isinstance(part, str) else part for part in parts]
+    if not items or any(item not in PLATFORMS for item in items) or len(set(items)) != len(items):
+        raise ValueError("BUILD_PLATFORM_INVALID")
+    return items
+
+
+def single_platform_input(data: Any) -> Any:
+    """Reads the pre-58 single `platform` input as `platforms` (old callers keep working)."""
+    if isinstance(data, dict) and "platform" in data and "platforms" not in data:
+        data = dict(data)
+        data["platforms"] = parse_platforms(data.pop("platform"))
+    return data
+
+
+class _Platforms(BaseModel):
+    """`platforms` (ticket 58): the image's platforms, in order. `platform` is the first one."""
+
+    platforms: list[str]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _single_platform(cls, data: Any) -> Any:
+        return single_platform_input(data)
+
+    @field_validator("platforms", mode="before")
+    @classmethod
+    def _valid_platforms(cls, value: Any) -> list[str]:
+        return parse_platforms(value)
+
+    @property
+    def platform(self) -> str:
+        return self.platforms[0]
 
 
 class S3Ref(BaseModel):
@@ -62,7 +107,7 @@ class S3Ref(BaseModel):
         return urlsplit(self.uri).path.lstrip("/")
 
 
-class BuildContext(BaseModel):
+class BuildContext(_Platforms):
     """Execution metadata supplied by orchestration and worker configuration."""
 
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
@@ -70,7 +115,6 @@ class BuildContext(BaseModel):
     resource_id: str
     attempt_id: str
     ecr_repository: str
-    platform: str
     log_bucket: str
 
     @model_validator(mode="after")
@@ -82,21 +126,18 @@ class BuildContext(BaseModel):
             raise ValueError("invalid migration, resource or attempt ID")
         if not _ECR.fullmatch(self.ecr_repository):
             raise ValueError("invalid ECR repository URI")
-        if self.platform not in {"linux/amd64", "linux/arm64"}:
-            raise ValueError("unsupported platform")
         if not _BUCKET.fullmatch(self.log_bucket):
             raise ValueError("invalid log bucket")
         return self
 
 
-class _BuildRequest(BaseModel):
+class _BuildRequest(_Platforms):
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     migration_id: str = Field(min_length=1)
     resource_id: str
     attempt_id: str
     source: S3Ref
     ecr_repository: str
-    platform: str
     log_destination: S3Ref
     # Ticket 47 (B-20): named AWS profile for the `aws` calls (the worker has no global one).
     aws_profile: str | None = None
@@ -110,8 +151,6 @@ class _BuildRequest(BaseModel):
             raise ValueError("invalid migration, resource or attempt ID")
         if not _ECR.fullmatch(self.ecr_repository):
             raise ValueError("invalid ECR repository URI")
-        if self.platform not in {"linux/amd64", "linux/arm64"}:
-            raise ValueError("unsupported platform")
         if not _ARCHIVE.fullmatch(PurePosixPath(self.source.key).name):
             raise ValueError("source archive name must be its SHA-256")
         if self.log_destination.version_id is not None:
@@ -121,14 +160,15 @@ class _BuildRequest(BaseModel):
         return self
 
 
-class BuildOutcome(BaseModel):
+class BuildOutcome(_Platforms):
+    """`image_digest` is the manifest list's when there are several platforms (ticket 58)."""
+
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     migration_id: str
     resource_id: str
     attempt_id: str
     status: str
     source_ref: S3ArchiveRef
-    platform: str
     image_digest: str | None = None
     image_uri: str | None = None
     log: S3Ref | None = None
@@ -374,12 +414,14 @@ def _login(request: _BuildRequest, docker_config: Path) -> dict[str, str]:
     return env
 
 
-def _publish(request: _BuildRequest, context: Path, docker_config: Path, tag: str) -> str:
-    env = _login(request, docker_config)
-    metadata = context.parent / "build-metadata.json"
+def _push_platform(
+    request: _BuildRequest, context: Path, env: dict[str, str], platform: str, tag: str
+) -> str:
+    """One platform's image, built on the daemon's own builder and pushed under `tag`."""
+    metadata = context.parent / f"build-metadata-{platform.replace('/', '-')}.json"
     _run(
         _buildx_command(
-            platform=request.platform,
+            platform=platform,
             context=context,
             image=f"{request.ecr_repository}:{tag}",
             metadata=metadata,
@@ -396,6 +438,54 @@ def _publish(request: _BuildRequest, context: Path, docker_config: Path, tag: st
     if observed != digest:
         raise BuildFailure("ECR_DIGEST_MISMATCH")
     return digest
+
+
+def _platform_tag(tag: str, platform: str) -> str:
+    return f"{tag}-{platform.rsplit('/', 1)[1]}"
+
+
+def _index_platforms(raw: str) -> set[str]:
+    """`os/architecture` of a manifest list's images; attestations (`unknown`) are not images."""
+    try:
+        manifests = json.loads(raw)["manifests"]
+        found = {f"{m['platform']['os']}/{m['platform']['architecture']}" for m in manifests}
+    except (ValueError, KeyError, TypeError):
+        raise BuildFailure("BUILD_INDEX_INVALID") from None
+    return found - {"unknown/unknown"}
+
+
+def _push_index(request: _BuildRequest, env: dict[str, str], digests: list[str], tag: str) -> str:
+    """Ticket 58: join the platform images into one manifest list under `tag`; its digest."""
+    repository = request.ecr_repository
+    _run(
+        ["docker", "buildx", "imagetools", "create", "--progress", "quiet",
+         "--tag", f"{repository}:{tag}", *[f"{repository}@{digest}" for digest in digests]],
+        env=env,
+    )  # fmt: skip
+    digest = _ecr_digest(request, tag)
+    if digest is None:
+        raise BuildFailure("ECR_DIGEST_MISMATCH")
+    raw = _run(
+        ["docker", "buildx", "imagetools", "inspect", "--raw", f"{repository}@{digest}"], env=env
+    ).stdout
+    if _index_platforms(raw) != set(request.platforms):
+        raise BuildFailure("BUILD_INDEX_PLATFORM_MISMATCH")
+    return digest
+
+
+def _publish(request: _BuildRequest, context: Path, docker_config: Path, tag: str) -> str:
+    env = _login(request, docker_config)
+    if len(request.platforms) == 1:  # pre-58 behavior: one image under the tag, no list
+        return _push_platform(request, context, env, request.platform, tag)
+    digests = []
+    for platform in request.platforms:
+        platform_tag = _platform_tag(tag, platform)
+        # ECR tags are immutable: a platform image a failed earlier try pushed is reused.
+        digests.append(
+            _ecr_digest(request, platform_tag)
+            or _push_platform(request, context, env, platform, platform_tag)
+        )
+    return _push_index(request, env, digests, tag)
 
 
 def _upload_log(request: _BuildRequest, record: dict, workspace: Path) -> S3Ref:
@@ -429,7 +519,7 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
     sha = _ARCHIVE.fullmatch(PurePosixPath(request.source.key).name).group("sha")
     identity = (
         f"{request.migration_id}\0{request.resource_id}\0"
-        f"{request.attempt_id}\0{request.platform}\0{sha}"
+        f"{request.attempt_id}\0{','.join(request.platforms)}\0{sha}"
     )
     tag = "cmp-" + hashlib.sha256(identity.encode()).hexdigest()
     digest = None
@@ -462,6 +552,7 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
                     "error_code": error_code,
                     "source_sha256": sha,
                     "platform": request.platform,
+                    "platforms": request.platforms,
                     "digest": digest,
                 },
                 workspace,
@@ -478,7 +569,7 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
             version_id=request.source.version_id,
             sha256=sha,
         ),
-        platform=request.platform,
+        platforms=request.platforms,
         image_digest=digest if not error_code else None,
         image_uri=f"{request.ecr_repository}@{digest}" if digest and not error_code else None,
         log=log,
@@ -500,7 +591,7 @@ class ImageBuilder:
             attempt_id=self.context.attempt_id,
             source=S3Ref(uri=source_uri, version_id=source_version_id),
             ecr_repository=self.context.ecr_repository,
-            platform=self.context.platform,
+            platforms=self.context.platforms,
             log_destination=S3Ref(
                 uri=(
                     f"s3://{self.context.log_bucket}/builds/"
