@@ -44,7 +44,7 @@
 | [26 Sandbox의 비공개 ECR 이미지 pull](../../tickets/analysis-verification/26-sandbox-ecr-pull.md) | DONE (구현 완료, PR 대기, 실제 토큰은 승인 후) | 25, Provisioning 29 (실제 토큰은 승인 필요) | AV-010, AV-011, AV-020 | #197 | ☐ |
 | [27 표준 테스트를 앱 API 모양에 맞추기](../../tickets/analysis-verification/27-standard-test-shapes.md) | IN_PROGRESS (27-A 구현·k3d 확인 완료, 27-B 구현 완료·실제 Claude와 k3d 확인 대기) | 12, 22, 24 (D-09 재정의 결정됨) | AV-012 | #199 | ☐ |
 | [28 보안 측정 모델과 원본 측정(데모 4행)](../../tickets/analysis-verification/28-security-measure.md) | IN_PROGRESS (28-A·28-B 구현·자동 테스트 완료, 실제 계정 확인·템플릿 반영 남음) | 04, 06, 07, 19 (병합됨) | AV-023 | 미생성 | ☐ |
-| [29 보안 동등 판정·약점 표시·승인 게이트 연결](../../tickets/analysis-verification/29-security-judge.md) | IN_PROGRESS (29-A 판정·표시 구현·자동 테스트 완료, 29-B 승인 연결은 D-17·상헌 합의 후) | 28, 08B, D-17(정책) | AV-023, AV-022 | 미생성 | ☐ |
+| [29 보안 동등 판정·약점 표시·승인 게이트 연결](../../tickets/analysis-verification/29-security-judge.md) | IN_PROGRESS (29-A·29-B 구현·자동 테스트 완료, 상헌 승인 화면·API 합의와 정책 P-12 검토 남음) | 28, 08B, D-17(정책) | AV-023, AV-022 | 미생성 | ☐ |
 | [30 Sandbox 보안 프로브](../../tickets/analysis-verification/30-security-probes.md) | IN_PROGRESS (DB 접근 프로브 구현·자동 테스트 완료, 실제 k3d 확인 남음. 평문 DB·운영 경로 프로브와 Skill은 후속) | 12, 13, 24, 28, D-18 | AV-023, AV-012, AV-013 | 미생성 | ☐ |
 | [31 Fixer가 상황에 맞는 Skill을 필요할 때 불러 쓰게 연결](../../tickets/analysis-verification/31-fixer-skills.md) | IN_PROGRESS (구현·자동 테스트 완료, 실제 Claude 확인 남음) | 14A, 20 (병합됨) | AV-007, AV-015, AV-020 | 미발행(사용자 발행 후 기록) | ☐ |
 

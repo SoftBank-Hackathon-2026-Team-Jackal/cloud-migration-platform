@@ -45,6 +45,7 @@ class AnalysisWorkflow:
                 "analysis_ref": None,
                 "pending": None,
                 "items": [],
+                "security": [],
                 "blocked": [],
                 "rejections": list(self.early_rejections),
             }
@@ -63,11 +64,16 @@ class AnalysisWorkflow:
 
     async def _review(self, report: dict, requirements) -> dict:
         rows = report["mapping"]
-        if not rows:
+        # Ticket 29-B: a security level that goes down is a loss to approve, like a lost feature.
+        # Patched so a run that started before it keeps the behaviour its history recorded.
+        security = (
+            report.get("security_judgements") if workflow.patched("security-gate-v1") else None
+        )
+        if not rows and not any(j["verdict"] == "LOWER" for j in security or []):
             return {"report": report, "requirements": requirements, "review": None}
         # Stop here until a person confirms required features and approves losses.
         # There is no timeout: a missing decision never turns into an approval.
-        self.gate = ReviewGate(report["ref"], rows)
+        self.gate = ReviewGate(report["ref"], rows, security=security)
         await workflow.wait_condition(lambda: self.gate.finished)
         if self.gate.phase == "BLOCKED":
             raise ApplicationError(

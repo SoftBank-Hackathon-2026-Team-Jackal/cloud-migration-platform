@@ -32,6 +32,15 @@ SUGGESTIONS = {
     "DB_TRANSPORT_ENCRYPTION": "REQUIRE_DB_SSL",
     "ADMIN_API_EXPOSURE": "BLOCK_ADMIN_PATHS_AT_ENTRY",
 }
+# What can prove each criterion. A cluster-internal protection can be shown in the Sandbox; what
+# crosses the external network (TLS at the entry, which paths the entry lets through) cannot, and
+# is judged from what the target declares and measured again after the deploy.
+PROOF = {
+    "EXTERNAL_HTTPS": "POST_DEPLOY",
+    "DB_ACCESS_SCOPE": "SANDBOX",
+    "DB_TRANSPORT_ENCRYPTION": "SANDBOX",
+    "ADMIN_API_EXPOSURE": "POST_DEPLOY",
+}
 _RANK = {"UNPROTECTED": 1, "PARTIAL": 2, "PROTECTED": 3}
 _WEAK = {"UNPROTECTED", "PARTIAL"}
 

@@ -460,4 +460,6 @@ class AnalysisPipeline:
             "mapping": [r.model_dump(mode="json") for r in report.mapping],
             "report_ref": self._put(report, data.migration_id, "analysis-report"),
             "commit": source["commit"],
+            # Ticket 29-B: the approval gate reads these (the stored report has the same).
+            "security_judgements": [j.model_dump(mode="json") for j in judgements],
         }
