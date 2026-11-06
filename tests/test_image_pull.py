@@ -315,15 +315,34 @@ def test_agent_gets_a_token_for_its_running_and_live_job_only(db, store, built, 
     assert minter.calls == [REGISTRY, REGISTRY]
 
 
-def test_refresh_stops_once_a_newer_revision_is_approved(db, store, built, configured, client):
+def test_refresh_follows_the_revision_that_is_actually_deployed(
+    db, store, built, configured, client
+):
+    """Ticket 52 (D17, C-14): an approved newer Revision does not stop the refresh of the one
+    still running; a newer READY Revision does. After 51 restores a failed Revision, the
+    earlier READY job keeps its pull token fresh."""
     http, minter = client
     job = queued(db, store, built[1]["ecr"])
     claim(db)
     finish(db, job.job_id)
-    queued(db, store, built[1]["ecr"], revision=2)
-    response = http.get(f"/agents/agent-a/jobs/{job.job_id}/image-pull", headers=headers())
+    path = f"/agents/agent-a/jobs/{job.job_id}/image-pull"
+    newer = queued(db, store, built[1]["ecr"], revision=2)
+    assert http.get(path, headers=headers()).status_code == 200  # rev2 not deployed yet
+    claim(db)
+    finish(db, newer.job_id, "FAILED", "WORKLOAD_NOT_READY")  # 51 restored rev1
+    assert http.get(path, headers=headers()).status_code == 200
+    failed = f"/agents/agent-a/jobs/{newer.job_id}/image-pull"
+    assert http.get(failed, headers=headers()).status_code == 404
+    third = queued(db, store, built[1]["ecr"], revision=3)
+    claim(db)
+    finish(db, third.job_id)
+    response = http.get(path, headers=headers())
     assert (response.status_code, response.json()["detail"]) == (404, "IMAGE_PULL_NOT_FOUND")
-    assert minter.calls == []
+    assert (
+        http.get(f"/agents/agent-a/jobs/{third.job_id}/image-pull", headers=headers()).status_code
+        == 200
+    )
+    assert minter.calls == [REGISTRY] * 3
 
 
 def test_failed_job_and_public_job_get_no_token(db, store, built, configured, client):

@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 import httpx
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -111,8 +112,15 @@ def main():
     parser.add_argument("--context", required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--agent-image", required=True, help="imported local tag, e.g. x:dev")
-    parser.add_argument("--probe-image", required=True, help="digest-pinned, e.g. postgres@sha256:")
+    parser.add_argument(
+        "--probe-image",
+        help="digest-pinned, e.g. postgres@sha256:; omitted: the Chart default (ticket 52, D12)",
+    )
     args = parser.parse_args()
+    chart_default = yaml.safe_load((ROOT / "infra/helm/onprem-agent/values.yaml").read_text())[
+        "networkPreflight"
+    ]["image"]
+    probe_image = args.probe_image or chart_default
     if args.kubeconfig.resolve() == (Path.home() / ".kube/config").resolve():
         raise ValueError("Dedicated kubeconfig required")
     if not args.context.startswith("k3d-cmp-"):
@@ -230,7 +238,7 @@ def main():
     evidence = {"cluster": {"context": args.context, "node": node}, "scenarios": {}}
     scenarios = evidence["scenarios"]
     try:
-        for document in manifests(args.probe_image, password):
+        for document in manifests(probe_image, password):
             kubectl("apply", "-f", "-", content=json.dumps(document))
         for secret, value in (("source-db-auth", password), ("source-db-bad", "wrong-" + password)):
             kubectl("create", "secret", "generic", secret, "-n", PROBE_NS,
@@ -252,8 +260,10 @@ def main():
             "image": {"repository": repository, "tag": tag, "digest": "", "pullPolicy": "Never"},
             "idleSeconds": 2,
             "tunnel": {"enabled": False},
-            "networkPreflight": {"image": args.probe_image},
         }  # fmt: skip
+        if args.probe_image:  # ticket 52: without it the install relies on the Chart default
+            values["networkPreflight"] = {"image": args.probe_image}
+        evidence["probe_image"] = {"value": probe_image, "chart_default": not args.probe_image}
         values_file = args.state_dir / "agent-values.json"
         values_file.write_text(json.dumps(values))
         values_file.chmod(0o600)
