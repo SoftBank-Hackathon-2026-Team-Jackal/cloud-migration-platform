@@ -363,3 +363,99 @@ class PlanEvents:
 
 
 PlanReadyEvents = PlanEvents  # ticket 24 name
+
+
+# ---- ON_PREM rollout (ticket 63): Agent job → provision.resource / provision.check ----
+
+# Agent `verify()` order: PVC·workloads·endpoints → pg_isready → app health (web check names).
+ONPREM_CHECKS = ("pods_ready", "db_connect", "app_health")
+ONPREM_CHECK_OF_CODE = {
+    "PVC_NOT_BOUND": "pods_ready",
+    "WORKLOAD_MISSING": "pods_ready",
+    "WORKLOAD_NOT_READY": "pods_ready",
+    "SERVICE_ENDPOINT_NOT_READY": "pods_ready",
+    "IMAGE_PULL_FAILED": "pods_ready",
+    "DATABASE_NOT_READY": "db_connect",
+    "APPLICATION_HEALTH_FAILED": "app_health",
+}
+
+
+def onprem_resources(job: dict) -> list[dict]:
+    """What the approved Revision's Agent job deploys (names only): Namespace, NetworkPolicies
+    when approved, DB release, App release. Ids are per job, so per Plan Revision."""
+    job_id, ns = job["job_id"], job["namespace"]
+    items = [("namespace", "cluster", f"Namespace {ns}")]
+    if job.get("network_policies"):
+        items.append(("network-policies", "network", f"NetworkPolicy {ns}"))
+    items.append(("database", "db", f"PostgreSQL {job['database']['release']}"))
+    items.append(("application", "app", f"App {job['application']['release']}"))
+    return [{"id": f"{job_id}:{part}", "key": key, "name": name} for part, key, name in items]
+
+
+def dispatch_failed_resource(job_id: str) -> list[dict]:
+    """Nothing was queued (RolloutError): one Agent-job block carries the failure code."""
+    return [{"id": f"{job_id}:rollout", "key": "agent", "name": "Agent rollout job"}]
+
+
+@dataclass(frozen=True)
+class OnPremRolloutEvents:
+    """Web events of one ON_PREM Agent job. The Agent reports one result per job (no
+    per-resource progress), so: every resource `running` when queued, then on READY each
+    `done` with progress n/m (the last one 100) and every check `done`; otherwise every
+    resource `failed` with the result code in `detail`, plus the check that code belongs to.
+
+    Keys hold the job id (one per Plan Revision) and the state, and ignore the Activity
+    attempt, so a retried or repeated execution of the same Revision adds no duplicates."""
+
+    migration_id: str
+    job_id: str
+    resources: tuple[dict, ...]
+
+    def _resource(self, item: dict, state: str, progress: float, detail: str | None = None):
+        data = {**item, "state": state, "progress": progress}
+        if detail is not None:
+            data["detail"] = detail
+        emit_event(
+            self.migration_id,
+            "provision.resource",
+            PHASE,
+            "failed" if state == "failed" else "running",
+            data,
+            progress=progress,
+            idempotency_key=f"onprem:{item['id']}:{state}",
+            across_retries=True,
+        )
+
+    def _check(self, name: str, state: str, progress: float) -> None:
+        emit_event(
+            self.migration_id,
+            "provision.check",
+            PHASE,
+            "failed" if state == "failed" else "running",
+            {"name": name, "state": state},
+            progress=progress,
+            idempotency_key=f"onprem:{self.job_id}:check:{name}:{state}",
+            across_retries=True,
+        )
+
+    def started(self) -> None:
+        for item in self.resources:
+            self._resource(item, "running", 0)
+
+    def finished(self, result: dict) -> None:
+        code = str(result.get("code") or "UNKNOWN")
+        if result.get("status") == "SUCCEEDED" and code == "READY":
+            total = len(self.resources)
+            for done, item in enumerate(self.resources, start=1):
+                self._resource(item, "done", round(100 * done / total, 1))
+            for name in ONPREM_CHECKS:
+                self._check(name, "done", 100)
+        else:
+            for item in self.resources:
+                self._resource(item, "failed", 0, detail=code)
+            failed = ONPREM_CHECK_OF_CODE.get(code)
+            if failed is not None:
+                for name in ONPREM_CHECKS[: ONPREM_CHECKS.index(failed)]:
+                    self._check(name, "done", 0)
+                self._check(failed, "failed", 0)
+        log_result(self.migration_id, "execute_on_prem_plan", result)
