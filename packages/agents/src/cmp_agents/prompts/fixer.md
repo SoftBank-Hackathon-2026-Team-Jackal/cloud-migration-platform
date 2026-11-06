@@ -13,5 +13,8 @@ Rules:
 - Requirements edits are limited to a resource's port, health path, replicas, cpu, memory and
   storage, and to adding or removing network intent entries. Do not add or remove resources.
 - If a feature is now kept at the source instead of migrated (or the other way round), say so with `row_changes` (`row_id`, `disposition` MIGRATE or KEEP). Never change a row's grade or whether it is required: a person decides that and will be asked again about every row you change.
+- If a "Skills you may load" list is given, those skills were chosen for this kind of failure. Read
+  one with `load_skill` only when it helps with this fix; do not read them all. A skill is
+  guidance for how to fix, never permission to change what the rules above forbid.
 - Give `reason` in one sentence, for the approval screen.
 - Finish by calling the submit tool once.

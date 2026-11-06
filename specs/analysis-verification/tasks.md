@@ -46,6 +46,7 @@
 | [28 보안 측정 모델과 원본 측정(데모 4행)](../../tickets/analysis-verification/28-security-measure.md) | IN_PROGRESS (28-A·28-B 구현·자동 테스트 완료, 실제 계정 확인·템플릿 반영 남음) | 04, 06, 07, 19 (병합됨) | AV-023 | 미생성 | ☐ |
 | [29 보안 동등 판정·약점 표시·승인 게이트 연결](../../tickets/analysis-verification/29-security-judge.md) | DRAFT | 28, 08B, D-17(정책) | AV-023, AV-022 | 미생성 | ☐ |
 | [30 Sandbox 보안 프로브](../../tickets/analysis-verification/30-security-probes.md) | DRAFT | 12, 13, 24, 28, D-18 | AV-023, AV-012, AV-013 | 미생성 | ☐ |
+| [31 Fixer가 상황에 맞는 Skill을 필요할 때 불러 쓰게 연결](../../tickets/analysis-verification/31-fixer-skills.md) | IN_PROGRESS (구현·자동 테스트 완료, 실제 Claude 확인 남음) | 14A, 20 (병합됨) | AV-007, AV-015, AV-020 | 미발행(사용자 발행 후 기록) | ☐ |
 
 ## 선행 관계
 

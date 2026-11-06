@@ -1,0 +1,11 @@
+# When the Fixer is offered a skill (ticket 31). The Fixer reads a skill only if it is chosen here
+# for the failure at hand: `failure_classes` (empty = SPEC, CODE and BUILD) and `reason_patterns`
+# (regular expressions searched in each reason code of the failure). Add a rule with the skill it
+# belongs to. `test-authoring` is the Tester's and is never offered to the Fixer.
+triggers:
+  # A call the Sandbox blocked: a host missing from the network intent, or a migrated service
+  # still called at its source address.
+  - skill: network
+    reason_patterns:
+      - "^EGRESS_BLOCKED:"
+      - "^MIGRATE_SOURCE_CALLED:"
