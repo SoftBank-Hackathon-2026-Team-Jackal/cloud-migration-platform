@@ -1,12 +1,10 @@
-<div align="center">
-
 <p align="center"><b>English</b> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a></p>
+
+<div align="center">
 
 # Cloud Migration Platform
 
-### Move a running EKS app and its database — without stopping it, at the same security level
-
-To on-premises (K3s) or another cloud — AI analyzes it and tries it in a sandbox first, and only a human-approved configuration is deployed.
+A platform for moving an app and its PostgreSQL database running on AWS EKS to on-premises K3s or another cloud.
 
 ![Python](https://img.shields.io/badge/Python_3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -19,51 +17,40 @@ To on-premises (K3s) or another cloud — AI analyzes it and tries it in a sandb
 
 </div>
 
-<!-- TODO: web E2E recording (GIF, or an mp4 dropped into the GitHub editor) -->
-<p align="center"><i>Demo recording goes here — one migration in the web UI, from analysis to traffic shift</i></p>
+<!-- TODO: web E2E recording (GIF or mp4) -->
 
----
+## Overview
 
-## At a glance
+In the web UI, the user connects a GitHub repository, a `.env` file, and an AWS account, and picks what to migrate. The platform does the rest:
 
-| The challenge's question | Our answer |
-| --- | --- |
-| Can a running app move to another environment **without stopping**? | The database catches up through logical replication, then writes pause only for milliseconds at cutover. Traffic moves in steps (10→50→100%) and rolls back automatically on trouble |
-| Can security and governance stay **at the same level everywhere**? | We extract "who connects to whom" from the source security groups and manifests, and rebuild it in the target as NetworkPolicy: deny by default, open only the paths the app used |
-| On-premises, how do you reproduce **what the cloud gave you for free**? | An Agent in the user's cluster deploys while only connecting outward (polling + WireGuard), so no inbound port is opened. Load balancers and managed DBs become standard building blocks |
-| How far can **AI be trusted** to inspect and fix? | AI tests and fixes only inside a sandbox with outbound traffic blocked. Production gets only the Revision a human approved, and the approved image and config digests are re-checked at run time |
+1. It reads the source code, the EKS manifests, and the AWS resources to work out what the app depends on.
+2. It builds an image and runs it in an isolated sandbox. If a test fails, AI (Claude) fixes the cause and runs the tests again.
+3. It creates a deployment plan for the target environment and deploys it once a person approves it. For on-premises targets, an Agent installed in the user's cluster does the deployment.
+4. It copies the database with logical replication, then pauses writes briefly to switch over. Traffic is moved in steps.
 
-## Why we built it
+We paid particular attention to keeping the source's security settings during the move. The platform extracts which components talk to each other from the source security groups and manifests, and recreates that in the target as NetworkPolicy that denies by default and opens only the needed paths.
 
-An app that ran well in the cloud **quietly gets weaker** the moment it moves. Security groups disappear, managed databases and load balancers are gone, and nobody remembers which ports had to be open. So migrations are usually matched by hand, piece by piece, and the service is often stopped while it moves.
-
-We turned this into one flow: **analyze → verify → approve → execute**. People only make decisions; everything that can be checked, the platform checks.
-
----
-
-## How it flows
+## How it runs
 
 <p align="center">
   <img src="docs/readme/temporal-flow.en.svg" alt="One migration in 10 steps, from analysis to done" width="100%">
 </p>
 
-One migration is one [Temporal](https://temporal.io) workflow, `MigrationWorkflow`. Whether it takes days, the server restarts, or it waits for a human approval, it never loses its state and continues from where it stopped.
+Each migration runs as a single [Temporal](https://temporal.io) workflow, `MigrationWorkflow`. Some steps take a long time (waiting for approval, for example) and the server may restart in the meantime, which is why we chose Temporal: the workflow resumes from where it stopped, based on its history.
 
-| Building block | In this platform |
+| Component | In this repository |
 | --- | --- |
-| **Workflow** — order and waiting | `MigrationWorkflow` calls child workflows in turn (analysis · sandbox · approval · data · traffic). After a restart it replays its history and continues |
-| **Activity** — the real outside work | clone, AWS reads, buildx, kubectl·Helm, DB writes. Failures are retried automatically, so each one is safe to run twice |
-| **Worker** — polls a queue and runs code | `worker` on the platform VM serves six queues; `relay-worker` on the relay server serves `relay-1` |
-| **Signal · Query** — the human link | approval `approve`, DB cutover `switchover`, rollback·retry / state `status` |
+| Workflow | `MigrationWorkflow` runs analysis, sandbox, approval, data, and traffic as child workflows, in order |
+| Activity | Anything that talks to the outside world: git clone, AWS calls, buildx, kubectl and Helm, database work. Retried automatically on failure |
+| Worker | The `worker` container on the platform VM handles six task queues; `relay-worker` on the relay server handles `relay-1` |
+| Signal · Query | Approval (`approve`), DB cutover (`switchover`), traffic rollback and retry / status (`status`) |
 
-Every step emits progress events (`analysis.*` `sandbox.*` `plan.*` `provision.*` `data.*` `traffic.*` `cutover.*`), and the web UI receives them live from `GET /migrations/{id}/events` (SSE).
+Each step stores progress events (`analysis.*`, `sandbox.*`, `plan.*`, `provision.*`, `data.*`, `traffic.*`, `cutover.*`), and the web UI reads them from `GET /migrations/{id}/events` (SSE).
 
----
-
-## Feature flows
+## Steps
 
 <details open>
-<summary><b>① Connect and analyze</b> — find out what has to move</summary>
+<summary><b>1. Connect and analyze</b></summary>
 
 ```mermaid
 flowchart TB
@@ -79,14 +66,14 @@ flowchart TB
   R --> AI[Claude mapping<br/>fit to standard resources]
 ```
 
-- The AWS account is connected through a **read-only role** created with CloudFormation; the scope is chosen per EKS namespace and workload.
-- `.env` values are encrypted once; analysis reads **key names only**.
-- The result is an **intermediate spec**: what the app uses (DB, config, exposure, connections) and how each maps to our standard resources (as-is / must change).
+- The AWS account is connected through a read-only role created with CloudFormation. The scope is chosen per EKS namespace and workload.
+- `.env` is stored encrypted; analysis only looks at the key names.
+- The analysis result (the intermediate spec) lists the database, configuration, exposure, and connections the app uses, and how each maps to the platform's standard resources.
 
 </details>
 
 <details>
-<summary><b>② Build the image</b> — pin the same source to the same image</summary>
+<summary><b>2. Build the image</b></summary>
 
 ```mermaid
 flowchart LR
@@ -96,13 +83,13 @@ flowchart LR
   ECR -->|sha256 digest| NEXT[later steps refer to the image only by digest]
 ```
 
-- During the build, the instance metadata service (credentials) is blocked, so user code cannot steal platform permissions.
-- Sandbox and production use the **same digest**, so the image that was tested is the image that ships.
+- Images are built for amd64 and arm64 with buildx on the platform VM's Docker and pushed to ECR. Access to instance metadata is blocked during the build so user code cannot read the platform's credentials.
+- Later steps refer to the image by digest rather than by tag, so the image tested in the sandbox is the one that gets deployed.
 
 </details>
 
 <details>
-<summary><b>③ Sandbox verification</b> — AI runs it first and fixes it</summary>
+<summary><b>3. Sandbox verification</b></summary>
 
 ```mermaid
 flowchart LR
@@ -113,13 +100,15 @@ flowchart LR
   T -->|fail| FX[AI Fixer] -->|up to 3 times| RD
 ```
 
-- Sandbox and production use the **same renderer** (`shared_deployment_v2`).
-- AI changes things freely only in this isolated space, and every fix must pass the tests again before moving on.
+- Each run gets a temporary namespace in a k3d cluster on the platform VM, with outbound traffic blocked. It is cleaned up after two hours.
+- The standard tests are a health check, a database write then read, and data surviving a restart. AI-generated tests are added on top.
+- On failure, the Fixer changes the setup, then it is rendered and tested again, up to three attempts.
+- The sandbox and the real deployment use the same renderer (`shared_deployment_v2`).
 
 </details>
 
 <details>
-<summary><b>④ Plan and approval</b> — a human approves a plan fitted to the target</summary>
+<summary><b>4. Deployment plan and approval</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -133,13 +122,13 @@ sequenceDiagram
   WF->>WF: re-check the approved digest at run time
 ```
 
-- **NetworkPolicy** built from connection intent: deny everything by default, open only the paths the source used, such as app → DB.
-- An approval is valid for one Revision only; if the digest differs at run time (`ARTIFACT_DIGEST_MISMATCH`), nothing is deployed.
+- Based on the target profile (on-premises, AWS, or GCP), the platform builds the namespace, NetworkPolicy, database, and app configuration and stores it as a Revision.
+- Approval is given per Revision. If the image digest at deploy time differs from the approved one, deployment stops with `ARTIFACT_DIGEST_MISMATCH`.
 
 </details>
 
 <details>
-<summary><b>⑤ On-premises provisioning</b> — deploy into the user's cluster without opening a port</summary>
+<summary><b>5. On-premises deployment</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -150,17 +139,19 @@ sequenceDiagram
   AG->>API: register WireGuard public key → tunnel IP
   RL->>API: sync peer list
   AG-->>RL: outbound handshake (no inbound port on the user side)
-  AG->>API: poll — receive the approved job
+  AG->>API: poll: receive the approved job
   AG->>AG: Namespace → NetworkPolicy → DB → App
   AG->>API: report progress → pod · DB · app · through-tunnel health checks
 ```
 
-- The user installs the Agent Helm chart **once**. On failure it restores the previous Revision.
+- The user installs the Agent Helm chart once. The Agent enrolls with a one-time token and only makes outbound connections to the platform.
+- The Agent also opens the WireGuard tunnel to the relay server, so no port has to be opened on the user's network.
+- The Agent polls for approved jobs, deploys the namespace, NetworkPolicy, database, and app in that order, and reports back. On failure it rolls back to the previous Revision.
 
 </details>
 
 <details>
-<summary><b>⑥ Data replication and DB cutover</b> — writes barely stop</summary>
+<summary><b>6. Data replication and DB cutover</b></summary>
 
 ```mermaid
 flowchart LR
@@ -171,12 +162,14 @@ flowchart LR
   PB --> SW[target becomes the writer]
 ```
 
-- Cross-cloud check (EKS→GKE): writes paused for **83 ms**, row counts and checksums matched, zero app write errors.
+- The schema and initial data are copied first, then logical replication catches up on changes.
+- Cutover happens after a second approval. Writes are paused in PgBouncer, sequences are synced, row counts and checksums are compared, and the target becomes the writer.
+- In our EKS to GKE test, writes were paused for 83 ms and row counts and checksums matched.
 
 </details>
 
 <details>
-<summary><b>⑦ Traffic shift</b> — move in steps, roll back on trouble</summary>
+<summary><b>7. Traffic shift</b></summary>
 
 ```mermaid
 flowchart LR
@@ -188,9 +181,10 @@ flowchart LR
   G -->|fail| RB[automatic rollback → source 100%]
 ```
 
-</details>
+- The Envoy weights on the relay server move to 10%, 50%, then 100%. At each step the platform checks request count, failures, and latency, and rolls back to the source if a threshold is crossed.
+- Rollback and retry can also be triggered from the web UI.
 
----
+</details>
 
 ## Architecture
 
@@ -231,83 +225,89 @@ flowchart TB
   ENV -->|tunnel| K3S
 ```
 
-## Cloud services we use
+## Cloud services
 
 | Cloud | Services | Used for |
 | --- | --- | --- |
-| AWS | EC2 · SSM · CloudFormation | running the platform and relay, SSH-less deploys, connection-role templates |
-| AWS | EKS · IAM roles and access entries · CloudTrail · VPC | read-only source analysis, a separate least-privilege role for data migration |
-| AWS | ECR · S3 | digest-pinned images, source bundles and logs |
-| Google Cloud | GKE · Terraform | cloud targets and cross-cloud data migration checks |
-| On-premises | K3s · Helm · WireGuard | Agent deployment, outbound-only tunnel |
+| AWS | EC2, SSM, CloudFormation | Running the platform and relay server, deployment, connection role templates |
+| AWS | EKS, IAM (roles, access entries), CloudTrail, VPC | Read-only source analysis, a separate role for data migration |
+| AWS | ECR, S3 | Built images, source bundles and build logs |
+| Google Cloud | GKE, Terraform | Cloud targets, data migration testing |
+| On-premises | K3s, Helm, WireGuard | Agent deployment, tunnel |
 
-## Where AI is used, and its guardrails
+## Use of AI
 
-| Where | What | Guardrail |
-| --- | --- | --- |
-| Analysis | Maps the source setup to standard resources | Every judgment keeps its evidence (file:line), and a human reviews it in the plan preview |
-| Sandbox | Generates tests, fixes failures (Fixer) | Only in a temporary space with outbound traffic blocked; a fix must pass the tests again |
-| Everywhere | Claude calls | Cost caps enforced in code ($3 per migration · $20 per day · $100 per month) and a usage ledger. The model receives only masked evidence snippets — never `.env` values or the whole codebase ([ADR-004](docs/decisions/ADR-004.md)) |
+We use Claude in three places:
 
-## What works today
+- Analysis: mapping the source setup to the platform's standard resources. Each decision keeps its evidence (file and line), and a person reviews it in the plan preview.
+- Sandbox: writing tests and fixing failed ones. This only runs inside the sandbox, where outbound traffic is blocked.
+- Cost and data: spending caps of $3 per migration, $20 per day, and $100 per month are enforced in code. The model only receives masked snippets of evidence, never `.env` values or the full codebase. See [ADR-004](docs/decisions/ADR-004.md).
 
-> What the demo shows is not a mockup — it runs on the demo server. Parts still in progress are marked as such.
+## Current status
 
-| Stage | Status |
+What runs on the demo server today:
+
+| Step | Status |
 | --- | --- |
-| Connection · scope selection, analysis, image build, sandbox verification | ✅ Runs for real on the demo server |
-| Plan · approval, on-premises provisioning (Agent · tunnel) | ✅ Runs for real — app and DB deployed to the user's K3s, all four checks passing |
-| Traffic shift | 🟡 Being verified in real runs — entry into the stepped weight shift confirmed |
-| Data replication · DB cutover | 🟡 Verified cross-cloud (EKS→GKE) · on-premises path in progress ([ADR-007](docs/decisions/ADR-007.md)) |
+| Connection and scope selection, analysis, image build, sandbox verification | Working |
+| Deployment plan and approval, on-premises deployment (Agent and tunnel) | Working. Confirmed up to deploying the app and database to the user's K3s |
+| Traffic shift | Being verified. Confirmed in a real run up to the start of the stepped shift |
+| Data replication and DB cutover | Verified for EKS to GKE. The on-premises path is in progress ([ADR-007](docs/decisions/ADR-007.md)) |
 
-## Technical decisions we thought hard about
+## Design decisions
 
-- **Never lose a long-running job** — Temporal survives hours-long approval waits and server restarts. When code changes while migrations are running, patch markers separate old runs from new ones ([ADR-001](docs/decisions/ADR-001.md)).
-- **Deploy only what was verified** — sandbox and production share the image digest and the renderer, and the approved digest is re-checked at run time ([ADR-003](docs/decisions/ADR-003.md)).
-- **Never punch holes on the user's side** — the on-prem Agent and its tunnel only connect outward. The data tunnel direction follows the same rule ([ADR-007](docs/decisions/ADR-007.md)).
-- **Never leak secrets** — `.env` is stored encrypted and only referenced afterwards; Agent and approver tokens are stored as digests only.
-- **Split permissions** — the source connection is a read-only role; data migration uses a separate role limited to two namespaces.
+- Why Temporal, and how we change code while workflows are running: [ADR-001](docs/decisions/ADR-001.md)
+- Reusing the sandbox-verified image digest for the production deployment: [ADR-003](docs/decisions/ADR-003.md)
+- How source and target environments are connected (AWS role delegation, a fixed GCP project): [ADR-005](docs/decisions/ADR-005.md)
+- Why traffic is shifted through an Envoy relay: [ADR-006](docs/decisions/ADR-006.md)
+- Why the on-premises data path enters through a gateway on the source side: [ADR-007](docs/decisions/ADR-007.md)
 
-## How the team worked
+Secrets are kept out of the repository, events, and logs. `.env` is stored encrypted and only referenced afterwards, and Agent and approver tokens are stored as hashes.
 
-- Decisions live in **7 ADRs** and per-area specs (`specs/`); work was split into **136 tickets** (`tickets/`) that record alternatives, the reason for each choice, and the checks done.
-- Every change went through branch → PR → CI (ruff, about **3,000** pytest tests) → squash merge; about 160 PRs are merged.
-- Each area (analysis·verification / provisioning / data migration / traffic / web) had an owner, and areas agreed through `packages/contracts` and the event schema.
+## How we worked
 
----
+- Decisions are recorded in 7 ADRs under `docs/decisions/` and in per-area specs (`specs/`). Work was split into 136 tickets under `tickets/`, each noting the alternatives considered, the reason for the choice, and how it was checked.
+- Every change went through a PR and was squash-merged after CI (ruff and about 3,000 pytest tests). About 160 PRs have been merged so far.
+- Ownership was split into analysis and verification, provisioning, data migration, traffic, and web. Interfaces between areas are defined in `packages/contracts` and the event schema.
 
 ## Repository layout
 
-| Path | Role |
+| Path | Contents |
 | --- | --- |
-| `apps/api` | FastAPI — start·read·approve migrations, connections, Agent·tunnel, events (SSE), report |
-| `apps/worker` | Temporal workflows · activities · workers |
-| `packages/contracts` | Contracts — events, task queues, input models |
-| `packages/scanners` | Code · manifest · AWS analysis |
-| `packages/agents` | AI mapping · test generation · Fixer |
+| `apps/api` | FastAPI: start, read, and approve migrations; connections; Agent and tunnel; events (SSE); report |
+| `apps/worker` | Temporal workflows, activities, and workers |
+| `packages/contracts` | Event, task queue, and input model definitions |
+| `packages/scanners` | Code, manifest, and AWS analysis |
+| `packages/agents` | AI mapping, test generation, Fixer |
 | `packages/testsuite` | Sandbox test runner |
-| `packages/providers` | Renderer, NetworkPolicy, per-target provisioning, on-prem Agent·tunnel |
-| `packages/data` | Data replication · DB cutover |
-| `packages/traffic` | Envoy config · traffic shift |
+| `packages/providers` | Renderer, NetworkPolicy, per-target deployment, on-premises Agent and tunnel |
+| `packages/data` | Data replication and DB cutover |
+| `packages/traffic` | Envoy configuration and traffic shift |
 | `infra/` | Demo server, Agent Helm chart, relay server, connection templates, Terraform |
-| `docs/` · `specs/` · `tickets/` | Design decisions, specs, work records |
+| `docs/`, `specs/`, `tickets/` | Design decisions, specs, work records |
 
-## Getting started
+## Running locally
 
-Requirements: Python 3.11, [uv](https://docs.astral.sh/uv/), Docker Compose. Full local setup, Agent enrollment, and a file-by-file guide are in the [development guide](docs/development.md) (Korean).
+You need Python 3.11, [uv](https://docs.astral.sh/uv/), and Docker Compose. Full instructions, Agent enrollment, and a file-by-file guide are in the [development guide](docs/development.md) (in Korean).
 
 ```bash
 cp .env.example .env
 make setup
 make infra-up    # PostgreSQL, Temporal
 make workers     # in another terminal
-make api         # in another terminal → http://localhost:8000/docs
+make api         # in another terminal, then open http://localhost:8000/docs
 ```
 
-## Further reading
+## Documentation
 
 Most design documents are written in Korean.
 
-[Development guide](docs/development.md) · [Design decisions (ADR)](docs/decisions/) · [Temporal guide](docs/architecture/temporal-flow.md) · [Events guide](docs/engineering/events-guide.md) · [`.env` reference guide](docs/engineering/env-file-guide.md) · [On-prem Agent install·operations](specs/provisioning/onprem-agent-install.md) · [Demo server operations](infra/demo/README.md)
+- [Development guide](docs/development.md)
+- [Design decisions (ADR)](docs/decisions/)
+- [Temporal guide](docs/architecture/temporal-flow.md)
+- [Events guide](docs/engineering/events-guide.md)
+- [`.env` reference guide](docs/engineering/env-file-guide.md)
+- [On-premises Agent installation and operation](specs/provisioning/onprem-agent-install.md)
+- [Demo server operation](infra/demo/README.md)
 
 <!-- TODO: team -->
