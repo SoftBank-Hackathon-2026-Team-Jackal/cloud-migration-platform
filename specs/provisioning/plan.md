@@ -240,7 +240,8 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 | ON_PREM 새 Revision 정착 실패 | 그 Release만 직전 `deployed` Revision으로 rollback·고착 Pod 정리 후 `FAILED <원인>`. 다음 Revision은 그대로 적용, `failed`로 남은 Release는 검사 후 복원·재적용(51) |
 | Image Pull 오류 | Digest·Registry 인증·Node 아키텍처 진단, READY 금지 |
 | PostgreSQL PVC Pending | StorageClass·CSI·용량·Pod 이벤트 확인, READY 금지 |
-| Agent 연결 끊김 | 작업 ID·Agent 상태 유지, 재연결 후 조회. 중복 제출 억제 |
+| Agent 연결 끊김 | 작업 ID·Agent 상태 유지, 재연결 후 조회. 중복 제출 억제. 승인 실행 대기 한도까지 시작하지 못한 작업은 `EXPIRED`로 닫고 `FAILED AGENT_OFFLINE`(늦게 돌아온 Agent가 실행하지 않음), 운영자 취소는 `CANCELLED`(52) |
+| ON_PREM 배포 정리 | 자동 정리 없음. 운영자가 `POST /agent-admin/jobs/{rollout_job_id}/teardown`으로 정리 작업을 만든다. 기본은 Release·플랫폼 Secret·NetworkPolicy만 지우고 PVC·DB 비밀번호·Namespace를 남긴다. `delete_data`면 PVC·Namespace까지 지운다(52) |
 | 헬스·DB·외부 접근 실패 | 실패 검사와 실제 리소스 상태 반환, Data/Traffic 진행 차단 |
 | Migration 실패 종료·강제 종료 | 실패 코드·단계·세부 코드 보존, 웹 `error` 이벤트, 상태 API·SSE는 Temporal 실행 상태 반영(티켓 49) |
 | claim 응답 유실·complete 실패 | 같은 승인 Workflow 실행의 claim 재시도는 다시 `CLAIMED`(`claimed_by`), complete는 6시간까지 재시도 뒤 `UNKNOWN`/`EXECUTION_RECORD_FAILED`(티켓 49) |

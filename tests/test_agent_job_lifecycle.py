@@ -130,7 +130,9 @@ def test_claim_refuses_a_queued_job_past_its_deadline(db, store, setup):
     with db() as session:
         result = outcome(session.get(AgentJob, JOB))
     assert (result["status"], result["code"]) == ("FAILED", "JOB_EXPIRED")
-    assert {"JOB_EXPIRED", "JOB_CANCELLED", "AGENT_OFFLINE"} <= PRECONDITION_CODES
+    assert {"JOB_EXPIRED", "JOB_CANCELLED", "AGENT_OFFLINE", "TEARDOWN_IN_PROGRESS"} <= (
+        PRECONDITION_CODES
+    )
 
 
 def test_claim_tells_the_agent_how_long_it_may_still_start(db, store, setup):

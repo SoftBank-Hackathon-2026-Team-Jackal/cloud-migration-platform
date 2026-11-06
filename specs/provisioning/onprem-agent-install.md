@@ -45,6 +45,8 @@ helm install cmp-agent oci://ghcr.io/softbank-hackathon-2026-team-jackal/charts/
 - 공개 여부 확인(로그인 없이 토큰·manifest 조회): `uv run python scripts/check_agent_package_access.py --version <X.Y.Z>` — 둘 다 `PUBLIC`이면 종료 코드 0, 비공개면 `PRIVATE`와 1. 수동으로는 `curl -s "https://ghcr.io/token?scope=repository:softbank-hackathon-2026-team-jackal/cmp-onprem-agent:pull"`가 토큰을 주고 그 토큰으로 `GET https://ghcr.io/v2/softbank-hackathon-2026-team-jackal/cmp-onprem-agent/manifests/<X.Y.Z>`가 200이어야 한다.
 
 - 플랫폼 인증서가 사설 CA로 서명됐다면 `--set-file platform.caBundle=ca.crt`를 더한다(Agent는 `SSL_CERT_FILE`로 신뢰한다). HTTP는 허용하지 않는다(H7).
+- **HTTPS 프록시 뒤(52, C-08):** `--set proxy.https=http://<proxy>:<port>`를 더하면 `agent`·`tunnel` 컨테이너에 `HTTPS_PROXY`/`https_proxy`와 `NO_PROXY`/`no_proxy`가 들어간다. `proxy.noProxy` 기본값은 `localhost,127.0.0.1,.svc,.cluster.local,10.42.0.0/16,10.43.0.0/16`(K3s 기본 Pod·Service CIDR)이라 클러스터 API와 Service는 프록시를 거치지 않는다. 클러스터 CIDR을 바꿨다면 `proxy.noProxy`도 맞춘다. TLS 검사 프록시는 그 CA를 `platform.caBundle`에 넣는데, `SSL_CERT_FILE`은 시스템 신뢰 목록을 대체하므로 플랫폼 인증서 체인의 CA도 함께 넣는다. WireGuard(UDP)는 HTTP 프록시를 지나지 않는다(§7).
+- Network Preflight 검사 이미지는 Chart 기본값(공식 `postgres` 16 alpine, Digest 고정)이라 따로 줄 값이 없다(§4).
 - 첫 실행에서 Agent가 등록하고 자격 증명을 `cmp-system/cmp-agent-credential` Secret(Helm 관리 밖)에 저장한 뒤 `cmp-agent-enrollment` Secret을 지운다(H5).
 - `helm upgrade` 때는 `enrollmentToken`을 비워 둔다. 자격 증명은 업그레이드로 바뀌지 않는다.
 
@@ -61,25 +63,36 @@ kubectl -n cmp-system logs deploy/cmp-onprem-agent
 
 - 작업이 없으면 `idleSeconds`(기본 10초)마다 폴링하고, 작업을 처리하면 바로 다시 폴링한다.
 - 플랫폼 요청 실패와 Kubernetes 접속 불가는 1→2→4…초, 최대 60초 간격으로 재시도한다.
-- 401/403(폐기·잘못된 자격 증명, 거절된 등록 토큰)은 종료 코드 2로 멈춘다. Pod는 재시작되지만 같은 이유로 다시 멈춘다.
-- SIGTERM을 받으면 진행 중인 Helm 단계가 끝난 뒤 종료한다. `terminationGracePeriodSeconds`(기본 960초)는 Agent의 Helm 단계 상한(900초)보다 길다. 그래도 강제 종료돼 Release가 `pending-*`로 남으면 다음 수신 때 `UNKNOWN INSPECTION_REQUIRED`로 보고하고 자동 재적용하지 않는다(12, 시한·정리는 52).
+- 401/403(폐기·잘못된 자격 증명, 거절된 등록 토큰)이면 `stopped` 로그를 한 번 남기고 **프로세스를 끝내지 않고 대기한다**(52, C-09). 플랫폼에 다시 요청하지 않고 재시작 반복도 없다. Pod는 `Running`으로 보이므로 로그로 확인하고 `helm uninstall`한다(§5). SIGTERM을 받으면 종료 코드 2로 끝난다.
+- 작업은 시한 안에만 시작한다(52). claim 응답의 남은 시간이 지났으면 클러스터를 바꾸기 전에 `FAILED JOB_EXPIRED`로 보고한다. 플랫폼도 시한이 지난 작업은 주지 않는다. 그래서 Agent가 오래 꺼져 있다 돌아와도 이미 끝난 승인 실행의 배포를 하지 않는다.
+- 한 번에 작업 하나를 처리한다. 대기 중인 정리 작업은 다른 작업보다 먼저 받는다(52 D10).
+- SIGTERM을 받으면 진행 중인 Helm 단계가 끝난 뒤 종료한다. `terminationGracePeriodSeconds`(기본 960초)는 Agent의 Helm 단계 상한(900초)보다 길다. 그래도 강제 종료돼 Release가 `pending-*`로 남으면 다음 수신 때 `UNKNOWN INSPECTION_REQUIRED`로 보고하고 자동 재적용하지 않는다(12). Helm 잠금은 사람이나 다른 도구가 잡고 있을 수도 있어 Agent가 버려진 잠금으로 확정하지 않는다(52 D20). §6 수동 복구 또는 정리 작업(상태와 무관하게 uninstall)을 쓴다.
 - 새 Revision이 `--helm-timeout`(기본 5분) 안에 정착하지 않으면 그 Release를 직전 `deployed` Revision으로 되돌리고 `FAILED <원인 코드>`를 보고한다. 되돌림이 끝날 때까지 한 단계가 최대 약 두 배의 시한을 쓴다. 이전 Agent가 `failed`로 남긴 Release는 다음 배포가 먼저 복원한다(51).
 - Deployment는 replica 1, `Recreate` 전략이라 교체 중 두 Agent가 함께 작업하지 않는다.
 
 ## 4. 권한 (H2)
 
-ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create(list는 17 터널 전달 대상 찾기), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·`--wait`·검사 동사, ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기, `pods` delete(51: 실패 Revision에 묶인 Ready가 아닌 DB Pod 정리), `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경하지 않는다(`NAMESPACE_NOT_OWNED`).
+ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create/delete(list는 17 터널 전달 대상 찾기, delete는 52 정리 작업의 `delete_data`), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·삭제·검사 동사(get/list/create/update/patch/delete), ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기(get/list), `pods` delete(51: 실패 Revision에 묶인 Ready가 아닌 DB Pod 정리), `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). `watch`는 없다(52: 51 이후 Agent가 Helm `--wait` 없이 직접 기다린다). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기와 Namespace 삭제 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경·삭제하지 않는다(`NAMESPACE_NOT_OWNED`). RBAC는 라벨로 범위를 좁힐 수 없고, Agent가 Namespace마다 Role을 만들려면 자기 권한 이상을 줄 수 없어(권한 상승 방지) 같은 클러스터 권한이나 `escalate`가 필요하다. 그래서 대상 Namespace를 설치 때 미리 선언하는 Namespace 한정 모드는 후속으로 둔다(52 D16).
 
-**Network Preflight (MNP-01 N3, #51):** `networkPreflight.image`(Digest 고정, 예 `postgres@sha256:…`)를 주면 ClusterRole에 `pods` create/delete와 `pods/log` get만 추가되고 Agent가 `NETWORK_PREFLIGHT` 작업을 실행한다. 비우면(기본) 이 권한이 없고 작업은 `PREFLIGHT_NOT_CONFIGURED`로 거절된다. 검사 Pod는 복제 Namespace의 일반 Pod 한 개와 같은 노드의 읽기 전용 `hostNetwork` Pod(`ip route get`만) 한 개이며, 끝나면 지운다. Agent는 `cmp.dev/environment-id` 주석이 있는 Namespace에서만 만든다(없으면 Pod를 만들지 않고 `NAMESPACE_NOT_OWNED`). Pod 생성 권한은 클러스터 범위라 `hostNetwork` Pod도 만들 수 있다(K3s 기본에는 Pod Security 제한이 없다). 이미 클러스터 전체 Secret·`pods/exec` 권한이 있어 신뢰 범위가 크게 늘지는 않지만, 필요 없으면 비워 둔다. 허용 이미지는 `networkPreflight.allowedImages`(비우면 `image` 하나)이며 작업이 이미지를 고를 수 없다.
+**Network Preflight (MNP-01 N3, #51):** `networkPreflight.image`는 기본값이 `docker.io/library/postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab`(공식 postgres 16.15-alpine3.24 multi-arch, amd64·arm64, 52 D12)다. 그래서 기본 설치에서 ClusterRole에 `pods` create/delete와 `pods/log` get이 추가되고 Agent가 `NETWORK_PREFLIGHT` 작업을 실행한다. Docker Hub에 닿지 못하는 곳은 같은 이미지를 미러에 올리고 그 Digest로 덮어쓴다. `--set networkPreflight.image=""`로 비우면 이 권한이 없고 작업은 `PREFLIGHT_NOT_CONFIGURED`로 거절된다. 검사 Pod는 복제 Namespace의 일반 Pod 한 개와 같은 노드의 읽기 전용 `hostNetwork` Pod(`ip route get`만) 한 개이며, 끝나면 지운다. Agent는 `cmp.dev/environment-id` 주석이 있는 Namespace에서만 만든다(없으면 Pod를 만들지 않고 `NAMESPACE_NOT_OWNED`). Pod 생성 권한은 클러스터 범위라 `hostNetwork` Pod도 만들 수 있다(K3s 기본에는 Pod Security 제한이 없다). 이미 클러스터 전체 Secret·`pods/exec` 권한이 있어 신뢰 범위가 크게 늘지는 않지만, 필요 없으면 비워 둔다. 허용 이미지는 `networkPreflight.allowedImages`(비우면 `image` 하나)이며 작업이 이미지를 고를 수 없다.
 
 ```yaml
 networkPreflight:
-  image: postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+  image: <mirror>/postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab  # 미러를 쓸 때만
 ```
 
 이 작업 유형은 `agent-v0.2.0` 이후 Agent에만 있다. 이전 Agent는 `FAILED UNSUPPORTED_JOB`으로 보고하고 Worker는 `UNKNOWN`/`AGENT_JOB_UNSUPPORTED`로 끝낸다(시작 차단).
 
 ## 5. 폐기·제거
+
+배포한 앱·DB를 먼저 지우려면 Agent가 살아 있을 때 정리 작업을 만든다(52). `<rollout_job_id>`는 상태 조회(`GET /provisioning/plans/<plan>/revisions/<rev>/rollout`)의 `job_id`다.
+
+```bash
+curl -sS -X POST https://<platform>/agent-admin/jobs/<rollout_job_id>/teardown -H "X-Enrollment-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' -d '{"delete_data": false}'
+curl -sS https://<platform>/agent-admin/jobs/<teardown_job_id> -H "X-Enrollment-Admin-Key: $ADMIN_KEY"   # status/code
+```
+
+`delete_data: false`(기본)는 Helm Release, 플랫폼이 만든 Secret(DB 비밀번호 제외)·NetworkPolicy·ECR pull Secret을 지우고 DB PVC·DB 비밀번호 Secret·Namespace를 남긴다. 같은 environment로 다시 배포하면 데이터를 이어 쓴다. `delete_data: true`는 DB PVC와 Namespace(사용자가 넣은 Secret 포함)까지 지운다. 되돌릴 수 없다. 대기 중인 작업은 `POST /agent-admin/jobs/<job_id>/cancel`로 취소한다.
 
 ```bash
 curl -sS -X POST https://<platform>/agent-admin/agents/<agent-id>/revoke -H "X-Enrollment-Admin-Key: $ADMIN_KEY"
@@ -87,12 +100,12 @@ helm uninstall cmp-agent -n cmp-system
 kubectl delete namespace cmp-system
 ```
 
-폐기된 Agent는 모든 Agent API에서 403이다. `tunnel` 컨테이너는 터널 인터페이스를 지우고 종료 코드 2로 멈추며, 중계 서버 목록에 `revoked: true`로 남아 중계 서버가 peer를 지운다. 남은 작업은 지우지 않으며 승인 실행 Activity가 대기 한도 뒤 `UNKNOWN AGENT_OFFLINE`을 반환한다. `cmp-agent-credential`·`cmp-agent-wireguard` Secret은 Helm이 관리하지 않으므로 Namespace 삭제로 지운다. 배포한 앱·DB Namespace는 그대로 남는다.
+폐기된 Agent는 모든 Agent API에서 403이다. `agent`·`tunnel` 컨테이너는 `stopped AGENT_UNAUTHORIZED`를 남기고(터널은 인터페이스를 지운 뒤) 대기한다. 재시작 반복 없이 `helm uninstall`까지 그대로 있다(52). 중계 서버 목록에 `revoked: true`로 남아 중계 서버가 peer를 지운다. 남은 작업은 지우지 않으며, 승인 실행 Activity는 대기 한도 뒤 시작되지 않은 작업을 `EXPIRED`로 닫고 `FAILED AGENT_OFFLINE`을 반환한다. `cmp-agent-credential`·`cmp-agent-wireguard` Secret은 Helm이 관리하지 않으므로 Namespace 삭제로 지운다. 정리 작업 없이 폐기하면 배포한 앱·DB Namespace는 그대로 남는다(직접 `helm uninstall`·`kubectl delete namespace`).
 
 ## 6. 복구가 필요한 경우
 
 - 등록 직후 자격 증명 저장 전에 Agent가 중단되면 토큰은 이미 사용돼 다시 쓸 수 없다. 로그가 `ENROLLMENT_REJECTED`로 멈추면 새 `agent_id`로 토큰을 다시 발급해 설치한다.
-- `cmp-agent-credential`이 지워졌다면 같은 방법으로 새 Agent를 등록하고 이전 Agent는 폐기한다.
+- `cmp-agent-credential`이 지워졌다면 같은 방법으로 새 Agent를 등록하고 이전 Agent는 폐기한다. 진행 중 Migration은 새 `agent_id`로 Plan을 다시 게시해야 한다. 같은 `agent_id`의 자격 재발급 API는 설계만 있고 후속이다(52 D15).
 - 배포가 `UNKNOWN ROLLBACK_FAILED` 또는 `UNKNOWN INSPECTION_REQUIRED`로 멈췄다면(51): Agent가 작업 중이 아닌지 로그로 확인한 뒤 상태를 본다.
 
   ```bash

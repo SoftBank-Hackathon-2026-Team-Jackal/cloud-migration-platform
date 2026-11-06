@@ -21,7 +21,10 @@ helm install cmp-agent oci://ghcr.io/softbank-hackathon-2026-team-jackal/charts/
 | `enrollmentToken` | `""` | 첫 설치에만. `helm upgrade` 때는 비운다 |
 | `image.repository` / `digest` / `tag` | 릴리스가 Digest 고정 | `tag`는 로컬 빌드용 |
 | `imagePullSecrets` | `[]` | 비공개 레지스트리 pull Secret 이름 목록(`- name: cmp-agent-ghcr`). Agent Pod에만 적용. Chart는 Secret을 만들지 않는다 (42) |
-| `networkPreflight.image` / `allowedImages` | `""` / `[]` | Network Preflight 검사 이미지(Digest 고정) |
+| `networkPreflight.image` / `allowedImages` | 공식 `postgres` 16.15-alpine Digest / `[]` | Network Preflight 검사 이미지(Digest 고정). 기본값으로 바로 동작하며 `""`이면 끈다 (52) |
+| `proxy.https` / `http` / `noProxy` | `""` / `""` / K3s 기본 CIDR·`.svc` | 플랫폼 호출용 HTTPS 프록시. 설정하면 두 컨테이너에 `HTTPS_PROXY`·`NO_PROXY`(대소문자 둘 다)를 넣는다 (52) |
 | `tunnel.enabled` / `mode` / `intervalSeconds` | `true` / `auto` / `15` | WireGuard 터널 컨테이너 (17) |
+
+ClusterRole에는 `watch`가 없고, 정리 작업(`ENVIRONMENT_TEARDOWN`)을 위해 Namespace delete가 있다. 폐기된 Agent는 재시작 반복 없이 대기한다(52).
 
 검증 규칙은 `values.schema.json`, 렌더 테스트는 `tests/test_onprem_agent_chart.py`에 있다.

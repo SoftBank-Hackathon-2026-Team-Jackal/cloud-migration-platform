@@ -81,3 +81,6 @@ Blocked by: 15(DONE). 29와는 파일만 이웃한다(29의 `cmp-ecr-pull`은 �
 - [x] 익명 pull 점검 스크립트·릴리스 단계
 - [x] 로컬 k3d 인증 pull
 - [ ] GHCR 공개 전환과 익명 설치 확인(승인 뒤)
+
+## 후속 (52)
+- 52 후속(#187): Chart 기본 `networkPreflight.image`는 GHCR이 아니라 공개 Docker Hub의 공식 postgres Digest다. `imagePullSecrets`는 검사 Pod에 적용되지 않는 점은 그대로다. [52](52-agent-job-lifecycle.md) D12.

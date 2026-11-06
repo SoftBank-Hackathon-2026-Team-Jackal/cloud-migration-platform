@@ -84,3 +84,6 @@ Blocked by: 13, 16, 17, 23 (DONE)
 - [x] 수용 기준과 Test Seam 확인
 - [x] 관련 테스트 통과와 회귀 확인
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영 (shared-contracts·onprem-shared-deployment·13·16·OpenAPI, ADR 변경 없음)
+
+## 후속 (52)
+- 52 후속(#187): 폐기된 Agent의 `tunnel`은 대기 상태로 보고를 멈추므로 인계는 이 티켓의 `TUNNEL_STATUS_STALE` 규칙대로 막힌다(변경 없음). [52](52-agent-job-lifecycle.md) D14.
