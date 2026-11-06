@@ -11,7 +11,7 @@ SECTIONS = [
     "## 수정 패턴",
     "## 테스트 패턴",
 ]
-NAMES = ["k8s-workload", "db-postgres", "network", "config-env"]
+NAMES = ["k8s-workload", "db-postgres", "network", "config-env", "test-authoring"]
 
 
 @pytest.mark.parametrize("name", NAMES)

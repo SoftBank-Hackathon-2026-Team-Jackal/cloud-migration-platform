@@ -8,8 +8,10 @@ never enter Workflow history; logs are masked and stored by reference.
 import json
 import re
 import shutil
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,8 +27,10 @@ from cmp_contracts.verification import BuildAttempt, canonical_requirements
 from cmp_providers.ecr_pull import EcrTokenMinter, PlatformRegistry
 from cmp_providers.env_file import EnvFileStore
 from cmp_scanners.masking import mask_text
+from cmp_scanners.routes import scan_go_routes
 from cmp_testsuite import SuiteResult, load_bundle, run_suite
 from cmp_testsuite.model import HttpStep
+from cmp_testsuite.record import RECORDED_PREFIX, Fetch, record_probe
 from cmp_testsuite.runner import run_case
 from cmp_testsuite.validate import CaseRunner, pin_suite, validate_tests
 from pydantic import BaseModel, ConfigDict
@@ -147,6 +151,29 @@ def make_proxy_case_runner(
     return open_runner
 
 
+def make_proxy_fetcher(
+    service: SandboxService,
+) -> Callable[[SandboxPlan], AbstractContextManager[Fetch]]:
+    """GET one path of the Sandbox application through `kubectl proxy` (for recording answers)."""
+
+    @contextmanager
+    def open_fetcher(plan: SandboxPlan) -> Iterator[Fetch]:
+        app = next(r for r in plan.request["resources"] if r["kind"] == "APPLICATION")
+        with service.cluster.proxy() as proxy:
+            base = proxy + service.service_path(plan, app["id"])
+
+            def fetch(path: str) -> tuple[int, bytes]:
+                try:
+                    with urllib.request.urlopen(base + path, timeout=15) as response:
+                        return response.status, response.read()
+                except urllib.error.HTTPError as exc:
+                    return exc.code, exc.read()
+
+            yield fetch
+
+    return open_fetcher
+
+
 class SandboxLoopActivities:
     def __init__(
         self,
@@ -166,12 +193,19 @@ class SandboxLoopActivities:
         env_store: EnvFileStore | None = None,
         pull_registry: PlatformRegistry | None = None,
         token_minter: EcrTokenMinter | None = None,
+        target_fetcher: Callable[[SandboxPlan], AbstractContextManager[Fetch]] | None = None,
+        reset_data: Callable[[SandboxPlan], Any] | None = None,
+        skills_root: Path | str | None = None,
     ) -> None:
+        self.target_fetcher = target_fetcher or make_proxy_fetcher(service)  # ticket 27-B
+        self.reset_data = reset_data  # default: the service's own, looked up when needed
+        self.skills_root = Path(skills_root) if skills_root else None  # where `test-authoring` is
         self.pull_registry = pull_registry  # ticket 26: private platform ECR images
         self.token_minter = token_minter
         self.env_store = env_store  # ENV-06: key names and PASS values by reference
         self.suite_uploader = suite_uploader
-        # The origin test resource (D-09) has no default: without it AI tests are never requested.
+        # The origin test resource (D-09) has no default. Without it the Tester is still asked, but
+        # only for shapes and probes: tests whose expected values need no outside answer (27-B).
         self.origin_case_runner = origin_case_runner
         self.target_case_runner = target_case_runner or make_proxy_case_runner(service)
         self.cut_dependency = cut_dependency or service.database_cut
@@ -345,7 +379,10 @@ class SandboxLoopActivities:
         return {
             **base,
             "verdict": verdict.model_dump(mode="json"),
-            "results": [{"id": r.id, "status": r.status} for r in suite.results],
+            "results": [
+                {"id": r.id, "status": r.status, **({"reason": r.reason} if r.reason else {})}
+                for r in suite.results
+            ],  # a reason is a code (status numbers, field names), never response content
         }
 
     @activity.defn(name="sbx_classify")
@@ -428,12 +465,13 @@ class SandboxLoopActivities:
     async def sbx_ai_tests(self, payload: dict) -> dict:
         """Ask the Tester for tests and keep only those that pass the four conditions (AV-012).
 
-        Without an origin test resource (D-09) or a model, nothing is asked and the suite stays.
+        The Tester reads the source and proposes write shapes and read-only probes with citations;
+        it does not write expected values. Shapes become property tests, probes are asked of the
+        app twice and kept as recorded tests, and a free-form test is only taken when an origin
+        test resource can vouch for it (ticket 27-B). Without a model nothing is asked.
         """
         suite_ref = ArtifactRef.model_validate(payload["suite_ref"])
         same = {"suite_ref": suite_ref.model_dump(mode="json"), "accepted": [], "rejected": {}}
-        if self.origin_case_runner is None:
-            return {**same, "status": "NOT_CALLED", "reason": "ORIGIN_UNAVAILABLE"}
         if self.llm_factory is None:
             return {**same, "status": "NOT_CALLED", "reason": "LLM_NOT_CONFIGURED"}
         suite = load_bundle(self.store.get(suite_ref))
@@ -443,6 +481,8 @@ class SandboxLoopActivities:
             for step in c.steps
             if isinstance(step, HttpStep)
         }
+        workspace = (payload.get("input", {}).get("source") or {}).get("workspace")
+        source = Path(workspace) if workspace and Path(workspace).is_dir() else None
         report = self._report(payload.get("analysis_report_ref"))
         usages = report.usage_profile.usages if report else []
         generated = generate_tests(
@@ -450,27 +490,51 @@ class SandboxLoopActivities:
                 usage_summary="\n".join(usages) or "(none)",
                 api_routes=routes,
                 existing_ids=[c.id for c in suite.cases],
+                http_routes=scan_go_routes(source) if source else [],
+                workspace=source,
+                skills_root=self.skills_root,
+                origin_available=self.origin_case_runner is not None,
             ),
             llm=self.llm_factory(payload["migration_id"], "tester"),
         )
         if generated.status != "GENERATED":
             return {**same, "status": "FAILED", "reason": generated.failure_reason}
         plan = SandboxPlan.model_validate(payload["plan"])
-        with self.origin_case_runner() as origin, self.target_case_runner(plan) as target:
+        rejected: dict[str, str] = {}
+        recorded = []
+        if generated.probes:
+            # Recorded first, on the data the Sandbox starts with: later cases write.
+            with self.target_fetcher(plan) as fetch:
+                for probe in generated.probes:
+                    result = record_probe(probe, fetch, sensitive=lambda t: mask_text(t) != t)
+                    if result.case is None:
+                        rejected[f"{RECORDED_PREFIX}{probe.id}"] = result.reason or "RECORD_FAILED"
+                    else:
+                        recorded.append(result.case)
+        origin = self.origin_case_runner() if self.origin_case_runner else nullcontext(None)
+        with origin as origin_runner, self.target_case_runner(plan) as target:
             validation = validate_tests(
-                generated.cases,
+                [*recorded, *generated.cases],
                 target=target,
-                origin=origin,
+                origin=origin_runner,
                 cut_dependency=lambda: self.cut_dependency(plan),
+                workspace=source,
             )
-        rejected = {v.case_id: v.reason for v in validation.verdicts if not v.accepted}
-        if not validation.accepted:
+        accepted = list(validation.accepted)
+        rejected.update({v.case_id: v.reason for v in validation.verdicts if not v.accepted})
+        if any(c.basis == "RECORDED" for c in accepted):
+            try:  # the checks above wrote data; the recorded answers belong to the baseline
+                (self.reset_data or self.service.reset_test_data)(plan)
+            except SandboxError:
+                rejected.update({c.id: "RESET_FAILED" for c in accepted if c.basis == "RECORDED"})
+                accepted = [c for c in accepted if c.basis != "RECORDED"]
+        if not accepted:
             return {**same, "status": "NONE_ACCEPTED", "rejected": rejected}
-        _pinned, data = pin_suite(f"{suite.name}+ai", suite.cases, validation.accepted)
+        _pinned, data = pin_suite(f"{suite.name}+ai", suite.cases, accepted)
         ref = self.store.put(data, ref_id="suite-ai", kind="test-suite")
         return {
             "status": "PINNED", "suite_ref": ref.model_dump(mode="json"),
-            "accepted": [c.id for c in validation.accepted], "rejected": rejected,
+            "accepted": [c.id for c in accepted], "rejected": rejected,
         }  # fmt: skip
 
     # ------------------------------------------------------------------ publication

@@ -304,7 +304,7 @@ NetworkPolicy(Sandbox 워커 생성):
 | 역할 | 세션 | 도구 | 금지 |
 | --- | --- | --- | --- |
 | Mapper | A | 증거 조회, 카탈로그·Skill 읽기 | 비밀 값, 원본 쓰기 |
-| Tester | B(분리) | 사용 프로필·API 목록 읽기 | Fixer 수정 내용 보기 |
+| Tester | B(분리) | 사용 프로필·API 목록·소스의 라우트 목록 읽기, 소스 조각 읽기(`get_snippet`, 비밀 파일 제외), `test-authoring` Skill | Fixer 수정 내용 보기, 기대값 작성(쓰기 모양·읽기 요청만 제안) |
 | Fixer | A | 작업 공간 diff 제안, 로그·보고서 읽기, 요구사항·intent 패치 제안 | 테스트 수정, Production 자격 증명 |
 
 - 에이전트끼리 대화하지 않는다. Workflow가 결과물만 넘긴다.
@@ -331,7 +331,7 @@ NetworkPolicy(Sandbox 워커 생성):
 | --- | --- | --- |
 | `get_evidence`, `list_call_sites`, `get_snippet` | Mapper·Fixer | 스캔 결과 조회(마스킹본). 17번 이후 코드 색인 조회로 확장 |
 | `get_catalog_entry`, `load_skill` | 전 역할 | 카탈로그 항목, Skill 지침·예시 읽기 |
-| `get_usage_profile`, `list_routes` | Tester | 사용 프로필·API 목록 |
+| `get_usage_profile`, `list_routes`, `get_snippet` | Tester | 사용 프로필·API 목록, 소스의 번호 붙은 몇 줄(비밀 마스킹, `.env`·키 파일 거부) |
 | `get_attempt_report` | Fixer | 실패한 시도의 판정 이유·테스트 결과·로그 요약 |
 | `propose_requirements_patch` | Fixer | `RequirementsV2`·intent 수정안(검증 후 적용) |
 | `propose_code_patch` | Fixer | 작업 공간 diff. 테스트 묶음 경로·`.env`·인증 파일은 거부 |
@@ -555,7 +555,7 @@ Production 롤백은 이 기능 범위가 아니다. Sandbox는 정리가 곧 �
 | D-06 | 소스·테스트 묶음 버킷 소유·정리 규칙 | 플랫폼 소유 버킷, 실행 종료 후 N일 | 민서·승철 |
 | D-07 | 첫 사이클 지원 언어 | 승철이 결정(데모 앱은 그 언어에 맞춤) | 승철 |
 | D-08 | Sandbox 기반 클러스터 준비 주체·시점 | **결정됨** — 로컬 k3d `cmp-sandbox`(Colima) | 승철 |
-| D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | 미해결. 없으면 `validate_tests`가 `ORIGIN_UNAVAILABLE`로 AI 테스트를 모두 거절하므로 표준 테스트만 쓴다 | 승철·소울 |
+| D-09 | AI 테스트 1번 조건용 원본 쪽 테스트 자원 | **재정의됨(2026-11-06, 티켓 27-B)**: 필수가 아니다. 속성 테스트와 기록 테스트는 소스 근거 확인으로 채택하고, 모델이 정한 리터럴 기대값만 원본 자원이 있어야 쓴다(없으면 `ORIGIN_UNAVAILABLE`). 원본 자원은 있으면 추가 검증 | 승철·소울 |
 | D-10 | Production 테스트 묶음 실행 시점·데이터 정리 | 데이터 이전 후·트래픽 전환 전 | 민서·소울·상헌 |
 | D-11 | DB 이미지를 고르는 "대상 구성 단계"의 소유자, Sandbox·Production 공유 방식 | 요구사항엔 이미지 없음(#22). 원본 이미지는 분석 결과에 정보로 | 민서 |
 | D-12 | Build 호출 Worker(권한 배치)·전체 시간 상한 | `resource_id`·`source_version_id`는 구현됨. 함수 호출 유지 | 민서 |

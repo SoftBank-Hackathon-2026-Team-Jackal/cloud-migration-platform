@@ -33,6 +33,8 @@ def test_submitted_scenarios_become_ai_cases():
 def test_the_session_input_has_no_place_for_fixer_output_and_is_masked():
     assert {f.name for f in dataclasses.fields(SuiteRequest)} == {
         "usage_summary", "api_routes", "existing_ids",
+        # ticket 27-B: what the Tester may read; none of it carries a Fixer change
+        "http_routes", "workspace", "skills_root", "origin_available",
     }  # fmt: skip
     llm = FakeLLMClient([LLMResponse(tool_calls=[call("submit_tests", cases=[case()])])])
     generate_tests(data(), llm=llm)
