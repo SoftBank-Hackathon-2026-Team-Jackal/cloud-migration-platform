@@ -13,3 +13,27 @@ cmp.dev/managed: "true"
 {{ .Values.image.repository }}:{{ .Values.image.tag }}
 {{- end -}}
 {{- end -}}
+
+{{/* Ticket 52 (D13): proxy variables in both spellings (Python urllib and Go/kubectl). */}}
+{{- define "agent.proxyEnv" -}}
+{{- with .Values.proxy }}
+{{- if .https }}
+- name: HTTPS_PROXY
+  value: {{ .https | quote }}
+- name: https_proxy
+  value: {{ .https | quote }}
+{{- end }}
+{{- if .http }}
+- name: HTTP_PROXY
+  value: {{ .http | quote }}
+- name: http_proxy
+  value: {{ .http | quote }}
+{{- end }}
+{{- if or .https .http }}
+- name: NO_PROXY
+  value: {{ .noProxy | quote }}
+- name: no_proxy
+  value: {{ .noProxy | quote }}
+{{- end }}
+{{- end }}
+{{- end }}

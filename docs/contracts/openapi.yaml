@@ -655,6 +655,130 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/jobs/{job_id}:
+    get:
+      tags:
+      - on-premises agents
+      summary: Show Job
+      operationId: show_job_agent_admin_jobs__job_id__get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentJobView'
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/jobs/{job_id}/cancel:
+    post:
+      tags:
+      - on-premises agents
+      summary: Cancel
+      description: 'QUEUED → CANCELLED (never runs). RUNNING → cancel requested: downloads
+        stop and a reclaim
+
+        closes it as UNKNOWN; a Helm step already in progress finishes and is reported.'
+      operationId: cancel_agent_admin_jobs__job_id__cancel_post
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentJobView'
+        '404':
+          description: Not Found
+        '409':
+          description: Code only, e.g. JOB_ALREADY_FINISHED
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/jobs/{job_id}/teardown:
+    post:
+      tags:
+      - on-premises agents
+      summary: Teardown
+      description: 'Queue the removal of what rollout job `job_id` deployed (Helm
+        Releases, platform
+
+        Secrets/NetworkPolicies; with `delete_data` also the DB PVC and the Namespace).'
+      operationId: teardown_agent_admin_jobs__job_id__teardown_post
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeardownRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentJobView'
+        '409':
+          description: Code only, e.g. JOB_ALREADY_FINISHED
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/approvers:
     post:
       tags:
@@ -1676,6 +1800,48 @@ components:
       - last_seen_at
       - revoked
       title: AgentAdminStatus
+    AgentJobView:
+      properties:
+        job_id:
+          type: string
+          title: Job Id
+        mode:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mode
+        agent_id:
+          type: string
+          title: Agent Id
+        status:
+          type: string
+          enum:
+          - QUEUED
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - UNKNOWN
+          - EXPIRED
+          - CANCELLED
+          title: Status
+        code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+        cancel_requested:
+          type: boolean
+          title: Cancel Requested
+      additionalProperties: false
+      type: object
+      required:
+      - job_id
+      - mode
+      - agent_id
+      - status
+      - code
+      - cancel_requested
+      title: AgentJobView
     AgentList:
       properties:
         agents:
@@ -2106,11 +2272,18 @@ components:
           - $ref: '#/components/schemas/QueuedWork'
           - $ref: '#/components/schemas/ProductionRolloutJob'
           - $ref: '#/components/schemas/NetworkPreflightJob'
+          - $ref: '#/components/schemas/TeardownJob'
           title: Payload
         status:
           type: string
           const: RUNNING
           title: Status
+        expires_in_seconds:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Expires In Seconds
       additionalProperties: false
       type: object
       required:
@@ -4070,6 +4243,8 @@ components:
           - READY
           - FAILED
           - UNKNOWN
+          - EXPIRED
+          - CANCELLED
           title: State
         code:
           anyOf:
@@ -4317,6 +4492,95 @@ components:
       - access_ref
       - capabilities_ref
       title: TargetSelectionV2
+    TeardownJob:
+      properties:
+        mode:
+          type: string
+          const: ENVIRONMENT_TEARDOWN
+          title: Mode
+        job_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Job Id
+        source_job_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Source Job Id
+        environment_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Environment Id
+        agent_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+        namespace:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Namespace
+        releases:
+          items:
+            type: string
+            maxLength: 53
+            minLength: 1
+            pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          type: array
+          maxItems: 2
+          minItems: 1
+          title: Releases
+        database_release:
+          type: string
+          maxLength: 53
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Database Release
+        database_secret:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Database Secret
+        delete_data:
+          type: boolean
+          title: Delete Data
+      additionalProperties: false
+      type: object
+      required:
+      - mode
+      - job_id
+      - source_job_id
+      - environment_id
+      - agent_id
+      - cluster_uid
+      - namespace
+      - releases
+      - database_release
+      - database_secret
+      - delete_data
+      title: TeardownJob
+    TeardownRequest:
+      properties:
+        delete_data:
+          type: boolean
+          title: Delete Data
+          default: false
+      additionalProperties: false
+      type: object
+      title: TeardownRequest
     Transfer:
       properties:
         bytes:

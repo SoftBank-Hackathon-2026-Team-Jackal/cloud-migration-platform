@@ -29,6 +29,16 @@ from cmp_providers.onprem_agent import (
 from cmp_providers.remote_agent import AgentControlClient, AgentTransportError, _secret_file
 
 UNAUTHORIZED_EXIT = 2
+# Ticket 52 (D14, C-09): a revoked/rejected Agent idles in these steps until SIGTERM instead of
+# exiting into a restart loop that keeps sending 403 requests.
+HALT_SECONDS = 3600
+
+
+def halt(wait: Callable[[float], bool]) -> int:
+    """Block without platform requests until a stop is requested; then exit with code 2."""
+    while not wait(HALT_SECONDS):
+        pass
+    return UNAUTHORIZED_EXIT
 
 
 class AgentRuntimeError(Exception):
@@ -217,7 +227,7 @@ class AgentDaemon:
             credential = self._credential()
         except AgentTransportError:
             self.log({"event": "stopped", "code": "ENROLLMENT_REJECTED"})
-            return UNAUTHORIZED_EXIT
+            return halt(self.wait)
         if credential is None:
             return 0
         while not self.should_stop():
@@ -226,7 +236,7 @@ class AgentDaemon:
             except AgentTransportError as exc:
                 if str(exc) == "AGENT_UNAUTHORIZED":
                     self.log({"event": "stopped", "code": "AGENT_UNAUTHORIZED"})
-                    return UNAUTHORIZED_EXIT
+                    return halt(self.wait)
                 if self._backoff(str(exc)):
                     return 0
                 continue

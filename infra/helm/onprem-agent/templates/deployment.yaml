@@ -61,6 +61,7 @@ spec:
             - name: SSL_CERT_FILE
               value: /etc/cmp-agent/ca/ca.crt
             {{- end }}
+            {{- include "agent.proxyEnv" . | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -102,6 +103,7 @@ spec:
             - name: SSL_CERT_FILE
               value: /etc/cmp-agent/ca/ca.crt
             {{- end }}
+            {{- include "agent.proxyEnv" . | nindent 12 }}
           securityContext:
             runAsNonRoot: false
             runAsUser: 0

@@ -13,6 +13,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
+from cmp_providers.agent_runtime import HALT_SECONDS
 from cmp_providers.agent_tunnel import (
     Forward,
     MemoryTunnelKeyStore,
@@ -357,13 +358,23 @@ def test_run_loop_retries_platform_outages_and_stops_on_revocation():
         return {"code": None}
 
     built.step = step
-    exit_code = run_tunnel(
-        built, wait=lambda s: waits.append(s) or False, interval=15, log=events.append
-    )
+    halted = []
+
+    def wait(seconds):
+        waits.append(seconds)
+        if seconds == HALT_SECONDS:  # ticket 52 (D14): idle after revocation, no restart loop
+            halted.append(("down",) in parts["link"].calls)
+            return len(halted) == 3  # SIGTERM after a while
+        return False
+
+    exit_code = run_tunnel(built, wait=wait, interval=15, log=events.append)
     assert exit_code == 2
+    assert halted == [True, True, True]  # the interface was already down while idling
     assert ("down",) in parts["link"].calls and parts["forwarders"].applied[-1] is None
     assert any(e.get("code") == "PLATFORM_REQUEST_FAILED" for e in events)
-    assert events[-1] == {"event": "stopped", "code": "AGENT_UNAUTHORIZED"}
+    assert [e for e in events if e.get("event") == "stopped"] == [
+        {"event": "stopped", "code": "AGENT_UNAUTHORIZED"}
+    ]
 
 
 def test_run_loop_tears_down_on_stop():

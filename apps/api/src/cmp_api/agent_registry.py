@@ -58,6 +58,10 @@ class AgentJob(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="QUEUED")
     result: Mapped[dict | None] = mapped_column(JSON)
+    # Ticket 52 (D1): latest epoch second the Agent may still start the job; None = no limit.
+    deadline_at: Mapped[int | None] = mapped_column(Integer)
+    # Ticket 52 (D5): operator cancel of a RUNNING job (stops downloads and a reclaim).
+    cancel_requested_at: Mapped[int | None] = mapped_column(Integer)
 
 
 class QueuedWork(Contract):
@@ -191,25 +195,53 @@ def enqueue_job(
 def _dispatch_block(session: Session, job: AgentJob) -> str | None:
     """Approved ON_PREM rollout jobs are re-checked against the business DB on every claim;
     Network Preflight jobs must still target this registered Agent and cluster (MNP-01 N3)."""
-    from cmp_api.agent_preflight import claim_block, is_preflight  # avoid import cycle
+    from cmp_api.agent_jobs import is_teardown, teardown_block  # avoid import cycle
+    from cmp_api.agent_preflight import claim_block, is_preflight
     from cmp_api.onprem_rollout import check_dispatchable, is_rollout
 
     if is_preflight(job.payload):
         return claim_block(session, job)
+    if is_teardown(job.payload):
+        return teardown_block(session, job)
     return check_dispatchable(session, job.payload) if is_rollout(job.payload) else None
 
 
-def poll_job(session: Session, *, agent_id: str, credential: str) -> dict | None:
-    agent = authenticate_agent(session, agent_id=agent_id, credential=credential)
+TEARDOWN_PREFIX = "teardown-"
+
+
+def _claimable(session: Session, agent_id: str) -> AgentJob | None:
+    """Ticket 52 (D10): a queued teardown is handed out before any other queued work."""
+    queued = (
+        select(AgentJob)
+        .where(AgentJob.agent_id == agent_id, AgentJob.status == "QUEUED")
+        .with_for_update(skip_locked=True)
+    )
+    return session.scalar(
+        queued.where(AgentJob.id.startswith(TEARDOWN_PREFIX)).order_by(AgentJob.id)
+    ) or session.scalar(queued.order_by(AgentJob.id))
+
+
+def _claimed(job: AgentJob, now: int) -> dict:
+    claimed = {"job_id": job.id, "payload": job.payload, "status": job.status}
+    if job.deadline_at is not None:  # ticket 52 (D4): seconds left, never a wall-clock time
+        claimed["expires_in_seconds"] = max(job.deadline_at - now, 0)
+    return claimed
+
+
+def poll_job(
+    session: Session, *, agent_id: str, credential: str, now: datetime | None = None
+) -> dict | None:
+    agent = authenticate_agent(session, agent_id=agent_id, credential=credential, now=now)
+    current = _epoch(now)
     while True:
-        job = session.scalar(
-            select(AgentJob)
-            .where(AgentJob.agent_id == agent.id, AgentJob.status == "QUEUED")
-            .order_by(AgentJob.id)
-            .with_for_update(skip_locked=True)
-        )
+        job = _claimable(session, agent.id)
         if job is None:
             break
+        if job.deadline_at is not None and current >= job.deadline_at:
+            # Ticket 52 (D3): the run that asked for it has given up; nothing has run.
+            job.status, job.result = "EXPIRED", {"code": "JOB_EXPIRED"}
+            session.commit()
+            continue
         blocked = _dispatch_block(session, job)
         if blocked:
             # Never hand an unapproved/superseded Plan to the Agent; nothing has run yet.
@@ -218,19 +250,23 @@ def poll_job(session: Session, *, agent_id: str, credential: str) -> dict | None
             continue
         job.status = "RUNNING"
         session.commit()
-        return {"job_id": job.id, "payload": job.payload, "status": job.status}
+        return _claimed(job, current)
     for job in session.scalars(
         select(AgentJob)
         .where(AgentJob.agent_id == agent.id, AgentJob.status == "RUNNING")
         .order_by(AgentJob.id)
     ):
         blocked = _dispatch_block(session, job)
+        if job.cancel_requested_at is not None:
+            blocked = "JOB_CANCELLED"  # ticket 52 (D5)
+        elif job.deadline_at is not None and current >= job.deadline_at:
+            blocked = "JOB_EXPIRED"  # ticket 52 (D3)
         if blocked:
             # It may have partially applied; require inspection instead of a silent re-run.
             job.status, job.result = "UNKNOWN", {"code": blocked}
             session.commit()
             continue
-        return {"job_id": job.id, "payload": job.payload, "status": job.status}
+        return _claimed(job, current)
     return None
 
 

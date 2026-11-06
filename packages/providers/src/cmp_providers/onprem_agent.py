@@ -21,9 +21,11 @@ from pathlib import Path
 from cmp_contracts.artifact import ArtifactRef
 from cmp_contracts.network_preflight import PREFLIGHT_JOB_MODE, NetworkPreflightJob
 from cmp_contracts.onprem_rollout import ProductionRolloutJob
+from cmp_contracts.onprem_teardown import TEARDOWN_MODE, TeardownJob
 from pydantic import ValidationError
 
 from cmp_providers import agent_image_pull, agent_rollout_recovery
+from cmp_providers.agent_teardown import TeardownRunner
 from cmp_providers.artifacts import verify_artifact_bytes
 from cmp_providers.database_url import connection_url
 from cmp_providers.db_replication import DB_PROBE, judge_probe
@@ -217,6 +219,10 @@ class RolloutRunner:
         self.fetch_image_pull = fetch_image_pull
         # Ticket 27: {capable, code} after READY; None = not verified (probe did not run).
         self.replication: dict | None = None
+        # Ticket 52 (D4): `target.now()` value after which no change may start; None = no limit.
+        self.deadline: float | None = None
+        # Ticket 52 (D17, C-14): the job that owned the pull Secret before this rollout.
+        self._pull_owner: str | None = None
 
     # --- read-only preflight -------------------------------------------------------------
     def preflight(self, job: ProductionRolloutJob) -> None:
@@ -286,6 +292,11 @@ class RolloutRunner:
         if credential is None:
             return
         name, now = job.image_pull.secret, time.time()
+        existing = self.target.get("secret", name, job.namespace) or {}
+        owner = ((existing.get("metadata") or {}).get("annotations") or {}).get(
+            agent_image_pull.JOB_ID
+        )
+        self._pull_owner = owner if owner and owner != job.job_id else None
         agent_image_pull.apply_pull_secret(
             self.target, job.namespace, name, job.job_id, credential, now
         )
@@ -567,6 +578,26 @@ class RolloutRunner:
     def rollout(self, job: ProductionRolloutJob) -> tuple[str, str]:
         """Returns (SUCCEEDED, READY) or a FAILED/UNKNOWN code. Raises ClusterUnavailable
         before any mutation so the caller can keep the job RUNNING and retry later."""
+        outcome = self._rollout(job)
+        if outcome != ("SUCCEEDED", "READY") and self._pull_owner is not None:
+            self._return_pull_secret(job)
+        return outcome
+
+    def _return_pull_secret(self, job: ProductionRolloutJob) -> None:
+        """Ticket 52 (D17, C-14): a failed Revision leaves the earlier one running (51), so its
+        job keeps refreshing the pull token. Best effort: a failure only delays the refresh."""
+        try:
+            self.target.kubectl(
+                "annotate", "secret", job.image_pull.secret, "-n", job.namespace,
+                f"{agent_image_pull.JOB_ID}={self._pull_owner}", "--overwrite",
+            )  # fmt: skip
+        except RolloutAgentError:
+            pass
+
+    def _expired(self) -> bool:
+        return self.deadline is not None and self.target.now() >= self.deadline
+
+    def _rollout(self, job: ProductionRolloutJob) -> tuple[str, str]:
         if job.cluster_uid != self.target.cluster_uid:
             return "FAILED", "CLUSTER_MISMATCH"
         try:
@@ -582,6 +613,8 @@ class RolloutRunner:
                 policies = self._network_policies(job, paths)
                 self.approved_policies = {item["metadata"]["name"] for item in policies}
                 pull = self._image_pull(job)
+                if self._expired():  # ticket 52 (D4): checked right before the first change
+                    raise RolloutAgentError("JOB_EXPIRED")
                 self._prepare_namespace(job, env_secrets)
                 del env_secrets
                 self._apply_image_pull(job, pull)
@@ -658,15 +691,39 @@ class RolloutAgent:
         status, code, observation = self.preflight.run(job)
         return self._report(job_id, status, code, observation)
 
+    def _deadline(self, expires_in) -> float | None:
+        """Ticket 52 (D4): the platform sends seconds left, so node clock skew does not matter."""
+        if isinstance(expires_in, bool) or not isinstance(expires_in, int) or expires_in < 0:
+            return None
+        return self.target.now() + expires_in
+
+    def _teardown(self, job_id: str, payload: dict, deadline: float | None) -> dict:
+        try:
+            job = TeardownJob.model_validate(payload)
+        except ValidationError:
+            return self._report(job_id, "FAILED", "UNSUPPORTED_JOB")
+        if job.agent_id != self.agent_id or job.job_id != job_id:
+            return self._report(job_id, "FAILED", "JOB_TARGET_MISMATCH")
+        try:
+            status, code = TeardownRunner(self.target).run(job, deadline=deadline)
+        except ClusterUnavailable:
+            # Teardown is idempotent: keep the job RUNNING and run it again on the next poll.
+            return {"job_id": job_id, "status": "RUNNING", "code": "KUBERNETES_UNAVAILABLE"}
+        return self._report(job_id, status, code)
+
     def poll_once(self) -> dict | None:
         claimed = self.client.poll_once(agent_id=self.agent_id, credential=self.credential)
         if claimed is None:
             return None
         job_id = claimed["job_id"]
         payload = claimed.get("payload")
+        deadline = self._deadline(claimed.get("expires_in_seconds"))
         if isinstance(payload, dict) and payload.get("mode") == PREFLIGHT_JOB_MODE:
             return self._preflight(job_id, payload)
+        if isinstance(payload, dict) and payload.get("mode") == TEARDOWN_MODE:
+            return self._teardown(job_id, payload, deadline)
         try:
+            # Ticket 52 (D11): any job type this Agent does not know ends here, unchanged.
             job = ProductionRolloutJob.model_validate(claimed["payload"])
         except ValidationError:
             return self._report(job_id, "FAILED", "UNSUPPORTED_JOB")
@@ -689,6 +746,7 @@ class RolloutAgent:
             )
 
         runner = RolloutRunner(self.target, fetch, fetch_env_secrets, fetch_image_pull)
+        runner.deadline = deadline
         try:
             status, code = runner.rollout(job)
         except ClusterUnavailable:

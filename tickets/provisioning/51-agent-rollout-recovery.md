@@ -94,3 +94,6 @@ k3d v5.9.0 / K3s v1.36.4+k3s1 / arm64 노드, Helm v4.3.1, 전용 kubeconfig, co
 - [x] SDD 문서 갱신
 - [ ] 리뷰·병합(오케스트레이터)
 - [ ] Agent 릴리스(사용자 승인)
+
+## 후속 (52)
+- 52 후속(#187): `pending-*`·`uninstalling`은 계속 `INSPECTION_REQUIRED`(D20)이며 정리 작업이 상태와 무관하게 uninstall한다. `pods` delete는 클러스터 범위로 두고 `watch`를 뺐다(D16). C-13(실패 Revision 동안 DB 중단)은 Preview 표시·#155로 넘기고(D18), C-15(앱만 실패하면 DB는 새 Revision)는 R3를 정책으로 확정했다(D19). C-14(복원 뒤 pull Secret 갱신)는 52에서 고쳤다(D17). [52](52-agent-job-lifecycle.md).

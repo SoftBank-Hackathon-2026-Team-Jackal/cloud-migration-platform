@@ -26,6 +26,14 @@ image:
 #     - name: cmp-agent-ghcr
 imagePullSecrets: []
 
+# Ticket 52 (D13, C-08): outbound HTTPS proxy for platform calls (agent and tunnel containers).
+# Empty: no proxy variables are set. `noProxy` keeps the cluster API and Services direct
+# (kubectl honours CIDRs; K3s default Pod/Service CIDRs). WireGuard (UDP) never uses the proxy.
+proxy:
+  https: ""
+  http: ""
+  noProxy: localhost,127.0.0.1,.svc,.cluster.local,10.42.0.0/16,10.43.0.0/16
+
 helmTimeout: 5m
 idleSeconds: 10
 # Must exceed the longest Helm step (helm --wait is bounded by 900s in the Agent).
@@ -38,11 +46,14 @@ resources:
   limits:
     memory: 512Mi
 
-# MNP-01 (#51, N3): probe image for NETWORK_PREFLIGHT jobs (needs psql, nc, getent, ip, timeout;
-# the k3d check used postgres:16-alpine). Must be pinned by digest. Empty: the Agent refuses
-# preflight jobs with PREFLIGHT_NOT_CONFIGURED and the Chart grants no Pod create/delete.
+# MNP-01 (#51, N3): probe image for NETWORK_PREFLIGHT jobs (needs psql, nc, getent, ip, timeout).
+# Must be pinned by digest. Ticket 52 (D12, N13): defaults to the official public
+# postgres 16.15-alpine3.24 multi-arch index (amd64/arm64) verified by MNP-01 on k3d, so a plain
+# install runs preflight. Override with a mirror digest when Docker Hub is unreachable/limited.
+# Empty: the Agent refuses preflight jobs with PREFLIGHT_NOT_CONFIGURED and the Chart grants no
+# Pod create/delete for it.
 networkPreflight:
-  image: ""
+  image: docker.io/library/postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
   # Digest-pinned images the Agent may run; empty means just `image`.
   allowedImages: []
 

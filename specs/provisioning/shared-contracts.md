@@ -97,7 +97,7 @@ identity = approval_target(manifest, preview)
 
 ## 승인된 ON_PREM 배포 소비자 (12)
 
-`cmp_api.onprem_rollout`이 07의 승인 기록·`latest_revision`·`manifest_digest`와 `verify_artifact_bytes`를 재사용해 Agent 작업을 만들고, 04A의 `agent_jobs`·인증·결과 보고와 04B의 Values 모델을 그대로 쓴다. 새 공통 모델은 Agent 작업 본문 `cmp_contracts.onprem_rollout.ProductionRolloutJob`뿐이다. 실행 dispatch는 08 소유 계약을 따른다. 상세는 [공통 배포 계약](onprem-shared-deployment.md#승인된-운영-배포-12-36)을 따른다.
+`cmp_api.onprem_rollout`이 07의 승인 기록·`latest_revision`·`manifest_digest`와 `verify_artifact_bytes`를 재사용해 Agent 작업을 만들고, 04A의 `agent_jobs`·인증·결과 보고와 04B의 Values 모델을 그대로 쓴다. 새 공통 모델은 Agent 작업 본문 `cmp_contracts.onprem_rollout.ProductionRolloutJob`뿐이다. 실행 dispatch는 08 소유 계약을 따른다. 52(#187)가 작업 본문을 바꾸지 않고 `agent_jobs`에 시한(`deadline_at`)·취소 요청(`cancel_requested_at`) 열과 상태 `EXPIRED`·`CANCELLED`를 더했다(상태 조회 `state`도 같은 두 값). claim 응답에는 선택 필드 `expires_in_seconds`가 붙는다. 새 작업 본문 `cmp_contracts.onprem_teardown.TeardownJob`(`ENVIRONMENT_TEARDOWN`)과 관리자 경로 `GET /agent-admin/jobs/{job_id}`, `POST .../cancel`, `POST .../teardown`이 생겼다. 상세는 [공통 배포 계약](onprem-shared-deployment.md#승인된-운영-배포-12-36)을 따른다.
 
 ## 온프레미스 Preview 생성 (12A)
 
