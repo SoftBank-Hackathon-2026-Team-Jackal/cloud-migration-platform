@@ -10,6 +10,7 @@ import json
 import uuid
 
 import pytest
+from cmp_contracts.events import TrafficSnapshotData
 from cmp_contracts.queues import WORKFLOW_QUEUE
 from cmp_traffic import TrafficShiftInput
 from cmp_traffic.envoy import EnvoyObserver, cluster_target_address
@@ -35,6 +36,7 @@ HANDOFF = {
         "port": 8080,
     },
 }
+EVENTS: list[dict] = []  # what the fake `emit_migration_event` stored in the last run
 GOOD = {"requests": 100, "failed": 0, "p99_ms": 100.0}
 GIVEN = {"relay_queue": "relay-test", "policy": {"observe_seconds": 1, "min_requests": 30}}
 
@@ -154,14 +156,22 @@ def relay_worker(client, calls, *, observe=None, apply_fails=False):
     )
 
 
+@activity.defn(name="emit_migration_event")
+async def fake_emit(request: dict) -> int:
+    EVENTS.append(request)
+    return len(EVENTS)
+
+
 async def run_probe(given=None, **kw):
     calls: list = []
+    EVENTS.clear()
     async with (
         await WorkflowEnvironment.start_time_skipping() as env,
         Worker(
             env.client,
             task_queue=WORKFLOW_QUEUE,
             workflows=[TrafficStepProbe, TrafficShiftWorkflow],
+            activities=[fake_emit],
         ),
         relay_worker(env.client, calls, **kw),
     ):
@@ -198,3 +208,28 @@ async def test_an_apply_that_is_not_confirmed_rolls_back_too() -> None:
     result, status, _calls, _ = await run_probe(apply_fails=True)
     assert result == "traffic_rolled_back"
     assert status["traffic_shift"]["status"] == "ROLLED_BACK"
+
+
+async def test_every_snapshot_is_stored_as_a_valid_web_event_under_the_migration_id() -> None:
+    _result, _status, _calls, pid = await run_probe()
+    assert EVENTS and {event["migration_id"] for event in EVENTS} == {pid}
+    assert {(event["type"], event["phase"]) for event in EVENTS} == {
+        ("traffic.snapshot", "traffic")
+    }
+    for event in EVENTS:
+        TrafficSnapshotData.model_validate(event["data"])  # the web contract accepts every payload
+    phases = [event["data"]["phase"] for event in EVENTS]
+    assert phases[0] == "applying" and phases[-1] == "complete"
+    assert "observing" in phases and "gate" in phases
+    assert [event["status"] for event in EVENTS][-1] == "done"
+    assert {event["status"] for event in EVENTS[:-1]} == {"running"}
+    assert EVENTS[-1]["data"]["weights"] == {"origin": 0, "target": 100}
+
+
+async def test_a_rollback_is_stored_as_a_failed_snapshot_with_the_source_weights() -> None:
+    bad = {"requests": 100, "failed": 5, "p99_ms": 100.0}
+    await run_probe(observe=[bad])
+    last = EVENTS[-1]
+    assert last["data"]["phase"] == "rolledback" and last["status"] == "failed"
+    assert last["data"]["weights"] == {"origin": 100, "target": 0}
+    TrafficSnapshotData.model_validate(last["data"])

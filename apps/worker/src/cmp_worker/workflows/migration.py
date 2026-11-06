@@ -377,6 +377,7 @@ class MigrationWorkflow:
                 "handover": handoff.get("handover") or {},
                 "policy": parsed.policy.model_dump(mode="json"),
                 "relay_queue": parsed.relay_queue,
+                "migration_id": workflow.info().workflow_id,  # #129: the web event stream key
                 # 입력으로 정하지 않았으면 이 실행의 데이터 이전 상태(DM-007)로 판단한다.
                 "db_gate_ok": parsed.db_gate_ok
                 if parsed.db_gate_ok is not None
