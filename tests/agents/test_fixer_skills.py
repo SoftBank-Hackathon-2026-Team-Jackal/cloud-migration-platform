@@ -93,6 +93,49 @@ def test_the_shipped_trigger_rules_only_name_real_skills_with_valid_patterns():
     assert select_skills(REAL_SKILLS, "SPEC", ["HEALTH_FAILED"]) == []
 
 
+# --- split by target or not ---------------------------------------------------------------------
+
+S3_CALL = ["MIGRATE_SOURCE_CALLED:s3.ap-northeast-2.amazonaws.com"]
+SPLIT = [  # one skill for the source service, one more only for a GCP target
+    {"skill": "storage-s3", "reason_patterns": [r"amazonaws\.com"]},
+    {"skill": "network", "targets": ["GCP"], "reason_patterns": [r"amazonaws\.com"]},
+]
+ONE = [{"skill": "storage-s3", "reason_patterns": [r"amazonaws\.com"]}]  # targets are in the skill
+
+
+def test_a_skill_can_be_limited_to_a_target(tmp_path):
+    root = make_skills(tmp_path, SPLIT)
+    assert select_skills(root, "CODE", S3_CALL, target_provider="GCP") == ["storage-s3", "network"]
+    assert select_skills(root, "CODE", S3_CALL, target_provider="ON_PREM") == ["storage-s3"]
+    assert select_skills(root, "CODE", S3_CALL, target_provider="AWS") == ["storage-s3"]
+
+
+def test_a_rule_for_a_target_does_not_match_when_the_target_is_not_known(tmp_path):
+    root = make_skills(tmp_path, SPLIT)
+    assert select_skills(root, "CODE", S3_CALL) == ["storage-s3"]  # no target given
+    assert select_skills(root, "CODE", S3_CALL, target_provider=None) == ["storage-s3"]
+
+
+def test_one_skill_without_a_target_rule_serves_every_target(tmp_path):
+    root = make_skills(tmp_path, ONE)
+    for provider in ("AWS", "GCP", "ON_PREM", None):
+        assert select_skills(root, "CODE", S3_CALL, target_provider=provider) == ["storage-s3"]
+
+
+def test_a_rule_may_name_several_targets_and_unknown_targets_are_refused(tmp_path):
+    rules = [{"skill": "network", "targets": ["GCP", "ON_PREM"], "reason_patterns": ["."]}]
+    root = make_skills(tmp_path, rules)
+    assert select_skills(root, "SPEC", ["x"], target_provider="ON_PREM") == ["network"]
+    assert select_skills(root, "SPEC", ["x"], target_provider="AWS") == []
+
+
+def test_a_rule_with_an_unknown_target_is_a_broken_file_and_offers_nothing(tmp_path):
+    (tmp_path / "bad").mkdir()
+    rules = [{"skill": "network", "targets": ["AZURE"], "reason_patterns": ["."]}]
+    root = make_skills(tmp_path / "bad", rules)
+    assert select_skills(root, "SPEC", ["x"], target_provider="AZURE") == []
+
+
 # --- the Fixer reads the skill only when asked ----------------------------------------------
 
 

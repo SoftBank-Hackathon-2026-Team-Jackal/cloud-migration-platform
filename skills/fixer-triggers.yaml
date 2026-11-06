@@ -2,6 +2,11 @@
 # for the failure at hand: `failure_classes` (empty = SPEC, CODE and BUILD) and `reason_patterns`
 # (regular expressions searched in each reason code of the failure). Add a rule with the skill it
 # belongs to. `test-authoring` is the Tester's and is never offered to the Fixer.
+#
+# `targets` (AWS, GCP, ON_PREM) limits a rule to those targets; leave it out for every target. A
+# skill can serve all targets and describe the differences in its own text, or be split into one
+# skill per target, each with its own rule. A failure may select several skills. A rule with
+# `targets` never matches when the target is not known to the Fixer.
 triggers:
   # A call the Sandbox blocked: a host missing from the network intent, or a migrated service
   # still called at its source address.
