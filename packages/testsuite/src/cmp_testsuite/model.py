@@ -5,7 +5,7 @@ Names avoid a `Test` prefix so pytest never collects them.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 class _Strict(BaseModel):
@@ -45,7 +45,29 @@ class ActionStep(_Strict):
     recover_seconds: int = Field(default=0, ge=0, le=300)
 
 
-Step = HttpStep | ActionStep  # told apart by `action`; extra fields are forbidden
+class ProbeStep(_Strict):
+    """Try to open a TCP connection from a short-lived Pod; the caller supplies the implementation.
+
+    `ALLOWED_CLIENT` is a Pod with the identity of `source_resource_id` (it should reach the
+    target); `OUTSIDER` has none of the identities the network intent lists (it should not). Which
+    resources and ports to probe comes from the requirements' network intent, never from here.
+    """
+
+    action: Literal["NETWORK_PROBE"] = "NETWORK_PROBE"
+    role: Literal["ALLOWED_CLIENT", "OUTSIDER"]
+    source_resource_id: str | None = None
+    target_resource_id: str
+    port: int = Field(ge=1, le=65535)
+    expect: Literal["CONNECTS", "BLOCKED"]
+
+    @model_validator(mode="after")
+    def _source_only_for_an_allowed_client(self):
+        if (self.role == "ALLOWED_CLIENT") != (self.source_resource_id is not None):
+            raise ValueError("An allowed client names its source; an outsider has none")
+        return self
+
+
+Step = HttpStep | ActionStep | ProbeStep  # told apart by `action`; extra fields are forbidden
 
 
 class Evidence(_Strict):

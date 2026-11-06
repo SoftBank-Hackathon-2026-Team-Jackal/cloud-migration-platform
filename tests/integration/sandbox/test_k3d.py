@@ -321,6 +321,46 @@ def test_a_pinned_suite_runs_in_the_sandbox_and_dependency_checks_use_the_real_d
         service.teardown_sandbox(plan.namespace)
 
 
+def test_security_probes_show_only_the_intents_sources_reach_the_database(service, tmp_path):
+    """Ticket 30 on a real cluster: the allowed source connects, an outsider is blocked."""
+    from cmp_contracts.provisioning_v2 import RequirementsV2
+
+    base = requirements().model_dump(mode="json")
+    base["network_intent"] = [
+        {"source_resource_id": "demo-api", "destination_resource_id": "demo-db", "port": 5432}
+    ]
+    run_id = "pr-" + uuid.uuid4().hex[:8]
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"FEATURE_X={ENV_VALUE}\n")
+    plan = service.prepare_sandbox(
+        RequirementsV2.model_validate(base),
+        migration_id="it-mig",
+        run_id=run_id,
+        images=SandboxImages(database=POSTGRES, applications={"demo-api": PODINFO}),
+        capabilities=SandboxCapabilities(storage_class="local-path"),
+        env_names=["FEATURE_X"],
+        env_file=env_file,
+        network=True,
+    )
+    try:
+        service.apply_sandbox(plan)
+        service.apply_network(plan)
+        service.check_sandbox(plan)
+        allowed = service.network_probe(
+            plan, role="ALLOWED_CLIENT", source_resource_id="demo-api",
+            target_resource_id="demo-db", port=5432,
+        )  # fmt: skip
+        outsider = service.network_probe(
+            plan, role="OUTSIDER", source_resource_id=None, target_resource_id="demo-db", port=5432
+        )
+        assert (allowed, outsider) == (True, False)
+        # The probe Pods and the temporary policy are gone.
+        left = kubectl("get", "pods,networkpolicies", "-n", plan.namespace, "-o", "name").stdout
+        assert "cmp-probe-" not in left
+    finally:
+        service.teardown_sandbox(plan.namespace)
+
+
 CURL = (
     "docker.io/curlimages/curl@sha256:"
     "d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"

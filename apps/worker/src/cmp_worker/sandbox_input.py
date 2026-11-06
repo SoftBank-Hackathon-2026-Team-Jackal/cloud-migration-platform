@@ -12,6 +12,7 @@ from cmp_contracts.provisioning import ContentRef, Image
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_testsuite import dump_bundle
 from cmp_testsuite.model import Suite
+from cmp_testsuite.security import security_probe_cases
 from cmp_testsuite.standard import AppApi, standard_cases
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,6 +41,9 @@ class SandboxSettings(BaseModel):
     extra_keep_hosts: list[dict[str, Any]] = Field(default_factory=list)
     # How the standard write -> read test reaches the app; without it only the health test runs.
     ai_tests: bool = False
+    # Ticket 30: also prove, from short-lived Pods, that only the network intent's sources reach
+    # the database. Off by default; the suite is then exactly the standard one.
+    security_probes: bool = False
     write_path: str | None = None
     read_path: str | None = None
     # The app's write API shape (ticket 27); see `AppApi`. Left out, the original shape is used.
@@ -101,7 +105,10 @@ def assemble_sandbox_input(
     )
     if not migration_id:
         raise ValueError("MIGRATION_ID_MISSING")
-    suite = Suite(name=f"standard-{migration_id}", cases=standard_cases(api))
+    cases = standard_cases(api)
+    if settings.security_probes:
+        cases = [*cases, *security_probe_cases(requirements).cases]
+    suite = Suite(name=f"standard-{migration_id}", cases=cases)
     suite_ref = store.put(dump_bundle(suite), ref_id=f"suite-{migration_id}", kind="test-suite")
     review = analysis.get("review") or {}
     env_plan_ref = None

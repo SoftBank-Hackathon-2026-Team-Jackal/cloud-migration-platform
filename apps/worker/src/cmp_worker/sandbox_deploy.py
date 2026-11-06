@@ -14,6 +14,7 @@ import re
 import secrets
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -24,6 +25,7 @@ from cmp_contracts.env_plan import EnvPlan
 from cmp_contracts.provisioning import ContentRef, Image
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_contracts.shared_deployment_v2 import SecretRefV2, SharedDeploymentRequestV2
+from cmp_providers import network_policy
 from cmp_providers.database_url import URL_SECRET_KEY, connection_url, connection_url_secret_name
 from cmp_providers.ecr_pull import (
     PULL_SECRET,
@@ -45,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from cmp_worker.activities.k8s_workloads_cli import CommandError
 from cmp_worker.sandbox_network import (
+    PROXY_IMAGE,
     PROXY_NAME,
     EgressRecord,
     allowlist,
@@ -55,6 +58,17 @@ from cmp_worker.sandbox_network import (
 )
 
 SANDBOX_CONTEXT = "k3d-cmp-sandbox"
+PROBE_LABEL = "cmp.sandbox/probe"
+# Exit 0 when the connection opens, 1 when it does not (refused, dropped by a policy, or no route).
+_PROBE_SCRIPT = (
+    "import socket, sys\n"
+    "s = socket.socket()\n"
+    "s.settimeout(3)\n"
+    "try:\n"
+    "    s.connect((sys.argv[1], int(sys.argv[2])))\n"
+    "except OSError:\n"
+    "    sys.exit(1)\n"
+)
 NAMESPACE_PREFIX = "cmp-sbx-"
 MANAGED_BY = "cmp-sandbox"
 FIELD_MANAGER = "cmp-sandbox"
@@ -662,6 +676,122 @@ class SandboxService:
             f"/api/v1/namespaces/{plan.namespace}/services/"
             f"{app['release_name']}:{app['port']}/proxy"
         )
+
+    def network_probe(
+        self,
+        plan: SandboxPlan,
+        *,
+        role: Literal["ALLOWED_CLIENT", "OUTSIDER"],
+        source_resource_id: str | None,
+        target_resource_id: str,
+        port: int,
+        timeout: float = 60.0,
+        pause: float = 1.0,
+    ) -> bool:
+        """True when a short-lived Pod of this role can open a TCP connection to the target.
+
+        An allowed client carries the instance label of its source resource, so the intent's
+        policies treat it as that resource. An outsider carries no such label; the Namespace's
+        default deny would stop it before it reached the database, so it gets a temporary egress
+        to the database only and the database's own ingress rule decides. The Pod and that policy
+        are removed whatever happens. No secret is involved: the Pod has no environment and no
+        service account token.
+        """
+        resources = {r["id"]: r for r in plan.request["resources"]}
+        target = resources.get(target_resource_id)
+        source = resources.get(source_resource_id or "")
+        if target is None or (role == "ALLOWED_CLIENT" and source is None):
+            raise SandboxError("PROBE_TARGET_UNKNOWN")
+        name = f"cmp-probe-{secrets.token_hex(4)}"
+        labels = {PROBE_LABEL: role.lower().replace("_", "-")}
+        if role == "ALLOWED_CLIENT" and source is not None:
+            labels[network_policy.INSTANCE] = source["release_name"]
+        owned = {"app.kubernetes.io/managed-by": MANAGED_BY}
+        host = target["release_name"]
+        items: list[dict[str, Any]] = [
+            {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "name": name,
+                    "namespace": plan.namespace,
+                    "labels": {**owned, **labels},
+                },
+                "spec": {
+                    "restartPolicy": "Never",
+                    "automountServiceAccountToken": False,
+                    "containers": [
+                        {
+                            "name": "probe",
+                            "image": PROXY_IMAGE,
+                            "command": ["python", "-c", _PROBE_SCRIPT, host, str(port)],
+                            "resources": {
+                                "requests": {"cpu": "10m", "memory": "16Mi"},
+                                "limits": {"cpu": "100m", "memory": "64Mi"},
+                            },
+                            "securityContext": {
+                                "runAsNonRoot": True,
+                                "runAsUser": 65534,
+                                "allowPrivilegeEscalation": False,
+                                "readOnlyRootFilesystem": True,
+                                "capabilities": {"drop": ["ALL"]},
+                            },
+                        }
+                    ],
+                },
+            }
+        ]
+        policy_name = None
+        if role == "OUTSIDER":
+            policy_name = f"{name}-egress"
+            items.append(
+                network_policy.policy(
+                    plan.namespace,
+                    policy_name,
+                    owned,
+                    {
+                        "podSelector": {"matchLabels": labels},
+                        "policyTypes": ["Egress"],
+                        "egress": [
+                            {
+                                "to": [{"podSelector": network_policy.selector(host)}],
+                                "ports": [{"protocol": "TCP", "port": port}],
+                            }
+                        ],
+                    },
+                )
+            )
+        deadline = time.monotonic() + timeout
+        try:
+            self.cluster.kubectl(
+                "apply",
+                "-f",
+                "-",
+                stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": items}).encode(),
+            )
+            while True:
+                phase = (
+                    self.cluster.kubectl(
+                        "get", "pod", name, "-n", plan.namespace, "-o", "jsonpath={.status.phase}"
+                    )
+                    .decode()
+                    .strip()
+                )
+                if phase in ("Succeeded", "Failed"):
+                    return phase == "Succeeded"
+                if time.monotonic() >= deadline:
+                    raise SandboxError("PROBE_TIMEOUT")
+                time.sleep(pause)
+        finally:
+            for kind, object_name in (("pod", name), ("networkpolicy", policy_name)):
+                if object_name is not None:
+                    try:
+                        self.cluster.kubectl(
+                            "delete", kind, object_name, "-n", plan.namespace,
+                            "--ignore-not-found", "--wait=false",
+                        )  # fmt: skip
+                    except CommandError:
+                        pass  # the Namespace is removed with the Sandbox anyway
 
     def restart_database(self, plan: SandboxPlan) -> None:
         release = self._database(plan)["release_name"]
