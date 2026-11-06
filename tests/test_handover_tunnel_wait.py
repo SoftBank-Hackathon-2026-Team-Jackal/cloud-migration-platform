@@ -1,4 +1,4 @@
-"""Ticket 64 (#284): the ON_PREM traffic handover waits for a tunnel health check of this rollout.
+"""Ticket 67 (#284): the ON_PREM traffic handover waits for a tunnel health check of this rollout.
 
 Seams:
 - Activity: `ApprovalActivities.get_traffic_handover` on SQLite with a stored result and an
@@ -150,6 +150,19 @@ async def test_proceeds_the_moment_the_post_rollout_health_check_passes(db, emit
     ]
     [event] = emitter.of_type("provision.check")[:1]
     assert event.phase == "traffic"
+
+
+async def test_with_the_immediate_tunnel_report_the_handover_goes_on_within_seconds(db, emitter):  # noqa: F811
+    """With ticket 66 the Agent reports a healthy app seconds after the port is assigned."""
+    complete_onprem(db)
+    fake = FakeTime(T0 + 1)
+    report(db, reported_at=T0 - 5, app_health_ok=False)  # APP_PORT_NOT_ASSIGNED before rollout
+    fake.reports.append((T0 + 3, {"app_health_ok": True}))  # 66: woken by the rollout
+
+    got = await run(activities(db, fake))
+
+    assert got.proceed
+    assert fake.t - (T0 + 1) <= 4  # the next 2 s read after the report
 
 
 async def test_a_healthy_report_from_before_the_rollout_is_not_trusted(db, emitter):  # noqa: F811

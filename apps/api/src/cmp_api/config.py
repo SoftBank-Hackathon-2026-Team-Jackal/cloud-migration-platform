@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # missed 15 s Agent reports) and its WireGuard handshake is within Reject-After-Time (180 s).
     tunnel_status_ttl_seconds: int = 60
     tunnel_handshake_stale_seconds: int = 180
-    # Ticket 64: how long an ON_PREM traffic handover lookup waits for this rollout's tunnel
+    # Ticket 67: how long an ON_PREM traffic handover lookup waits for this rollout's tunnel
     # health check (cut to the Activity timeout), and how often it reads the tunnel status.
     traffic_handover_wait_seconds: int = 180
     traffic_handover_poll_seconds: float = 2.0
