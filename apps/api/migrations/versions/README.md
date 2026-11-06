@@ -6,3 +6,5 @@ Revision `20261105_05` (ticket 23) adds `environment_connections`: AWS Role ARN,
 Revision `20261105_06` (ticket 24) adds the append-only `migration_events` (per-Migration `seq`, idempotency key) and `migration_logs`. It chains onto ticket 23's `20261105_05`.
 
 Revision `20261105_07` (ticket 17) adds `agent_tunnel_status.code`, the tunnel failure code the Agent reports. It chains onto `20261105_06`.
+
+Revision `20261106_03` (ticket 56) adds `scope_analyses` (selection and scope candidates read from a source EKS cluster) and `scope_confirmations` (included/excluded candidate IDs). Names, ARNs and evidence locations only; no Secret or env values. It chains onto `20261106_02`.

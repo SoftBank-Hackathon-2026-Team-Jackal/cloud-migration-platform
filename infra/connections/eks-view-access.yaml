@@ -1,0 +1,41 @@
+# Cloud Migration Platform - read-only Kubernetes access to one source EKS cluster. Ticket 56.
+# Created by the user in the account that owns the cluster, after the source connection role
+# (source-role.yaml) exists. It adds one EKS access entry for that role with the AWS-managed
+# AmazonEKSViewPolicy at cluster scope: Kubernetes `view` (no Secrets, no writes). The cluster
+# authentication mode must be API or API_AND_CONFIG_MAP. Deleting the stack removes the access.
+# Hosted with the role templates (ticket 23 C9) at connections/v2/eks-view-access.yaml.
+# Long-form intrinsics only, so the file is plain YAML (validated by tests/test_connection_templates.py).
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloud Migration Platform read-only Kubernetes access (EKS access entry, AmazonEKSViewPolicy)
+Parameters:
+  ClusterName:
+    Type: String
+    Description: Name of the source EKS cluster the platform may read
+    AllowedPattern: "^[0-9A-Za-z][A-Za-z0-9_-]{0,99}$"
+  PrincipalArn:
+    Type: String
+    Description: Role ARN registered on the platform source connection (output RoleArn of the source role stack)
+    AllowedPattern: "^arn:aws(-cn|-us-gov)?:iam::[0-9]{12}:role/.+$"
+Resources:
+  PlatformViewAccess:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName:
+        Ref: ClusterName
+      PrincipalArn:
+        Ref: PrincipalArn
+      Type: STANDARD
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy
+          AccessScope:
+            Type: cluster
+      Tags:
+        - Key: cmp:managed-by
+          Value: cloud-migration-platform
+        - Key: cmp:connection-role
+          Value: source
+Outputs:
+  AccessEntryArn:
+    Description: The EKS access entry granting the platform read-only Kubernetes access
+    Value:
+      Fn::GetAtt: [PlatformViewAccess, AccessEntryArn]

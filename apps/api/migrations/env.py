@@ -9,6 +9,7 @@ from cmp_api import (
     connections,  # noqa: F401  # Register environment connection tables (ticket 23).
     migration_events,  # noqa: F401  # Register event store/log tables (ticket 24).
     plan_inputs,  # noqa: F401  # Register Planning input tables (ticket 18).
+    scope_selection,  # noqa: F401  # Register scope analysis tables (ticket 56).
     tunnels,  # noqa: F401  # Register tunnel exchange tables (ticket 16).
 )
 from cmp_api.config import settings

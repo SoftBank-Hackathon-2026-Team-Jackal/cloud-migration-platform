@@ -193,6 +193,23 @@ API 설정(`cmp_api.config`):
 - AWS Plan 명령 실패 issues: 첫 코드(계정 확인 단계는 `AWS_IDENTITY_UNAVAILABLE`, 그 밖은 `PLAN_COMMAND_FAILED`) + 단계 코드 `PLAN_STEP_IDENTITY|INIT|VALIDATE|PLAN|SHOW`(경로 `terraform.<단계>`).
 - AWS 워크로드: `ApprovedWorkloads.runtime_for(approved)` 훅, `Approved.spec`(승인된 SPEC 문서), `CliRuntime.with_profile`. 응답 추가: `POST /connections`·`GET /connections/{id}`의 `platform_principal_arn`(AWS만, 설정 없으면 `null`).
 
+## 이전 범위 선택 (56)
+
+[티켓 56](../../tickets/provisioning/56-scope-selection.md#착수-결정-2026-11-06-issue-219-표). 23과 같은 라우터(운영자 키, detail은 코드만, 422에 입력값 없음). 모두 확인된(`CONNECTED`) `AWS_SOURCE` 연결이 필요하다. 쿠버네티스 읽기는 클러스터별 접근 항목(`infra/connections/eks-view-access.yaml`, 호스팅 `connections/v2/eks-view-access.yaml`)이 있어야 한다.
+
+| 라우트 | 요청 | 응답 |
+| --- | --- | --- |
+| `GET /connections/{id}/eks-clusters/{cluster}/namespaces?region=` | 리전(생략 시 연결 리전) | `{connection_id, region, cluster, namespaces: [이름]}`. `kube-*`·`amazon-*`·`aws-*`·`*-system` 제외 |
+| `GET /connections/{id}/eks-clusters/{cluster}/namespaces/{namespace}/workloads?region=` | 〃 | `{connection_id, region, cluster, namespace, workloads: [{kind: Deployment\|StatefulSet, name}]}` |
+| `POST /connections/{id}/scope-analyses` | `{region, cluster, namespace, workload, workload_kind?}` | `ScopeAnalysis {analysis_id: "sa-…", selection: {connection_id, region, cluster, namespace, workload, workload_kind}, candidates: [ScopeCandidate]}` |
+| `POST /scope-analyses/{analysis_id}/confirm` | `{included: [candidate_id]}` | `ScopeConfirmation {scope_id: "scope-…", analysis_id, included, excluded, confirmed_at}`. `confirmed_at`은 ISO-8601 UTC 문자열 |
+
+`ScopeCandidate`: `{candidate_id, resource_type, name, arn|null, evidence: [{kind, location}], suggested}`. `resource_type`: `ALB`, `IAM_ROLE`, `S3`·`SQS`·`SNS`·`DYNAMODB`·`RDS`·`ELASTICACHE`·`SECRETS_MANAGER`·`KMS`·…(IAM 정책 리소스 서비스), `SECRET`, `CONFIG_MAP`, `POSTGRESQL`. `evidence.kind`는 분석 `Evidence.kind` 값 중 이 API가 실제로 읽는 `MANIFEST`·`CLOUD_RESOURCE`·`IAM_POLICY`·`CONFIG`만 쓴다.
+
+오류: `CONNECTION_NOT_FOUND` 404, `SOURCE_CONNECTION_REQUIRED`·`CONNECTION_NOT_READY`·`EKS_ACCESS_DENIED`·`EKS_API_FAILED`·`ASSUME_ROLE_DENIED`·`ASSUME_ROLE_FAILED`·`PLATFORM_CREDENTIALS_UNAVAILABLE` 409, `CLUSTER_NOT_FOUND`·`NAMESPACE_NOT_FOUND`·`WORKLOAD_NOT_FOUND`·`ANALYSIS_NOT_FOUND` 404, `INVALID_SCOPE` 400(빈 `included` 또는 분석에 없는 id).
+
+공개 모듈: `cmp_api.scope_selection`(`eks_token`, `EksKubeApi`, `KubeApi`, `KubeNotFound`, `open_cluster`, `list_namespaces`, `list_workloads`, `analyze_scope`, `confirm_scope`, `ScopeAnalysisRecord`, `ScopeConfirmationRecord`, `REQUIRED_AWS_ACTIONS`). 라우트 의존성 `get_kube_factory`(테스트 교체용). 분석·worker는 아직 확정 범위를 읽지 않는다(후속).
+
 ## 이전 이벤트 저장소·SSE (24)
 
 `cmp_contracts.events`가 이벤트 봉투 `MigrationEvent`와 웹 계약(`cloud-migration-web` `contract/events.schema.json`, 사본 `docs/contracts/events.schema.json`)과 같은 타입별 `*Data` 모델, 백엔드→웹 이름 변환 `to_web`, 웹 형식 스키마 `event_json_schema()`를 제공한다. 저장은 `cmp_api.migration_events`(`migration_events`·`migration_logs`, `append_event`·`list_events`·`list_logs`, `EventEmitter`·`InMemoryEmitter`·`DbEventEmitter`), Activity 발행은 `cmp_worker.events`(`emit_event`·`emit_event_async`·`log_event`, Workflow용 `emit_migration_event` Activity)다. 읽기는 `GET /migrations/{id}/events`(SSE·JSON)와 `GET /migrations/{id}/logs`. 기존 모델·Activity 반환값은 바꾸지 않는다. Terraform Apply는 `-json`으로 바뀌었고 결과 계약(`status`·`code`·refs)은 같다. 결정은 [migration-events.md E1~E17](migration-events.md), 담당자 사용법은 [이벤트 발행 안내서](../../docs/engineering/events-guide.md).

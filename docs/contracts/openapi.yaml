@@ -1713,6 +1713,199 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}/eks-clusters/{cluster}/namespaces:
+    get:
+      tags:
+      - environment connections
+      summary: Eks Namespaces
+      description: 'Ticket 56: namespaces of a source cluster, system namespaces excluded.'
+      operationId: eks_namespaces_connections__connection_id__eks_clusters__cluster__namespaces_get
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: cluster
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-Za-z][A-Za-z0-9_-]{0,99}$
+          title: Cluster
+      - name: region
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-\d$
+          - type: 'null'
+          title: Region
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NamespaceList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}/eks-clusters/{cluster}/namespaces/{namespace}/workloads:
+    get:
+      tags:
+      - environment connections
+      summary: Eks Workloads
+      description: 'Ticket 56: Deployments and StatefulSets in one namespace.'
+      operationId: eks_workloads_connections__connection_id__eks_clusters__cluster__namespaces__namespace__workloads_get
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: cluster
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[0-9A-Za-z][A-Za-z0-9_-]{0,99}$
+          title: Cluster
+      - name: namespace
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+          title: Namespace
+      - name: region
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-\d$
+          - type: 'null'
+          title: Region
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkloadList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}/scope-analyses:
+    post:
+      tags:
+      - environment connections
+      summary: Scope Analysis
+      description: 'Ticket 56: scope candidates from what the platform actually read
+        (stored).'
+      operationId: scope_analysis_connections__connection_id__scope_analyses_post
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScopeAnalysisRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScopeAnalysis'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /scope-analyses/{analysis_id}/confirm:
+    post:
+      tags:
+      - environment connections
+      summary: Confirm Scope
+      description: 'Ticket 56: stores the included candidates; the rest of the analysis
+        is excluded.'
+      operationId: confirm_scope_scope_analyses__analysis_id__confirm_post
+      parameters:
+      - name: analysis_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Analysis Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScopeConfirmRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScopeConfirmation'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agent-admin/agents:
     get:
       tags:
@@ -3361,6 +3554,29 @@ components:
       - approval_pending
       - cancel_requested
       title: MigrationStatus
+    NamespaceList:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        region:
+          type: string
+          title: Region
+        cluster:
+          type: string
+          title: Cluster
+        namespaces:
+          items:
+            type: string
+          type: array
+          title: Namespaces
+      type: object
+      required:
+      - connection_id
+      - region
+      - cluster
+      - namespaces
+      title: NamespaceList
     NetworkPreflightJob:
       properties:
         mode:
@@ -4537,6 +4753,185 @@ components:
       - test_suite_ref
       - cleanup_status
       title: SandboxEvidenceV2
+    ScopeAnalysis:
+      properties:
+        analysis_id:
+          type: string
+          title: Analysis Id
+        selection:
+          $ref: '#/components/schemas/ScopeSelection'
+        candidates:
+          items:
+            $ref: '#/components/schemas/ScopeCandidate'
+          type: array
+          title: Candidates
+      type: object
+      required:
+      - analysis_id
+      - selection
+      - candidates
+      title: ScopeAnalysis
+    ScopeAnalysisRequest:
+      properties:
+        region:
+          type: string
+          pattern: ^[a-z]{2}(-gov|-iso[a-z]?)?-[a-z]+-\d$
+          title: Region
+        cluster:
+          type: string
+          pattern: ^[0-9A-Za-z][A-Za-z0-9_-]{0,99}$
+          title: Cluster
+        namespace:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+          title: Namespace
+        workload:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$
+          title: Workload
+        workload_kind:
+          anyOf:
+          - type: string
+            enum:
+            - Deployment
+            - StatefulSet
+          - type: 'null'
+          title: Workload Kind
+      additionalProperties: false
+      type: object
+      required:
+      - region
+      - cluster
+      - namespace
+      - workload
+      title: ScopeAnalysisRequest
+    ScopeCandidate:
+      properties:
+        candidate_id:
+          type: string
+          title: Candidate Id
+        resource_type:
+          type: string
+          title: Resource Type
+        name:
+          type: string
+          title: Name
+        arn:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Arn
+        evidence:
+          items:
+            $ref: '#/components/schemas/ScopeEvidence'
+          type: array
+          title: Evidence
+        suggested:
+          type: boolean
+          title: Suggested
+      type: object
+      required:
+      - candidate_id
+      - resource_type
+      - name
+      - arn
+      - evidence
+      - suggested
+      title: ScopeCandidate
+    ScopeConfirmRequest:
+      properties:
+        included:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+          title: Included
+      additionalProperties: false
+      type: object
+      required:
+      - included
+      title: ScopeConfirmRequest
+    ScopeConfirmation:
+      properties:
+        scope_id:
+          type: string
+          title: Scope Id
+        analysis_id:
+          type: string
+          title: Analysis Id
+        included:
+          items:
+            type: string
+          type: array
+          title: Included
+        excluded:
+          items:
+            type: string
+          type: array
+          title: Excluded
+        confirmed_at:
+          type: string
+          title: Confirmed At
+      type: object
+      required:
+      - scope_id
+      - analysis_id
+      - included
+      - excluded
+      - confirmed_at
+      title: ScopeConfirmation
+    ScopeEvidence:
+      properties:
+        kind:
+          type: string
+          enum:
+          - CODE
+          - MANIFEST
+          - CLOUD_RESOURCE
+          - IAM_POLICY
+          - CLOUDTRAIL
+          - CONFIG
+          title: Kind
+        location:
+          type: string
+          title: Location
+      type: object
+      required:
+      - kind
+      - location
+      title: ScopeEvidence
+    ScopeSelection:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        region:
+          type: string
+          title: Region
+        cluster:
+          type: string
+          title: Cluster
+        namespace:
+          type: string
+          title: Namespace
+        workload:
+          type: string
+          title: Workload
+        workload_kind:
+          type: string
+          enum:
+          - Deployment
+          - StatefulSet
+          title: Workload Kind
+      type: object
+      required:
+      - connection_id
+      - region
+      - cluster
+      - namespace
+      - workload
+      - workload_kind
+      title: ScopeSelection
     SecretRef:
       properties:
         secret_name:
@@ -5071,6 +5466,49 @@ components:
       title: VersionRef
       description: Opaque, immutable record version. Never a credential or signed
         URL.
+    Workload:
+      properties:
+        kind:
+          type: string
+          enum:
+          - Deployment
+          - StatefulSet
+          title: Kind
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - kind
+      - name
+      title: Workload
+    WorkloadList:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        region:
+          type: string
+          title: Region
+        cluster:
+          type: string
+          title: Cluster
+        namespace:
+          type: string
+          title: Namespace
+        workloads:
+          items:
+            $ref: '#/components/schemas/Workload'
+          type: array
+          title: Workloads
+      type: object
+      required:
+      - connection_id
+      - region
+      - cluster
+      - namespace
+      - workloads
+      title: WorkloadList
 x-sdd-contract-status:
   scope: Frontend and on-premises Agent to FastAPI REST and SSE
   implementation: Migration paths remain a scaffold; Agent enrollment and polling
