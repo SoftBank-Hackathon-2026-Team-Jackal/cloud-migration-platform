@@ -124,6 +124,25 @@ class AwsUsage(Contract):
     cloudtrail: list[CloudTrailCall] = Field(default_factory=list)
 
 
+SecurityCriterion = Literal[
+    "EXTERNAL_HTTPS", "DB_ACCESS_SCOPE", "DB_TRANSPORT_ENCRYPTION", "ADMIN_API_EXPOSURE"
+]
+# From strongest to weakest: PROTECTED, PARTIAL (some entries or paths weak), UNPROTECTED. UNKNOWN is
+# "no evidence" and is never read as protected. NOT_APPLICABLE: the thing measured is absent.
+SecurityState = Literal["PROTECTED", "PARTIAL", "UNPROTECTED", "UNKNOWN", "NOT_APPLICABLE"]
+
+
+class SecurityMeasure(Contract):
+    """The source's state for one security criterion (ticket 28-B), with its evidence.
+
+    `reasons` are codes, never values: no connection string, secret or address."""
+
+    criterion: SecurityCriterion
+    state: SecurityState
+    reasons: list[Text] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
+
+
 class MappingRow(Contract):
     id: Text
     capability: str
@@ -194,6 +213,7 @@ class AnalysisReport(Contract):
     unverified_risks: list[str]
     scope: ConfirmedScope | None = None  # ticket 06B: what the user confirmed to analyze
     aws_usage: AwsUsage | None = None  # ticket 06C: IAM and CloudTrail evidence of resource use
+    security: list[SecurityMeasure] | None = None  # ticket 28-B: None before it was measured
 
     @model_validator(mode="after")
     def unique_mapping_ids(self):

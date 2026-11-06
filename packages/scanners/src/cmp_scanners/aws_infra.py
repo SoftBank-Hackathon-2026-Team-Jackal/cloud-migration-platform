@@ -12,13 +12,13 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, ProfileNotFound
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 _PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _ACCESS_KEY = re.compile(r"^(?:AKIA|ASIA)[A-Z0-9]{16}$")
@@ -67,6 +67,7 @@ ALLOWED_OPERATIONS = (
     AwsOperation("iam", "get_policy", "GetPolicy", "iam:GetPolicy"),
     AwsOperation("iam", "get_policy_version", "GetPolicyVersion", "iam:GetPolicyVersion"),
     AwsOperation("cloudtrail", "lookup_events", "LookupEvents", "cloudtrail:LookupEvents"),
+    AwsOperation("cloudfront", "list_distributions", "ListDistributions", "cloudfront:ListDistributions"),
 )  # fmt: skip
 _BY_METHOD = {(op.client, op.method): op for op in ALLOWED_OPERATIONS}
 
@@ -99,6 +100,7 @@ class AwsClients:
     elbv2: Any
     iam: Any
     cloudtrail: Any
+    cloudfront: Any = None  # 28-A: optional, so a scan with five clients still works
 
 
 def get_session(credential_ref: str, *, region: str | None = None) -> boto3.Session:
@@ -116,7 +118,7 @@ def make_clients(session: boto3.Session) -> AwsClients:
     return AwsClients(
         *(
             session.client(name, config=config)
-            for name in ("eks", "ec2", "elbv2", "iam", "cloudtrail")
+            for name in ("eks", "ec2", "elbv2", "iam", "cloudtrail", "cloudfront")
         )
     )
 
@@ -173,6 +175,10 @@ class ListenerInfo(_Model):
     port: int
     protocol: str
     target_ports: list[int]
+    # 28-A: how the listener protects traffic (a certificate and policy, or a redirect to HTTPS).
+    has_certificate: bool = False
+    ssl_policy: str | None = None
+    redirects_to_https: bool = False
 
 
 class LoadBalancerInfo(_Model):
@@ -180,6 +186,18 @@ class LoadBalancerInfo(_Model):
     type: str
     scheme: str
     listeners: list[ListenerInfo]
+    dns_name: str | None = None  # 28-A: lets a CloudFront origin be matched to this balancer
+
+
+class CloudFrontInfo(_Model):
+    """A distribution whose origin is a load balancer of the cluster VPC (28-A)."""
+
+    id: str
+    domain_name: str
+    aliases: list[str]
+    enabled: bool
+    viewer_protocol_policies: list[str]  # allow-all | redirect-to-https | https-only
+    origin_domains: list[str]  # the load balancers' DNS names that are origins
 
 
 class RolePolicyInfo(_Model):
@@ -204,6 +222,10 @@ class AwsInfraScan(_Model):
     role_policies: list[RolePolicyInfo]
     cloudtrail: list[CloudTrailEventSummary]
     duration_seconds: float
+    cloudfront: list[CloudFrontInfo] = Field(default_factory=list)
+    # NOT_REQUESTED: no client or no load balancer to match. DENIED: the role predates the
+    # permission (the scan goes on). Never read it as "no distribution" unless COLLECTED.
+    cloudfront_status: Literal["COLLECTED", "DENIED", "NOT_REQUESTED"] = "NOT_REQUESTED"
 
 
 # ------------------------------------------------------------------------------- calls
@@ -291,6 +313,60 @@ def _policy_actions(document: dict[str, Any] | str) -> tuple[set[str], bool]:
         resources = statement.get("Resource", [])
         wildcard = wildcard or "*" in ([resources] if isinstance(resources, str) else resources)
     return actions, wildcard
+
+
+def _cloudfront(call: _Caller, balancers: Sequence[LoadBalancerInfo]) -> list[CloudFrontInfo]:
+    """Distributions whose origin is one of the balancers (28-A). Lists every page."""
+    names = {lb.dns_name.lower(): lb.dns_name for lb in balancers if lb.dns_name}
+    found: list[CloudFrontInfo] = []
+    marker: str | None = None
+    while True:
+        listing = call(
+            "cloudfront", "list_distributions", **({"Marker": marker} if marker else {})
+        ).get("DistributionList", {})
+        for item in listing.get("Items") or []:
+            origins = (item.get("Origins") or {}).get("Items") or []
+            matched = sorted(
+                {
+                    names[o["DomainName"].lower()]
+                    for o in origins
+                    if o["DomainName"].lower() in names
+                }
+            )
+            if not matched:
+                continue
+            behaviors = (item.get("CacheBehaviors") or {}).get("Items") or []
+            policies = {
+                item["DefaultCacheBehavior"]["ViewerProtocolPolicy"],
+                *(b["ViewerProtocolPolicy"] for b in behaviors),
+            }
+            found.append(
+                CloudFrontInfo(
+                    id=item["Id"],
+                    domain_name=item["DomainName"],
+                    aliases=list((item.get("Aliases") or {}).get("Items") or []),
+                    enabled=bool(item.get("Enabled")),
+                    viewer_protocol_policies=sorted(policies),
+                    origin_domains=matched,
+                )
+            )
+        marker = listing.get("NextMarker")
+        if not (listing.get("IsTruncated") and marker):
+            return sorted(found, key=lambda d: d.id)
+
+
+def _read_cloudfront(
+    call: _Caller, clients: AwsClients, balancers: Sequence[LoadBalancerInfo]
+) -> tuple[list[CloudFrontInfo], Literal["COLLECTED", "DENIED", "NOT_REQUESTED"]]:
+    """Best effort: a role created before this permission existed still scans (status DENIED)."""
+    if clients.cloudfront is None or not any(lb.dns_name for lb in balancers):
+        return [], "NOT_REQUESTED"
+    try:
+        return _cloudfront(call, balancers), "COLLECTED"
+    except AwsScanError as error:
+        if error.code != "PERMISSION_DENIED":
+            raise
+        return [], "DENIED"
 
 
 def _role_policy(call: _Caller, role_arn: str) -> RolePolicyInfo:
@@ -401,7 +477,16 @@ def scan_aws_infra(
             target_ports = sorted({ports[a] for a in arns if ports.get(a) is not None})
             listeners.append(
                 ListenerInfo(
-                    port=listener["Port"], protocol=listener["Protocol"], target_ports=target_ports
+                    port=listener["Port"],
+                    protocol=listener["Protocol"],
+                    target_ports=target_ports,
+                    has_certificate=bool(listener.get("Certificates")),
+                    ssl_policy=listener.get("SslPolicy"),
+                    redirects_to_https=any(
+                        a.get("Type") == "redirect"
+                        and (a.get("RedirectConfig") or {}).get("Protocol") == "HTTPS"
+                        for a in listener.get("DefaultActions", [])
+                    ),
                 )
             )
         balancers.append(
@@ -410,8 +495,11 @@ def scan_aws_infra(
                 type=lb.get("Type", ""),
                 scheme=lb.get("Scheme", ""),
                 listeners=listeners,
+                dns_name=lb.get("DNSName"),
             )
         )
+
+    distributions, cloudfront_status = _read_cloudfront(call, clients, balancers)
 
     roles = [_role_policy(call, arn) for arn in role_arns]
 
@@ -442,4 +530,6 @@ def scan_aws_infra(
         role_policies=roles,
         cloudtrail=summary,
         duration_seconds=clock() - started,
+        cloudfront=distributions,
+        cloudfront_status=cloudfront_status,
     )

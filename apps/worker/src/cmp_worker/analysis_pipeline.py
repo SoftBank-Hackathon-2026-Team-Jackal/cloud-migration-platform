@@ -49,7 +49,8 @@ from cmp_scanners.manifests import ManifestScan
 from cmp_scanners.manifests import scan_manifests as run_manifest_scan
 from cmp_scanners.masking import mask_text
 from cmp_scanners.network import build_network, merge_network_intents
-from cmp_scanners.routes import scan_go_routes
+from cmp_scanners.routes import HttpRoute, scan_go_routes
+from cmp_scanners.security import measure_security
 from cmp_scanners.source import fetch_source as checkout_source
 from cmp_scanners.usage import (
     build_aws_usage,
@@ -429,6 +430,12 @@ class AnalysisPipeline:
             unverified_risks=risks,
             scope=data.scope,
             aws_usage=aws_usage,
+            security=measure_security(
+                manifests,
+                infra_scan,
+                code,
+                [HttpRoute.model_validate(r) for r in assembly.get("http_routes", [])],
+            ),
         )
         return {
             "ref": report.ref.model_dump(),

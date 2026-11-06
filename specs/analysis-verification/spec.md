@@ -109,7 +109,7 @@
 
 #### AV-005 — 인프라·네트워크 스캔과 통신 의도
 
-- VPC·Subnet·Route Table·Security Group, ALB Listener·Target Group, IRSA 역할 정책, CloudTrail 관리 이벤트를 읽기 전용으로 조회한다.
+- VPC·Subnet·Route Table·Security Group, ALB Listener·Target Group, IRSA 역할 정책, CloudTrail 관리 이벤트를 읽기 전용으로 조회한다. ALB 리스너는 인증서 유무·TLS 정책·HTTPS 리다이렉트까지, 클러스터 VPC의 로드밸런서를 오리진으로 쓰는 CloudFront 배포는 뷰어 프로토콜 정책과 별칭을 읽는다(티켓 28-A, CloudFront 권한이 없으면 스캔은 계속하고 `cloudfront_status`가 `DENIED`로 남는다).
 - Security Group·Ingress·코드의 외부 호출을 **`network_intent`**로 바꾼다. 형식은 `RequirementsV2`의 목록이다: `{source_resource_id, destination_resource_id 또는 external_host, port, protocol}`. 리소스 간 통신은 `destination_resource_id`, 외부 목적지는 `external_host`로 쓴다.
 - 외부 진입(인터넷 → 앱 포트·TLS)과 원본 CIDR은 v2 intent에 자리가 없으므로 `AnalysisReport`에 기록한다(외부 진입 표현은 D-15).
 - 대상 CIDR·NAT·LB 종류·Security Group ID는 넣지 않는다.
@@ -248,7 +248,7 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 #### AV-023 — 보안 측정과 동등 판정
 
 - **측정 기준(첫 사이클 4개):** 외부 HTTPS, DB 접근 범위, DB 전송 암호화, 운영용 API 외부 노출. 포트 관리, 네트워크 분리, 저장 암호화, 시크릿, 권한, 감사 로그, 백업은 같은 모델에 항목을 더하는 후속이다.
-- **원본 측정:** 스캔 결과(매니페스트·인프라·코드·`.env` 키 이름)에서 기준별 원본 상태를 근거(`Evidence`)와 함께 기록한다. 근거가 없으면 "알 수 없음"으로 두고 통과로 간주하지 않는다. 비밀 값은 읽지 않는다(AV-020).
+- **원본 측정:** 스캔 결과(매니페스트·인프라·코드·`.env` 키 이름)에서 기준별 원본 상태를 근거(`Evidence`)와 함께 기록한다. 근거가 없으면 "알 수 없음"으로 두고 통과로 간주하지 않는다. 비밀 값은 읽지 않는다(AV-020). 상태는 `PROTECTED` / `PARTIAL` / `UNPROTECTED` / `UNKNOWN` / `NOT_APPLICABLE`이고 `AnalysisReport.security`에 기준 순서대로 실린다(티켓 28-B). `sslmode`는 비밀이 아닌 출처(소스 코드, 매니페스트 리터럴, ConfigMap)에서 모드 값만 읽고, `.env`·Secret에만 있으면 `UNKNOWN`이다. 운영용 API는 관례적 경로를 **후보**로만 올리고 확정은 사용자가 한다.
 - **판정:** 기준마다 원본 상태와 대상(예정) 상태를 비교해 `LOWER`(낮아짐) / `SAME` / `HIGHER` / `UNKNOWN`을 낸다. 원본부터 약한 항목은 약점(`WEAK_SOURCE`)으로 따로 표시한다. 같은 입력이면 같은 판정이 나온다.
 - **동등 보장:** `LOWER`는 필수 기능의 `NONE`과 같이 취급한다. 보강으로 `SAME` 이상이 되지 않으면 `APPROVAL`(잃는 것을 보이고 사용자 승인) 또는 `BLOCK`이다. 자동 승인은 없다(AV-022).
 - **약점 보강 제안:** 약점마다 대상에서 어떻게 고칠지(예: DB 접근을 앱 Pod로 제한, DB 연결에 SSL 강제, 운영용 경로 외부 차단)를 제안으로 표시하고 사용자가 승인한 것만 적용 대상이 된다. **보강을 대상 구성에 반영하는 방법은 Provisioning 계약 합의 전이므로 이 기능 범위에 넣지 않는다**(표시와 승인 기록까지).

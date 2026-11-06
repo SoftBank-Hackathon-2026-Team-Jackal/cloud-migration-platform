@@ -8,6 +8,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from cmp_scanners.sslmode import env_mode, modes_in
+
 _WORKLOAD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod"}
 _BUILTIN_GROUPS = {
     "apps", "batch", "policy", "autoscaling", "networking.k8s.io", "storage.k8s.io",
@@ -121,6 +123,37 @@ class NetworkRule(_Model):
     evidence: str
 
 
+class IngressInfo(_Model):
+    """An Ingress: the paths it routes and whether it terminates TLS (ticket 28-B)."""
+
+    name: str
+    namespace: str | None
+    tls: bool  # `spec.tls`, or an ALB certificate annotation
+    paths: list[str]
+    evidence: str
+
+
+class IngressPolicy(_Model):
+    """A NetworkPolicy for ingress: which pods it selects and who may reach them (ticket 28-B).
+
+    `allow_all` is true when some rule lets any source in (no `from`, an empty selector, or
+    0.0.0.0/0). No sources and not `allow_all` means ingress is denied."""
+
+    policy: str
+    namespace: str | None
+    target_selector: dict[str, str]
+    source_selectors: list[dict[str, str]]
+    allow_all: bool
+    evidence: str
+
+
+class SslModeFinding(_Model):
+    """A `sslmode` mode word found in a ConfigMap value or a literal environment value."""
+
+    mode: str
+    evidence: str
+
+
 class Reference(_Model):
     source: str
     kind: Literal["ConfigMap", "Secret", "PVC"]
@@ -143,6 +176,10 @@ class ManifestScan(_Model):
     configmaps: list[ConfigMapInfo]
     network_rules: list[NetworkRule]
     unparsed: list[Unparsed]
+    # Ticket 28-B: security signals. Defaults keep older stored scans readable.
+    ingresses: list[IngressInfo] = []
+    ingress_policies: list[IngressPolicy] = []
+    ssl_modes: list[SslModeFinding] = []
 
 
 def _files(path: Path) -> list[tuple[Path, str]]:
@@ -213,6 +250,16 @@ def _scan_workload(doc, rel, resource, evidence, out) -> None:
             },
         )
         containers.append(info)
+        for entry in c.get("env") or []:
+            value = entry.get("value")
+            name = entry.get("name", "")
+            if not isinstance(value, str):
+                continue  # a reference (valueFrom) or a number: its value is not here to read
+            modes = [m] if (m := env_mode(name, value)) else modes_in(value)
+            for mode in modes:
+                out["ssl_modes"].append(
+                    SslModeFinding(mode=mode, evidence=f"{info.evidence}/env/{name}")
+                )
         if index > 0:
             out["unconvertible"].append(
                 Unconvertible(
@@ -319,6 +366,74 @@ def _scan_network_policy(doc: dict[str, Any], meta: dict[str, Any], evidence: st
                     )
 
 
+_ANY_SOURCE = {"0.0.0.0/0", "::/0"}
+
+
+def _labels(selector: Any) -> dict[str, str]:
+    return {str(k): str(v) for k, v in ((selector or {}).get("matchLabels") or {}).items()}
+
+
+def _scan_ingress(
+    doc: dict[str, Any], meta: dict[str, Any], annotations: dict[str, Any], evidence: str, out
+) -> None:
+    spec = doc.get("spec") or {}
+    paths: list[str] = []
+    for rule in spec.get("rules") or []:
+        for item in (rule.get("http") or {}).get("paths") or []:
+            path = item.get("path") or "/"
+            if path not in paths:
+                paths.append(path)
+    if not paths and spec.get("defaultBackend"):
+        paths.append("/")
+    out["ingresses"].append(
+        IngressInfo(
+            name=meta.get("name", ""),
+            namespace=meta.get("namespace"),
+            tls=bool(spec.get("tls")) or "alb.ingress.kubernetes.io/certificate-arn" in annotations,
+            paths=paths,
+            evidence=evidence,
+        )
+    )
+
+
+def _scan_ingress_policy(doc: dict[str, Any], meta: dict[str, Any], evidence: str, out) -> None:
+    spec = doc.get("spec") or {}
+    types = spec.get("policyTypes") or []
+    if types and "Ingress" not in types:
+        return  # no policyTypes means Kubernetes applies ingress rules
+    sources: list[dict[str, str]] = []
+    allow_all = False
+    for rule in spec.get("ingress") or []:
+        peers = rule.get("from") or []
+        if not peers:
+            allow_all = True  # a rule without `from` lets every source in
+        for peer in peers:
+            if "ipBlock" in peer:
+                allow_all = allow_all or (peer["ipBlock"] or {}).get("cidr") in _ANY_SOURCE
+            elif "namespaceSelector" in peer:
+                labels = _labels(peer["namespaceSelector"])
+                if labels:
+                    sources.append({f"namespace.{k}": v for k, v in labels.items()})
+                else:
+                    allow_all = True  # every namespace
+            elif "podSelector" in peer:
+                labels = _labels(peer["podSelector"])
+                if labels:
+                    sources.append(labels)
+                else:
+                    allow_all = True  # every pod of the namespace
+    out["ingress_policies"].append(
+        IngressPolicy(
+            policy=meta.get("name", ""),
+            namespace=meta.get("namespace"),
+            target_selector=_labels(spec.get("podSelector")),
+            source_selectors=sources,
+            allow_all=allow_all,
+            evidence=evidence,
+        )
+    )
+
+
 def _references(resource: str, pod: dict[str, Any], out) -> None:
     found: set[tuple[str, str]] = set()
     for c in [*(pod.get("containers") or []), *(pod.get("initContainers") or [])]:
@@ -397,6 +512,8 @@ def _scan_document(doc: dict[str, Any], rel: str, out) -> None:
                     kind="ALB_INGRESS", resource=resource, evidence=f"{evidence}/{where}"
                 )
             )
+    if kind == "Ingress":
+        _scan_ingress(doc, meta, annotations, evidence, out)
     if kind == "ServiceAccount" and "eks.amazonaws.com/role-arn" in annotations:
         out["cloud_dependencies"].append(
             CloudDependency(
@@ -412,6 +529,11 @@ def _scan_document(doc: dict[str, Any], rel: str, out) -> None:
             )
         )
     if kind == "ConfigMap":
+        for key, value in sorted((doc.get("data") or {}).items()):
+            for mode in modes_in(value) if isinstance(value, str) else []:
+                out["ssl_modes"].append(
+                    SslModeFinding(mode=mode, evidence=f"{evidence}/data/{key}")
+                )
         keys = sorted({*(doc.get("data") or {}), *(doc.get("binaryData") or {})})
         out["configmaps"].append(
             ConfigMapInfo(
@@ -423,6 +545,7 @@ def _scan_document(doc: dict[str, Any], rel: str, out) -> None:
         )
     if kind == "NetworkPolicy":
         _scan_network_policy(doc, meta, evidence, out)
+        _scan_ingress_policy(doc, meta, evidence, out)
     if kind == "PersistentVolumeClaim":
         _add_claim(doc, meta.get("name", ""), evidence, out)
     if kind == "Secret":
@@ -450,6 +573,9 @@ _RESULT_KEYS = (
     "configmaps",
     "network_rules",
     "unparsed",
+    "ingresses",
+    "ingress_policies",
+    "ssl_modes",
 )
 
 
