@@ -383,3 +383,25 @@ def test_client_other_http_errors_stay_generic():
     client.opener = Failing()
     with pytest.raises(AgentTransportError, match="PLATFORM_REQUEST_FAILED"):
         client.poll_once(agent_id="agent-a", credential="cmp_agent_private")
+
+
+def test_finished_jobs_wake_the_tunnel_and_a_wake_failure_never_stops_the_agent():
+    """Ticket 66 (#283): a processed job (not RUNNING, not idle) signals the tunnel container."""
+    clock = Clock(stop_after=2)
+    poll = scripted(
+        {"job_id": "job-a", "status": "SUCCEEDED", "code": "READY"},
+        {"job_id": "job-b", "status": "RUNNING", "code": "KUBERNETES_UNAVAILABLE"},
+        {"job_id": "job-c", "status": "FAILED", "code": "PVC_NOT_BOUND"},
+        None,
+    )
+    woken, events = [], []
+
+    def wake(outcome):
+        woken.append(outcome["job_id"])
+        raise OSError("read-only")
+
+    agent = daemon(MemoryCredentialStore(credential="c"), poll, clock)
+    agent.wake, agent.log = wake, events.append
+    assert agent.run() == 0
+    assert woken == ["job-a", "job-c"]
+    assert {"event": "tunnel_wake_failed"} in events

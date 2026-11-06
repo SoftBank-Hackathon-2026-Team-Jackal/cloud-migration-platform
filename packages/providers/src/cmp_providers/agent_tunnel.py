@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from cmp_providers.agent_runtime import halt
+from cmp_providers.agent_runtime import halt, read_wake, write_wake  # noqa: F401
 from cmp_providers.onprem_agent import (
     ENVIRONMENT,
     MANAGED,
@@ -46,6 +46,11 @@ DB_PORT = 5432
 STALE_AFTER = 180  # WireGuard Reject-After-Time: no handshake for this long means no session
 UNAUTHORIZED_EXIT = 2
 KEY_SECRET = "cmp-agent-wireguard"
+# Ticket 66 (#283): after a wake-up (start, Agent job signal, exposed-port change) an unhealthy
+# tunnel re-checks every FAST_INTERVAL seconds for at most FAST_WINDOW seconds.
+FAST_INTERVAL = 2.0
+FAST_WINDOW = 120.0
+WAKE_TICK = 1.0
 _ENDPOINT = re.compile(r"^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$")
 
 
@@ -531,6 +536,7 @@ class TunnelManager:
         self.last_action = 0.0
         self.recoveries = 0
         self.last_event: dict | None = None
+        self.ports: list[int] | None = None  # exposed ports of the latest config
 
     def start(self) -> None:
         """Load or create the private key, then register its public key (idempotent)."""
@@ -598,6 +604,7 @@ class TunnelManager:
             return self._report(tunnel_ip, None, False, False, str(exc))
 
         ports = sorted({int(p) for p in config.get("exposed_ports") or []})
+        self.ports = ports
         try:
             forwards, codes = self.discover(ports)
         except RolloutAgentError:
@@ -651,15 +658,35 @@ def run_tunnel(
     interval: float,
     log: Callable[[dict], None],
     max_backoff: float = 60,
+    wake: Callable[[], object] | None = None,
+    fast_interval: float = FAST_INTERVAL,
+    fast_window: float = FAST_WINDOW,
+    tick: float = WAKE_TICK,
 ) -> int:
     """`wait(seconds)` returns True when a stop was requested. On revocation (W9) the tunnel is
-    taken down and the loop idles until a stop (ticket 52, D14), then exits with code 2."""
+    taken down and the loop idles until a stop (ticket 52, D14), then exits with code 2.
+
+    Ticket 66 (#283): start-up, a new `wake()` token (the `agent` container finished a job) and
+    an exposed-port change open a fast window. Inside it an unhealthy report is followed by the
+    next check after `fast_interval`; a healthy report, or the end of the window, returns to
+    `interval`. Checks are never closer than `fast_interval`, so one window costs at most
+    `fast_window / fast_interval` extra config/status call pairs."""
+    clock = manager.clock
     failures = 0
+    fast_until = clock() + fast_window
+    token = wake() if wake else None
+    ports = None
     try:
         while True:
             try:
-                manager.step()
-                failures, delay = 0, interval
+                report = manager.step()
+                failures = 0
+                if ports is not None and manager.ports != ports:
+                    fast_until = clock() + fast_window
+                ports = manager.ports
+                healthy = (report or {}).get("code") is None
+                fast = not healthy and clock() < fast_until
+                delay = fast_interval if fast else interval
             except AgentTransportError as exc:
                 if str(exc) == "AGENT_UNAUTHORIZED":
                     log({"event": "stopped", "code": "AGENT_UNAUTHORIZED"})
@@ -672,8 +699,21 @@ def run_tunnel(
                 delay = min(2**failures, max_backoff)
                 failures += 1
                 log({"event": "retry", "code": exc.code, "seconds": delay})
-            if wait(delay):
-                return 0
+            if wake is None:
+                if wait(delay):
+                    return 0
+                continue
+            checked = clock()
+            due = checked + delay
+            while (remaining := due - clock()) > 0:
+                if wait(min(tick, remaining)):
+                    return 0
+                current = wake()
+                if current != token:
+                    token = current
+                    fast_until = clock() + fast_window
+                    if not failures:  # platform outages keep their backoff
+                        due = min(due, checked + fast_interval)
     finally:
         manager.shutdown()
 
@@ -691,6 +731,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--namespace", default="cmp-system")
     parser.add_argument("--mode", choices=["auto", "kernel", "userspace"], default="auto")
     parser.add_argument("--interval-seconds", type=float, default=15)
+    parser.add_argument("--wake-file", help="signal file the agent container writes (ticket 66)")
     args = parser.parse_args(argv)
 
     stop = threading.Event()
@@ -730,7 +771,8 @@ def main(argv: list[str] | None = None) -> int:
         discover=lambda ports: discover_forwards(view, ports),
         log=_log,
     )
-    return run_tunnel(manager, wait=stop.wait, interval=args.interval_seconds, log=_log)
+    wake = (lambda: read_wake(args.wake_file)) if args.wake_file else None
+    return run_tunnel(manager, wait=stop.wait, interval=args.interval_seconds, log=_log, wake=wake)
 
 
 if __name__ == "__main__":

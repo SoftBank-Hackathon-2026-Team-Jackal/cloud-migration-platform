@@ -125,7 +125,7 @@ identity = approval_target(manifest, preview)
 | `status` | `common.status`: READY→READY, FAILED→FAILED, INFRASTRUCTURE_READY·UNKNOWN·결과 없음→UNKNOWN |
 | `external_endpoint` | `http://{application.external_host}:{application.external_port}`(둘 다 있을 때만) |
 | `port` | `application.external_port`(AWS/GCP LB 80, ON_PREM 터널 쪽 앱 포트). 앱 `port`(클러스터 안 컨테이너 포트)는 쓰지 않는다 |
-| `health_path` | `application.health_path`, 없으면 `/health` |
+| `health_path` | `application.health_path`(= Plan 앱 `health_path`, 분석이 readinessProbe > livenessProbe > 헬스 이름 코드 라우트 > `/` 순으로 정함, [64](../../tickets/provisioning/64-health-path-from-analysis.md)), 결과에 없을 때만 `/health` |
 | `ready` | `proceed` ∧ status READY ∧ 목적지 있음 ∧ `application.ready` ∧ HTTP·TLS 없음(P0). `TrafficHandoff.proceed`와 같다 |
 
 막힘 코드(`blocked_by`, 첫 값이 원인): `RESULT_NOT_FOUND`, `WORKLOADS_NOT_DEPLOYED`, `PROVISIONING_NOT_READY`, `DATABASE_NOT_READY`, `TUNNEL_DB_NOT_VERIFIED`, `APPLICATION_NOT_READY`, `EXTERNAL_ENDPOINT_UNAVAILABLE`, `TUNNEL_STATUS_STALE`. 조회 자체가 실패하면 Workflow가 `HANDOFF_UNAVAILABLE`로 기록한다. 데이터 이전이 읽는 DATA_MIGRATION 필드는 `proceed`, `blocked_by`, `common.namespace`, `common.cluster.{kind,name,location,account_id}`, `database.{release,name,tunnel_endpoint}`이며 이 티켓에서 바꾸지 않았다. AWS/GCP DB 외부 주소는 두지 않는다(CDC는 `kubectl exec`, 클러스터 사이 주소는 WireGuard `peer_host` 입력). 상세는 [50 H1~H8](../../tickets/provisioning/50-handoff-contract.md#착수-결정-2026-11-06).

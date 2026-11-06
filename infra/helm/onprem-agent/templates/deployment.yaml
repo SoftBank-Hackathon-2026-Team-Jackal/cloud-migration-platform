@@ -54,6 +54,11 @@ spec:
             - --preflight-allowed-images
             - {{ join "," ($.Values.networkPreflight.allowedImages | default (list .)) | quote }}
             {{- end }}
+            {{- if .Values.tunnel.enabled }}
+            # Ticket 66 (#283): a finished job tells the tunnel to re-check right away.
+            - --tunnel-wake-file
+            - /var/run/cmp-wake/job
+            {{- end }}
           env:
             - name: HOME
               value: /tmp
@@ -72,6 +77,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.tunnel.enabled }}
+            - name: tunnel-wake
+              mountPath: /var/run/cmp-wake
+            {{- end }}
             {{- if .Values.platform.caBundle }}
             - name: platform-ca
               mountPath: /etc/cmp-agent/ca
@@ -96,6 +105,8 @@ spec:
             - {{ .Values.tunnel.mode | quote }}
             - --interval-seconds
             - {{ .Values.tunnel.intervalSeconds | quote }}
+            - --wake-file
+            - /var/run/cmp-wake/job
           env:
             - name: HOME
               value: /tmp
@@ -120,6 +131,8 @@ spec:
               mountPath: /tmp
             - name: wireguard-run
               mountPath: /var/run/wireguard
+            - name: tunnel-wake
+              mountPath: /var/run/cmp-wake
             {{- if ne .Values.tunnel.mode "kernel" }}
             - name: tun
               mountPath: /dev/net/tun
@@ -138,6 +151,11 @@ spec:
           emptyDir: {}
         - name: wireguard-run
           emptyDir: {}
+        # Ticket 66: signal file written by the agent container, read by the tunnel container.
+        - name: tunnel-wake
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
         {{- if ne .Values.tunnel.mode "kernel" }}
         # wireguard-go fallback only (kernel WireGuard needs no device).
         - name: tun
