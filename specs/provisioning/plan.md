@@ -226,6 +226,8 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 
 **13 구현 (#53):** 위 제안 필드를 `ProvisioningResult` v1로 확정했다. 승인 실행 완료 시 업무 DB `provisioning_results`에 불변 저장하고, Workflow 이력에는 `plan_id`·`revision`·`status`만 남긴다. Data/Traffic Worker는 `get_migration_handoff` Activity로 자기 섹션과 진행 가능 여부를 읽고, 사용자는 읽기 전용 요약 API로 상태·앱 외부 주소·검사 결과만 본다. 검사 목록은 Provider별 고정 검사 순서와 첫 실패 코드에서 추론하며, 데이터 변경 기능 테스트는 항상 `NOT_RUN`(데이터 이전 후 실행)이다. 상세 결정은 [티켓 13](../../tickets/provisioning/13-result-handoff.md)에 있다.
 
+**50 구현 (#185):** `MigrationWorkflow`는 승인 실행이 성공한 실행에서 `traffic` 단계 직전(데이터 단계 뒤) `traffic-handoff-v1` patch 아래 `get_traffic_handover`로 Traffic `Handover` 모양의 인계를 읽어 Workflow 상태 `traffic_handoff`에 보존한다. `proceed=false`이거나 조회가 실패하면 `traffic_blocked`(코드 = 첫 `blocked_by` 또는 `HANDOFF_UNAVAILABLE`)로 끝나고 전환 Activity를 실행하지 않는다. 변환은 Provisioning 쪽 순수 함수이고 Traffic 계약은 바꾸지 않는다. 자식 `TrafficShiftWorkflow` 연결은 #128이다. 상세는 [티켓 50](../../tickets/provisioning/50-handoff-contract.md#착수-결정-2026-11-06).
+
 ## 12. Failure, retry, and rollback behavior
 
 | 실패 | 처리·복구 경계 |

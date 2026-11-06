@@ -9,6 +9,7 @@ order and stops at the first failure, so the check list is inferred from that or
 from datetime import datetime
 from urllib.parse import urlsplit
 
+from cmp_contracts.handoff import TrafficHandoff, TrafficHandover
 from cmp_contracts.plan import PlanManifest
 from cmp_contracts.provisioning_result import (
     ApplicationHandoff,
@@ -462,6 +463,47 @@ def handoff(
                 blocked.append("EXTERNAL_ENDPOINT_UNAVAILABLE")
         view["application"] = application
     return {**view, "proceed": not blocked, "blocked_by": blocked}
+
+
+# Ticket 50: result status -> Traffic `Handover.status`. INFRASTRUCTURE_READY is not ready for
+# traffic yet, so it is UNKNOWN (the Traffic model has no such value; `blocked_by` says why).
+TRAFFIC_STATUS = {"READY": "READY", "FAILED": "FAILED"}
+
+
+def traffic_handover(view: dict) -> TrafficHandoff:
+    """Ticket 50 (#185): a TRAFFIC_MIGRATION view -> the Traffic `Handover` shape (pure).
+
+    The relay forwards to `external_host:external_port` (AWS/GCP: the LB address and port 80;
+    ON_PREM: the tunnel IP and app port, filled only after a tunnel health check). The app's
+    in-cluster `port` is never used. `ready` is True only when the view proceeds, the app is ready
+    and the scheme is plain HTTP (P0); otherwise the value is still built so the reason travels
+    with it, but Traffic's `check_handover` refuses it.
+    """
+    common = view.get("common") or {}
+    app = view.get("application") or {}
+    status = TRAFFIC_STATUS.get(str(common.get("status")), "UNKNOWN")
+    host, port = app.get("external_host"), app.get("external_port")
+    endpoint = f"http://{host}:{port}" if host and port else None
+    http_only = app.get("scheme", "http") == "http" and not app.get("tls")
+    proceed = bool(view.get("proceed")) and status == "READY" and bool(endpoint)
+    handover = TrafficHandover(
+        status=status,
+        ready=proceed and bool(app.get("ready")) and http_only,
+        external_endpoint=endpoint,
+        health_path=app.get("health_path") or DEFAULT_HEALTH_PATH,
+        port=int(port or 80),
+    )
+    blocked = list(view.get("blocked_by") or [])
+    if not handover.ready and not blocked:
+        blocked = ["APPLICATION_NOT_READY"]  # e.g. TLS on a P0 (HTTP-only) target
+    return TrafficHandoff(
+        plan_id=view["plan_id"],
+        revision=view["revision"],
+        provider=common.get("provider"),
+        proceed=handover.ready,
+        blocked_by=[] if handover.ready else blocked,
+        handover=handover,
+    )
 
 
 def public_summary(result: ProvisioningResult) -> dict:

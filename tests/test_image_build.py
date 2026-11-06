@@ -276,3 +276,41 @@ def test_mutable_ecr_repository_is_rejected(tmp_path, monkeypatch):
     assert result.log.version_id == "log-v1"
     assert not any(c[0] == "docker" for c in calls)
     assert logs[0]["error_code"] == result.error_code
+
+
+def test_build_runs_on_daemon_default_bridge_without_network_entitlements(tmp_path, monkeypatch):
+    """Ticket 54: RUN steps stay on `docker0`, where the host IMDS guard applies."""
+    path = archive(tmp_path, {"Dockerfile": b"FROM scratch\n", "app.py": b"print('ok')"})
+    monkeypatch.setenv("BUILDX_BUILDER", "unguarded-remote-builder")
+    calls, _ = mock_aws_docker(monkeypatch, path)
+    mocked = subprocess.run
+    envs = {}
+
+    def run(command, **kwargs):
+        if command[:3] == ["docker", "buildx", "build"]:
+            envs["build"] = kwargs["env"]
+        return mocked(command, **kwargs)
+
+    monkeypatch.setattr("cmp_worker.image_build.subprocess.run", run)
+    assert builder().build(source_uri(path)).status == "SUCCEEDED"
+    (build,) = [c for c in calls if c[:3] == ["docker", "buildx", "build"]]
+    assert build[build.index("--network") + 1] == "default"
+    assert not any(arg.startswith("--allow") or "network.host" in arg for arg in build)
+    assert "--builder" not in build
+    # A fresh DOCKER_CONFIG and no BUILDX_BUILDER: always the daemon's own `docker` driver.
+    assert "BUILDX_BUILDER" not in envs["build"]
+    assert Path(envs["build"]["DOCKER_CONFIG"]).name == "docker-config"
+
+
+def test_buildx_command_is_shared_with_the_imds_smoke(tmp_path):
+    from cmp_worker.image_build import _buildx_command
+
+    command = _buildx_command(
+        platform="linux/amd64",
+        context=tmp_path,
+        image=f"{ECR}:cmp-tag",
+        metadata=tmp_path / "metadata.json",
+    )
+    assert command[:3] == ["docker", "buildx", "build"]
+    assert command[command.index("--network") + 1] == "default"
+    assert command[-1] == str(tmp_path)

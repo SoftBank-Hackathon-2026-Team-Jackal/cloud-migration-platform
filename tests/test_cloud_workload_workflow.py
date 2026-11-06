@@ -18,7 +18,7 @@ from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
 from temporalio import activity
 from temporalio.client import WorkflowHistory
 from temporalio.worker import Replayer, Worker
-from test_migration_plan_workflow import run_scenario, wait_phase
+from test_migration_plan_workflow import handover_fake, run_scenario, traffic_handoff, wait_phase
 
 OLD_HISTORY = Path(__file__).parent / "fixtures/temporal/migration-aws-infra-only-v1.json"
 INFRA = {"plan_id": "plan-infra", "revision": 1}
@@ -49,6 +49,8 @@ class FakeCloudProvisioning:
         self.workloads = workloads or published(WORK, provider, "WORKLOADS")
         self.reject = set(reject)
         self.calls = []
+        self.traffic = traffic_handoff(WORK)  # ticket 50
+        self.handover_requests = []
 
     def worker(self, client):
         plans = {"approval-infra": (INFRA, "INFRASTRUCTURE"), "approval-work": (WORK, "WORKLOADS")}
@@ -105,6 +107,7 @@ class FakeCloudProvisioning:
                 publish_workloads,
                 claim,
                 complete,
+                handover_fake(self),
                 *(executor(name) for name in STEPS.values()),
             ],
         )
@@ -149,6 +152,8 @@ async def test_cloud_infra_then_workload_plan_approval_runs_09_11(provider):
         "complete",
     ]
     assert fake.calls[4][1] == {"migration_id": "migration-1", "infrastructure": INFRA}
+    # Ticket 50: Traffic reads the workload Revision's result, not the infrastructure one.
+    assert fake.handover_requests == [WORK]
 
 
 async def test_workload_publish_failure_ends_plan_failed_without_deploying():
