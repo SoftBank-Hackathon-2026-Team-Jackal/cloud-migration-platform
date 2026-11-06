@@ -125,6 +125,11 @@ async def test_the_analysis_result_reaches_the_sandbox_loop_and_the_pass_reaches
     plan = next(p for n, p in script.calls if n == "sbx_plan_publish")
     assert plan["input"]["review_ref"] == sandbox_input["review_ref"]
     assert set(rows) == {"postgres", "environment-config"}
+    # Provisioning 59: sandbox events go to the parent's stream (the web reads `migration-w`)
+    emits = [p for n, p in script.calls if n == "sbx_emit"]
+    contexts = [p["events"] for n, p in script.calls if n != "sbx_emit" and p.get("events")]
+    assert emits and {p["migration_id"] for p in emits} == {"migration-w"}
+    assert contexts and {c["migration_id"] for c in contexts} == {"migration-w"}
 
 
 @pytest.mark.asyncio

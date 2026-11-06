@@ -43,7 +43,7 @@ class Script:
         self.calls.append((name, payload))
 
     def names(self):
-        return [n for n, _ in self.calls]
+        return [n for n, _ in self.calls if n != "sbx_emit"]
 
     def activities(self):
         script = self
@@ -118,7 +118,12 @@ class Script:
             script.record("sbx_teardown", payload)
             return {"cleanup_status": "CLEANED"}
 
-        return [build, prepare, apply, verify, classify, fix, plan_publish, publish, teardown]
+        @activity.defn(name="sbx_emit")
+        async def emit(payload: dict) -> int:  # Provisioning 59: Workflow-level events
+            script.record("sbx_emit", payload)
+            return len(payload["events"])
+
+        return [build, prepare, apply, verify, classify, fix, plan_publish, publish, teardown, emit]
 
 
 @workflow.defn
