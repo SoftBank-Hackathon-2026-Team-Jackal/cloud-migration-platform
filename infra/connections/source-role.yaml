@@ -52,6 +52,7 @@ Resources:
             Effect: Allow
             Action:
               - cloudtrail:LookupEvents
+              - cloudfront:ListDistributions
               - ec2:DescribeRouteTables
               - ec2:DescribeSecurityGroups
               - ec2:DescribeSubnets

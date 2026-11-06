@@ -27,6 +27,7 @@ OTHER_LB_ARN = f"arn:aws:elasticloadbalancing:{REGION}:{ACCOUNT}:loadbalancer/ap
 TG_ARN = f"arn:aws:elasticloadbalancing:{REGION}:{ACCOUNT}:targetgroup/shop-tg/123"
 ROLE_ARN = f"arn:aws:iam::{ACCOUNT}:role/shop-api"
 POLICY_ARN = f"arn:aws:iam::{ACCOUNT}:policy/shop-read"
+LB_DNS = f"shop-123.{REGION}.elb.amazonaws.com"
 
 
 def policy_json(action, resource):
@@ -76,7 +77,7 @@ def sg(group_id, name, ingress):
     }
 
 
-def stub_happy(stubs, *, cloudtrail_events=None):
+def stub_happy(stubs, *, cloudtrail_events=None, listener_extra=None):
     stubs["eks"].add_response(
         "describe_cluster",
         {
@@ -142,6 +143,7 @@ def stub_happy(stubs, *, cloudtrail_events=None):
                     "VpcId": "vpc-1",
                     "Scheme": "internet-facing",
                     "Type": "application",
+                    "DNSName": LB_DNS,
                 },
                 {
                     "LoadBalancerArn": OTHER_LB_ARN,
@@ -163,6 +165,7 @@ def stub_happy(stubs, *, cloudtrail_events=None):
                     "Port": 443,
                     "Protocol": "HTTPS",
                     "DefaultActions": [{"Type": "forward", "TargetGroupArn": TG_ARN}],
+                    **(listener_extra or {}),
                 }
             ]
         },

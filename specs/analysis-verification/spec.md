@@ -109,7 +109,7 @@
 
 #### AV-005 — 인프라·네트워크 스캔과 통신 의도
 
-- VPC·Subnet·Route Table·Security Group, ALB Listener·Target Group, IRSA 역할 정책, CloudTrail 관리 이벤트를 읽기 전용으로 조회한다.
+- VPC·Subnet·Route Table·Security Group, ALB Listener·Target Group, IRSA 역할 정책, CloudTrail 관리 이벤트를 읽기 전용으로 조회한다. ALB 리스너는 인증서 유무·TLS 정책·HTTPS 리다이렉트까지, 클러스터 VPC의 로드밸런서를 오리진으로 쓰는 CloudFront 배포는 뷰어 프로토콜 정책과 별칭을 읽는다(티켓 28-A, CloudFront 권한이 없으면 스캔은 계속하고 `cloudfront_status`가 `DENIED`로 남는다).
 - Security Group·Ingress·코드의 외부 호출을 **`network_intent`**로 바꾼다. 형식은 `RequirementsV2`의 목록이다: `{source_resource_id, destination_resource_id 또는 external_host, port, protocol}`. 리소스 간 통신은 `destination_resource_id`, 외부 목적지는 `external_host`로 쓴다.
 - 외부 진입(인터넷 → 앱 포트·TLS)과 원본 CIDR은 v2 intent에 자리가 없으므로 `AnalysisReport`에 기록한다(외부 진입 표현은 D-15).
 - 대상 CIDR·NAT·LB 종류·Security Group ID는 넣지 않는다.
