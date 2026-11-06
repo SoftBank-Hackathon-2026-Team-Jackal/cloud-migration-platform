@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from cmp_contracts.events import MigrationEvent
@@ -10,7 +10,7 @@ from cmp_providers.env_file_store import EncryptedEnvFileStore, EnvFileError
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from temporalio.client import WorkflowHandle
+from temporalio.client import WorkflowHandle, WorkflowQueryFailedError, WorkflowQueryRejectedError
 from temporalio.service import RPCError, RPCStatusCode
 
 from cmp_api.config import settings
@@ -153,14 +153,48 @@ async def get_migration(workflow_id: str) -> MigrationStatus:
     return MigrationStatus(workflow_id=workflow_id, **state)
 
 
-@router.post("/{workflow_id}/approve", status_code=202)
-async def approve_migration(workflow_id: str) -> dict[str, str]:
+@router.post(
+    "/{workflow_id}/approve",
+    status_code=202,
+    responses={
+        409: {"description": "`gate=cutover`: DB is not ready to switch (`CUTOVER_NOT_READY`)"}
+    },
+)
+async def approve_migration(
+    workflow_id: str, gate: Annotated[Literal["cutover"] | None, Query()] = None
+) -> dict[str, str]:
+    """Without `gate`: the scaffold approval Signal. `gate=cutover` (web second approval): switch
+    the database of this migration (child `data-<id>`, specs/data-migration). Accepted only while
+    the source is the writer and replication is streaming; otherwise 409 `CUTOVER_NOT_READY`."""
+    if gate == "cutover":
+        return await _approve_cutover(workflow_id)
     try:
         await (await _handle(workflow_id)).signal("approve")
     except RPCError as exc:
         code = 404 if exc.status == RPCStatusCode.NOT_FOUND else 503
         raise HTTPException(status_code=code, detail="Workflow not found or unavailable") from exc
     return {"workflow_id": workflow_id, "signal": "approve"}
+
+
+async def _approve_cutover(workflow_id: str) -> dict[str, str]:
+    child = f"data-{workflow_id}"
+    try:
+        handle = await _handle(child)
+        status = await handle.query("status")
+        if status.get("phase") != "streaming" or status.get("active") != "source":
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "CUTOVER_NOT_READY", "phase": status.get("phase")},
+            )
+        await handle.signal("switchover")
+    except (WorkflowQueryFailedError, WorkflowQueryRejectedError) as exc:
+        raise HTTPException(status_code=503, detail="Data migration unavailable") from exc
+    except RPCError as exc:
+        code = 404 if exc.status == RPCStatusCode.NOT_FOUND else 503
+        raise HTTPException(
+            status_code=code, detail="Data migration not found or unavailable"
+        ) from exc
+    return {"workflow_id": child, "signal": "switchover"}
 
 
 @router.post("/{workflow_id}/cancel", status_code=202)

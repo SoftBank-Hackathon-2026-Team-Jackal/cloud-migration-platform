@@ -50,13 +50,19 @@ class Fakes:
         @activity.defn(name="dm_switchover")
         async def switchover(payload: dict) -> dict:
             direction = payload["request"]["direction"]
-            self.calls.append(f"dm_switchover:{direction}")
+            self.calls.append(f"dm_switchover:{direction}:{payload['attempt']}")
             if self.refuse:
                 raise ApplicationError("NOT_READY", type="NOT_READY", non_retryable=True)
             active = "target" if direction == "forward" else "source"
             return {"switched": True, "active": active, "write_pause_ms": 7, "verify_ok": True}
 
+        @activity.defn(name="dm_announce_cutover")
+        async def announce(payload: dict) -> dict:
+            self.calls.append(f"dm_announce_cutover:{payload['approval']}")
+            return {"ready": True}
+
         return [
+            announce,
             precheck,
             sample,
             switchover,
@@ -110,6 +116,10 @@ async def test_replicates_until_streaming_then_switches_rolls_back_and_finishes(
     assert order[:6] == ["dm_precheck", "dm_prepare", "dm_copy_schema", "dm_subscribe",
                          "dm_install_cutover", "dm_route_app"]  # fmt: skip
     assert "dm_sample:reverse" in fakes.calls  # 전환 뒤에는 역방향 복제를 감시한다
+    # 원본이 쓰기 주체일 때만 계획과 승인 요청을 알린다: 처음 한 번, 롤백 뒤(새 시도) 한 번
+    announced = [c for c in order if c.startswith(("dm_announce", "dm_switchover"))]
+    assert announced == ["dm_announce_cutover:True", "dm_switchover:forward:1",
+                         "dm_switchover:reverse:2", "dm_announce_cutover:True"]  # fmt: skip
 
 
 async def test_blocked_precheck_creates_nothing() -> None:
@@ -144,3 +154,5 @@ async def test_refused_switchover_keeps_the_source_as_writer() -> None:
             result = await handle.result()
     assert result["status"] == "cancelled"
     assert "dm_cleanup" in fakes.calls
+    # 거부 뒤에는 새 시도이므로 승인 요청을 다시 보낸다
+    assert fakes.calls.count("dm_announce_cutover:True") == 2
