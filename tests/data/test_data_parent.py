@@ -89,7 +89,7 @@ def handoff_worker(client, view):
     return Worker(client, task_queue=PROVISIONING_QUEUE, activities=[handoff])
 
 
-async def run_probe(view, drive):
+async def run_probe(view, drive, given=GIVEN):
     fakes = Fakes()
     async with (
         await WorkflowEnvironment.start_time_skipping() as env,
@@ -103,7 +103,7 @@ async def run_probe(view, drive):
     ):
         pid = f"migration-{uuid.uuid4()}"
         handle = await env.client.start_workflow(
-            DataStepProbe.run, GIVEN, id=pid, task_queue=WORKFLOW_QUEUE
+            DataStepProbe.run, given, id=pid, task_queue=WORKFLOW_QUEUE
         )
         await drive(env, handle, pid)
         return await handle.result(), await handle.query("status")
@@ -125,6 +125,21 @@ async def test_parent_continues_only_after_the_db_is_switched() -> None:
     assert status["data_migration"]["writer"] == "target"
     assert status["data_migration"]["phase"] == "switched"
     assert status["data_migration"]["active"] == "target"
+
+
+async def test_parent_blocks_when_the_preflight_location_is_unknown() -> None:
+    """Provisioning 76: 검사 위치(Agent·클러스터)를 모르면 자식(터널·복제)을 시작하지 않는다."""
+    from .test_data_preflight_request import GIVEN as ONPREM_GIVEN
+
+    view = READY_VIEW | {"common": {"provider": "ON_PREM", "namespace": "chat",
+                                    "cluster": {"kind": "K3s", "agent_id": "office-seoul-01"}}}  # fmt: skip
+
+    async def drive(env, handle, pid):
+        pass
+
+    result, status = await run_probe(view, drive, ONPREM_GIVEN)
+    assert result == "data_blocked"
+    assert status["failure_code"] == "NETWORK_PREFLIGHT_TARGET_MISSING"
 
 
 async def test_parent_stops_when_the_handoff_is_not_ready() -> None:

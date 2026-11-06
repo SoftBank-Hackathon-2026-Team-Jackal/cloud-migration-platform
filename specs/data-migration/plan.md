@@ -18,7 +18,8 @@ MigrationWorkflow
   └─ data_copy 단계 → DataMigrationWorkflow (자식)
        1. dm_handover      Provisioning DATA_MIGRATION 보기 읽기(proceed=false면 BLOCKED)
        1b. dm_path         WireGuard 터널과 원본 PgBouncer 준비(ticket 06, 앱 연결 1회 변경)
-       2. dm_preflight     ON_PREM이면 MNP Preflight 호출(PASS가 아니면 BLOCKED)
+       2. run_network_preflight  `network_preflight` 입력이 있으면(웹 ON_PREM 기본) 터널 뒤 MNP 검사 →
+                           may_start_data_migration(같은 입력 PASS만). 아니면 BLOCKED(NETWORK_PREFLIGHT_*)
        3. dm_precheck      원본 precheck SQL → evaluate_precheck → data.phase(preflight|blocked)
        4. dm_copy_schema   pg_dump --schema-only 원본 → 대상, 전환 확인용 marker 테이블
        5. dm_subscribe     원본 publication, 대상 subscription(copy_data=true). 이름은 replication_names
@@ -27,6 +28,8 @@ MigrationWorkflow
        7. dm_readiness (반복) 원본 신호 → readiness_event → data.readiness
        8. dm_switchover    PoC fast 순서, PgBouncer PAUSE·연결 대상 변경(ticket 04)
        9. dm_verify        테이블별 행 수·체크섬 → data.verify / cutover.verify
+       끝. dm_tunnel_cleanup 터널을 만든 실행은 done·failed·cancelled·blocked 어느 끝이든 슬롯 정리 뒤
+                           한 번(롤백이 터널을 쓰므로 스트리밍 중엔 안 지움, Provisioning 76)
 ```
 
 SQL 실행 경로: Worker → `kubectl --kubeconfig <참조> exec -n <ns> <db pod> -- psql -XAtc` (Provisioning `cluster.database_probe`와 같은 방식). 비밀번호는 Pod 안의 환경변수·Secret을 쓰고 명령줄에 넣지 않는다. 대상의 구독 연결 문자열(`host=<원본 터널 IP>`)에 들어가는 원본 비밀번호는 대상 클러스터 Secret에서 읽어 SQL을 Pod 안에서 조립한다(Q3 결정 후 구체화).

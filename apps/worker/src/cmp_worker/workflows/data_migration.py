@@ -5,6 +5,12 @@
 `cancel` 신호는 전환 전이면 구독·발행을 지우고 끝낸다(원본 슬롯이 WAL을 붙잡지 않게). 구독을 만든 뒤
 복제가 실패해도 같은 정리를 시도한다(Provisioning 72, 정리 실패는 `cleanup_code`).
 
+Provisioning 76(ADR-007 2안): 입력에 `network_preflight`(MNP `NetworkPreflightRequest`)가 있으면 터널 뒤,
+복제 전에 `run_network_preflight`를 부르고 같은 입력 Fingerprint의 PASS만 통과시킨다(아니면 `blocked`,
+`NETWORK_PREFLIGHT_<status>`). 터널을 만든 실행은 어느 끝(done·failed·cancelled·blocked)에서든 마지막에
+`dm_tunnel_cleanup`을 부른다. 롤백이 터널을 쓰므로 스트리밍 중에는 지우지 않는다(정리 실패는
+`tunnel_cleanup_code`, 원래 결과를 덮지 않음).
+
 감시는 짧은 Activity를 타이머 간격으로 반복한다(무기한 Activity 없음). 이력이 길어지지 않게 일정 횟수마다
 continue-as-new로 상태를 넘긴다. Traffic의 DB 게이트는 `db_gate` Query로 읽는다(DM-007).
 
@@ -15,6 +21,7 @@ API가 이 Workflow에 `switchover` 신호로 보낸다.
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 from temporalio import workflow
@@ -22,7 +29,9 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
+    from cmp_contracts.network_preflight import NetworkPreflightRequest, NetworkPreflightResult
     from cmp_contracts.queues import MIGRATION_QUEUE
+    from cmp_providers.network_preflight import may_start_data_migration
 
     from cmp_worker.activities import data_cutover as dc
     from cmp_worker.activities import data_migration as dm
@@ -33,6 +42,8 @@ PARENT_SIGNAL = "data_migration_state"
 ANNOUNCE_PATCH = "data-cutover-announce-v1"
 TUNNEL_PATCH = "data-tunnel-v1"
 FAILURE_CLEANUP_PATCH = "data-failure-cleanup-v1"  # Provisioning 72: 복제 실패 때도 슬롯 정리
+PREFLIGHT_PATCH = "data-network-preflight-v1"  # Provisioning 76: 복제 전 MNP 게이트
+TUNNEL_CLEANUP_PATCH = "data-tunnel-cleanup-v1"  # Provisioning 76: 끝날 때 터널(NLB) 정리
 SWITCH_FROM = {"switchover": "source", "rollback": "target"}
 
 
@@ -56,6 +67,9 @@ class DataMigrationWorkflow:
         self.tunnel: dict | None = None  # ticket 10: {name, endpoint, handshake, peer_host}
         self.subscribing = False  # 구독(원본 슬롯)을 만들기 시작했는지
         self.cleanup_code: str | None = None  # 실패 뒤 정리도 실패했을 때의 코드
+        self.tunnel_made = False  # 끝날 때 dm_tunnel_cleanup을 부를지(Provisioning 76)
+        self.tunnel_cleanup_code: str | None = None
+        self.preflight: dict | None = None  # {status, may_start, blocked_by, input_fingerprint}
 
     # ---- 신호·조회 ----
 
@@ -85,6 +99,7 @@ class DataMigrationWorkflow:
             "switches": self.switches,
             "failure_code": self.failure_code,
             "tunnel": self.tunnel,
+            "preflight": self.preflight,
         }
 
     @workflow.query
@@ -134,12 +149,19 @@ class DataMigrationWorkflow:
         if args.get("tunnel") and workflow.patched(TUNNEL_PATCH):
             # ticket 10: 두 클러스터 사이 WireGuard 게이트웨이. LB 주소·handshake를 기다린다.
             self.phase = "tunnel"
+            # 만들다 실패해도(NLB가 이미 생겼을 수 있다) 끝에서 정리한다
+            self.tunnel_made = workflow.patched(TUNNEL_CLEANUP_PATCH)
             self.tunnel = await self._call(
                 dt.dm_tunnel,
                 {"request": req, "tunnel": args["tunnel"]},
                 timeout_s=3600 if args["tunnel"].get("ingress") == "source" else 1800,
                 attempts=2,
             )
+        if args.get("network_preflight") and workflow.patched(PREFLIGHT_PATCH):
+            blocked = await self._network_preflight(args["network_preflight"])
+            if blocked:
+                self.failure_code = blocked
+                return "blocked"
         self.phase = "precheck"
         pre = await self._call(dm.dm_precheck, req, timeout_s=120)
         if not pre["ok"]:
@@ -168,6 +190,44 @@ class DataMigrationWorkflow:
         await self._call(dc.dm_install_cutover, self._cutover_payload(args), timeout_s=600)
         await self._call(dc.dm_route_app, self._cutover_payload(args), timeout_s=600)
         return None
+
+    async def _network_preflight(self, request: dict) -> str | None:
+        """MNP 게이트. 막히면 원인 코드를 준다. 결과 이벤트(`data.preflight`)는 Activity가 낸다."""
+        self.phase = "network_preflight"
+        try:
+            raw = await self._call("run_network_preflight", request, timeout_s=900, attempts=2)
+        except ActivityError:
+            self.preflight = {"status": "UNKNOWN", "may_start": False,
+                              "blocked_by": ["PREFLIGHT_NOT_RUN"]}  # fmt: skip
+            return "NETWORK_PREFLIGHT_UNKNOWN"
+        try:
+            # 계약은 strict라 JSON으로 읽는다(checked_at이 문자열이다)
+            result = NetworkPreflightResult.model_validate_json(json.dumps(raw))
+        except ValueError:  # pydantic ValidationError 포함: 결과를 믿을 수 없으면 시작하지 않는다
+            self.preflight = {"status": "UNKNOWN", "may_start": False,
+                              "blocked_by": ["PREFLIGHT_RESULT_INVALID"]}  # fmt: skip
+            return "NETWORK_PREFLIGHT_UNKNOWN"
+        ok, blocked_by = may_start_data_migration(
+            result, NetworkPreflightRequest.model_validate_json(json.dumps(request))
+        )
+        self.preflight = {"status": result.status, "may_start": ok, "blocked_by": blocked_by,
+                          "input_fingerprint": result.input_fingerprint}  # fmt: skip
+        if ok:
+            return None
+        if result.status != "PASS":
+            return f"NETWORK_PREFLIGHT_{result.status}"
+        return blocked_by[0]  # PASS지만 다른 입력의 결과(PREFLIGHT_INPUT_CHANGED)
+
+    async def _cleanup_tunnel(self, args: dict) -> None:
+        """터널(원본 EKS 공개 NLB 포함)을 지운다. 슬롯 정리 뒤, 실행이 끝날 때만 부른다."""
+        if not self.tunnel_made:
+            return
+        self.tunnel_made = False
+        payload = {"request": self._req(args), "tunnel": args["tunnel"]}
+        try:
+            await self._call(dt.dm_tunnel_cleanup, payload, timeout_s=3600, attempts=3)
+        except ActivityError as exc:
+            self.tunnel_cleanup_code = _code(exc)
 
     async def _cancel(self, args: dict) -> str:
         self.phase = "cancelling"
@@ -239,7 +299,8 @@ class DataMigrationWorkflow:
         except Exception:  # noqa: BLE001 - 부모가 끝났어도 데이터 이전은 계속한다
             workflow.logger.info("parent not signalled")
 
-    async def _finish(self, status: str) -> dict:
+    async def _finish(self, status: str, args: dict) -> dict:
+        await self._cleanup_tunnel(args)
         await self._notify()
         return self._result(status)
 
@@ -252,18 +313,19 @@ class DataMigrationWorkflow:
             self.phase, self.active = state["phase"], state["active"]
             self.switches, self.requested = state["switches"], state.get("requested")
             self.last_steps, self.announced = state.get("last_steps"), state.get("announced")
+            self.tunnel_made = state.get("tunnel_made", False)
         else:
             try:
                 outcome = await self._replicate(args)
             except ActivityError as exc:
                 self.failure_code, self.phase = _code(exc), "failed"
                 await self._cleanup_after_failure(args)
-                return await self._finish("failed")
+                return await self._finish("failed", args)
             if outcome:
                 if outcome == "failed":
                     await self._cleanup_after_failure(args)
                 self.phase = outcome
-                return await self._finish(outcome)
+                return await self._finish(outcome, args)
             self.phase = "streaming"
             await self._notify()
 
@@ -274,10 +336,10 @@ class DataMigrationWorkflow:
             if SWITCH_FROM.get(request or "") == self.active:
                 await self._switch(args)
             elif request == "cancel" and self.active == "source":
-                return await self._finish(await self._cancel(args))
+                return await self._finish(await self._cancel(args), args)
             elif request == "finish":
                 self.phase = "done"
-                return await self._finish("done")
+                return await self._finish("done", args)
             await self._monitor_once(args)
             await self._announce(args)
             try:
@@ -288,7 +350,7 @@ class DataMigrationWorkflow:
                 pass
         state = {"phase": self.phase, "active": self.active, "switches": self.switches,
                  "requested": self.requested, "last_steps": self.last_steps,
-                 "announced": self.announced}  # fmt: skip
+                 "announced": self.announced, "tunnel_made": self.tunnel_made}  # fmt: skip
         workflow.continue_as_new({**args, "state": state})
         raise ApplicationError("unreachable")  # continue_as_new does not return
 
@@ -299,4 +361,5 @@ class DataMigrationWorkflow:
             "switches": self.switches,
             "failure_code": self.failure_code,
             "cleanup_code": self.cleanup_code,
+            "tunnel_cleanup_code": self.tunnel_cleanup_code,
         }
