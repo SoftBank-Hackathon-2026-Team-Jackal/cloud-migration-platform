@@ -108,7 +108,7 @@ def test_worker_image_pins_every_cli_with_a_checksum():
     assert text.count("curl -fsSLo") == text.count("sha256sum -c -") == 7
     assert "components-v${GCLOUD_VERSION}.json" in text
     assert "gke-gcloud-auth-plugin" in text
-    assert re.search(r"^FROM api AS worker$", text, re.MULTILINE)
+    assert re.search(r"^FROM base AS worker$", text, re.MULTILINE)
 
 
 def test_worker_kubectl_and_helm_match_the_agent_image():
@@ -689,7 +689,7 @@ def test_worker_image_keeps_git_for_the_real_analysis_source_fetch():
     """Ticket 45 local run: real analysis `fetch_source` failed ANALYSIS_INPUT_INVALID because
     `git` was missing (FileNotFoundError). The release health check now requires it."""
     dockerfile = (DEMO / "Dockerfile").read_text()
-    worker_stage = dockerfile.split("FROM api AS worker", 1)[1]
+    worker_stage = dockerfile.split("FROM base AS worker", 1)[1]
     install = re.search(r"apt-get install -y --no-install-recommends ([^;]+);", worker_stage)
     assert install and "git" in install.group(1).split()
     purge = re.search(r"apt-get purge -y ([^;]+);", worker_stage)
@@ -774,3 +774,15 @@ def test_api_runtime_report_names_the_web_start_data_migration_state(monkeypatch
     assert report()["web_start_data_migration"] == "on"
     monkeypatch.setattr(settings, "web_start_data_migration", '{"source": {}}')
     assert report()["web_start_data_migration"] == "error:DATA_MIGRATION_SETTINGS_INVALID"
+
+
+def test_worker_clis_come_before_the_platform_source():
+    """Deploy speed: a code-only change must not rebuild the ~1.4 GB CLI layer. The worker installs
+    the pinned CLIs before copying the source, and both targets copy the same source set."""
+    text = (DEMO / "Dockerfile").read_text()
+    api_stage = text.split("FROM base AS api", 1)[1].split("FROM base AS worker", 1)[0]
+    worker_stage = text.split("FROM base AS worker", 1)[1]
+    assert worker_stage.index("sha256sum -c -") < worker_stage.index("COPY apps ./apps")
+    copies = [line for line in api_stage.splitlines() if line.startswith("COPY ")]
+    assert copies and all(line in worker_stage for line in copies)
+    assert "COPY apps" not in text.split("FROM base AS api", 1)[0]  # base holds only the lock file

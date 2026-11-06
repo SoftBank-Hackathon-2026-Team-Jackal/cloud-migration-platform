@@ -1,12 +1,17 @@
 # Demo control-plane image. `api` stays slim; `worker` adds the pinned Provisioning CLIs (ticket 21, #100).
 #   docker build -f infra/demo/Dockerfile --target worker -t cmp-demo-worker:dev .
-FROM python:3.11-slim AS api
+# Layer order keeps deploys fast: the pinned dependencies and the worker CLIs (~1.4 GB) come before
+# the platform source, so a code-only change rebuilds only the small source layers. The source block
+# is the same in both targets on purpose (copying it before the CLIs would rebuild them every deploy).
+FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY infra/demo/requirements.lock.txt ./requirements.lock.txt
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock.txt
+
+FROM base AS api
 
 COPY pyproject.toml README.md ./
 COPY apps ./apps
@@ -25,7 +30,7 @@ ENV CMP_RESOURCE_ROOT=/app
 
 EXPOSE 8000
 
-FROM api AS worker
+FROM base AS worker
 
 ARG TARGETARCH
 # Terraform matches the version used for the saved-Plan/Apply checks (tickets 05, 08, 10).
@@ -120,5 +125,21 @@ ENV PATH=/opt/google-cloud-sdk/bin:${PATH} \
 
 COPY infra/demo/worker-entrypoint.sh /usr/local/bin/cmp-worker-entrypoint
 RUN chmod 0755 /usr/local/bin/cmp-worker-entrypoint
+
+COPY pyproject.toml README.md ./
+COPY apps ./apps
+COPY packages ./packages
+COPY scripts ./scripts
+COPY alembic.ini ./
+RUN pip install --no-cache-dir --no-deps .
+# Ticket 43 (#178): the installed packages live in site-packages, so the runtime resources
+# (cmp_providers.resources.RUNTIME_RESOURCE_DIRS) are copied here and located through
+# CMP_RESOURCE_ROOT instead of the package location.
+COPY infra/terraform ./infra/terraform
+COPY infra/helm ./infra/helm
+COPY catalog ./catalog
+COPY skills ./skills
+ENV CMP_RESOURCE_ROOT=/app
+
 ENTRYPOINT ["cmp-worker-entrypoint"]
 CMD ["python", "-m", "cmp_worker.workers.run_all"]
