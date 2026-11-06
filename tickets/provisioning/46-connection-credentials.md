@@ -88,14 +88,14 @@ Blocked by: 23(#118, 연결 API), 41(#176, api 플랫폼 프로필). 44(#179, �
 - 문서: 이 티켓, `tasks.md`, ADR-005, `shared-contracts.md`, `plan.md`, 23·28·41, `docs/contracts/openapi.yaml`
 - 테스트: `tests/test_connection_credentials.py`(신규), `test_demo_runtime.py`·`test_plan_publish.py`(기대값 갱신), `test_aws_workloads.py`(`Plan(spec=)` 도우미)
 
-## 검증 기록 (2026-11-06, origin/main `b65c6cd`(23b #208·44 #206) 병합 후)
+## 검증 기록 (2026-11-06, origin/main `9c3b9f2`(23b #208·44 #206·52 #209) 병합 후)
 | 명령·환경 | 결과 |
 | --- | --- |
 | 새 테스트 (구현 전) | 수집 실패 `ImportError: check_target_connection`·`cmp_providers.aws_credentials` 없음 (RED) |
 | 병합 직후 44 테스트 | `test_aws_start_takes_the_connection_profile_and_account` 실패 → 44가 `credential_ref.id`에 `cmp-conn-<hex>`를 넣고 ID가 32 hex인 것을 반영(C1: 두 형식, 12~32 hex) |
-| `make check` (ruff + pytest) | 2122 passed, 9 skipped |
+| `make check` (ruff + pytest) | 2157 passed, 9 skipped |
 | `make openapi` | origin/main 대비 `ConnectionDetail`·`CreateConnectionResponse`에 `platform_principal_arn`만 추가 |
-| `alembic upgrade head` + `alembic check` (SQLite) | head `20261106_01`, `No new upgrade operations detected.` (DB 변경 없음) |
+| `alembic upgrade head` + `alembic check` (SQLite) | head `20261106_02`(52), `No new upgrade operations detected.` (46은 DB 변경 없음) |
 | `infra/connections/*.yaml` | origin/main(= 23b가 올린 `v1`)과 같은 바이트 |
 | `bash -n` `ensure-secrets.sh`·`start.sh` | 통과 |
 | 초안 단계: `docker compose config`, `uvx cfn-lint`(템플릿), botocore 연쇄(`cmp-conn-*` → `source_profile` 프로필의 `credential_source = Ec2InstanceMetadata`) | 공유 경로·마운트 확인, 오류 없음, IMDS까지 해석(서버 밖이라 IMDS만 실패). 병합 후 연쇄는 `test_generated_profiles_chain_to_the_instance_role_build_profile`로 고정 |
