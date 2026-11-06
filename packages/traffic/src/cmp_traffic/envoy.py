@@ -2,6 +2,8 @@
 
 - 가중치 적용: RDS 파일을 원자적으로 교체(os.replace)하고, 관리 API에서 Envoy가 그 버전을
   받아들였는지 확인한다(version_text 일치 / update_rejected 증가 감시).
+- 대상 주소 바꾸기: 같은 방식으로 CDS 파일(`cluster_target` 한 개)을 교체한다. 대상 클러스터를 정적 설정에
+  박아 두면 이전마다 손으로 고치고 Envoy를 다시 띄워야 한다.
 - 관측: 관리 API /stats의 클러스터 카운터를 관찰 창 앞뒤로 읽어 차이를 낸다.
 설정 배포를 한 호스트 파일 공유로 하는 것은 데모 범위이며, 다른 호스트 배포는 xDS 서버가 필요하다.
 """
@@ -20,11 +22,13 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import Sample
+from .relay import CLUSTER_TYPE, _cluster
 
 FetchJson = Callable[[str], dict[str, Any]]
 FetchText = Callable[[str], str]
 
 RDS_STAT = r"http\.ingress\.rds\.local_route\.(version_text|update_rejected)$"
+CDS_STAT = r"cluster_manager\.cds\.(version_text|update_rejected)$"
 CLUSTER_STAT = r"cluster\.cluster_(origin|target)\.(upstream_rq_(total|5xx|timeout|time))$"
 
 
@@ -129,8 +133,10 @@ class EnvoyProxy:
         target_host: str | None = None,
         confirm_timeout: float = 2.5,
         poll_interval: float = 0.05,
+        cds_path: Path | None = None,
     ) -> None:
         self.rds_path = Path(rds_path)
+        self.cds_path = Path(cds_path) if cds_path else None
         self.admin_url = admin_url.rstrip("/")
         self.fetch = fetch or http_get_json
         self.target_host = target_host
@@ -138,8 +144,8 @@ class EnvoyProxy:
         self.poll_interval = poll_interval
         self.version = 0
 
-    def _rds_stats(self) -> dict[str, Any]:
-        query = urllib.parse.urlencode({"format": "json", "filter": RDS_STAT})
+    def _stats(self, pattern: str) -> dict[str, Any]:
+        query = urllib.parse.urlencode({"format": "json", "filter": pattern})
         data = self.fetch(f"{self.admin_url}/stats?{query}")
         return {
             item["name"].split(".")[-1]: item["value"]
@@ -147,7 +153,10 @@ class EnvoyProxy:
             if "name" in item
         }
 
-    def _next_version(self) -> int:
+    def _rds_stats(self) -> dict[str, Any]:
+        return self._stats(RDS_STAT)
+
+    def _next_version(self, path: Path | None = None) -> int:
         """직전 번호보다 큰 번호. Activity마다 새 인스턴스가 만들어져도 1부터 다시 시작하지 않는다.
 
         번호가 겹치면 Envoy의 version_text가 이미 그 값이라 "적용됐다"는 확인이 무의미해진다.
@@ -155,27 +164,26 @@ class EnvoyProxy:
         """
         floor = self.version
         try:
-            floor = max(floor, int(json.loads(self.rds_path.read_text())["version_info"]))
+            floor = max(floor, int(json.loads((path or self.rds_path).read_text())["version_info"]))
         except (OSError, ValueError, KeyError, TypeError):
             pass
         return max(floor + 1, int(time.time()))
 
-    def apply(self, weights: dict[str, int]) -> None:
-        version = self._next_version()
-        doc = build_route_config(weights, version, self.target_host)
+    def _publish(self, path: Path, doc: dict[str, Any], version: int, pattern: str) -> None:
+        """파일을 원자적으로 교체하고 Envoy가 그 버전을 받아들였다고 확인될 때만 돌아온다."""
         try:
-            before = self._rds_stats()
+            before = self._stats(pattern)
         except Exception:  # noqa: BLE001 - 아직 Envoy가 없으면 기준값 없이 확인한다
             before = {}
-        tmp = self.rds_path.with_name(".rds.tmp")
+        tmp = path.with_name("." + path.stem + ".tmp")
         tmp.write_text(json.dumps(doc), encoding="utf-8")
-        os.replace(tmp, self.rds_path)  # 같은 디렉터리 안에서 원자적 교체
+        os.replace(tmp, path)  # 같은 디렉터리 안에서 원자적 교체
         self.version = version
 
         deadline = time.monotonic() + self.confirm_timeout
         while time.monotonic() < deadline:
             try:
-                current = self._rds_stats()
+                current = self._stats(pattern)
             except Exception:  # noqa: BLE001 - 일시 오류는 제한 시간까지 다시 본다
                 current = {}
             if str(current.get("version_text")) == str(version):
@@ -184,6 +192,43 @@ class EnvoyProxy:
                 raise RuntimeError("envoy rejected the config")
             time.sleep(self.poll_interval)
         raise RuntimeError("timeout waiting for envoy to load the config")
+
+    def apply(self, weights: dict[str, int]) -> None:
+        version = self._next_version()
+        doc = build_route_config(weights, version, self.target_host)
+        self._publish(self.rds_path, doc, version, RDS_STAT)
+
+    def target_weight(self) -> int | None:
+        """지금 라우트 파일에서 대상으로 가는 가중치(%). 읽지 못하면 None."""
+        try:
+            doc = json.loads(self.rds_path.read_text(encoding="utf-8"))
+            hosts = doc["resources"][0]["virtual_hosts"]
+            for route in hosts[0]["routes"]:
+                for cluster in (
+                    route.get("route", {}).get("weighted_clusters", {}).get("clusters", [])
+                ):
+                    if cluster.get("name") == "cluster_target":
+                        return int(cluster["weight"])
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            return None
+        return None
+
+    def set_target(self, host: str, port: int, health_path: str = "/health") -> None:
+        """대상 클러스터의 주소를 바꾼다(CDS 파일 교체). 중계 서버가 동적 대상으로 깔려 있어야 한다.
+
+        Envoy가 그 버전을 받아들였다고 확인될 때만 돌아온다. 새 대상이 실제로 쓰이는지(주소가 활성인지)는
+        호출하는 쪽이 `EnvoyObserver.target_address()`로 한 번 더 본다.
+        """
+        if self.cds_path is None:
+            raise RuntimeError("dynamic target is not configured (no CDS path)")
+        version = self._next_version(self.cds_path)
+        doc = {
+            "version_info": str(version),
+            "resources": [
+                {"@type": CLUSTER_TYPE, **_cluster("cluster_target", host, port, health_path)}
+            ],
+        }
+        self._publish(self.cds_path, doc, version, CDS_STAT)
 
 
 def parse_cluster_stats(data: dict[str, Any], side: str) -> dict[str, float]:
@@ -211,12 +256,16 @@ def parse_cluster_stats(data: dict[str, Any], side: str) -> dict[str, float]:
 
 
 def cluster_target_address(config_dump: dict[str, Any]) -> tuple[str, int] | None:
-    """Envoy `/config_dump`의 static cluster `cluster_target`이 가리키는 (주소, 포트). 없으면 None.
+    """Envoy `/config_dump`의 `cluster_target`이 가리키는 (주소, 포트). 없으면 None.
 
+    정적(static_clusters)이든 파일로 바꾸는 동적(dynamic_active_clusters, 이미 활성화된 것만)이든 읽는다.
     DNS 이름은 풀기 전 설정값 그대로라서 핸드오버의 external_host와 같은 글자로 비교할 수 있다.
     """
     for section in config_dump.get("configs", []):
-        for item in section.get("static_clusters", []):
+        for item in [
+            *section.get("static_clusters", []),
+            *section.get("dynamic_active_clusters", []),
+        ]:
             cluster = item.get("cluster", {})
             if cluster.get("name") != "cluster_target":
                 continue

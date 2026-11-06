@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import time
 
 import yaml
 
@@ -53,11 +55,31 @@ def _cluster(name: str, host: str, port: int, health_path: str) -> dict:
     }
 
 
+CLUSTER_TYPE = "type.googleapis.com/envoy.config.cluster.v3.Cluster"
+
+
+def render_target_cds(
+    target: tuple[str, int], health_path: str = "/health", version: int | None = None
+) -> str:
+    """`cluster_target` 한 개만 담은 CDS 파일(JSON). Envoy는 `cds_path`를 감시해 대상 주소를 바꾼다.
+
+    설정이 처음 깔릴 때의 대상이다. 그 뒤로는 릴레이 워커(`EnvoyProxy.set_target`)가 같은 모양으로 교체한다.
+    """
+    doc = {
+        "version_info": str(version if version is not None else int(time.time())),
+        "resources": [
+            {"@type": CLUSTER_TYPE, **_cluster("cluster_target", target[0], target[1], health_path)}
+        ],
+    }
+    return json.dumps(doc)
+
+
 def render_bootstrap(
     origin: tuple[str, int],
     target: tuple[str, int],
     health_path: str = "/health",
     rds_path: str = "/etc/envoy/rds/rds.json",
+    cds_path: str | None = None,
 ) -> str:
     http_manager = "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager"
     router = "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"
@@ -102,13 +124,45 @@ def render_bootstrap(
                     ],
                 }
             ],
-            "clusters": [
-                _cluster("cluster_origin", origin[0], origin[1], health_path),
-                _cluster("cluster_target", target[0], target[1], health_path),
-            ],
+            # cds_path가 있으면 대상 클러스터는 정적으로 두지 않는다(파일로 바꾼다). 원본은 늘 정적이다.
+            "clusters": [_cluster("cluster_origin", origin[0], origin[1], health_path)]
+            + ([] if cds_path else [_cluster("cluster_target", target[0], target[1], health_path)]),
         },
     }
+    if cds_path:
+        doc["dynamic_resources"] = _cds_source(cds_path)
     return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+
+
+def _cds_source(cds_path: str) -> dict:
+    return {
+        "cds_config": {
+            "resource_api_version": "V3",
+            "path_config_source": {
+                "path": cds_path,
+                "watched_directory": {"path": cds_path.rsplit("/", 1)[0]},
+            },
+        }
+    }
+
+
+def to_dynamic_bootstrap(bootstrap_yaml: str, cds_path: str) -> tuple[str, str]:
+    """이미 깔린 정적 bootstrap을 동적 대상으로 바꾼다. (새 bootstrap, 처음 CDS 파일) 을 돌려준다.
+
+    `cluster_target`을 정적 설정에서 빼서 CDS 파일로 옮기고 나머지는 그대로 둔다(원본 클러스터·가중치·관리 포트).
+    지금 대상 설정이 그대로 첫 CDS 값이 되므로, 바꾸는 순간에 트래픽이 가는 곳은 달라지지 않는다.
+    """
+    doc = yaml.safe_load(bootstrap_yaml)
+    if "dynamic_resources" in doc:
+        raise ValueError("already dynamic")
+    clusters = doc["static_resources"]["clusters"]
+    target = next((c for c in clusters if c.get("name") == "cluster_target"), None)
+    if target is None:
+        raise ValueError("no cluster_target in the bootstrap")
+    doc["static_resources"]["clusters"] = [c for c in clusters if c is not target]
+    doc["dynamic_resources"] = _cds_source(cds_path)
+    cds = {"version_info": str(int(time.time())), "resources": [{"@type": CLUSTER_TYPE, **target}]}
+    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), json.dumps(cds)
 
 
 def render_wireguard(

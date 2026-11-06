@@ -14,7 +14,11 @@
 #
 # 단서: dnf·WireGuard 설정·Envoy 실행은 시험 때 같은 명령으로 확인했고, systemd 등록(wg-quick@wg0)은 아직 다시 돌려보지 않았다.
 #
-# 사용: BOOTSTRAP=./bootstrap.yaml RDS_INIT=./rds.json ./setup-relay.sh
+# 동적 대상(선택): 이전이 넘긴 주소로 대상을 바꾸게 하려면 CDS 파일도 같이 준다.
+#   BOOTSTRAP: render_bootstrap(('원본주소', 80), ('10.200.0.2', 8080), cds_path='/etc/envoy/cds/cds.json')
+#   CDS_INIT=cds.json: python -c "from cmp_traffic.relay import render_target_cds; print(render_target_cds(('10.200.0.2', 8080)))"
+#   그리고 릴레이 워커에 TRAFFIC_CDS_PATH=/etc/envoy/cds/cds.json 을 준다. 이미 깔린 서버는 enable-dynamic-target.sh.
+# 사용: BOOTSTRAP=./bootstrap.yaml RDS_INIT=./rds.json [CDS_INIT=./cds.json] ./setup-relay.sh
 set -euo pipefail
 
 BOOTSTRAP="${BOOTSTRAP:?BOOTSTRAP=bootstrap.yaml 경로가 필요합니다}"
@@ -40,6 +44,10 @@ sudo systemctl enable --now wg-quick@wg0
 sudo install -d -o "$(id -un)" /etc/envoy/rds
 install -m 644 "$BOOTSTRAP" /etc/envoy/bootstrap.yaml
 install -m 644 "$RDS_INIT" /etc/envoy/rds/rds.json
+if [[ -n "${CDS_INIT:-}" ]]; then
+  sudo install -d -o "$(id -un)" /etc/envoy/cds
+  install -m 644 "$CDS_INIT" /etc/envoy/cds/cds.json
+fi
 sudo docker rm -f envoy >/dev/null 2>&1 || true
 sudo docker run -d --name envoy --restart unless-stopped --network host \
   -v /etc/envoy:/etc/envoy "$ENVOY_IMAGE" \
