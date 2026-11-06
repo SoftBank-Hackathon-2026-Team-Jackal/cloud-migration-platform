@@ -38,7 +38,7 @@ json.dump({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
   "$kc" -n "$NS" get secret wg-key -o jsonpath='{.data.private}' | py -c '
 import base64, sys
 from cmp_providers.agent_tunnel import public_key
-print(base64.b64encode(public_key(base64.b64decode(base64.b64decode(sys.stdin.read()))).decode()))
+print(base64.b64encode(public_key(base64.b64decode(base64.b64decode(sys.stdin.read())))).decode())
 '
 }
 
