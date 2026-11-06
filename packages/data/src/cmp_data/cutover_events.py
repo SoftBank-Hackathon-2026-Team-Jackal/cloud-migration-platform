@@ -201,11 +201,18 @@ def verify_events(result: dict, *, key: str, n: int) -> list[Draft]:
                 "target_rows": row["target_rows"],
                 "checksum": "match" if row["match"] else "mismatch"}  # fmt: skip
         out.append(Draft("cutover.verify", "running", data, f"{key}:table:{row['table']}"))
+    # 합계는 웹 script.ts DATA_VERIFY_TIMELINE 순서: rows running → rows 결과 → checksum running →
+    # checksum 결과. 이벤트 status는 마지막(checksum done)만 done, 실패면 failed, 나머지는 running.
     rows = "done" if all(r["source_rows"] == r["target_rows"] for r in tables) else "failed"
     source = sum(row["source_rows"] for row in tables)
     target = sum(row["target_rows"] or 0 for row in tables)
-    out.append(Draft("data.verify", rows, {"name": "rows", "state": rows, "source": source,
-                                           "target": target}, f"{key}:rows"))  # fmt: skip
     state = "done" if verify_ok else "failed"
-    out.append(Draft("data.verify", state, {"name": "checksum", "state": state}, f"{key}:checksum"))
+    out.extend([
+        Draft("data.verify", "running", {"name": "rows", "state": "running"}, f"{key}:rows:running"),
+        Draft("data.verify", "running" if rows == "done" else "failed",
+              {"name": "rows", "state": rows, "source": source, "target": target}, f"{key}:rows"),
+        Draft("data.verify", "running", {"name": "checksum", "state": "running"},
+              f"{key}:checksum:running"),
+        Draft("data.verify", state, {"name": "checksum", "state": state}, f"{key}:checksum"),
+    ])  # fmt: skip
     return out
