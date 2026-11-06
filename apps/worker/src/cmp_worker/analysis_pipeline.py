@@ -51,6 +51,13 @@ from cmp_scanners.masking import mask_text
 from cmp_scanners.network import build_network, merge_network_intents
 from cmp_scanners.routes import scan_go_routes
 from cmp_scanners.source import fetch_source as checkout_source
+from cmp_scanners.usage import (
+    build_aws_usage,
+    cloud_resource_locators,
+    code_services,
+    reconcile_usage,
+    trail_services,
+)
 
 from cmp_worker.artifact_store import ArtifactRef, ArtifactStore
 from cmp_worker.source_access import (
@@ -352,11 +359,23 @@ class AnalysisPipeline:
             *(c.evidence for c in manifests.configmaps),
         ]
         locators = {*evidence, *(prefix + e for e in evidence)}
+        # 06C: what the AWS scan read (IAM roles, CloudTrail) is evidence a mapping row may cite.
+        infra_scan = (
+            AwsInfraScan.model_validate(self._get(infra["ref"]))
+            if infra.get("status") == "COLLECTED"
+            else None
+        )
+        aws_usage = build_aws_usage(
+            "COLLECTED" if infra_scan is not None else infra.get("status", "NOT_COLLECTED"),
+            infra_scan,
+            reason=infra.get("reason") or infra.get("code"),
+        )
         checked = check_mapping_evidence(
             rows,
             workspace=source["workspace"],
             manifest_locators=locators,
             catalog_capabilities=catalog.capabilities,
+            cloud_resource_ids=cloud_resource_locators(aws_usage),
         )
         network = assembly.get("network") or {}
         risks = list(assembly["assumptions"])
@@ -369,6 +388,14 @@ class AnalysisPipeline:
         code = CodeScan.model_validate(self._get(built["code_ref"]))
         if code.env_comparison.partial:
             risks.append("ENV_COMPARISON_PARTIAL: some source files were not scanned")
+        # 06C: the user's candidates against the code and CloudTrail (risk codes only).
+        risks.extend(
+            reconcile_usage(
+                data.scope,
+                code_services=code_services(code),
+                trail_services=trail_services(infra_scan.cloudtrail) if infra_scan else None,
+            )
+        )
         unmapped = [
             *assembly["unmapped_items"],
             *network.get("notes", []),
@@ -401,6 +428,7 @@ class AnalysisPipeline:
             unmapped_items=unmapped,
             unverified_risks=risks,
             scope=data.scope,
+            aws_usage=aws_usage,
         )
         return {
             "ref": report.ref.model_dump(),

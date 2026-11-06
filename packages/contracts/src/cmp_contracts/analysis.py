@@ -34,16 +34,17 @@ class ScopeCandidate(Contract):
     arn: Text | None = None
     evidence: list[ScopeEvidence] = Field(default_factory=list)
     suggested: bool = False
+    selected: bool = False  # 06C: the user's choice; unselected candidates are passed too
 
 
 class ConfirmedScope(Contract):
-    """The user's confirmed analysis scope (ticket 06B). Built by the API from its stored
-    records, never from values the web sends. Names and ARNs only, no credentials."""
+    """The user's confirmed analysis scope (ticket 06B, 06C). Built by the API from its stored
+    records, never from values the web sends. Names and ARNs only, no credentials. Every
+    candidate the platform found is here, told apart by `selected`."""
 
     scope_id: Text
     selection: ScopeSelection
-    included: list[ScopeCandidate]
-    excluded: list[Text] = Field(default_factory=list)
+    candidates: list[ScopeCandidate]
 
 
 class AnalysisInput(Contract):
@@ -91,6 +92,36 @@ class Evidence(Contract):
     kind: Literal["CODE", "MANIFEST", "CLOUD_RESOURCE", "IAM_POLICY", "CLOUDTRAIL", "CONFIG"]
     locator: str
     verified: bool = False
+
+
+class IamRoleUsage(Contract):
+    """An app role the scan read (06C): what it is allowed to do. Wildcard resources cannot be
+    narrowed to a resource, so they are flagged instead of guessed."""
+
+    role_arn: Text
+    actions: list[Text] = Field(default_factory=list)
+    wildcard_resources: bool = False
+    evidence: Evidence
+
+
+class CloudTrailCall(Contract):
+    """Management events the scan saw (06C). CloudTrail `LookupEvents` covers the whole account
+    and no data events: it never proves that an app did not use something."""
+
+    event_source: Text
+    event_name: Text
+    count: int = Field(ge=0)
+    evidence: Evidence
+
+
+class AwsUsage(Contract):
+    """What the AWS scan says about resource use (06C). `status` says whether it ran, so a
+    missing scan is not mistaken for "nothing found"."""
+
+    status: Literal["COLLECTED", "NOT_COLLECTED", "FAILED"]
+    reason: Text | None = None
+    iam_roles: list[IamRoleUsage] = Field(default_factory=list)
+    cloudtrail: list[CloudTrailCall] = Field(default_factory=list)
 
 
 class MappingRow(Contract):
@@ -162,6 +193,7 @@ class AnalysisReport(Contract):
     unmapped_items: list[str]
     unverified_risks: list[str]
     scope: ConfirmedScope | None = None  # ticket 06B: what the user confirmed to analyze
+    aws_usage: AwsUsage | None = None  # ticket 06C: IAM and CloudTrail evidence of resource use
 
     @model_validator(mode="after")
     def unique_mapping_ids(self):

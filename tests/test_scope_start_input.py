@@ -131,8 +131,13 @@ def test_scope_id_fills_the_analysis_input_from_stored_records(api, db, env_ref,
     assert analysis["role_arns"] == [ROLE]
     assert analysis["scope"]["scope_id"] == scope_id
     assert analysis["scope"]["selection"]["namespace"] == "chat"
-    assert [c["candidate_id"] for c in analysis["scope"]["included"]] == INCLUDED
-    assert analysis["scope"]["excluded"] == ["iam-role-other"]
+    # 06C: every candidate is passed in full, told apart by `selected`.
+    by_id = {c["candidate_id"]: c for c in analysis["scope"]["candidates"]}
+    assert list(by_id) == [c["candidate_id"] for c in CANDIDATES]
+    assert [i for i, c in by_id.items() if c["selected"]] == INCLUDED
+    unselected = by_id["iam-role-other"]
+    assert unselected["selected"] is False
+    assert unselected["arn"] == "arn:aws:iam::123456789012:role/other"
     # What the worker receives is a valid analysis input.
     assert AnalysisInput.model_validate(analysis).scope is not None
 
@@ -211,31 +216,31 @@ def test_without_scope_the_start_input_is_unchanged(api, env_ref, agent):
 # --- the pure rule and the contract -----------------------------------------------------------
 
 
-def scope(included, excluded=()):
+def scope(selected):
     return ConfirmedScope.model_validate(
         {
             "scope_id": "scope-" + "a" * 16,
             "selection": SELECTION,
-            "included": [c for c in CANDIDATES if c["candidate_id"] in included],
-            "excluded": list(excluded),
+            "candidates": [{**c, "selected": c["candidate_id"] in selected} for c in CANDIDATES],
         }
     )
 
 
-def test_only_included_iam_roles_with_an_arn_become_role_arns():
-    fields = scope_analysis_fields(scope(INCLUDED, ["iam-role-other"]), PROFILE)
+def test_only_selected_iam_roles_with_an_arn_become_role_arns():
+    fields = scope_analysis_fields(scope(INCLUDED), PROFILE)
     assert fields == {
         "credential_ref": PROFILE,
         "cluster_name": "chat-prod",
         "region": "ap-northeast-1",
         "role_arns": [ROLE],
-        "scope": scope(INCLUDED, ["iam-role-other"]).model_dump(mode="json"),
+        "scope": scope(INCLUDED).model_dump(mode="json"),
     }
 
 
 def test_role_arns_are_unique_and_keep_order():
-    twice = scope(["iam-role-chat-api-irsa", "iam-role-other"])
-    again = twice.model_copy(update={"included": [*twice.included, twice.included[0]]})
+    both = scope(["iam-role-chat-api-irsa", "iam-role-other"])
+    first = both.candidates[0]
+    again = both.model_copy(update={"candidates": [*both.candidates, first]})
     assert scope_analysis_fields(again, PROFILE)["role_arns"] == [
         ROLE,
         "arn:aws:iam::123456789012:role/other",
@@ -244,7 +249,8 @@ def test_role_arns_are_unique_and_keep_order():
 
 def test_an_iam_role_candidate_without_an_arn_is_ignored():
     bare = scope(["iam-role-chat-api-irsa"])
-    bare = bare.model_copy(update={"included": [bare.included[0].model_copy(update={"arn": None})]})
+    first = bare.candidates[0].model_copy(update={"arn": None})
+    bare = bare.model_copy(update={"candidates": [first, *bare.candidates[1:]]})
     assert scope_analysis_fields(bare, PROFILE)["role_arns"] == []
 
 

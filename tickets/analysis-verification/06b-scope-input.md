@@ -1,7 +1,7 @@
 # Ticket 06B — 확정된 분석 범위를 분석 입력으로 연결
 
 ## 상태
-IN_PROGRESS — 구현·자동 테스트 완료(2026-11-06, 전체 2598 통과, `make openapi` 반영). 실제 클러스터 후보로 1회 확인과 웹 계약 합의, 사용자 검토가 남음. GitHub Issue 번호는 사용자가 발행한 뒤 tasks.md에 기록한다.
+DONE — PR #237 병합, Issue #232 (2026-11-06). 미확인: 실제 클러스터 후보로 1회 실행(승인 필요), 웹 `scope_id` 계약 합의. 후속은 [06C](06c-usage-tracing.md). 06C에서 `ConfirmedScope`가 `included`/`excluded` 대신 `candidates[]`(후보마다 `selected`)로 바뀌었다.
 
 ## 목적
 웹의 "이전 범위 선택"(티켓 56, ADR-005)이 확정한 정보를 분석이 실제로 쓰게 한다. 지금은 확정 기록(`scope_confirmations`)을 읽는 코드가 없고, API로 시작한 분석 입력(`AnalysisInput`)에는 저장소·커밋만 있어 `cluster_name`·`credential_ref`가 비어 인프라 스캔이 `AWS_SCAN_NOT_CONFIGURED`로 건너뛰어진다. 프론트가 값을 직접 넣지 않고, API가 저장된 확정 기록에서 서버 쪽으로 채운다.

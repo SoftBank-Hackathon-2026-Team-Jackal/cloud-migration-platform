@@ -115,6 +115,7 @@
 - 대상 CIDR·NAT·LB 종류·Security Group ID는 넣지 않는다.
 - 권한 거부는 필요한 권한 이름과 함께 실패로 반환한다. 코드 스캔과 병렬로 실행한다.
 - **범위 입력(티켓 06B):** 웹의 범위 선택에서 확정된 범위(`scope_id`)를 API가 저장된 기록에서 읽어 `AnalysisInput`의 `credential_ref`·`cluster_name`·`region`·`role_arns`(포함된 IAM 역할 후보만)·`scope`를 채운다. 웹이 값을 직접 보내지 않는다. 범위가 없으면 클러스터가 없어 인프라 스캔이 건너뛰어진다(결정 대기). 확정 범위는 `AnalysisReport.scope`에 기록하고, 스캔 필터·`MIGRATE`/`KEEP` 반영은 후속이다.
+- **리소스 사용 추적(티켓 06C):** 범위의 후보는 선택한 것과 선택하지 않은 것을 모두(`selected`로 구분) 분석에 넘긴다. 스캔이 읽은 IAM 역할 정책(허용 액션, 와일드카드 여부)과 CloudTrail 요약은 `AnalysisReport.aws_usage`에 근거(`IAM_POLICY`, `CLOUDTRAIL`)와 함께 싣고, 스캔이 못 돈 경우는 사유(`NOT_COLLECTED`, `FAILED`)로 남긴다. 후보·코드 호출·CloudTrail을 대조해 `unverified_risks`에 `SCOPE_EXCLUDED_BUT_USED`(제외했는데 쓴다), `SCOPE_SELECTED_NO_USAGE`(선택했는데 흔적 없음), `USAGE_NOT_IN_SCOPE`(코드가 쓰는데 후보에 없음)를 올린다. CloudTrail은 데이터 이벤트와 오래된 기록을 보지 못하고 계정 전체를 보여 주므로, 호출 기록 없음은 쓰지 않음의 증거가 아니며 CloudTrail만으로 후보 밖 사용을 단정하지 않는다.
 
 #### AV-006 — 요구사항·사용 프로필과 사전 점검
 
