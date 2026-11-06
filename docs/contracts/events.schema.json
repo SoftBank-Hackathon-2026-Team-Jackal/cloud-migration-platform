@@ -985,6 +985,14 @@
         "preview_digest": {
           "pattern": "^[a-f0-9]{64}$",
           "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "INFRASTRUCTURE",
+            "WORKLOADS",
+            "FULL"
+          ],
+          "type": "string"
         }
       },
       "title": "PlanReadyData",

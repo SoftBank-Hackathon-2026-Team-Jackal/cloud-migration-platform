@@ -400,3 +400,44 @@ async def test_third_reject_ends_the_migration_rejected():
 
     assert await run_migration(fake, scenario) == "plan_rejected"
     assert [c for c in fake.calls if c[0] == "publish"] == [("publish", n) for n in (1, 2, 3)]
+
+
+# --- plan.ready carries the scope the approval API compares ----------------------------------
+
+client, approver = plan_publish.client, plan_publish.approver
+
+
+def _decide(client, headers, ready, decision, scope):
+    return client.post(
+        f"/provisioning/plans/{ready['plan_id']}/revisions/{ready['revision']}/approvals",
+        json={
+            "decision": decision,
+            "scope": scope,
+            "manifest_digest": ready["manifest_digest"],
+            "preview_digest": ready["preview_digest"],
+        },
+        headers=headers,
+    )
+
+
+async def _onprem_ready(db, store, tmp_path, emitted) -> dict:
+    with_report(db, store)
+    await publish(PlanEvents(publisher(db, store, tmp_path)))
+    [ready] = emitted.of_type("plan.ready")
+    assert validate_data("plan.ready", ready.data) == ready.data
+    return ready.data
+
+
+@pytest.mark.parametrize("decision", ["APPROVE", "REJECT"])
+async def test_plan_ready_scope_is_accepted_by_the_approval_api(
+    db, store, tmp_path, emitted, onprem, client, decision
+):
+    ready = await _onprem_ready(db, store, tmp_path, emitted)
+    assert ready["scope"] == "WORKLOADS"  # ON_PREM Plans are always WORKLOADS
+    headers = approver(client)
+    # The approval rule is unchanged: any other scope is still a target mismatch.
+    full = _decide(client, headers, ready, decision, "FULL")
+    assert full.status_code == 409 and "APPROVAL_TARGET_MISMATCH" in full.text
+    accepted = _decide(client, headers, ready, decision, ready["scope"])
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()["scope"] == "WORKLOADS"

@@ -211,6 +211,7 @@ async def test_plan_ready_after_publication(emitted):
         "revision": 2,
         "manifest_digest": "a" * 64,
         "preview_digest": "b" * 64,
+        "scope": "INFRASTRUCTURE",
     }
 
 
