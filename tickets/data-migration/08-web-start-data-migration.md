@@ -2,7 +2,7 @@
 
 ## 상태
 
-DONE(로컬 검증). 데모 서버에 값을 넣는 일과 worker의 클러스터 접근 준비는 남아 있다.
+DONE(PR #254 병합). 데모 서버에 값을 넣는 일과 worker의 클러스터 접근 준비는 남아 있다.
 
 ## 배경
 
@@ -29,6 +29,7 @@ DONE(로컬 검증). 데모 서버에 값을 넣는 일과 worker의 클러스�
 - `tests/test_web_start_request.py`: 값이 없으면 `data_migration` 없음, 값이 있으면 CLI 결과와 같음, 잘못된 값 5종(JSON 아님, 배열, 모르는 필드, `app` 누락 필드, `settings.image` 없음)은 503이고 값이 응답에 없음, scaffold 시작은 영향 없음
 - `tests/test_demo_runtime.py`: api 전용 기본 꺼짐, 예시 줄 비어 있음, `runtime-check.sh` 포함, 점검 출력 on/off/error
 - 전체 `uv run pytest`: 2819 passed, 31 skipped
+- 로컬 e2e(2026-11-06): 로컬 API에 웹과 같은 `POST /migrations`(ON_PREM, `.env` 업로드)를 보내고 `WEB_START_DATA_MIGRATION`으로만 데이터 입력을 넣었다. 분석·리허설·계획·승인·구축은 결과만 돌려주는 대역 worker로 통과시켰고, 상위 Workflow·데이터 자식·데이터 Activity·SSE·승인 API는 실제로 돌렸다(k3d 실습, 초당 약 50건 쓰기). 준비 전 승인 409 → SSE `approval.required gate=cutover` → HTTP 승인 202 → 전환(쓰기 중단 5.96ms), 테이블 4개 행 수·체크섬 일치, 앱 쓰기 오류 0건, SSE 이벤트 64건 계약 검증 통과. 이 실행에서 전환 확인용 내부 테이블이 `cutover.verify`에 보여 ticket 09에서 뺐다.
 
 ## 남은 일
 

@@ -100,6 +100,20 @@ def test_failed_verify_totals_end_failed() -> None:
     ]
 
 
+def test_internal_marker_table_is_not_shown_as_a_user_table() -> None:
+    tables = [
+        {"table": "messages", "source_rows": 5, "target_rows": 5, "match": True},
+        {"table": "cmp_switchover_marker", "source_rows": 1, "target_rows": 1, "match": True},
+    ]
+    result = {"switched": True, "write_pause_ms": 6, "verify_ok": True, "steps": [],
+              "tables": tables}  # fmt: skip
+    drafts = ce.run_events(result, attempt=1, came_from="source", going_to="target", policy=POLICY)
+    check(drafts)
+    assert [d.data["table"] for d in drafts if d.type == "cutover.verify"] == ["messages"]
+    rows = [d.data for d in drafts if d.type == "data.verify" and d.data["name"] == "rows"][-1]
+    assert (rows["source"], rows["target"]) == (5, 5)
+
+
 def test_verify_none_sends_no_table_results() -> None:
     result = {"switched": True, "write_pause_ms": 4, "verify_ok": None, "steps": []}
     drafts = ce.run_events(result, attempt=1, came_from="source", going_to="target", policy=POLICY)
