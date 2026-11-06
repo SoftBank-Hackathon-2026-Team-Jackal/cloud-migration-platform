@@ -15,6 +15,7 @@ from typing import Any
 
 from .contracts import DataMigrationRequest, DbEndpoint, ReadinessPolicy
 from .cutover import CutoverSettings, SourceApp
+from .sql import MARKER_TABLE
 
 METHOD = "fast"
 # 실습에서 잰 쓰기 중단 시간(infra/data-migration/crosscloud-lab/README.md): k3d 4~7ms, EKS 안 21ms,
@@ -39,6 +40,8 @@ PLAN_STEPS = [
     ("retarget", "pause"),
     ("resume", "pause"),
 ]
+# 전환 도구가 만든 내부 테이블. 사용자 테이블 비교(cutover.verify·data.verify rows)에는 보이지 않는다.
+INTERNAL_TABLES = {MARKER_TABLE, MARKER_TABLE.rpartition(".")[2]}
 CUTOVER_APPROVAL = {"excluded": [], "rollback_policy": "reverse_replication", "gate": "cutover"}
 
 
@@ -190,7 +193,7 @@ def run_events(
 
 def verify_events(result: dict, *, key: str, n: int) -> list[Draft]:
     """RESUME 뒤 스냅샷 비교 → cutover.step(verify), 테이블마다 cutover.verify, 합계 data.verify."""
-    tables = result.get("tables") or []
+    tables = [row for row in result.get("tables") or [] if row["table"] not in INTERNAL_TABLES]
     verify_ok = result.get("verify_ok")
     out = [Draft("cutover.step", "running", {"n": min(n, 32), "state": "verify", "of": min(n, 32)},
                  f"{key}:verify")]  # fmt: skip
