@@ -162,7 +162,7 @@ ON_PREM Agent에는 Plan ID·Revision·작업 ID·산출물 Digest·필요한 Ma
 
 **State 결정:** Migration/대상 환경별 독립 Backend key를 두고 공유 인프라와 충돌하지 않게 소유 경계를 기록한다. 원격 Backend, 암호화·최소 권한·버전 관리, State locking을 권장한다. 중앙 S3 Backend와 잠금을 채택한다. 구체 Terraform 버전·잠금 설정·버킷/권한은 공통 실행 설정으로 확정한다. P0에서는 기존 네트워크를 지원하지 않는다. 외부 소유 자원을 State로 가져오지 않는다. 동일 State에 대한 동시 Apply를 잠금 및 업무 DB 실행 상태로 방지하고, 잠금 획득 실패는 대상 변경 없이 재조회/대기한다. Worker 장애 후에는 lock 상태·State·실제 클라우드 자원을 확인한 다음 재개한다. 로컬 Plan·State 임시 파일은 보호된 작업 공간에 두고 로그·Git에 남기지 않는다.
 
-Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·변경된 자원을 기록한다. 자동 재시도 가능성을 판단하되 원인 불명·공유 자원·데이터가 있는 경우 사람의 조치 상태로 둔다. 무조건 `destroy`하지 않는다. Terraform Output은 Cluster/Network ID 등만 `ProvisioningResult`에 매핑하며 Secret Output은 일반 결과로 보내지 않는다. State는 중앙 S3와 잠금을 사용한다. 실제 설정과 부분 실패 후 자동 정리 정책은 미정이다.
+Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·변경된 자원을 기록한다. 자동 재시도 가능성을 판단하되 원인 불명·공유 자원·데이터가 있는 경우 사람의 조치 상태로 둔다. 무조건 `destroy`하지 않는다. Terraform Output은 Cluster/Network ID 등만 `ProvisioningResult`에 매핑하며 Secret Output은 일반 결과로 보내지 않는다. State는 중앙 S3와 잠금을 사용한다. 실제 설정과 부분 실패 후 자동 정리 정책은 미정이다. Apply·destroy 시한과 Activity 취소는 SIGTERM → 유예(기본 300초) → SIGKILL로 끝내 Terraform이 lock을 풀고 State를 기록하게 하고, 중단 뒤 S3 `.tflock` 상태와 보존한 `errored.tfstate`를 결과에 남긴다(53). 정리는 자동으로 하지 않고 운영자가 검토된 destroy로만 한다(§12, 53).
 
 ## 9. Helm과 Kubernetes 배포 (`PROV-010`~`013`, `016`~`018`)
 
@@ -210,7 +210,7 @@ Apply가 부분 실패하면 Terraform State와 대상 API를 조회해 생성·
 
 ### 29 이미지 pull 전략 (#153)
 
-플랫폼만 AWS 권한을 갖는다. EKS는 노드 역할(`AmazonEC2ContainerRegistryPullOnly`)로 받는다. K3s는 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/image-pull`로 플랫폼이 발급한 단기 ECR 토큰을 받아 `cmp-ecr-pull`을 만들고, TTL 절반이 지나면 갱신한다. GKE는 실행마다 Secret을 새 토큰으로 다시 쓰고, 플랫폼 측 6시간 Schedule이 승인된 배포의 Secret만 다시 쓴다. 플랫폼 레지스트리·저장소는 `PLATFORM_ECR_REGISTRY`·`PLATFORM_ECR_REPOSITORIES`로 정한다. ON_PREM pull 실패는 `IMAGE_PULL_FAILED`. 결정 I1~I11은 [티켓 29](../../tickets/provisioning/29-image-pull-strategy.md)에 있다. 데모 서버에서는 api가 `/opt/cmp/.env`의 `PLATFORM_ECR_REGISTRY`와 인스턴스 역할 프로필 `cmp-demo-build`(`CONNECTION_PLATFORM_AWS_PROFILE`)로 이 설정을 받는다([티켓 41](../../tickets/provisioning/41-demo-ecr-pull-wiring.md)).
+플랫폼만 AWS 권한을 갖는다. EKS는 노드 역할(`AmazonEC2ContainerRegistryPullOnly`)로 받는다. K3s는 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/image-pull`로 플랫폼이 발급한 단기 ECR 토큰을 받아 `cmp-ecr-pull`을 만들고, TTL 절반이 지나면 갱신한다. GKE는 실행마다 Secret을 새 토큰으로 다시 쓰고, 플랫폼 측 6시간 Schedule이 승인된 배포의 Secret만 다시 쓴다. 플랫폼 레지스트리·저장소는 `PLATFORM_ECR_REGISTRY`·`PLATFORM_ECR_REPOSITORIES`로 정한다. ON_PREM pull 실패는 `IMAGE_PULL_FAILED`. 결정 I1~I11은 [티켓 29](../../tickets/provisioning/29-image-pull-strategy.md)에 있다. 데모 서버에서는 api가 `/opt/cmp/.env`의 `PLATFORM_ECR_REGISTRY`와 인스턴스 역할 프로필 `cmp-demo-build`(`CONNECTION_PLATFORM_AWS_PROFILE`)로 이 설정을 받는다([티켓 41](../../tickets/provisioning/41-demo-ecr-pull-wiring.md)). [티켓 47](../../tickets/provisioning/47-aws-target-access.md)부터 K3s·GKE 토큰은 pull 전용 역할 `cmp-demo-ecr-pull`(이 저장소 pull만)로 발급하고, 다른 계정 EKS 노드 역할(`cmp-*-eks-node`)은 빌드 스택 매개변수 `PullAccountIds`에 넣은 계정만 저장소 정책으로 pull한다. 새 EKS는 access entry(`API` 인증 모드)로 사용자 관리자 주체에게 kubectl 접근을 준다.
 
 ### 12A 온프레미스 Preview (#41)
 
@@ -236,7 +236,7 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 | Credential 누락·권한 부족 | 필요한 권한만 진단해 사용자 조치 요청. 원문 출력 금지 |
 | Terraform Plan 실패 | Preview 승인 불가. Plan 산출물·오류 참조 보관 |
 | 승인 Revision/Digest 불일치·State drift | 실행 차단, 새 Plan/Preview/승인 필요 |
-| Terraform Apply 부분 실패·Worker 종료 | 잠금·State·실제 자원 조회 후 유지/재개/수동 조치 결정. 무조건 Destroy 금지 |
+| Terraform Apply 부분 실패·Worker 종료 | 잠금·State·실제 자원 조회 후 유지/재개/수동 조치 결정. 무조건 Destroy 금지. 시한·취소는 SIGTERM → 유예 → SIGKILL, 결과에 `stopped`·`state_lock`(`HELD`/`ABSENT`/`UNKNOWN`)·`state_recovery`(보존한 `errored.tfstate`). lock은 자동으로 풀지 않는다(53) |
 | EKS/GKE 생성 지연 | 실제 클러스터 상태 조회와 제한된 재시도·Timeout. 수치 미정 |
 | Helm 설치/응답 유실 | Release·Kubernetes 상태 조회 후 같은 승인 Values로 재개 |
 | ON_PREM 새 Revision 정착 실패 | 그 Release만 직전 `deployed` Revision으로 rollback·고착 Pod 정리 후 `FAILED <원인>`. 다음 Revision은 그대로 적용, `failed`로 남은 Release는 검사 후 복원·재적용(51) |
@@ -244,6 +244,7 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 | PostgreSQL PVC Pending | StorageClass·CSI·용량·Pod 이벤트 확인, READY 금지 |
 | Agent 연결 끊김 | 작업 ID·Agent 상태 유지, 재연결 후 조회. 중복 제출 억제. 승인 실행 대기 한도까지 시작하지 못한 작업은 `EXPIRED`로 닫고 `FAILED AGENT_OFFLINE`(늦게 돌아온 Agent가 실행하지 않음), 운영자 취소는 `CANCELLED`(52) |
 | ON_PREM 배포 정리 | 자동 정리 없음. 운영자가 `POST /agent-admin/jobs/{rollout_job_id}/teardown`으로 정리 작업을 만든다. 기본은 Release·플랫폼 Secret·NetworkPolicy만 지우고 PVC·DB 비밀번호·Namespace를 남긴다. `delete_data`면 PVC·Namespace까지 지운다(52) |
+| AWS/GCP 대상 정리 | 자동 정리 없음. 운영자가 `POST /provisioning-admin/teardowns` `{plan_id, revision, delete_data}`(실행된 INFRASTRUCTURE/FULL Revision)로 시작한다. Helm uninstall(앱→DB) → 모든 Ingress·LoadBalancer Service 삭제·소멸 대기 → PVC 정책(기본 보존·Retain 디스크 ID 보고, `delete_data`면 플랫폼 Namespace 디스크를 CSI로 삭제) → `plan -destroy` 검토(삭제만 허용, GKE는 보호 해제 1속성 Plan) → `POST …/{teardown_id}/confirm {review_digest}` 뒤에만 destroy. 24시간 미확인이면 `UNKNOWN DESTROY_NOT_CONFIRMED`(53) |
 | 헬스·DB·외부 접근 실패 | 실패 검사와 실제 리소스 상태 반환, Data/Traffic 진행 차단 |
 | Migration 실패 종료·강제 종료 | 실패 코드·단계·세부 코드 보존, 웹 `error` 이벤트, 상태 API·SSE는 Temporal 실행 상태 반영(티켓 49) |
 | claim 응답 유실·complete 실패 | 같은 승인 Workflow 실행의 claim 재시도는 다시 `CLAIMED`(`claimed_by`), complete는 6시간까지 재시도 뒤 `UNKNOWN`/`EXECUTION_RECORD_FAILED`(티켓 49) |
@@ -332,7 +333,7 @@ Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다.
 - **저장:** 업무 DB `environment_connections`(Alembic `20261105_05`)에 Role ARN·External ID·계정·주체·확인 시각·코드를 둔다.
 - **확인:** verify와 기준점 조회는 API 프로세스에서 코드로 AssumeRole(900초, ExternalId)한다. 받은 임시 자격 증명은 메모리에서만 STS·EKS 클라이언트에 쓴다. Workflow·Activity를 거치지 않으므로 Temporal 이력에 연결 확인이 남지 않는다.
 - **`credential_ref` 해석:** 역할을 등록하거나 연결을 삭제할 때마다(46부터 API 시작 때도) API가 `connection_aws_config_file`을 DB 기준으로 다시 쓴다. 내용은 플랫폼 기본 프로필 파일 + 연결별 `[profile cmp-conn-<hex>]`(`role_arn`, `external_id`, `source_profile`)다. worker·분석은 `AWS_CONFIG_FILE`로 같은 파일을 읽는다. 그러면 분석 `get_session(credential_ref)`, Provisioning `aws_profile`, Terraform·AWS CLI가 코드 변경 없이 SDK의 assume-role로 동작한다.
-- **GCP:** `cmp_providers.gcp_preview.verify_adc_principal`(06의 ADC 검사 공개 함수)을 재사용한다.
+- **GCP:** `cmp_providers.gcp_preview.verify_adc_principal`(06의 ADC 검사 공개 함수)을 재사용한다. 48(#183)부터 이 확인은 GCP 자격이 있는 provisioning worker에서 돈다: API가 `GcpConnectionCheckWorkflow`(`migration` 큐)를 실행하고 `verify_gcp_connection` Activity(`provisioning` 큐) 결과(코드·주체 이메일)를 기다린다. Temporal에 닿지 못하면 `GCP_CHECK_UNAVAILABLE`. 주체 규칙(서비스 계정 키는 이메일 scope 토큰의 `email` = `client_email`, WIF는 가장 대상 SA)은 `cmp_providers.gcp_adc`이고 Plan(06)·Apply(10)도 같은 함수를 쓴다. 상세는 [48](../../tickets/provisioning/48-gcp-target-principal.md).
 - **템플릿:** `infra/connections/{source,target}-role.yaml`. S3 공개 읽기 객체로 호스팅하고 `connection_template_base_url`로 빠른 생성 링크를 만든다.
 - **Provisioning 연결 실행(46):** Plan 입력 `credential_ref.id`가 연결(`cmp-conn-<hex>` 또는 `conn-<hex>`)이면 Plan·Apply·AWS 워크로드가 승인된 Spec의 그 연결 프로필로 실행하고, State backend는 플랫폼 프로필을 따로 쓴다(`cmp_providers.aws_credentials`). 플랫폼 주체는 인스턴스 역할(23b). 상세는 [46](../../tickets/provisioning/46-connection-credentials.md).
 - **제외:** `MigrationRequest` 연결 ID, 다른 계정 Apply의 backend 프로필, 데모 반영은 후속이다([23 티켓](../../tickets/provisioning/23-environment-connections.md)).

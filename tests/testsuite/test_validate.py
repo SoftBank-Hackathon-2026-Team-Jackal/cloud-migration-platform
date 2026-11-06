@@ -88,3 +88,120 @@ def test_pinning_gives_the_same_bytes_for_the_same_accepted_set():
     one = pin_suite("demo", standard, [ai_case()])[1]
     assert one == pin_suite("demo", standard, [ai_case()])[1]
     assert one != pin_suite("demo", standard, [])[1]
+
+
+# ---------------------------------------------------------------------------------- ticket 27-B
+# Condition 1 no longer needs an origin test resource for a test that knows its own answer: it
+# needs the test to cite real source lines. A test with some other expected literal still needs an
+# outside answer (an origin run), because an AI's idea of that value is not evidence.
+
+import pytest
+from cmp_testsuite.model import Evidence
+
+SOURCE = 'package main\n\nfunc r(m *Mux) {\n\tm.HandleFunc("POST /items", create)\n}\n'
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    (tmp_path / "main.go").write_text(SOURCE)
+    return tmp_path
+
+
+def property_case(case_id="ai-prop", *, evidence=((("main.go"), 4),)):
+    return SuiteCase(
+        id=case_id, source="AI", effect="WRITES_DATA",
+        evidence=[Evidence(file=f, line=n) for f, n in evidence],
+        steps=[
+            HttpStep(
+                method="POST", path="/items", json_body={"name": "n-{{run_id}}"},
+                expect=Expect(status=201, json_equals={"name": "n-{{run_id}}"}),
+            )
+        ],
+    )  # fmt: skip
+
+
+def free_case(case_id="ai-free"):
+    return SuiteCase(
+        id=case_id, source="AI", effect="READ_ONLY",
+        evidence=[Evidence(file="main.go", line=4)],
+        steps=[HttpStep(path="/items", expect=Expect(status=200, json_equals={"total": 2700}))],
+    )  # fmt: skip
+
+
+def check_with(world, workspace, *cases, origin=False, cut=True):
+    return validate_tests(
+        list(cases),
+        target=world.target,
+        origin=world.origin if origin else None,
+        cut_dependency=world.cut if cut else None,
+        workspace=workspace,
+    )
+
+
+def test_a_property_test_with_real_evidence_needs_no_origin(workspace):
+    result = check_with(World(), workspace, property_case())
+    assert [(v.accepted, v.reason) for v in result.verdicts] == [(True, None)]
+
+
+def test_a_property_test_without_evidence_is_refused(workspace):
+    result = check_with(World(), workspace, property_case(evidence=()))
+    assert result.verdicts[0].reason == "NO_EVIDENCE" and result.accepted == []
+
+
+def test_evidence_that_does_not_hold_is_refused(workspace):
+    result = check_with(World(), workspace, property_case(evidence=[("main.go", 1)]))
+    assert result.verdicts[0].reason == "EVIDENCE_MISMATCH /items"
+
+
+def test_an_expectation_the_test_did_not_write_still_needs_an_origin_run(workspace):
+    result = check_with(World(), workspace, free_case())
+    assert result.verdicts[0].reason == "ORIGIN_UNAVAILABLE"
+
+
+def test_an_origin_run_can_still_vouch_for_an_outside_expectation(workspace):
+    result = check_with(World(), workspace, free_case(), origin=True)
+    assert [(v.accepted, v.reason) for v in result.verdicts] == [(True, None)]
+
+
+def test_evidence_is_checked_even_when_an_origin_run_would_pass(workspace):
+    bad = free_case()
+    bad.evidence = [Evidence(file="main.go", line=1)]
+    result = check_with(World(), workspace, bad, origin=True)
+    assert result.verdicts[0].reason == "EVIDENCE_MISMATCH /items"
+
+
+def test_without_a_source_a_property_test_cannot_be_vouched_for():
+    result = check_with(World(), None, property_case())
+    assert result.verdicts[0].reason == "EVIDENCE_UNAVAILABLE"
+
+
+def test_the_other_conditions_still_apply_to_a_property_test(workspace):
+    failing = World()
+    failing.up = False
+    assert check_with(failing, workspace, property_case()).verdicts[0].reason == "TARGET_FAILED"
+    independent = World(depends=False)
+    result = check_with(independent, workspace, property_case())
+    assert result.verdicts[0].reason == "PASSES_WITHOUT_DEPENDENCY"
+
+
+def recorded_case(case_id="ai-0rec-items", *, line=4):
+    return SuiteCase(
+        id=case_id, source="AI", effect="READ_ONLY", basis="RECORDED",
+        evidence=[Evidence(file="main.go", line=line)],
+        steps=[HttpStep(path="/items", expect=Expect(status=200, json_equals={"total": 2700}))],
+    )  # fmt: skip
+
+
+def test_a_recorded_test_needs_no_origin_because_its_answer_was_taken_from_the_app(workspace):
+    result = check_with(World(), workspace, recorded_case())
+    assert [(v.accepted, v.reason) for v in result.verdicts] == [(True, None)]
+
+
+def test_a_recorded_test_still_has_to_cite_the_source(workspace):
+    result = check_with(World(), workspace, recorded_case(line=1))
+    assert result.verdicts[0].reason == "EVIDENCE_MISMATCH /items"
+
+
+def test_a_recorded_test_that_does_not_depend_on_a_migrated_service_is_dropped(workspace):
+    result = check_with(World(depends=False), workspace, recorded_case())
+    assert result.verdicts[0].reason == "PASSES_WITHOUT_DEPENDENCY"

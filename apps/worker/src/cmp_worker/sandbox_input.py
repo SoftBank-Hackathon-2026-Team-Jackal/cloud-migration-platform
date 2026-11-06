@@ -5,7 +5,7 @@ test suite it stores has the same SHA-256. Only references, names and public ima
 here; the source stays in the workspace on this worker.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from cmp_contracts.analysis import AnalysisReport
 from cmp_contracts.provisioning import ContentRef, Image
@@ -42,6 +42,13 @@ class SandboxSettings(BaseModel):
     ai_tests: bool = False
     write_path: str | None = None
     read_path: str | None = None
+    # The app's write API shape (ticket 27); see `AppApi`. Left out, the original shape is used.
+    write_body: dict[str, Any] | None = None
+    write_status: int | None = None
+    id_from_response: str | None = None
+    value_field: str = "value"
+    read_back: Literal["GET", "REPEAT_WRITE"] = "GET"
+    repeat_status: int = 200
 
 
 def keep_hosts(report: AnalysisReport | None, region: str) -> list[dict[str, Any]]:
@@ -81,6 +88,12 @@ def assemble_sandbox_input(
         health_path=apps[0].health_path,
         write_path=settings.write_path,
         read_path=settings.read_path,
+        write_body=settings.write_body,
+        write_status=settings.write_status,
+        id_from_response=settings.id_from_response,
+        value_field=settings.value_field,
+        read_back=settings.read_back,
+        repeat_status=settings.repeat_status,
         health_from_target=True,
     )
     migration_id = (report.migration_id if report else None) or analysis["report"].get(

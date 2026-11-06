@@ -122,7 +122,9 @@ def build_gcp_workloads_activities(session_factory):
         gcloud=os.environ.get("GCLOUD_BIN", "gcloud"),
         aws=os.environ.get("AWS_BIN", "aws"),
         gcloud_configuration=os.environ.get("PROVISIONING_GCLOUD_CONFIGURATION"),
-        aws_profile=os.environ.get("PROVISIONING_AWS_PROFILE"),
+        # Ticket 47 (B-09, 41 D4): GKE pull Secret tokens come from the pull-only profile.
+        aws_profile=os.environ.get("PLATFORM_ECR_AWS_PROFILE")
+        or os.environ.get("PROVISIONING_AWS_PROFILE"),
     )
     return GcpWorkloadsActivities(
         session_factory,

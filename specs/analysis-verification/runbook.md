@@ -77,9 +77,28 @@ uv run python scripts/sandbox_ctl.py cleanup --all --confirm DELETE-ALL  # 전�
 
 전용 클러스터(`k3d-cmp-sandbox`)의 `cmp-sbx-*`만 다룬다. 워커가 죽어 남은 만료 Sandbox는 `cleanup`을 주기적으로(예: 15분마다 cron·launchd) 실행해 지운다. 출력에는 네임스페이스·실행 ID·만료 시각만 나온다.
 
+### 표준 테스트의 쓰기 모양 (티켓 27)
+
+DB 쓰기·읽기와 재시작 후 유지 테스트는 앱이 쓰기를 받는 모양을 알아야 한다. 모양을 주지 않으면 헬스 테스트만 돈다. 모양은 `--sandbox`에 설정으로 준다(Go 데모 앱 예시).
+
+```bash
+--sandbox '{"write_path": "/api/messages", "write_body": {"client_msg_id": "std-{{run_id}}", "author": "cmp-test", "body": "value-{{run_id}}"}, "write_status": 201, "id_from_response": "id", "value_field": "body", "read_back": "REPEAT_WRITE"}'
+```
+
+- `REPEAT_WRITE`는 쓰기가 멱등인 앱(같은 키 재전송에 200과 저장된 행)을 위한 읽기 방식이다. 같은 쓰기를 다시 보내 같은 ID와 같은 본문이 오는지로 저장을, DB 재시작 뒤에 오는지로 유지를 확인한다. 케이스마다 쓰기 키가 달라서 첫 쓰기는 항상 새 행이다.
+- "DB 재시작 후 유지" 테스트는 재시작 직후 앱이 5xx를 주거나 답이 없는 동안(최대 60초) 같은 요청을 다시 보낸다(데모 앱은 재시작 직후 "같은 ID로 재시도하라"는 503을 준다). 데이터를 잃어 바로 201이 오면 기다리지 않고 실패한다.
+- 테스트 실패 사유 코드(`STATUS_MISMATCH expected=200 actual=503` 같은 상태·필드 값)는 Sandbox 결과의 테스트별 `reason`에서 본다.
+- 이 모양은 앱마다 사람이 적어야 해서 일반적이지 않다. 후보를 자동으로 고르는 방식은 만들었다가 후보가 앱 하나뿐이라 제거했고, 일반화는 소스 근거를 쓰는 AI 테스트로 간다.
+
 ### AI 생성 테스트
 
-`--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다. 원본 쪽 테스트 자원(D-09)이 연결되어 있지 않으면 모델을 부르지 않고 결과 `ai_tests.reason`에 `ORIGIN_UNAVAILABLE`이 남는다(비용 0). 지금은 원본 자원이 없어 항상 이 경우다.
+`--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다(실제 Claude 호출이므로 비용 승인이 먼저다. 모델이 설정되지 않았으면 `LLM_NOT_CONFIGURED`로 건너뛴다).
+
+- Tester는 소스의 라우트 목록과 읽기 전용 소스 조각 도구, `test-authoring` 스킬로 앱을 읽고 **쓰기 모양(`shapes`)과 읽기 요청(`probes`)** 을 소스 근거와 함께 낸다. 기대값은 쓰지 않는다. 원본 쪽 테스트 자원(D-09)이 없어도 호출된다.
+- 쓰기 모양은 왕복(`ai-<id>-roundtrip`)과 재시작 후 유지(`ai-<id>-restart`) 테스트로 만든다. 읽기 요청은 앱에 두 번 보내 같은 응답이면 `ai-0rec-<id>` 테스트가 되고, 응답이 매번 달라지면(`RECORD_UNSTABLE <필드>`) 비2xx·JSON 아님·비어 있음·너무 큼·민감해 보이는 값이면 버린다.
+- 결과 `ai_tests`의 `accepted`/`rejected`에서 어떤 테스트가 왜 빠졌는지 본다: `NO_EVIDENCE`(근거 없음), `EVIDENCE_FILE_MISSING`, `EVIDENCE_LINE_MISSING`, `EVIDENCE_MISMATCH <경로>`(인용한 줄 근처에 그 경로가 없음), `PASSES_WITHOUT_DEPENDENCY`(의존성을 끊어도 통과), `RESET_FAILED`(기록 뒤 데이터를 기준 상태로 못 되돌림).
+- 이 방식이 보장하는 것은 "기준 시점 이후 Fixer의 코드 수정이 동작을 바꾸지 않았다"까지다. 기준 상태가 AWS 원본과 같다는 것은 보장하지 않는다. 정답이 앱 규칙에서 나오는 값(계산 결과 등)은 원본 자원(D-09)이 없으면 테스트가 되지 않고 공백으로 남는다.
+- `get_snippet`이 읽을 수 있는 것은 가져온 소스뿐이며 `.env`와 키·인증서 파일은 읽지 않는다.
 
 ## 7. 자주 막히는 곳
 
@@ -164,4 +183,4 @@ result = run_suite(
 
 ## 9. 아직 없는 것
 
-실제 AWS에서의 빌드 실행(S3·ECR·Docker, D-06·D-12·승인), 인계 후 실제 계획 게시 확인, `make smoke-temporal`, 승인 API·화면, 수정 패치의 push·PR 자동 생성(후순위), 원본 쪽 테스트 자원(AI 테스트 실제 사용, D-09). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.
+실제 AWS에서의 빌드 실행(S3·ECR·Docker, D-06·D-12·승인), 인계 후 실제 계획 게시 확인, `make smoke-temporal`, 승인 API·화면, 수정 패치의 push·PR 자동 생성(후순위), 원본 쪽 테스트 자원(있으면 AI 테스트의 추가 검증, D-09), 실제 Claude로 만든 AI 테스트의 품질(비용 승인 후 1회 확인). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.

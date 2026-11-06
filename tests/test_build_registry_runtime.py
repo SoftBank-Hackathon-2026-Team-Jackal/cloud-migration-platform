@@ -58,8 +58,11 @@ def test_build_stack_creates_only_the_repository_and_an_inline_policy():
         # Ticket 23b (#205): connection AssumeRole, a separate inline policy on the same role
         # (scope tested in tests/test_connection_launch_stack.py).
         "ConnectionAssumePolicy": "AWS::IAM::RolePolicy",
+        # Ticket 47 (B-09): pull-only token role (tests/test_platform_ecr_access.py).
+        "EcrPullRole": "AWS::IAM::Role",
     }
-    # Attached to the existing role by parameter; no role, user or bucket is created here.
+    # Attached to the existing role by parameter; no user or bucket is created here (47 adds the
+    # pull-only role).
     for name in ("BuildAccessPolicy", "ConnectionAssumePolicy"):
         assert resources[name]["Properties"]["RoleName"] == {"Ref": "InstanceRoleName"}
 
@@ -186,7 +189,8 @@ def test_worker_build_settings_are_names_with_an_explicit_build_profile():
         "BUILD_PLATFORM",
     ):
         assert env[name] == f"${{{name}:-}}", name
-    assert env["BUILD_AWS_PROFILE"] == env["AWS_PROFILE"] == "cmp-demo-build"
+    # Ticket 47 (B-20): the Build module passes this profile itself; no global AWS_PROFILE.
+    assert env["BUILD_AWS_PROFILE"] == "cmp-demo-build" and "AWS_PROFILE" not in env
     assert env["PROVISIONING_AWS_PROFILE"] != "cmp-demo-build"
     # Empty settings keep the pre-built images instead of half-enabling the build.
     assert build_wiring.BuildSettings.from_values("", "", "", "", "cmp-demo-build") is None

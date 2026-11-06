@@ -98,6 +98,8 @@ class _BuildRequest(BaseModel):
     ecr_repository: str
     platform: str
     log_destination: S3Ref
+    # Ticket 47 (B-20): named AWS profile for the `aws` calls (the worker has no global one).
+    aws_profile: str | None = None
 
     @model_validator(mode="after")
     def valid_request(self) -> "_BuildRequest":
@@ -174,6 +176,11 @@ def _run(
         raise BuildFailure("EXTERNAL_COMMAND_FAILED") from None
 
 
+def _aws_env(profile: str | None) -> dict[str, str] | None:
+    """Environment for `aws` calls: the process one plus the Build profile when configured."""
+    return dict(os.environ, AWS_PROFILE=profile) if profile else None
+
+
 def _hash_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -182,12 +189,12 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _download(source: S3Ref, destination: Path) -> None:
+def _download(source: S3Ref, destination: Path, env: dict[str, str] | None = None) -> None:
     command = ["aws", "s3api", "head-object", "--bucket", source.bucket, "--key", source.key]
     if source.version_id:
         command += ["--version-id", source.version_id]
     try:
-        size = json.loads(_run(command + ["--output", "json"]).stdout)["ContentLength"]
+        size = json.loads(_run(command + ["--output", "json"], env=env).stdout)["ContentLength"]
     except (ValueError, KeyError, TypeError):
         raise BuildFailure("SOURCE_METADATA_INVALID") from None
     if not isinstance(size, int) or size < 0:
@@ -195,7 +202,7 @@ def _download(source: S3Ref, destination: Path) -> None:
     if size > _MAX_ARCHIVE_BYTES:
         raise BuildFailure("ARCHIVE_TOO_LARGE")
     command[2] = "get-object"
-    _run(command + [str(destination)])
+    _run(command + [str(destination)], env=env)
     if destination.stat().st_size > _MAX_ARCHIVE_BYTES:
         raise BuildFailure("ARCHIVE_TOO_LARGE")
     expected = _ARCHIVE.fullmatch(PurePosixPath(source.key).name).group("sha")
@@ -261,7 +268,14 @@ def _ecr_digest(request: _BuildRequest, tag: str) -> str | None:
         "json",
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=30)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+            env=_aws_env(request.aws_profile),
+        )
     except subprocess.CalledProcessError as error:
         if "ImageNotFoundException" in (error.stderr or ""):
             return None
@@ -290,7 +304,8 @@ def _require_immutable_ecr(request: _BuildRequest) -> None:
             match.group("repo"),
             "--output",
             "json",
-        ]
+        ],
+        env=_aws_env(request.aws_profile),
     )
     try:
         repository = json.loads(result.stdout)["repositories"][0]
@@ -341,7 +356,8 @@ def _login(request: _BuildRequest, docker_config: Path) -> dict[str, str]:
             "get-login-password",
             "--region",
             match.group("region"),
-        ]
+        ],
+        env=_aws_env(request.aws_profile),
     ).stdout
     _run(
         [
@@ -398,7 +414,8 @@ def _upload_log(request: _BuildRequest, record: dict, workspace: Path) -> S3Ref:
             str(path),
             "--output",
             "json",
-        ]
+        ],
+        env=_aws_env(request.aws_profile),
     )
     try:
         version_id = json.loads(result.stdout).get("VersionId")
@@ -424,7 +441,7 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
         docker_config.mkdir(mode=0o700)
         try:
             archive = workspace / "source.tar.gz"
-            _download(request.source, archive)
+            _download(request.source, archive, _aws_env(request.aws_profile))
             _require_immutable_ecr(request)
             digest = _ecr_digest(request, tag)
             if digest is None:
@@ -472,8 +489,9 @@ def _build_and_push(request: _BuildRequest) -> BuildOutcome:
 class ImageBuilder:
     """Prepared per attempt; the Sandbox loop supplies only an S3 source URI."""
 
-    def __init__(self, context: BuildContext) -> None:
+    def __init__(self, context: BuildContext, *, aws_profile: str | None = None) -> None:
         self.context = context
+        self._aws_profile = aws_profile
 
     def build(self, source_uri: str, *, source_version_id: str | None = None) -> BuildOutcome:
         request = _BuildRequest(
@@ -490,5 +508,6 @@ class ImageBuilder:
                     f"{self.context.attempt_id}.json"
                 )
             ),
+            aws_profile=self._aws_profile,
         )
         return _build_and_push(request)

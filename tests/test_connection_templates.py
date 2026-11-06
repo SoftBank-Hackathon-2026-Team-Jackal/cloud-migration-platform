@@ -57,8 +57,11 @@ def test_source_role_grants_exactly_the_scan_reads_plus_cluster_listing():
 
 
 def test_target_role_scopes_writes_to_platform_resources():
+    """Structure only; ticket 47 evaluates the calls in tests/test_aws_target_access.py."""
     template = load("target-role.yaml")
-    by_sid = {s["Sid"]: s for s in statements(template, "TargetBuild")}
+    by_sid = {
+        s["Sid"]: s for name in ("TargetBuild", "TargetCluster") for s in statements(template, name)
+    }
     for statement in by_sid.values():
         assert "*" not in actions(statement) and "iam:*" not in actions(statement)
     allowed_wildcards = [
@@ -66,11 +69,11 @@ def test_target_role_scopes_writes_to_platform_resources():
     ]
     assert all(a.split(":")[1].startswith(READ_PREFIXES) for a in allowed_wildcards)
     tag = {"Ref": "ManagedByTag"}
-    for sid in ("CreateTagged", "TagOnCreate"):
+    for sid in ("CreateTaggedNetwork", "CreateTaggedInVpc", "CreateTaggedNatGateway"):
         assert by_sid[sid]["Condition"] == {"StringEquals": {"aws:RequestTag/cmp:managed-by": tag}}
-    assert by_sid["ChangeTagged"]["Condition"] == {
-        "StringEquals": {"aws:ResourceTag/cmp:managed-by": tag}
-    }
+    for sid in ("ChangeTagged", "CreateInTaggedParents"):
+        assert by_sid[sid]["Condition"] == {"StringEquals": {"aws:ResourceTag/cmp:managed-by": tag}}
+    assert "ec2:CreateAction" in by_sid["TagOnCreate"]["Condition"]["StringEquals"]
     iam = by_sid["PlatformIamOnly"]
     assert all(
         "${ResourcePrefix}" in r["Fn::Sub"] or "oidc.eks" in r["Fn::Sub"] for r in iam["Resource"]
@@ -85,8 +88,9 @@ def test_target_role_scopes_writes_to_platform_resources():
     self_guard = by_sid["NeverChangeThisRole"]
     assert self_guard["Effect"] == "Deny"
     assert self_guard["Resource"] == {"Fn::GetAtt": ["ConnectionRole", "Arn"]}
-    # Every non-read Allow carries a condition or a platform-prefixed resource.
+    # Every non-read Allow carries a condition or a platform-scoped resource list.
     for sid, statement in by_sid.items():
-        if statement["Effect"] != "Allow" or sid == "Read":
+        if statement["Effect"] != "Allow" or sid.startswith("Read") or "Condition" in statement:
             continue
-        assert "Condition" in statement or sid == "PlatformIamOnly", sid
+        resources = statement["Resource"]
+        assert isinstance(resources, list | dict), sid

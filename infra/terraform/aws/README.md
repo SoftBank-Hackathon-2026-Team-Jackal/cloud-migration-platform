@@ -37,6 +37,10 @@ terraform validate -no-color
 
 `aws-eks-v3`(티켓 26)는 VPC CNI 관리형 Add-on(`enableNetworkPolicy = "true"`)을 더해 Kubernetes NetworkPolicy를 노드에서 강제한다. 기본 설치된 자체 관리 VPC CNI를 `OVERWRITE`로 넘겨받는다. 09는 배포 전에 `aws-node`의 `aws-eks-nodeagent`가 정책 강제로 실행 중인지 확인한다.
 
+`aws-eks-v4`(티켓 47)는 클러스터 인증 모드를 `API`(access entry만, `aws-auth` ConfigMap 없음)로 두고 구축 주체(대상 연결 역할)를 클러스터 관리자로 남긴다(`bootstrap_cluster_creator_admin_permissions = true`). 입력 `cluster_admin_principal_arns`(IAM 역할·사용자 ARN 최대 10개, 경로 허용, 다른 계정 가능)마다 `access.tf`가 STANDARD access entry와 `AmazonEKSClusterAdminPolicy`(클러스터 범위)를 만든다. 비면 Preview에 `NO_USER_CLUSTER_ACCESS` 경고가 남는다. 결과의 `eks_cluster_admin_principal_arns`가 인계 표시용이다. SG 아웃바운드 규칙에도 `local.tags`를 붙인다(대상 역할은 태그 있는 생성만 허용). v3 이하로 Apply한 클러스터는 인증 모드 변경이 update라 같은 환경 재Plan이 `DESTRUCTIVE_PLAN`으로 거절된다(실제 Apply된 AWS 대상은 아직 없다).
+
+대상 연결 역할(`infra/connections/target-role.yaml`)이 허용해야 하는 호출 목록은 `packages/providers/src/cmp_providers/aws_target_access.py`에 있다. 리소스 타입을 추가하면 그 목록·템플릿을 함께 고치고 `tests/test_aws_target_access.py`와 `infra/connections/simulate-target-role.py`(읽기 전용 IAM 시뮬레이션)로 확인한다.
+
 Apply는 07 승인 게이트를 통과한 Plan만 대상으로 한다. `claim_approved_execution` 이후 `execute_aws_plan` Activity(`cmp_providers.aws_apply.apply_aws_infrastructure`)가 다음을 처리한다.
 
 - `PROVISIONING_ARTIFACT_ROOT/<plan_id>-r<revision>/`의 `spec.json`·`saved.tfplan`을 manifest의 ArtifactRef(SHA-256·크기)와 대조한다.

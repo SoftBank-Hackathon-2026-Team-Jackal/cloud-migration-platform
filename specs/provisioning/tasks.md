@@ -45,13 +45,17 @@
 | [43 worker 이미지에 Terraform·Helm·catalog 경로 포함과 Linux Provider lock](../../tickets/provisioning/43-worker-image-packaging.md) | IN_PROGRESS | 21, 28 | PROV-001, 004, 008, 021 | [#178](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/178) | ☐ |
 | [44 웹 시작 요청을 실제 실행 입력(PlanningSettings)으로 연결](../../tickets/provisioning/44-web-start-to-planning.md) | IN_PROGRESS (로컬 완료, 리뷰 대기) | 18, 22, 23, ENV-02, 49 | PROV-001, 002, 004, 021 | [#179](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/179) | ☐ |
 | [46 연결 `credential_ref`로 실행하고 플랫폼 주체 권한·연결 설정 갖추기 (23·ADR-005 후속)](../../tickets/provisioning/46-connection-credentials.md) | IN_PROGRESS (로컬 완료, 스택 배포·템플릿 업로드·서버 반영 승인 대기) | 23, 41 | PROV-003, 007, 021, 022 | [#181](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/181) | ☐ |
+| [47 AWS 대상 구축 권한·교차 계정 ECR·사용자 클러스터 접근 (23·28·29·46 후속)](../../tickets/provisioning/47-aws-target-access.md) | IN_PROGRESS (로컬·IAM 시뮬레이션·변경 세트 완료, 스택 실행·템플릿 v2 업로드·서버 반영·실제 Apply 승인 대기) | 23, 28, 29, 46 | PROV-003, 007, 010, 013, 018, 021 | [#182](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/182) | ☐ |
 | [42 Agent 이미지·Chart를 사용자 클러스터가 받을 수 있게 (GHCR 공개·imagePullSecrets)](../../tickets/provisioning/42-agent-package-access.md) | IN_PROGRESS (Chart·문서 완료, GHCR 공개 전환 승인 대기) | 15 | PROV-009, 016, 021 | [#177](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/177) | ☐ |
 | [51 ON_PREM 배포 실패 시 기존 앱·DB 보존과 복구](../../tickets/provisioning/51-agent-rollout-recovery.md) | IN_PROGRESS (로컬·k3d 완료, 리뷰·Agent 릴리스 승인 대기) | 12, 15, 27 | PROV-009, 011, 016, 017, 018 | [#186](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/186) | ☐ |
 | [52 Agent 작업 시한·취소·정리 작업과 운영 보강](../../tickets/provisioning/52-agent-job-lifecycle.md) | IN_PROGRESS (로컬·k3d 완료, 리뷰·Agent 릴리스 승인 대기) | 12, 15, 17, 29, 51 | PROV-009, 015, 016, 017, 021 | [#187](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/187) | ☐ |
+| [53 클라우드 대상 정리(destroy)와 Apply 타임아웃 안전 처리](../../tickets/provisioning/53-cloud-teardown-apply-timeout.md) | IN_PROGRESS (로컬·실제 terraform 로컬 실측 완료, 리뷰·클라우드 실측 승인 대기) | 08, 09, 10, 11, 14, 46, 52 | PROV-008, 009, 016, 021 | [#188](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/188) | ☐ |
 | [49 실패 이벤트·실패 사유 보존과 running 고착 해소](../../tickets/provisioning/49-failure-visibility.md) | IN_PROGRESS (로컬 완료, 리뷰 대기) | 07, 18, 22, 24 | PROV-014, 015, 016, 018, 021 | [#184](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/184) | ☐ |
 | [45 데모 서버 실행 설정 연결(분석·샌드박스·ENV·카탈로그)과 서버 점검 절차](../../tickets/provisioning/45-demo-runtime-wiring.md) | IN_PROGRESS (로컬 완료, 리뷰·서버 반영 승인 대기, 실제 Sandbox 경로는 협의 필요) | 21, 41, 43, 44, 46, ENV-01 | PROV-001, 002, 004, 021 | [#180](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/180) | ☐ |
 | [54 빌드 중 인스턴스 메타데이터 자격 노출 차단](../../tickets/provisioning/54-build-isolation.md) | IN_PROGRESS (로컬 완료, 리뷰·서버 반영 승인 대기) | 28, B-01 | PROV-001, 021 | [#189](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/189) | ☐ |
 | [50 Provisioning 인계 조회 방식과 Traffic Handover 정합 (#128 선행)](../../tickets/provisioning/50-handoff-contract.md) | IN_PROGRESS (로컬 완료, 리뷰·이상헌님 확인 대기) | 13, 16, 25, 49 | PROV-018, 019, 020, 021 | [#185](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/185) | ☐ |
+| [55 샌드박스 결과(EnvPlan·정리 상태·검증 대상)를 Plan에 반영](../../tickets/provisioning/55-sandbox-results-into-plan.md) | IN_PROGRESS (로컬 완료, 리뷰 대기. 생산 쪽 필드는 박승철님 협의 필요) | 15, 18, 44, ENV-04, ENV-05 | PROV-002, 004, 021 | [#190](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/190) | ☐ |
+| [48 GCP 대상 플랫폼 주체와 GCP 연결 확인 (B-06·B-07·D-07)](../../tickets/provisioning/48-gcp-target-principal.md) | IN_PROGRESS (로컬 완료, 리뷰·SA 생성·키 배치·서버 반영 승인 대기) | 06, 10, 21, 23, 46 | PROV-003, 007, 021, 022 | [#183](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/183) | ☐ |
 
 ## 선행 관계
 
@@ -73,6 +77,8 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 28, 29 → 41              (데모 서버 api에 플랫폼 ECR·토큰 발급 설정 전달)
 23, 28, 41 → 23B         (데모 AWS 연결 Launch Stack 링크·템플릿 버킷·AssumeRole 권한)
 23, 41 → 46              (연결 credential_ref로 Plan·Apply·워크로드 실행, State 분리·연결 프로필 공유)
+08~11, 14, 46, 52 → 53   (클라우드 대상 정리·검토된 destroy, Apply 타임아웃 graceful 종료)
+23, 28, 29, 46 → 47      (대상 역할 템플릿 v2·사용자 kubectl access entry·교차 계정 ECR·pull 전용 토큰)
 ```
 
 화살표는 주요 경로를 요약한다. 정확한 모든 `Blocked by`는 위 표와 각 티켓에 있다. `02`·`05`·`06`·`07`은 `CP-01`이 main에 반영된 뒤 의존성상 독립이지만 현재는 순차로 진행하며, AWS/GCP의 배포 경로는 공통 Helm 기반과 해당 인프라 준비가 끝나면 독립 진행할 수 있다. `13`은 K3s 경로로 결과 계약을 먼저 검증한다. AWS/GCP 실제 경로와의 연결은 `14`에서 확인한다.

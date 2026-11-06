@@ -6,9 +6,14 @@ class Settings(BaseSettings):
 
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
+    # TLS to Temporal (the relay-host worker reaches the demo host through the HTTPS edge).
+    temporal_tls: bool = False
     # Ticket 08: protected directory holding Planning output `<plan_id>-r<revision>/`.
     provisioning_artifact_root: str | None = None
     provisioning_aws_profile: str | None = None
+    # Ticket 47 (D-10): comma-separated CIDRs the worker reaches new cluster APIs from (the demo
+    # host EIP). AWS Plans refuse API access CIDRs that leave them out; empty = not checked.
+    provisioning_platform_egress_cidrs: str | None = None
     terraform_bin: str = "terraform"
     # Ticket 03: directory for analysis source workspaces; must be outside the service directory.
     analysis_workspace_root: str | None = None
@@ -55,6 +60,10 @@ class Settings(BaseSettings):
     # Ticket 10: gcloud configuration and the expected Google ADC principal for GCP Apply.
     provisioning_gcloud_configuration: str | None = None
     provisioning_gcp_adc_email: str | None = None
+
+    def platform_egress_cidrs(self) -> tuple[str, ...]:
+        raw = self.provisioning_platform_egress_cidrs or ""
+        return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
 settings = Settings()

@@ -19,7 +19,7 @@ CONNECTIONS = ROOT / "infra" / "connections"
 ACCOUNT = "714066696240"
 REGION = "ap-northeast-2"
 BUCKET = f"cmp-demo-{ACCOUNT}-apne2-connection-templates"
-BASE_URL = f"https://{BUCKET}.s3.{REGION}.amazonaws.com/connections/v1"
+BASE_URL = f"https://{BUCKET}.s3.{REGION}.amazonaws.com/connections/v2"  # ticket 47
 ROLE = "cmp-demo-control-plane-InstanceRole-oAXRipePmZCe"
 PRINCIPAL = f"arn:aws:iam::{ACCOUNT}:role/{ROLE}"
 
@@ -256,7 +256,7 @@ def test_plan_creates_a_change_set_only(tmp_path):
     assert "--no-execute-changeset" in deploy
     assert "--stack-name cmp-demo-connection-templates" in deploy
     assert "--template-file infra/demo/connection-templates-stack.yaml" in deploy
-    assert "TemplateVersion=v1" in deploy
+    assert "TemplateVersion=v2" in deploy
     assert not [c for c in calls if "s3 cp" in c or c.startswith("curl")]
     assert "CONNECTION_TEMPLATE_BASE_URL=" not in result.stdout
 
@@ -270,7 +270,7 @@ def test_apply_uploads_both_templates_as_yaml_checks_them_and_prints_env_lines(t
     assert len(uploads) == 2
     for name in ("source-role.yaml", "target-role.yaml"):
         [upload] = [c for c in uploads if f"infra/connections/{name}" in c]
-        assert f"s3://{BUCKET}/connections/v1/{name}" in upload
+        assert f"s3://{BUCKET}/connections/v2/{name}" in upload
         assert "--content-type text/yaml" in upload
         assert f"curl -sI {BASE_URL}/{name}" in calls
     lines = result.stdout.splitlines()

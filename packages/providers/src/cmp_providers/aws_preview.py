@@ -25,9 +25,14 @@ from pydantic import Field
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes
 from cmp_providers.aws_credentials import resolve_aws_profiles
 from cmp_providers.plans import manifest_digest
+from cmp_providers.platform_egress import check_platform_egress
 from cmp_providers.resources import resource_root
 
 _NAME = r"^[a-z][a-z0-9-]{0,38}[a-z0-9]$"
+TEMPLATE_VERSION = "aws-eks-v4"
+# Ticket 47 (B-10): an IAM role (path allowed, e.g. SSO) or user; never root, an STS session or a
+# service-linked role (EKS refuses those). STANDARD entries may name another account.
+_PRINCIPAL = re.compile(r"arn:aws:iam::[0-9]{12}:(?:role|user)/[A-Za-z0-9+=,.@_/-]{1,512}")
 _RESOURCE_TYPES = {
     "aws_vpc": ("NETWORK", "VPC"),
     "aws_subnet": ("NETWORK", "서브넷"),
@@ -47,6 +52,9 @@ _RESOURCE_TYPES = {
     "aws_iam_openid_connect_provider": ("CLUSTER", "IAM OIDC 공급자"),
     "aws_eks_addon": ("CLUSTER", "EKS 애드온(EBS CSI·VPC CNI)"),
     "aws_iam_policy": ("CLUSTER", "Load Balancer Controller IAM 정책"),
+    # Ticket 47 (B-10): the user's kubectl access (aws-eks-v4).
+    "aws_eks_access_entry": ("CLUSTER", "EKS 사용자 접근 항목"),
+    "aws_eks_access_policy_association": ("CLUSTER", "EKS 사용자 접근 정책(클러스터 관리자)"),
 }
 _ACTIONS = {
     "create": "CREATE",
@@ -84,6 +92,9 @@ class AwsPlanInput(Contract):
     node_instance_type: Annotated[str, Field(pattern=r"^[a-z0-9]+\.[a-z0-9]+$")]
     node_count: int = Field(ge=1, le=20)
     node_disk_gib: int = Field(ge=20, le=1024)
+    # Ticket 47 (B-10): IAM principals that get cluster admin through an EKS access entry. Empty
+    # keeps only the creator (the platform's run principal) as admin.
+    cluster_admin_principal_arns: list[Text] = Field(default_factory=list, max_length=10)
 
 
 def _reject(code: str, path: str, message: str) -> None:
@@ -110,7 +121,7 @@ def validate_aws_input(request: AwsPlanInput) -> None:
     vpc = _network(request.vpc_cidr, "vpc_cidr")
     if not 16 <= vpc.prefixlen <= 24:
         _reject("INVALID_TOPOLOGY", "vpc_cidr", "VPC CIDR는 /16에서 /24 사이여야 합니다.")
-    if request.plan.template_version != "aws-eks-v3":
+    if request.plan.template_version != TEMPLATE_VERSION:
         _reject(
             "UNSUPPORTED_TEMPLATE", "plan.template_version", "지원하지 않는 AWS 템플릿 버전입니다."
         )
@@ -149,6 +160,14 @@ def validate_aws_input(request: AwsPlanInput) -> None:
                 f"api_access_cidrs.{index}",
                 "API 접근 CIDR를 제한해야 합니다.",
             )
+    seen: set[str] = set()
+    for index, arn in enumerate(request.cluster_admin_principal_arns):
+        path = f"cluster_admin_principal_arns.{index}"
+        if not _PRINCIPAL.fullmatch(arn) or ":role/aws-service-role/" in arn:
+            _reject("INVALID_PRINCIPAL_ARN", path, "IAM 역할 또는 사용자 ARN이 필요합니다.")
+        if arn in seen:
+            _reject("DUPLICATE_PRINCIPAL_ARN", path, "같은 주체를 두 번 넣을 수 없습니다.")
+        seen.add(arn)
 
 
 def terraform_variables(request: AwsPlanInput) -> dict:
@@ -171,6 +190,7 @@ def terraform_variables(request: AwsPlanInput) -> dict:
         "node_instance_type": request.node_instance_type,
         "node_count": request.node_count,
         "node_disk_gib": request.node_disk_gib,
+        "cluster_admin_principal_arns": list(request.cluster_admin_principal_arns),
     }
 
 
@@ -214,6 +234,8 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
         "클러스터 보안 그룹": "명시적 인바운드 없음; 아웃바운드 0.0.0.0/0",
         "EKS 클러스터": f"Kubernetes {request.kubernetes_version}; 공개 API {', '.join(request.api_access_cidrs)}; 사설 API 활성화",
         "관리형 노드 그룹": f"{request.node_instance_type}; 노드 {request.node_count}개; 각 {request.node_disk_gib} GiB; 비공개 서브넷",
+        "EKS 사용자 접근 항목": "클러스터 관리자: "
+        + ", ".join(request.cluster_admin_principal_arns),
     }
     changes = [
         ResourceChange(
@@ -230,6 +252,11 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
         ),
         ResourceChange(
             resource_type="CLUSTER", action="CREATE", name="EKS 사설 API Endpoint 활성화"
+        ),
+        ResourceChange(  # ticket 47
+            resource_type="CLUSTER",
+            action="CREATE",
+            name="EKS 인증 모드 API(access entry); 구축 주체(대상 연결 역할) 클러스터 관리자",
         ),
         ResourceChange(  # ticket 26
             resource_type="NETWORK",
@@ -257,6 +284,17 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
             message="단일 NAT 게이트웨이에 비공개 서브넷 아웃바운드가 의존합니다.",
         ),
     ]
+    if not request.cluster_admin_principal_arns:
+        warnings.append(
+            ValidationIssue(
+                code="NO_USER_CLUSTER_ACCESS",
+                path="cluster_admin_principal_arns",
+                message=(
+                    "플랫폼 구축 주체만 kubectl 관리자입니다. 인계 뒤 사용자가 클러스터를 보려면 "
+                    "관리자 IAM 주체를 넣거나 EKS access entry를 직접 추가해야 합니다."
+                ),
+            )
+        )
     if continuation:
         warnings.append(
             ValidationIssue(
@@ -315,13 +353,17 @@ def plan_aws_infrastructure(
     aws_profile: str,
     template_dir: Path | None = None,
     backend_mode: BackendMode = "S3",
+    platform_egress_cidrs: tuple[str, ...] = (),
 ) -> tuple[PlanManifest, Preview]:
     """저장 Plan을 실행한다. 로컬 검증 Plan은 운영 승인이 불가능하다.
 
     `aws_profile`은 플랫폼 프로필이다(State backend, 연결이 없을 때의 고정 프로필). 대상 계정
     프로필은 `request.credential_ref`에서 해석한다(46, `aws_credentials`).
+    `platform_egress_cidrs`(47)는 worker가 클러스터 API에 나가는 주소다. 주면 `api_access_cidrs`가
+    덮어야 하고, 비우면 Preview에 미검사 경고를 남긴다.
     """
     variables = terraform_variables(request)
+    check_platform_egress(request.api_access_cidrs, platform_egress_cidrs, path="api_access_cidrs")
     if backend_mode not in {"S3", "LOCAL_VALIDATION"}:
         _reject("UNSUPPORTED_BACKEND", "backend_mode", "알 수 없는 Plan Backend 모드입니다.")
     if backend_mode == "S3" and request.state_bucket is None:
@@ -456,6 +498,17 @@ def plan_aws_infrastructure(
             },
         )
         preview = preview_from_plan(plan_json, request, manifest_digest(manifest))
+        if not platform_egress_cidrs:
+            preview.warnings.append(
+                ValidationIssue(
+                    code="PLATFORM_EGRESS_UNCHECKED",
+                    path="api_access_cidrs",
+                    message=(
+                        "플랫폼 egress 주소가 설정되지 않아 API 접근 CIDR에 포함되는지 확인하지 "
+                        "않았습니다(PROVISIONING_PLATFORM_EGRESS_CIDRS)."
+                    ),
+                )
+            )
         if backend_mode == "LOCAL_VALIDATION":
             preview.pending_decisions.append(
                 ValidationIssue(

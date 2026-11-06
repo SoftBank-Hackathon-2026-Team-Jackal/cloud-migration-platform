@@ -35,3 +35,7 @@ output "ebs_csi_role_arn" {
 output "lb_controller_role_arn" {
   value = aws_iam_role.lb_controller.arn
 }
+
+output "cluster_admin_principal_arns" {
+  value = sort([for entry in aws_eks_access_entry.admin : entry.principal_arn])
+}

@@ -13,3 +13,7 @@ variable "api_access_cidrs" { type = list(string) }
 variable "node_instance_type" { type = string }
 variable "node_count" { type = number }
 variable "node_disk_gib" { type = number }
+variable "cluster_admin_principal_arns" {
+  type    = list(string)
+  default = []
+}

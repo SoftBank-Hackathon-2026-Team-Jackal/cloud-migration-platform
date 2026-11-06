@@ -145,6 +145,13 @@ def test_edge_sends_only_agent_and_relay_routes_to_the_api():
     # Everything that is not the Agent API or the relay polling API is the web front end; the
     # operator, approval and tunnel-admin routes and /docs never get a route to the API.
     assert code == [
+        "@temporal {",
+        "path /temporal.api.* /grpc.health.v1.Health/*",
+        "remote_ip {$CMP_TEMPORAL_ALLOWED_IP}",
+        "}",
+        "handle @temporal {",
+        "reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}",
+        "}",
         "@backend path /agents/* /relays/*",
         "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
@@ -160,6 +167,9 @@ def test_edge_sends_only_agent_and_relay_routes_to_the_api():
     edge = _env("edge")
     assert edge["CMP_API_UPSTREAM"] == "api:8000"
     assert edge["CMP_WEB_UPSTREAM"] == "web:3000"
+    assert edge["CMP_TEMPORAL_UPSTREAM"] == "temporal:7233"
+    # Nobody may reach Temporal through the edge unless the operator sets an address.
+    assert edge["CMP_TEMPORAL_ALLOWED_IP"].endswith("192.0.2.1/32}")
 
 
 def test_web_is_internal_only_and_reaches_the_api_over_the_compose_network():
@@ -340,7 +350,8 @@ def test_api_uses_the_instance_role_build_profile_without_gcp_credentials():
     # role itself (never PROVISIONING_AWS_ROLE_ARN).
     # Ticket 23b·46: the connection principal stays this profile; ECR tokens have their own.
     assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
-    assert env["PLATFORM_ECR_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
+    # Ticket 47 (B-09): the pull-only profile once configured, the build profile until then.
+    assert env["PLATFORM_ECR_AWS_PROFILE"] == "${PLATFORM_ECR_AWS_PROFILE:-cmp-demo-build}"
     assert "PROVISIONING_AWS_PROFILE" not in env
     # The API never gets the GCP key or a gcloud configuration.
     assert not [m for m in api["volumes"] if "/secrets/gcp" in m or "/run/cmp/gcp" in m]
@@ -367,6 +378,7 @@ def _run_deploy_build_stack(tmp_path, uri: str) -> subprocess.CompletedProcess:
   *describe-stack-resource*) echo cmp-demo-control-plane-InstanceRole-ABC ;;
   *DeployBucket*) echo cmp-demo-714066696240-apne2-deploy ;;
   *RepositoryUri*) echo {uri} ;;
+  *PullRoleArn*) echo arn:aws:iam::714066696240:role/cmp-demo-ecr-pull ;;
   *"cloudformation deploy"*) ;;
   *) echo "unexpected aws $*" >&2; exit 9 ;;
 esac
@@ -634,6 +646,14 @@ def test_runtime_check_prints_names_and_states_never_env_values(tmp_path):
         assert expected in out, expected
     # Names the demo needs but .env lacks are listed as missing (here: the DB passwords).
     assert "missing=" in out and "PLATFORM_DB_PASSWORD" in out.split("missing=", 1)[1]
+    optional = out.split("optional_unset=", 1)[1].splitlines()[0].split()
+    for name in (
+        "PLATFORM_ECR_PULL_ROLE_ARN",
+        "PROVISIONING_PLATFORM_EGRESS_CIDRS",
+        "CMP_GCP_PROJECT",
+    ):
+        assert name in optional, name  # 47·48 names are reported when unset
+    assert "BUILD_PLATFORM" not in optional
 
 
 def test_worker_image_keeps_git_for_the_real_analysis_source_fetch():

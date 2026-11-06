@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from cmp_api.db import Base
 from cmp_api.onprem_rollout import LocalArtifactStore, RolloutError
 
-CLOUD_TEMPLATES = {"AWS": "aws-eks-v3", "GCP": "gcp-gke-v3"}
+CLOUD_TEMPLATES = {"AWS": "aws-eks-v4", "GCP": "gcp-gke-v3"}
 _CLOUD_MODELS = {"AWS": AwsPlanInput, "GCP": GcpPlanInput}
 
 
