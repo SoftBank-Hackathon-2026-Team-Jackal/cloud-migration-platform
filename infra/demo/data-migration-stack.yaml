@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  CMP demo data migration write access on the source EKS cluster (data-migration ticket 12). A
+  separate stack: a data-only IAM role with namespace-scoped EKS edit access, plus an inline policy
+  on the EXISTING control-plane instance role that lets it assume only this role. The source
+  connection role (read-only, AmazonEKSViewPolicy) and cmp-demo-control-plane stay unchanged.
+
+Parameters:
+  InstanceRoleName:
+    Type: String
+    Description: Name of the existing demo EC2 instance role (cmp-demo-control-plane InstanceRole).
+    AllowedPattern: '^cmp-demo-control-plane-InstanceRole-[\w+=,.@-]{1,40}$'
+  ClusterName:
+    Type: String
+    Default: cmp-demo-source
+    AllowedPattern: '^[0-9A-Za-z][A-Za-z0-9_-]{0,99}$'
+  # Namespaces the data Activities write to: the app namespace (DB exec, Secrets, cmp-cutover,
+  # app rollout, DB ingress NetworkPolicy) and the WireGuard gateway namespace.
+  AppNamespace:
+    Type: String
+    Default: chat-source
+    AllowedPattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+  TunnelNamespace:
+    Type: String
+    Default: cmp-data-tunnel
+    AllowedPattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+  # Verification only: an extra principal (operator SSO role ARN) trusted while checking with
+  # `kubectl auth can-i` as the real role. Leave empty (default) in the steady state.
+  VerifierPrincipalArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(arn:aws:iam::\d{12}:role/[\w+=,.@/-]+)?$'
+
+Conditions:
+  HasVerifier: !Not [!Equals [!Ref VerifierPrincipalArn, '']]
+
+Resources:
+  DataMigrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cmp-demo-data-migration
+      Description: Data migration writes on the source EKS cluster, two namespaces only (data ticket 12)
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DemoInstanceRole
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${InstanceRoleName}'
+            Action: sts:AssumeRole
+          - !If
+            - HasVerifier
+            - Sid: TemporaryVerifier
+              Effect: Allow
+              Principal:
+                AWS: !Ref VerifierPrincipalArn
+              Action: sts:AssumeRole
+            - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: cmp-demo-data-migration
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # `aws eks update-kubeconfig` (CliRuntime.connect). The token itself (`aws eks
+              # get-token`) is a presigned STS call and needs no IAM action.
+              - Sid: DescribeSourceCluster
+                Effect: Allow
+                Action: eks:DescribeCluster
+                Resource: !Sub 'arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+      Tags:
+        - Key: Project
+          Value: cloud-migration-platform
+        - Key: Purpose
+          Value: hackathon-demo-data-migration
+
+  # Kubernetes side: edit (no RBAC, no cluster-scoped objects) in the two namespaces only. The
+  # group lets data-migration-rbac.yaml grant the one cluster-scoped call the tunnel makes
+  # (server-side apply of its own Namespace object).
+  DataMigrationAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt DataMigrationRole.Arn
+      Type: STANDARD
+      KubernetesGroups:
+        - cmp-data-migration
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy
+          AccessScope:
+            Type: namespace
+            Namespaces:
+              - !Ref AppNamespace
+              - !Ref TunnelNamespace
+      Tags:
+        - Key: Project
+          Value: cloud-migration-platform
+        - Key: Purpose
+          Value: hackathon-demo-data-migration
+
+  # The demo worker reaches the role from the instance role (profile cmp-demo-data-migration with
+  # credential_source = Ec2InstanceMetadata). Caller-side allow for this one role only.
+  AssumeDataMigrationPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref InstanceRoleName
+      PolicyName: cmp-demo-data-migration
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AssumeDataMigrationRole
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !GetAtt DataMigrationRole.Arn
+
+Outputs:
+  DataMigrationRoleArn:
+    Value: !GetAtt DataMigrationRole.Arn
+  AccessEntryArn:
+    Value: !GetAtt DataMigrationAccessEntry.AccessEntryArn
+  KubernetesGroup:
+    Value: cmp-data-migration
