@@ -89,3 +89,6 @@ TDD 메모: API/Activity 슬라이스는 모듈 부재 RED → GREEN 한 단계�
 - `UNKNOWN`(오프라인·검사 필요) 이후 자동 재개 정책과 실패 Release 정리 정책은 14 범위다. Agent는 실패/중단 Release를 자동 삭제·재적용하지 않는다.
 - k3d 검증의 앱 헬스는 04 테스트 앱(SQL 쓰기/읽기 포함)이다. 임의 운영 앱은 health_path 2xx만 확인한다.
 - `spec.md` 요구사항·수용 기준은 바뀌지 않아 수정하지 않았다.
+
+## 후속 (52)
+- 52 후속(#187): E1/E6의 "대기 한도 초과 시 작업을 취소하지 않고 `UNKNOWN AGENT_OFFLINE`"은 바뀌었다. 시작되지 않은 작업은 `EXPIRED`로 닫히고 결과는 `FAILED AGENT_OFFLINE`이다(늦게 돌아온 Agent가 실행하지 않음). 운영자 취소·정리 작업도 [52](52-agent-job-lifecycle.md)에 있다.

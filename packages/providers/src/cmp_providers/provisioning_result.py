@@ -143,6 +143,10 @@ PRECONDITION_CODES = {
     "ACCOUNT_CHECK_FAILED",
     "JOB_TARGET_MISMATCH",
     "CANCELLED_BEFORE_EXECUTION",
+    "JOB_EXPIRED",  # ticket 52: the Agent did not start the job before its deadline
+    "JOB_CANCELLED",  # ticket 52: an operator cancelled it before it started
+    "AGENT_OFFLINE",  # ticket 52: expired while still queued for an offline Agent
+    "TEARDOWN_IN_PROGRESS",  # ticket 52: a teardown of the target Namespace is pending
     "EXPLICIT_TARGET_REQUIRED",
     "UNSUPPORTED_JOB",
 }

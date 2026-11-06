@@ -64,3 +64,6 @@ Blocked by: 11, 12, 15, ENV-04 (DONE). 28(플랫폼 저장소 `cmp-platform-buil
 - DB 모델 변경 없음. `alembic check`는 로컬 Postgres가 없어 실행하지 못했다(테스트 안의 Alembic·모델 일치 검사는 통과). `make smoke-temporal`은 로컬 인프라가 없어 미실행
 - 기존 테스트 조정: 18의 Planning 이미지가 ECR(`123456789012…/demo`)이라 `test_plan_publish`에 플랫폼 레지스트리 설정 fixture를 추가했다(I1)
 - 운영 반영 시: API 설정 `PLATFORM_ECR_REGISTRY`·`PLATFORM_ECR_REPOSITORIES`, 플랫폼 역할에 `ecr:GetAuthorizationToken`과 저장소 `ecr:BatchGetImage`·`ecr:GetDownloadUrlForLayer`(28 범위), 새 Agent 이미지·Chart(RBAC) 배포
+
+## 후속 (52)
+- 52 후속(#187, C-14): I3의 갱신 허용 조건이 "SUCCEEDED이고 최신 승인 Revision"에서 "SUCCEEDED READY이고 자기 승인 기록이 유효하며 같은 Plan의 더 새 Revision이 READY가 아님"으로 넓어졌다. 실패한 Revision의 Agent는 pull Secret의 `cmp.dev/job-id`를 직전 작업으로 되돌린다. 정리 작업은 pull Secret을 지워 갱신을 멈춘다. [52](52-agent-job-lifecycle.md) D17·D8.

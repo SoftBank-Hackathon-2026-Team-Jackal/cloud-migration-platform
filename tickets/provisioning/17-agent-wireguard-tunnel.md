@@ -112,3 +112,6 @@ TDD 메모: Agent 로직·클라이언트·Chart·W8 API는 테스트를 먼저 
 - 중계 서버가 여럿이면 첫 번째만 쓴다(W5). Envoy 요청 출발지가 `10.200.0.1`이 아니면 Agent가 받지 않는다(W3) — 상헌님과 확인 필요.
 - Pod Security `baseline` 이상을 강제하는 클러스터, x86_64·다른 K3s 배포판, 장시간 실행, 커널 WireGuard가 없는 실제 호스트(대체 경로는 `userspace` 고정으로만 확인).
 - `agent-v0.2.0` 릴리스(GHCR 이미지·OCI Chart)는 사용자 승인 대기.
+
+## 후속 (52)
+- 52 후속(#187): W9의 폐기 시 `tunnel` 종료(코드 2)는 인터페이스를 내린 뒤 SIGTERM까지 대기로 바뀌었다. 프록시 값은 플랫폼 HTTPS 호출에만 적용되고 WireGuard UDP는 그대로다. [52](52-agent-job-lifecycle.md) D13·D14.

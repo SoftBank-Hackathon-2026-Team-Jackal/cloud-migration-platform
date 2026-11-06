@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from cmp_contracts.chart import KubernetesName
 from cmp_contracts.network_preflight import NetworkPreflightJob, ProbeObservation
 from cmp_contracts.onprem_rollout import ProductionRolloutJob, RolloutReplication
+from cmp_contracts.onprem_teardown import TeardownJob
 from cmp_contracts.provisioning import Text
 from cmp_providers.ecr_pull import EcrPullError, EcrTokenMinter, boto3_minter
 from cmp_providers.env_file import EnvFileError, EnvFileStore
@@ -79,8 +80,11 @@ class JobReport(Request):
 
 class ClaimedJob(Request):
     job_id: str
-    payload: QueuedWork | ProductionRolloutJob | NetworkPreflightJob
+    payload: QueuedWork | ProductionRolloutJob | NetworkPreflightJob | TeardownJob
     status: Literal["RUNNING"]
+    # Ticket 52 (D4): seconds left to start the job (not a clock time); absent = no deadline.
+    # Agents older than ticket 52 ignore it; the claim-time check (D3) still applies to them.
+    expires_in_seconds: int | None = Field(default=None, ge=0)
 
 
 class ClaimResponse(Request):

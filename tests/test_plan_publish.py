@@ -294,7 +294,8 @@ def test_preview_api_then_approval_starts_onprem_execution(db, store, tmp_path, 
     import asyncio
 
     result = asyncio.run(ActivityEnvironment().run(outcome.execute_on_prem_plan, claim))
-    assert (result["status"], result["code"]) == ("UNKNOWN", "AGENT_OFFLINE")
+    # Ticket 52 (D3): not started before the wait ended → closed as EXPIRED, nothing ran.
+    assert (result["status"], result["code"]) == ("FAILED", "AGENT_OFFLINE")
 
 
 def test_preview_api_requires_an_authorized_approver(db, store, tmp_path, client, onprem):

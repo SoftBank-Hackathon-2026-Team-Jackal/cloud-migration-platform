@@ -102,7 +102,10 @@ def test_rbac_is_explicit_without_wildcards(tmp_path):
         for group in rule["apiGroups"]
         for resource in rule["resources"]
     }
-    assert granted[("", "namespaces")] == {"get", "list", "create"}  # list: tunnel discovery (17)
+    # list: tunnel discovery (17); delete: environment teardown with delete_data (52, D8)
+    assert granted[("", "namespaces")] == {"get", "list", "create", "delete"}
+    # Ticket 52 (D16): no `watch` anywhere since the Agent stopped using `helm --wait` (51).
+    assert all("watch" not in rule["verbs"] for rule in role["rules"])
     assert granted[("storage.k8s.io", "storageclasses")] == {"get"}
     assert granted[("", "pods/exec")] == {"create"}
     assert granted[("", "services/proxy")] == {"get"}
@@ -114,10 +117,10 @@ def test_rbac_is_explicit_without_wildcards(tmp_path):
             if "pods" in r["resources"] and r["apiGroups"] == [""]
         )
     )
-    assert pod_verbs == {"get", "list", "watch", "delete"}
+    # create: the default Network Preflight probe image (52, D12)
+    assert pod_verbs == {"get", "list", "create", "delete"}
     # Ticket 29 (I8): pull Secret linked to the default ServiceAccount; no delete/update.
     assert granted[("", "serviceaccounts")] == {"get", "create", "patch"}
-    assert "delete" not in granted[("", "namespaces")]
     [binding] = [doc for (kind, _), doc in docs.items() if kind == "ClusterRoleBinding"]
     assert binding["roleRef"]["name"] == role["metadata"]["name"]
     assert binding["subjects"][0]["namespace"] == "cmp-system"
@@ -267,8 +270,26 @@ def _pod_rules(docs):
     ], role
 
 
-def test_preflight_disabled_by_default_grants_no_pod_create(tmp_path):
+DEFAULT_PROBE = (
+    "docker.io/library/postgres@sha256:"
+    "0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab"
+)
+
+
+def test_preflight_runs_by_default_with_the_pinned_public_probe_image(tmp_path):
+    """Ticket 52 (D12, N13): installing without values must not refuse NETWORK_PREFLIGHT."""
     docs = documents(tmp_path, values())
+    rules, _ = _pod_rules(docs)
+    assert rules == [{"delete"}, {"create", "delete"}, {"get"}]
+    args = container(deployment(docs)["spec"]["template"]["spec"])["args"]
+    assert args[args.index("--preflight-image") + 1] == DEFAULT_PROBE
+    assert args[args.index("--preflight-allowed-images") + 1] == DEFAULT_PROBE
+    chart_values = yaml.safe_load((CHART / "values.yaml").read_text())
+    assert chart_values["networkPreflight"]["image"] == DEFAULT_PROBE
+
+
+def test_preflight_can_be_switched_off_and_then_grants_no_pod_create(tmp_path):
+    docs = documents(tmp_path, values(networkPreflight={"image": ""}))
     rules, role = _pod_rules(docs)
     assert rules == [{"delete"}]  # ticket 51 rollback recovery only
     pod_verbs = {
@@ -278,6 +299,40 @@ def test_preflight_disabled_by_default_grants_no_pod_create(tmp_path):
     assert (
         "--preflight-image" not in container(deployment(docs)["spec"]["template"]["spec"])["args"]
     )
+
+
+def _env(pod, name):
+    return {item["name"]: item.get("value") for item in container(pod, name).get("env", [])}
+
+
+def test_no_proxy_settings_by_default(tmp_path):
+    pod = deployment(documents(tmp_path, values()))["spec"]["template"]["spec"]
+    for name in ("agent", "tunnel"):
+        assert not {"HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"} & set(_env(pod, name))
+
+
+def test_proxy_reaches_both_containers_and_keeps_cluster_traffic_direct(tmp_path):
+    """Ticket 52 (D13, C-08)."""
+    proxy = {"https": "http://proxy.corp.example:3128"}
+    pod = deployment(documents(tmp_path, values(proxy=proxy)))["spec"]["template"]["spec"]
+    for name in ("agent", "tunnel"):
+        env = _env(pod, name)
+        assert env["HTTPS_PROXY"] == env["https_proxy"] == proxy["https"]
+        assert "HTTP_PROXY" not in env
+        no_proxy = env["NO_PROXY"].split(",")
+        assert env["no_proxy"] == env["NO_PROXY"]
+        assert {".svc", ".cluster.local", "10.43.0.0/16", "localhost"} <= set(no_proxy)
+    custom = values(proxy=proxy | {"http": "http://p:3128", "noProxy": "10.0.0.0/8,.internal"})
+    env = _env(deployment(documents(tmp_path, custom))["spec"]["template"]["spec"], "agent")
+    assert env["HTTP_PROXY"] == "http://p:3128" and env["NO_PROXY"] == "10.0.0.0/8,.internal"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"https": "proxy:3128"}, {"https": "http://a b"}, {"noProxy": "a, b"}, {"other": "x"}],
+)
+def test_proxy_values_are_validated(tmp_path, bad):
+    assert render(tmp_path, values(proxy=bad)).returncode != 0
 
 
 def test_preflight_image_adds_minimal_pod_rules_and_agent_args(tmp_path):

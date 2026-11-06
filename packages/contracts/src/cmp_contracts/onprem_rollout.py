@@ -127,4 +127,13 @@ def rollout_job_id(plan_id: str, revision: int) -> str:
     return "rollout-" + hashlib.sha256(f"{plan_id}:{revision}".encode()).hexdigest()[:24]
 
 
-RolloutState = Literal["NOT_DISPATCHED", "WAITING_AGENT", "RUNNING", "READY", "FAILED", "UNKNOWN"]
+RolloutState = Literal[
+    "NOT_DISPATCHED",
+    "WAITING_AGENT",
+    "RUNNING",
+    "READY",
+    "FAILED",
+    "UNKNOWN",
+    "EXPIRED",  # ticket 52: the Agent did not start it before its deadline
+    "CANCELLED",  # ticket 52: an operator cancelled it before it started
+]

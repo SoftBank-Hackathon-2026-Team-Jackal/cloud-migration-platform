@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from cmp_api.routes.agent_jobs import router as agent_job_router
 from cmp_api.routes.agents import router as agent_router
 from cmp_api.routes.approvals import router as approval_router
 from cmp_api.routes.connections import router as connection_router
@@ -12,6 +13,7 @@ from cmp_api.routes.tunnels import router as tunnel_router
 app = FastAPI(title="Cloud Migration Platform", version="0.1.0")
 app.include_router(migration_router)
 app.include_router(agent_router)
+app.include_router(agent_job_router)
 app.include_router(approval_router)
 app.include_router(rollout_router)
 app.include_router(tunnel_router)

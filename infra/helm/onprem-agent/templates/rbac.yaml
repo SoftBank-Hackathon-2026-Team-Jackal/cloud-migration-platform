@@ -1,6 +1,7 @@
 # Explicit resources and verbs only (ticket 15, H2). Target Namespaces are created at rollout
 # time, so this is cluster-scoped; the Agent refuses Namespaces it does not own
-# (cmp.dev/environment-id annotation) before any change.
+# (cmp.dev/environment-id annotation) before any change. Ticket 52 (D16): no `watch` (the Agent
+# waits itself since 51 and only gets/lists); a Namespace-scoped Role mode is a follow-up.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -11,14 +12,15 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     # list: the tunnel finds forward targets in Agent-owned Namespaces (ticket 17 W2).
-    verbs: ["get", "list", "create"]
+    # delete: environment teardown with delete_data, owned Namespaces only (ticket 52 D8).
+    verbs: ["get", "list", "create", "delete"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get"]
-  # Helm release records, DB password Secret, Agent credential.
+  # Helm release records, DB password Secret, Agent credential; teardown removes managed ones.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
   # Ticket 29 (I8): link the platform ECR pull Secret to the Namespace `default`
   # ServiceAccount (create only when the controller has not made it yet).
   - apiGroups: [""]
@@ -26,16 +28,16 @@ rules:
     verbs: ["get", "create", "patch"]
   - apiGroups: [""]
     resources: ["services", "persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods", "endpoints", "events"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list"]
   # Ticket 51: a StatefulSet stays blocked on a never-Ready Pod of a failed revision even after
   # rollback; the Agent deletes only such Pods of its managed DB StatefulSet (never Ready ones).
   - apiGroups: [""]
@@ -43,11 +45,11 @@ rules:
     verbs: ["delete"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list"]
   # Ticket 26: approved NetworkPolicies in Agent-owned Namespaces (managed label only).
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
   # READY checks: pg_isready inside the DB Pod and the app health path via the API proxy.
   - apiGroups: [""]
     resources: ["pods/exec"]

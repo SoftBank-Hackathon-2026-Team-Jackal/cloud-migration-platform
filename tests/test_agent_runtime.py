@@ -8,6 +8,7 @@ from urllib.error import HTTPError
 import pytest
 import yaml
 from cmp_providers.agent_runtime import (
+    HALT_SECONDS,
     AgentDaemon,
     AgentRuntimeError,
     MemoryCredentialStore,
@@ -94,8 +95,10 @@ def test_missing_credential_and_token_exits_with_a_code():
 def test_rejected_enrollment_stops_without_retrying():
     registrar = Registrar(AgentTransportError("AGENT_UNAUTHORIZED"))
     store = MemoryCredentialStore(enrollment_token="cmp_enroll_used")
-    assert daemon(store, scripted(), Clock(stop_after=5), registrar).run() == 2
+    clock = Clock(stop_after=2)
+    assert daemon(store, scripted(), clock, registrar).run() == 2
     assert store.credential is None and len(registrar.calls) == 1
+    assert clock.waits == [HALT_SECONDS, HALT_SECONDS]  # ticket 52: idle until SIGTERM
 
 
 def test_platform_outage_backs_off_exponentially_with_a_cap_then_idles():
@@ -189,11 +192,16 @@ def test_job_left_running_because_kubernetes_is_down_is_backed_off():
     assert clock.waits == [1, 10]
 
 
-def test_revoked_credential_stops_the_loop():
+def test_revoked_credential_stops_polling_and_idles_instead_of_restarting():
+    """Ticket 52 (D14, C-09): no exit (no restart loop, no repeated 403); SIGTERM ends it."""
     poll = scripted(AgentTransportError("AGENT_UNAUTHORIZED"), None)
-    clock = Clock(stop_after=5)
-    assert daemon(MemoryCredentialStore(credential="c"), poll, clock).run() == 2
-    assert len(poll.calls) == 1 and clock.waits == []
+    events = []
+    clock = Clock(stop_after=3)
+    agent = daemon(MemoryCredentialStore(credential="c"), poll, clock)
+    agent.log = events.append
+    assert agent.run() == 2
+    assert len(poll.calls) == 1 and clock.waits == [HALT_SECONDS] * 3
+    assert events == [{"event": "stopped", "code": "AGENT_UNAUTHORIZED"}]
 
 
 def test_stop_requested_while_idle_exits_cleanly():

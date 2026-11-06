@@ -43,6 +43,15 @@
         "additionalProperties": false
       }
     },
+    "proxy": {
+      "type": "object",
+      "properties": {
+        "https": {"type": "string", "pattern": "^(https?://[^\\s/?#]+/?)?$"},
+        "http": {"type": "string", "pattern": "^(https?://[^\\s/?#]+/?)?$"},
+        "noProxy": {"type": "string", "pattern": "^[^\\s]*$"}
+      },
+      "additionalProperties": false
+    },
     "helmTimeout": {"type": "string", "pattern": "^[0-9]+(s|m)$"},
     "idleSeconds": {"type": "number", "minimum": 1},
     "terminationGracePeriodSeconds": {"type": "integer", "minimum": 960},
