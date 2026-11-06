@@ -56,13 +56,20 @@ Blocked by: 18, 22, 23, ENV-02, 49 (main 반영). 동시 진행: 46(#181, `crede
 - 점검 A 재현(`a-repro`)의 A-01 xfail 3개는 S3·S4·S6 정책(실제 시작에 `.env`·카탈로그 필요)을 반영해 `tests/test_web_start_request.py`로 옮겼다(RED → GREEN). 원본 a-repro는 정책 이전 요청이라 그대로는 422/503이고, "현재 동작"(필드 버림) 테스트는 이제 실패한다(의도대로).
 
 ## 검증
-- `uv run pytest tests/test_web_start_request.py` — 결과는 PR 본문에 기록
-- `make check`, `make openapi`(재생성·리뷰)
-- 데모 compose 로컬 실측(점검 D `d-repro` 방식, 클라우드 자격 없음): 결과는 PR 본문에 기록
+- `uv run pytest tests/test_web_start_request.py`: 33 passed. RED는 설정·의존성 부재로 30 errors(2026-11-06).
+- `make check`: 통과(ruff, 전체 pytest). 옛 정책(`GCP`만 허용)을 단언하던 `tests/test_scaffold.py::test_contract_rejects_unplanned_target`을 새 계약으로 고쳤다.
+- `make openapi`: `MigrationRequest`·`StartTarget`·`StartSource`와 `POST /migrations` 설명이 바뀌었다(리뷰함).
+- 데모 compose 로컬 실측(2026-11-06, 점검 D `d-repro` 방식: 이 브랜치로 api·worker 이미지 빌드, 호스트 경로·포트만 바꾼 override, api에 `.env` 저장소·카탈로그만 추가, 클라우드 자격 없음, `alembic upgrade head` → `20261106_01`):
+  - 웹 `sseProvider`와 같은 본문(`project_id`·`source_provider`·`target_provider` + `target`·`source`·`env_file_ref` 문자열)으로 ON_PREM(`onprem-k3s-basic`, HTTP로 등록한 Agent)·GCP(`gcp-vm-basic`, `asia-northeast3`) 모두 202.
+  - Temporal 이력의 시작 입력: `analysis`(`https://github.com/<full_name>.git`, commit), `planning`(ON_PREM 대상 설정에 Agent 등록 `cluster_uid`), 최신 버전으로 고정된 `env_file_ref{id, version, sha256}`.
+  - **정지 지점: 분석 자식**(약 4초, `failed`/`CHILD_WORKFLOW_FAILED`, `failure_phase=analysis`). 분석 자식 Activity 실패 메시지 "Failed decoding arguments": 데모 worker에 분석 설정(`ANALYSIS_ARTIFACT_STORE_DIR` 등)이 없어 scaffold Activity가 dict 입력을 못 받는다(A-03/D-08, 이 티켓 범위 밖). 자격 단계까지는 가지 않는다. 그 뒤 경로(인계 → 등록 → Plan 게시)는 위 단위·통합 테스트로 확인했다.
+  - 거절: `env_file_ref` 없음 → 422 `ENV_FILE_REF_REQUIRED`, 모르는 필드 → 422, `{"project_id"}`만 → 202 scaffold(기존 그대로).
+  - 컨테이너·볼륨·이미지·임시 데이터는 삭제했다.
 
 ## 미검증
 - 데모 서버·실제 웹 BFF에서의 시작(승인 대기: 데모 서버 변경 금지)
 - 실제 분석·샌드박스를 지나 Plan 게시까지(데모 worker에 분석·샌드박스 설정이 없음, A-03/D-08)
+- 데모 compose api에는 `.env` 저장소 설정(`ENV_FILE_STORE_DIR`·`ENV_FILE_ENCRYPTION_KEY`)이 없다(N12). 서버에 설정하기 전까지 데모의 웹 시작은 503 `ENV_FILE_STORE_UNCONFIGURED`다. 서버 `.env` 변경이라 이 PR에 넣지 않았다(승인 대기)
 
 ## 협의 필요
 - 웹(김민서, 별도 저장소): `contract/rest.schema.json` `target.provider`에 `AWS` 추가 여부, `target.credential_ref`에 연결 ID(`conn-<hex>`)를 넣는다는 의미 기록, `env_file_ref` 문자열이 `envf-<32 hex>`(업로드 `id`)라는 형식 기록, 실제 시작에 `source`·`env_file_ref`가 필요하다는 점(웹은 지금 `env_file_ref`를 보내지 않는다).
