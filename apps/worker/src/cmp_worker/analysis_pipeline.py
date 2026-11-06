@@ -51,6 +51,7 @@ from cmp_scanners.masking import mask_text
 from cmp_scanners.network import build_network, merge_network_intents
 from cmp_scanners.routes import HttpRoute, scan_go_routes
 from cmp_scanners.security import measure_security
+from cmp_scanners.security_judge import judge_security, target_security
 from cmp_scanners.source import fetch_source as checkout_source
 from cmp_scanners.usage import (
     build_aws_usage,
@@ -409,6 +410,26 @@ class AnalysisPipeline:
                 sort_keys=True,
             ).encode()
         ).hexdigest()[:12]
+        measures = measure_security(
+            manifests,
+            infra_scan,
+            code,
+            [HttpRoute.model_validate(r) for r in assembly.get("http_routes", [])],
+        )
+        requirements_ref = built.get("requirements_ref")
+        planned = (
+            RequirementsV2.model_validate_json(
+                self.store.get(ArtifactRef.model_validate(requirements_ref))
+            )
+            if requirements_ref
+            else None
+        )
+        judgements = judge_security(
+            measures, target_security(data.target_provider, planned, measures)
+        )
+        # Ticket 29-A: what the review should look at first, next to the other risks.
+        risks.extend(f"SECURITY_LOWER: {j.criterion}" for j in judgements if j.verdict == "LOWER")
+        risks.extend(f"SECURITY_WEAK_SOURCE: {j.criterion}" for j in judgements if j.weak_source)
         report = AnalysisReport(
             migration_id=data.migration_id,
             ref=VersionRef(id="analysis", version=version),
@@ -431,12 +452,8 @@ class AnalysisPipeline:
             scope=data.scope,
             target_provider=data.target_provider,
             aws_usage=aws_usage,
-            security=measure_security(
-                manifests,
-                infra_scan,
-                code,
-                [HttpRoute.model_validate(r) for r in assembly.get("http_routes", [])],
-            ),
+            security=measures,
+            security_judgements=judgements,
         )
         return {
             "ref": report.ref.model_dump(),
