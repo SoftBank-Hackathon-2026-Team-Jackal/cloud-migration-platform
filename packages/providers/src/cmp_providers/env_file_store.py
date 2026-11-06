@@ -216,6 +216,14 @@ class EncryptedEnvFileStore:
         if entry["sha256"] != ref.sha256:
             raise EnvFileError("ENV_FILE_DIGEST_MISMATCH")
 
+    def latest(self, file_id: str) -> ContentRef:
+        """The newest stored version of `file_id` (ticket 44: the web sends the id only)."""
+        meta = self._meta(file_id)
+        if not meta["versions"]:
+            raise EnvFileError("ENV_FILE_NOT_FOUND")
+        version = max(meta["versions"], key=int)
+        return ContentRef(id=file_id, version=version, sha256=meta["versions"][version]["sha256"])
+
     def read_names(self, ref: ContentRef) -> list[str]:
         values, _ = parse_env(self._plaintext(ref))
         return sorted(values)

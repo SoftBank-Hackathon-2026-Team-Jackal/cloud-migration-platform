@@ -15,11 +15,16 @@ def test_health_is_local_and_does_not_require_temporal() -> None:
 
 
 def test_contract_rejects_unplanned_target() -> None:
+    # Ticket 44: the web targets (AWS, GCP, ON_PREM) are accepted; anything else and unknown
+    # fields are refused instead of being dropped.
     request = MigrationRequest(project_id="demo")
-    assert request.target_provider == "GCP"
+    assert request.target_provider is None and request.target is None
     assert StepResult(step="analysis", detail="example").mode == "scaffold"
+    assert MigrationRequest(project_id="demo", target_provider="ON_PREM").target_provider
     with pytest.raises(ValidationError):
-        MigrationRequest(project_id="demo", target_provider="ON_PREM")
+        MigrationRequest(project_id="demo", target_provider="AZURE")
+    with pytest.raises(ValidationError):
+        MigrationRequest(project_id="demo", target={"provider": "GCP", "profile": "x"}, extra=1)
 
 
 def test_checked_in_openapi_matches_api() -> None:

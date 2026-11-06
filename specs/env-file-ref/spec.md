@@ -17,6 +17,7 @@
 포함
 - `.env` 업로드 API, 암호화 저장, `env_file_ref` 반환, 삭제 정책
 - 시작 요청 `MigrationRequest.env_file_ref`와 분석·샌드박스·구축 입력 전달
+- (Provisioning 44, 2026-11-06) 웹 시작 요청(`target` 있음)에서는 `.env` 참조가 **필수**다(없으면 422 `ENV_FILE_REF_REQUIRED`, 환경변수가 없는 앱은 빈 `.env`를 올린다). 웹은 업로드 응답의 `id`(`envf-<32 hex>`) 문자열만 보내고, API가 시작 순간의 최신 버전으로 `ContentRef{id, version, sha256}`를 고정해 Workflow에 넣는다. 객체 참조는 그 버전 그대로다. `target`이 없는 scaffold 시작은 기존처럼 선택이다
 - 공통 함수 `resolve_env_names`, `render_env`와 테스트용 InMemory 저장소
 - 분석의 EnvPlan 출력, 샌드박스·구축의 `render_env` 전환
 

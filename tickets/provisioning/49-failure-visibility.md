@@ -27,7 +27,7 @@ Blocked by: 07, 18, 22, 24 (main 반영). 같은 파일을 44(시작 요청)·50
 
 ## 변경 경계 (병렬 티켓과 충돌 최소화)
 - `apps/worker/src/cmp_worker/workflows/migration.py`: `run`은 실패 감싸기만 하고 기존 본문은 `_run`으로 이름만 옮겼다. 추가 함수 `_record_failure`·`_report_failure`, `phase` property. `_approve_and_execute`에는 `failure_issues` 한 줄만 더했다. 44·50은 `_run`·`_hand_off`·`_plan_and_provision`의 시작·인계 부분을 고친다.
-- `apps/api/src/cmp_api/routes/migrations.py`: `get_migration`·`read_workflow_status` 본문만 바꿨다(새 모듈 `cmp_api.migration_state` 호출). `start_migration`은 그대로다.
+- `apps/api/src/cmp_api/routes/migrations.py`: `get_migration`·`read_workflow_status` 본문만 바꿨다(새 모듈 `cmp_api.migration_state` 호출). `start_migration`은 그대로다(시작 입력은 [44](44-web-start-to-planning.md)가 바꿨다. R1의 `PLANNING_INPUT_MISSING`은 웹 요청이 `target` 없이 scaffold로 가던 D-03 증상이다).
 
 ## 수용 기준 (Issue #184)
 - [x] 로컬 통합 실행에서 Plan 실패 시 웹이 실패 단계와 코드를 받는다. (데모 compose 로컬 실측 R1·R3)

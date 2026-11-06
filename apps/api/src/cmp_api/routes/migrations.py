@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from temporalio.client import WorkflowHandle
 from temporalio.service import RPCError, RPCStatusCode
 
+from cmp_api.config import settings
 from cmp_api.db import SessionLocal
 from cmp_api.event_stream import (
     StatusReader,
@@ -23,6 +24,15 @@ from cmp_api.event_stream import (
 from cmp_api.migration_events import list_events, list_logs
 from cmp_api.migration_state import read_migration_state
 from cmp_api.routes.env_files import get_env_file_store
+from cmp_api.start_request import (
+    StartRefused,
+    check_request,
+    find_agent,
+    find_connection,
+    load_target_profiles,
+    planning_settings,
+    start_input,
+)
 from cmp_api.temporal_client import get_temporal_client
 
 router = APIRouter(prefix="/migrations", tags=["migration scaffold"])
@@ -43,33 +53,81 @@ EnvStoreFactoryDep = Annotated[
 ]
 
 
+def get_session_factory():
+    """Opened only by a real (`target`) start, for the connection and Agent lookups."""
+    return SessionLocal
+
+
+SessionFactoryDep = Annotated[Callable, Depends(get_session_factory)]
+
+
+def _refused(code: str, status: int = 422) -> HTTPException:
+    return HTTPException(status_code=status, detail={"code": code})
+
+
+def _env_ref(request: MigrationRequest, env_store: Callable[[], EncryptedEnvFileStore]):
+    """ENV-02/ticket 44 S5: an object must exist as given; an `envf-` id pins its latest version."""
+    store = env_store()
+    try:
+        if isinstance(request.env_file_ref, str):
+            return store, store.latest(request.env_file_ref)
+        store.check(request.env_file_ref)
+    except EnvFileError as exc:
+        raise _refused(exc.code) from None
+    return store, request.env_file_ref
+
+
+def _real_start_input(
+    request: MigrationRequest,
+    env_store: Callable[[], EncryptedEnvFileStore],
+    sessions: Callable,
+):
+    """Ticket 44: `target` given → the real pipeline input (S3~S10), or a code-only refusal."""
+    try:
+        target, source = check_request(request)
+        entry = load_target_profiles(settings.planning_target_profiles_file).get(target.profile)
+        if not isinstance(entry, dict):
+            raise StartRefused("TARGET_PROFILE_NOT_FOUND")
+        if entry.get("provider") != target.provider:
+            raise StartRefused("TARGET_PROFILE_PROVIDER_MISMATCH")
+        connection = agent = None
+        if target.agent_id is not None or target.credential_ref is not None:
+            with sessions() as session:
+                if target.agent_id is not None:
+                    agent = find_agent(session, target.agent_id)
+                if target.credential_ref is not None:
+                    connection = find_connection(session, target.credential_ref, target.provider)
+        planning = planning_settings(target, entry, connection=connection, agent=agent)
+    except StartRefused as exc:
+        raise _refused(exc.code, exc.status) from None
+    store, env_ref = _env_ref(request, env_store)
+    return start_input(request, source, planning, env_ref), store, env_ref
+
+
 @router.post("", response_model=MigrationCreated, status_code=202)
 async def start_migration(
-    request: MigrationRequest, env_store: EnvStoreFactoryDep
+    request: MigrationRequest, env_store: EnvStoreFactoryDep, sessions: SessionFactoryDep
 ) -> MigrationCreated:
-    """Start a migration. `env_file_ref` (from `POST /env-files`) is optional; an unknown,
-    changed or deleted reference is 422 `{"detail": {"code": "ENV_FILE_NOT_FOUND" |
-    "ENV_FILE_DIGEST_MISMATCH" | "ENV_FILE_EXPIRED"}}` and nothing starts."""
-    store = None
-    if request.env_file_ref is not None:
+    """Start a migration. Unknown fields are 422.
+
+    Without `target` this is the scaffold start: `env_file_ref` (from `POST /env-files`) is
+    optional. With `target` (the web `StartRequest`, ticket 44) the real pipeline starts: `source`
+    and `env_file_ref` (an `envf-` id, pinned to its latest version, or an exact reference) are
+    required and the target profile catalog supplies the target settings. Refusals are
+    `{"detail": {"code": ...}}`: 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`,
+    `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`; 503
+    `TARGET_PROFILES_UNCONFIGURED` or the `.env` store codes. Nothing starts on a refusal."""
+    store = env_ref = None
+    if request.target is not None:
+        data, store, env_ref = _real_start_input(request, env_store, sessions)
+    elif request.env_file_ref is not None:
         # ENV-02: only an existing version with the same sha256 may start a migration.
-        store = env_store()
-        try:
-            store.check(request.env_file_ref)
-        except EnvFileError as exc:
-            raise HTTPException(status_code=422, detail={"code": exc.code}) from None
+        store, env_ref = _env_ref(request, env_store)
+        data = {"project_id": request.project_id, "env_file_ref": env_ref.model_dump(mode="json")}
+    else:
+        data = request.project_id  # the scaffold string input, as before
     client = await get_temporal_client()
     workflow_id = f"migration-{uuid4()}"
-    # Without a reference the input stays the scaffold string, as before; with one, only the
-    # reference (id, version, sha256) travels in the Workflow input, never a value.
-    data: str | dict = (
-        request.project_id
-        if request.env_file_ref is None
-        else {
-            "project_id": request.project_id,
-            "env_file_ref": request.env_file_ref.model_dump(mode="json"),
-        }
-    )
     handle = await client.start_workflow(
         WORKFLOW_NAME,
         data,
@@ -77,7 +135,7 @@ async def start_migration(
         task_queue=WORKFLOW_QUEUE,
     )
     if store is not None:
-        store.bind_migration(request.env_file_ref, workflow_id)  # retention follows this run
+        store.bind_migration(env_ref, workflow_id)  # retention follows this run
     return MigrationCreated(workflow_id=workflow_id, run_id=handle.result_run_id)
 
 
