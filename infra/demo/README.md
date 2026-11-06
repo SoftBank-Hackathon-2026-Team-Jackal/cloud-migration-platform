@@ -150,7 +150,7 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 | ECR 저장소 | `cmp-platform-builds` (`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-platform-builds`), `IMMUTABLE`, 푸시 시 스캔, 태그 없는 이미지만 7일 뒤 만료, 스택 삭제 시 보존 |
 | 인스턴스 역할 인라인 정책 | `cmp-demo-build`: `ecr:GetAuthorizationToken`, 그 저장소의 pull·push, 배포 버킷 `sources/`·`tests/`·`builds/`의 `GetObject`·`PutObject`, 버킷 `ListBucket`. `releases/`는 읽기 전용 그대로 |
 | worker 설정 | `BUILD_ECR_REPOSITORY`·`BUILD_SOURCE_BUCKET`·`BUILD_LOG_BUCKET`·`BUILD_PLATFORM`(`/opt/cmp/.env`, 비면 사전 빌드 이미지), `BUILD_AWS_PROFILE=cmp-demo-build`(인스턴스 역할 프로필). 티켓 47(B-20): Build 모듈이 자기 `aws` 호출에 이 프로필을 직접 넘기고, worker 전역 `AWS_PROFILE`은 없다 |
-| ECR pull 전용 역할 (티켓 47, B-09) | `cmp-demo-ecr-pull`(이 스택): `ecr:GetAuthorizationToken` + 이 저장소의 pull 세 동작만. 인스턴스 역할만 Assume. `ensure-secrets.sh`가 `.env`의 `PLATFORM_ECR_PULL_ROLE_ARN`이 있으면 프로필 `cmp-demo-ecr-pull`(`source_profile = cmp-demo-build`)을 쓴다. K3s·GKE pull Secret을 읽은 사람은 이 저장소 pull만 가능하고 push는 거부된다 |
+| ECR pull 전용 역할 (티켓 47, B-09) | `cmp-demo-ecr-pull`(이 스택): `ecr:GetAuthorizationToken` + 이 저장소의 pull 세 동작만. 인스턴스 역할만 Assume. `ensure-secrets.sh`가 `.env`의 `PLATFORM_ECR_PULL_ROLE_ARN`이 있으면 프로필 `cmp-demo-ecr-pull`(`credential_source = Ec2InstanceMetadata`, 인스턴스 역할이 바로 Assume)을 쓴다. K3s·GKE pull Secret을 읽은 사람은 이 저장소 pull만 가능하고 push는 거부된다 |
 | 교차 계정 pull (티켓 47, B-08) | 매개변수 `PullAccountIds`(기본 빈 값 = 저장소 정책 없음)에 대상 연결 계정을 넣으면 저장소 정책이 그 계정의 `arn:aws:iam::*:role/cmp-*-eks-node`(Terraform 노드 역할)에게 pull 세 동작만 허용한다. `CMP_ECR_PULL_ACCOUNT_IDS=<id>[,<id>] bash infra/demo/deploy-build-stack.sh --plan`으로 바꾸고, 비우면 이전 값을 유지한다. 같은 계정은 필요 없다 |
 | api 설정 (#176, 티켓 41·46) | `PLATFORM_ECR_REGISTRY`(`/opt/cmp/.env`, 비면 꺼짐)·`PLATFORM_ECR_REPOSITORIES`(기본 `cmp-platform-builds`), `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build`, AWS 설정 파일 읽기 전용 마운트. K3s Agent의 `GET /agents/{agent_id}/jobs/{job_id}/image-pull` 토큰을 이 프로필(인스턴스 역할)로 발급한다 |
 | worker 빌드 | 이미지의 Docker CLI 28.5.2·buildx v0.37.2 → 마운트한 호스트 `/var/run/docker.sock`의 데몬 |
@@ -206,7 +206,7 @@ AWS 연결 생성 응답의 `launch_stack_url`(ADR-005)은 api가 `CONNECTION_PL
 | 항목 | 내용 |
 | --- | --- |
 | 생성 연결 설정 파일 | api `CONNECTION_AWS_CONFIG_FILE=/run/cmp/aws-connections/config`(호스트 `/opt/cmp/data/aws-connections`, api 쓰기·worker 읽기 전용), `CONNECTION_AWS_BASE_CONFIG_FILE=/run/cmp/aws/config`. 키는 없다(ARN·External ID·프로필 이름). api가 시작·역할 등록·연결 삭제 때 DB에서 다시 쓴다. `start.sh`의 `ensure-secrets.sh`가 없을 때만 기본 파일로 씨앗을 둔다 |
-| 프로필 연쇄 | `cmp-conn-<hex>`(`source_profile = cmp-demo-build`) → `cmp-demo-build`(`credential_source = Ec2InstanceMetadata`) = 위 `CONNECTION_PLATFORM_PRINCIPAL_ARN`(인스턴스 역할) |
+| 프로필 연쇄 | `cmp-conn-<hex>`(`credential_source = Ec2InstanceMetadata`) = 위 `CONNECTION_PLATFORM_PRINCIPAL_ARN`(인스턴스 역할)이 연결 역할을 바로 Assume한다. botocore는 `credential_source`만 있는 프로필(`cmp-demo-build`)을 `source_profile`로 받지 않으므로(`The source profile ... must have credentials`) 생성 프로필은 플랫폼 프로필의 `credential_source`를 그대로 옮겨 쓴다. 플랫폼 프로필이 키·역할·process를 가지면 지금처럼 `source_profile`이다 |
 | worker | `AWS_CONFIG_FILE=/run/cmp/aws-connections/config`. Plan 입력 `credential_ref.id`가 연결 ID(`conn-<hex>`)면 provider·`aws`·kubectl은 `cmp-conn-<hex>`, State backend는 `PROVISIONING_AWS_PROFILE`. 아니면 지금처럼 `PROVISIONING_AWS_PROFILE` 하나 |
 | api ECR 토큰 | `PLATFORM_ECR_AWS_PROFILE`(연결 주체 설정과 분리, 티켓 47부터 pull 전용 역할) |
 

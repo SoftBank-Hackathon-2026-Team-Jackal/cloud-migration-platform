@@ -419,7 +419,8 @@ def test_api_start_up_rewrites_the_shared_config_from_the_db(sessions, tmp_path,
     sync_connection_profiles(sessions)
     text = target.read_text()
     assert "[profile cmp-demo-build]" in text and f"[profile {PROFILE}]" in text
-    assert "source_profile = cmp-demo-build" in text
+    assert "credential_source = Ec2InstanceMetadata" in text.split(f"[profile {PROFILE}]")[1]
+    assert "source_profile" not in text
 
 
 def test_api_start_up_sync_is_a_no_op_without_the_setting(sessions, monkeypatch):
@@ -530,8 +531,35 @@ def test_generated_profiles_chain_to_the_instance_role_build_profile(tmp_path):
     parser = configparser.ConfigParser()
     parser.read_string(text)
     generated = parser[f"profile {PROFILE}"]
-    assert generated["source_profile"] == "cmp-demo-build"
+    assert generated["credential_source"] == "Ec2InstanceMetadata"  # botocore refuses the chain
+    assert "source_profile" not in generated
     platform = parser["profile cmp-demo-build"]
     assert platform["credential_source"] == "Ec2InstanceMetadata"
     assert "role_arn" not in platform  # never PROVISIONING_AWS_ROLE_ARN
     assert "aws_access_key_id" not in text
+
+
+def test_generated_profile_resolves_in_botocore(tmp_path, monkeypatch):
+    """The demo platform profile has only `credential_source`; botocore refuses it as a
+    `source_profile` ("must have credentials"), so the generated profile must resolve on its own.
+    Credentials are deferred: no STS call happens here."""
+    import botocore.session
+
+    connection = EnvironmentConnection(
+        id=CONN, kind="AWS_SOURCE", role_arn="arn:aws:iam::123456789012:role/cmp-s",
+        external_id="cmp-" + "b" * 32, region="ap-northeast-2",
+    )  # fmt: skip
+    config = tmp_path / "config"
+    config.write_text(
+        connections.render_aws_config(
+            [connection],
+            base="[profile cmp-demo-build]\ncredential_source = Environment\n",
+            platform_profile="cmp-demo-build",
+        )
+    )
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(config))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "none"))
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "example")
+    session = botocore.session.Session(profile=PROFILE)
+    assert session.get_credentials() is not None
