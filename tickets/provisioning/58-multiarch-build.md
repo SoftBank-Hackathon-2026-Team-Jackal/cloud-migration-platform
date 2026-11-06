@@ -66,7 +66,7 @@ Blocked by: B-01(완료), 28(로컬 완료), 54(로컬 완료). 54의 빌드 격
 | k3d `cmp58-arm`(노드 `arm64`, 별도 클러스터)에 `infra/helm/postgres`·`application`, `image.platforms=[linux/amd64, linux/arm64]` | `sandbox-postgres-0`·`demo-app` Running/Ready, 노드 조건 `["amd64","arm64"]`, 앱 로그 `aarch64`, imageID = 목록 Digest |
 | 같은 클러스터에 DB `platforms=[linux/amd64]`(11-07 설정 재현) | `Pending Unschedulable … didn't match Pod's node affinity/selector` |
 | 정리 | `k3d cluster delete cmp58-arm`, `k3d registry delete cmp58-reg`. `k3d-cmp-local`은 건드리지 않음 |
-| `make check` | 결과는 PR 본문 |
+| `make check` (ruff + pytest) | 3108 passed, 10 skipped |
 
 ## 미검증
 - 데모 서버(AL2023, classic 저장소, x86_64)에서 binfmt 설치·arm64 빌드·ECR 목록 push: 서버 반영 승인 필요. ECR의 목록 `describe-images`·IMMUTABLE 태그 동작은 AWS 문서 근거이고 실제 계정에서 확인하지 않았다.
