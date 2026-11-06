@@ -4,7 +4,6 @@ Mirrors `execute_aws_plan`: reloads the Plan Revision from the business DB, requ
 manifest Digest, applies only the pinned saved Plan and heartbeats while Terraform runs.
 """
 
-import asyncio
 from pathlib import Path
 
 from cmp_api.approvals import PlanRevision
@@ -15,6 +14,7 @@ from cmp_providers.plans import manifest_digest
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio import activity
 
+from cmp_worker.activities.terraform_run import run_with_heartbeat
 from cmp_worker.provisioning_events import log_result, terraform_progress
 
 HEARTBEAT_SECONDS = 30
@@ -73,10 +73,7 @@ class GcpInfraActivities:
 
     @activity.defn(name="execute_gcp_plan")
     async def execute_gcp_plan(self, request: dict) -> dict:
-        activity.heartbeat("started")
-        work = asyncio.create_task(asyncio.to_thread(self._apply, request))
-        while not work.done():
-            await asyncio.wait({work}, timeout=HEARTBEAT_SECONDS)
-            if not work.done():
-                activity.heartbeat("running")
-        return work.result()
+        # Ticket 53 (D9): heartbeats; a cancellation stops Terraform gracefully first.
+        return await run_with_heartbeat(
+            self._apply, request, heartbeat_seconds=HEARTBEAT_SECONDS
+        )

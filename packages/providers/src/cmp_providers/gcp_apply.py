@@ -33,6 +33,7 @@ from cmp_providers.aws_apply import (
 from cmp_providers.gcp_preview import GcpPlanInput
 from cmp_providers.resources import resource_root
 from cmp_providers.terraform_events import apply_runner, is_stale
+from cmp_providers.terraform_process import failed_apply_refs
 
 GCP_TEMPLATE_ROOT = resource_root() / "infra/terraform/gcp"
 OUTPUT_REFS = {
@@ -230,6 +231,21 @@ def apply_gcp_infrastructure(
                 refs = {"state_resource_count": str(len([line for line in lines if line]))}
             else:
                 refs = {"state_inspection": "UNAVAILABLE"}
+            # Ticket 53 (D10): keep a State Terraform could not upload; report the S3 lock.
+            refs |= failed_apply_refs(
+                applied,
+                runner=runner,
+                work=work,
+                keep_dir=artifact_dir.parent / "state-recovery",
+                label=artifact_dir.name,
+                lock={
+                    "bucket": spec.state_bucket,
+                    "key": spec.state_key,
+                    "region": spec.state_region,
+                    "profile": aws_profile,
+                },
+                env=env,
+            )
             if is_stale(applied, progress):
                 return _result("UNKNOWN", "SAVED_PLAN_STALE", refs)
             if applied.returncode < 0:
