@@ -41,7 +41,7 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 - `status`는 `running` · `done` · `waiting` · `failed`. **`failed`는 화면에서 이전 실패로 보인다.** 재시도할 실패(빌드 1차 실패 등)는 `running`으로 보내고 `data`의 상태 값으로 표현한다.
 - **문구는 보내지 않는다.** 값·코드·식별자만 보낸다(화면이 key로 자기 언어 문구를 고른다). `error.message`는 빈 문자열.
 - **비밀값은 참조만**(Secret name/key). 저장 전 `cmp_scanners.masking`으로 한 번 더 가리고, 키 이름이 password·secret·token·credential이면 값을 통째로 가린다(`*_ref`는 유지).
-- 같은 Activity 시도 안에서 같은 타입을 여러 번 내면 `idempotency_key`로 구분한다(기본값은 `data` Digest라 같은 값은 한 번만 남는다). Temporal 재시도(새 attempt)는 새 이벤트로 남는다.
+- 같은 Activity 시도 안에서 같은 타입을 여러 번 내면 `idempotency_key`로 구분한다(기본값은 `data` Digest라 같은 값은 한 번만 남는다). Temporal 재시도(새 attempt)는 새 이벤트로 남는다(`across_retries=True`면 같은 키는 재시도에도 한 건, Provisioning 59).
 - `data`는 32 KiB 이하. 틀린 필드·이름·큰 데이터는 저장하지 않고 `None`을 돌려주며 운영 로그 `EVENT_INVALID`·`EVENT_TOO_LARGE`를 남긴다. 발행 실패가 Activity를 실패시키지는 않는다.
 - 테스트: `configure_emitter(InMemoryEmitter())`로 바꾸고 `emitter.of_type("…")`로 확인한다([tests/test_migration_events.py](../../tests/test_migration_events.py) 참고).
 
@@ -49,29 +49,40 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 
 표의 "기존 값"은 지금 코드에 있는 모델·반환값이다. `[없음]`은 아직 값을 만드는 코드가 없다는 뜻이다(§5).
 
-### 분석 (승철님) — `phase: analysis`
+### 분석 (승철님, **연결 완료** #226) — `phase: analysis`
 
-| 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
+`cmp_worker.analysis_events`가 실제 분석 Activity(`AnalysisActivities`) 끝에서 낸다. 스캔 안의 항목 단위 진행 신호는 없어서, 스캔이 끝날 때마다 개수를 묶어 한 건씩 낸다. 웹 기본 분석 화면(`AnalysisStage`)이 이 `analysis.scan`을 그린다. `analysis.finding`은 웹의 예전 방식(`?analysis=items`)이라 내지 않는다. 같은 item 키로 `analysis.finding`을 내면 웹에 `analysis.u.<key>` 문구가 없어서 화면에 키 이름이 그대로 나온다.
+
+| 보낼 이벤트 | 어느 Activity에서 | `stream`·n/m | `items` (웹 `analysis.item.<key>`, 개수만) | `evidence` |
+| --- | --- | --- | --- | --- |
+| `analysis.scan` | `fetch_source` 끝 | code 1/3 | `files`(작업 공간 파일 수, `.git` 등 제외), `commit` | `CODE` `host/owner/repo@sha7`(scheme·사용자 정보·토큰 제거) |
+| `analysis.scan` | `scan_manifests` 끝 | code 2/3 | `manifests`(워크로드가 있는 파일 수), `services`, `statefulsets`, `health_endpoint`(probe가 있으면 1) | `MANIFEST` 파일:줄 |
+| `analysis.scan` | `scan_code` 끝 | code 3/3 | `db_driver`(`sku`=드라이버 이름), `s3_sdk`, `env_keys`(읽는 키 이름 수) | `CODE` 파일:줄 |
+| `analysis.scan` | `scan_aws_infra` 끝 | infrastructure 1/2 | `resources`, `eks_cluster`, `alb`, `iam_role`, `trail_calls`. 미수집·실패면 `[]` | `CLOUD_RESOURCE`·`IAM_POLICY`(`role/<이름>`, 계정 ID 없음)·`CLOUDTRAIL`, 늘 `verified: false` |
+| `analysis.scan` (`activity: scan_network`) | `build_requirements` 끝(네트워크 분석 `build_network`가 여기서 돈다) | infrastructure 2/2 | `vpc`, `subnet`, `security_group`(AWS 스캔이 있을 때) | `CLOUD_RESOURCE` VPC, `CONFIG` 외부 진입 |
+| `analysis.done` | `build_requirements`가 요구사항을 만든 직후(막혔으면 내지 않음) | — | `{}` (status `done`) | — |
+
+- `data.id`는 `scan-<activity>`로 고정이다. 웹은 같은 id를 덮어쓰고, 흐름별로 가장 큰 `completed`를 진행률로 쓴다. 그래서 병렬 스캔이 어떤 순서로 끝나든, Temporal이 재시도해 새 attempt가 새 행으로 남든 화면이 중복되거나 뒤로 가지 않는다.
+- 웹 계약에 있는 `node`·`nat_gateway`·`ebs_gb`·`s3_bucket`은 스캐너가 아직 수집하지 않아 내지 않는다.
+- 요약에 실패해도 스캔은 성공으로 끝나고, 운영 로그 `ANALYSIS_EVENT_FAILED`만 남는다.
+- `migration_id`는 분석 입력값이다. 웹 시작 경로와 CLI 시작 경로는 이 칸에 `project_id`를 넣지만, `MigrationWorkflow`가 자식을 시작할 때 자기 Workflow ID(`migration-<uuid>`)로 덮어쓴다. 이 동작은 `tests/analysis/test_scan_events_workflow.py`가 확인한다.
+- scaffold 분석(문자열 입력)은 실제 스캔을 하지 않으므로 내지 않는다.
+
+### 샌드박스·빌드 (승철님, 발행은 Provisioning 59 대행) — `phase: build`
+
+발행 위치(Provisioning 59, [티켓](../../tickets/provisioning/59-sandbox-events.md)): `SandboxVerificationWorkflow._run_integrated`는 패치 `sandbox-events-v1` 뒤로 각 `sbx_*` Activity 입력에 `events: {migration_id, run, attempt}`를 넣고, Activity가 자기 단계 이벤트를 낸다(문맥이 없으면 내지 않는다). Workflow 수준 이벤트(`sandbox.attempt`·`sandbox.done`·`build.review`)는 샌드박스 큐의 `sbx_emit` Activity로 낸다(실패해도 루프는 그대로). `run`은 `sbx_apply` 횟수(화면 트랙, INFRA 재시도는 run만 늘린다), `attempt`는 수정 시도(1~3). 키는 `sbx:{run}:{attempt}:{step}:{state}`이고 `across_retries=True`라 Activity 재시도에도 한 건만 남는다. 도우미는 `cmp_worker.sandbox_events`.
+
+| 보낼 이벤트 | 어디서 | 값 | 예시 |
 | --- | --- | --- | --- |
-| `analysis.finding` | `scan_code`·`scan_manifests`·`scan_aws_infra`·`scan_network`이 **끝날 때마다**(항목 단위 진행은 불가: 스캔 안에 진행 신호가 없다) | 스캔 결과 항목 → `id`(항목 ID), `stream`(`code`/`infrastructure`), `key`(능력 이름, 예 `s3`), `via`(근거 출처, §2 주의), `progress`(끝난 스캔 수 / 전체 스캔 수 ×100), `message`·`detail`은 `""` | `{"id":"f-s3-1","stream":"code","key":"s3","via":["code"],"progress":50,"message":"","detail":""}` |
-| `analysis.done` | `build_requirements` 성공 직후 | 없음(`{}`) | `{}` (status `done`) |
-
-주의: 백엔드 `Evidence.kind`는 `CODE/MANIFEST/CLOUD_RESOURCE/IAM_POLICY/CLOUDTRAIL/CONFIG`인데 웹 `via`는 `code/iam/trail/config`뿐이다. **결정 필요**(§5): 웹이 6개 값을 그대로 받게 할지, 백엔드가 `CODE→code, IAM_POLICY→iam, CLOUDTRAIL→trail, MANIFEST·CLOUD_RESOURCE·CONFIG→config`로 줄여 보낼지. 결정 전에는 줄인 값을 쓰면 검증을 통과한다.
-
-### 샌드박스·빌드 (승철님) — `phase: build`
-
-자식 `SandboxVerificationWorkflow`의 `attempt`·`phase`를 **Activity 경계에서** 낸다(Workflow 코드에서 내지 않는다). `status` Query의 `{phase, attempt, verdict, cleanup_failed, attempts[]}`와 같은 값이다.
-
-| 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
-| --- | --- | --- | --- |
-| `sandbox.env` | `sbx_apply` 첫 시도 성공 직후 | `plan.namespace` → `namespace`, `plan.expires_at - now` → `expires_minutes`, `apply_network(...)`가 돌려주는 허용 목록 길이 → `egress_allowed`. **지금 `sbx_apply`는 `apply_network` 반환값을 버린다** — 변수로 받아 쓰면 된다 | `{"namespace":"sbx-m1-r1","expires_minutes":60,"egress_allowed":3}` |
-| `sandbox.step` | `sbx_prepare`(render)·`sbx_apply`(apply)·`check_sandbox`(ready)·`sbx_verify`(test·judge) 시작·끝 | `payload["attempt"]` → `attempt`, 화면 트랙 순번 → `run`(INFRA 재시도는 attempt를 늘리지 않으므로 run을 1 늘린다), 단계 → `step`, `running/done/failed` → `state` | `{"run":1,"attempt":1,"step":"apply","state":"done"}` |
-| `sandbox.tests` | `sbx_verify` 시작 시 | 고정 테스트 묶음 출처별 개수 | `{"total":12,"catalog":6,"original":4,"generated":2,"read_only":3}` |
-| `sandbox.attempt` | `sbx_classify` 끝 | `SandboxAttempt{attempt, verdict{passed,reasons}, failure_class}` + 판정 신호 → `checks`, 고친 `build.fix` id → `fix_ids` | `{"run":1,"attempt":1,"max_attempts":3,"verdict":{"passed":false,"reasons":["REQUIRED_TEST_FAILED"]},"failure_class":"CODE","checks":{"required_passed":10,"required_total":12,"unsupported_calls":0,"calls_in_mapping":4,"calls_total":4,"blocked_egress":0},"fix_ids":[]}` |
-| `build.fix` | `sbx_fix` 끝 | 패치 줄 → `lines[{kind,text}]`, 고친 파일 → `file`, 실패 검사 → `check`, `why`·`evidence`는 코드·위치 값 | `{"id":"fix-1","check":"health","lines":[{"kind":"del","text":"..."}],"why":"HEALTH_PATH","evidence":"app/main.py:42","file":"app/main.py"}` |
-| `build.result` | `sbx_build` 끝(시도마다). **`BuildResult`(`build_request.request_build`)를 루프에 연결해야 한다** — 지금 `sbx_build`는 `self.build`만 쓴다 | `BuildAttempt{status, image_uri, image_digest, error_code}` → `status`, `image_uri`, `digest`(자동 변환), `error_code`; 재사용 여부 → `reused` | `{"attempt":1,"max_attempts":3,"status":"SUCCEEDED","digest":"sha256:…","image_uri":"…/app","reused":false,"error_code":null}` |
-| `build.review` | 최대 시도 초과로 `NEEDS_REVIEW`(Workflow 대기) 직전 Activity | `attempts` 수 | `{"reason":"max_attempts","attempts":3}` (status `waiting`) |
-| `sandbox.done` | `sbx_publish`(통과) 또는 `sbx_teardown` 끝 | `SandboxVerification.status`·`cleanup_status`, 통과 Digest | `{"status":"PASSED","cleanup_status":"CLEANED","digest":"sha256:…"}` |
+| `build.check` | `sbx_build` 시작·끝 | `{id:"build", state, attempt}` | `{"id":"build","state":"done","attempt":1}` |
+| `build.result` | `sbx_build` 끝(시도마다) | 첫 앱 이미지의 `digest`·`image_uri`, 증거 경로의 `reused`, 실패 코드(계약 밖이면 `BUILD_FAILED`) | `{"attempt":1,"max_attempts":3,"status":"SUCCEEDED","digest":"sha256:…","image_uri":"…/app@sha256:…","reused":false,"error_code":null}` |
+| `sandbox.env` | 첫 `sbx_prepare` 성공 | `plan.namespace`, `plan.expires_at - now`(분), `allowlist(network_intent, keep_hosts)` 길이 | `{"namespace":"sbx-m1-r1","expires_minutes":120,"egress_allowed":3}` |
+| `sandbox.step` | `sbx_apply`(render·apply·ready), `sbx_verify`(test·judge) | 단계 running → done/failed. 판정 실패는 judge failed | `{"run":1,"attempt":1,"step":"apply","state":"done"}` |
+| `sandbox.tests` | `sbx_verify` 시작(테스트 실행 전) | 고정 묶음의 출처별 개수(STANDARD→catalog, ORIGINAL→original, AI→generated), `READ_ONLY` 수 | `{"total":12,"catalog":6,"original":4,"generated":2,"read_only":3}` |
+| `sandbox.attempt` | Workflow(판정 직후, 수정이 있으면 같은 run을 `fix_ids`와 다시) | `verdict`, 분류, `sbx_verify`가 돌려준 `checks` | `{"run":1,"attempt":1,"max_attempts":3,"verdict":{"passed":false,"reasons":["TEST_FAILED:std-health"]},"failure_class":"CODE","checks":{…},"fix_ids":["fix-1-1"]}` |
+| `build.fix` | `sbx_fix` 끝(고친 파일마다, 요구사항 수정은 한 건) | 바뀐 줄(가림, `.env` 계열은 키만), `why`=분류 사유 코드, `evidence`=파일 | `{"id":"fix-1-1","check":"code","lines":[{"kind":"add","text":"+ HOST = '0.0.0.0'"}],"why":"TEST_FAILED:std-health","evidence":"app.py","file":"app.py"}` |
+| `build.review` | Workflow(3회 실패로 `NEEDS_REVIEW`, `sandbox.done` 뒤) | 시도 수 | `{"reason":"max_attempts","attempts":3}` (status `waiting`) |
+| `sandbox.done` | Workflow(정리 전 `PENDING`, 정리 뒤 `CLEANED`) | 루프 결과, 통과 Digest | `{"status":"PASSED","cleanup_status":"CLEANED","digest":"sha256:…"}` (status `done`, 통과 외 `failed`) |
 
 ### 계획: 매핑 (승철님) — `phase: planning`
 
@@ -114,6 +125,8 @@ Helm heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`)은 Temp
 | `traffic.snapshot` | 가중치 변경·관찰 주기마다 | 가중치·게이트·잔여 연결 | `{"phase":"observing","weights":{"origin":50,"target":50},"step":50,"gate":{…},"residual":{…}}` |
 | `traffic.ready` | 전환 조건 확인 | 복제 지연·가장 긴 트랜잭션·초당 커밋 | `{"state":"done","lag_ms":0,"longest_tx_ms":12,"commits_per_sec":40}` |
 
+**실제 발행(#234, 트래픽 범위 대행).** 세 트래픽 이벤트는 모두 `TrafficShiftWorkflow`가 `emit_migration_event`로 낸다(중계 서버 워커에는 이벤트 저장소가 없다). 순서는 웹 목업과 같다: `traffic.ready` running → `traffic.prepare` running(`handoff_status`·`ready` done, `external_endpoint` running) → `traffic_prepare`(중계 대상 일치·대상 `health_path` 확인) → `traffic.prepare` done(네 확인 done) 또는 failed(`reason` 코드) → `traffic.ready` done(DB 게이트가 막으면 waiting) → `traffic.snapshot`. `traffic.ready` 숫자는 같은 실행의 `data-<id>` `status` Query 값이며 하나라도 모르면 내지 않는다. 사람이 누르는 `POST /migrations/{id}/traffic/rollback`·`/retry`는 자식 `traffic-<id>`에 `request_rollback`·`request_retry` Signal을 보낸다(없는 migration 404, 지금 받을 수 없으면 409 `TRAFFIC_NOT_RUNNING`·`TRAFFIC_ACTION_NOT_ALLOWED`). 수동 롤백 스냅샷은 `notes: [{key: "manual", activity: "traffic_rollback"}]`, 재시도 첫 스냅샷은 `notes: [{key: "restart"}]`이다. 롤백 뒤 재시도를 기다리는 동안 `rolledback` 스냅샷은 `running`이고, 기다림(기본 900초)이 끝나면 같은 스냅샷을 `failed`로 한 번 더 낸다. 자세한 결정: [ticket 61](../../tickets/provisioning/61-traffic-events-actions.md).
+
 ### 전환·인계 (상헌님·데이터 담당) — `phase: verification`
 
 | 보낼 이벤트 | 어느 Activity에서 | 값 | 예시 |
@@ -154,7 +167,7 @@ uv run python -m cmp_worker.poc_bridge watch --migration-id <id> \
 
 | 파트 | 없는 것 |
 | --- | --- |
-| 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다). `Evidence.kind` 6개 값과 웹 `via` 4개 값의 대응 **결정 필요**. `finding.key`의 웹 문구 사전과 백엔드 능력 이름 맞추기 |
+| 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다). `node`·`nat_gateway`·`ebs_gb`·`s3_bucket` 수집(스캐너에 없음). `analysis.finding`은 쓰지 않는다(#226: `analysis.scan`으로 대신함) |
 | 샌드박스 | `sbx_apply`가 버리는 `apply_network` 반환값(namespace·TTL·egress) 살리기, `BuildResult`를 `sbx_build`에 연결, `sandbox.tests` 출처별 개수와 `checks`(`calls_in_mapping` 등) 값을 만드는 코드, `run` 번호 규칙(웹 `[가정]`) |
 | 계획(매핑) | `MappingRow`에 대상 서비스(`after`)와 노드 분류(`kind`) 값 없음 |
 | 계획 게시·승인·구축(민서) | `plan.preview`(Preview `changes[]`→`resources`, `{resource_type, action, name, quantity, size}` → `{id, group, name, detail:"", size, change}`; 원본·대상 환경·보안 규칙·env 재매핑 값은 Preview에 없음), `approval.required`, ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |

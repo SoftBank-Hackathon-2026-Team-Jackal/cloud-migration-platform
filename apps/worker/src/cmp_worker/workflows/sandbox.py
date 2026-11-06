@@ -11,6 +11,11 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.activities import sandbox
     from cmp_worker.review_gate import ReapprovalGate
     from cmp_worker.sandbox_deploy import sandbox_namespace
+    from cmp_worker.sandbox_events import attempt_data, context, event_key, image_digest
+
+# Provisioning 59: the loop emits `build.*`/`sandbox.*`. Histories without this marker replay as
+# before (no events context, no `sbx_emit`).
+SANDBOX_EVENTS_PATCH = "sandbox-events-v1"
 
 
 @workflow.defn
@@ -174,6 +179,60 @@ class SandboxVerificationWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
 
+        # Event plumbing (Provisioning 59). `run` counts `sbx_apply` calls (the screen's tracks);
+        # `self.attempt` is the fix attempt. Emitting is observation: it never changes the loop.
+        events_on = workflow.patched(SANDBOX_EVENTS_PATCH)
+        mid = data["migration_id"]
+        run = 1
+
+        def ctx(run_no: int, attempt: int) -> dict:
+            return {"events": context(mid, run_no, attempt)} if events_on else {}
+
+        async def emit(*items: tuple[str, str, dict, str]) -> None:
+            """Workflow-level events through `sbx_emit`; items are (type, status, data, key)."""
+            if not events_on:
+                return
+            try:
+                await workflow.execute_activity(
+                    "sbx_emit",
+                    {
+                        "migration_id": mid,
+                        "events": [
+                            {"type": t, "status": st, "data": d, "key": k} for t, st, d, k in items
+                        ],
+                    },
+                    task_queue=SANDBOX_QUEUE,
+                    schedule_to_start_timeout=timedelta(minutes=1),
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+            except ActivityError:
+                workflow.logger.info("sandbox events could not be stored")
+
+        async def emit_attempt(
+            run_no, attempt, verdict, klass, checks, fix_ids=None, state="judged"
+        ):
+            data = attempt_data(
+                run_no,
+                attempt,
+                verdict=verdict,
+                failure_class=klass,
+                checks=checks,
+                fix_ids=fix_ids,
+            )
+            await emit(
+                ("sandbox.attempt", "running", data, event_key(run_no, attempt, "attempt", state))
+            )
+
+        async def emit_done(cleanup: str, digest: str | None) -> None:
+            status = (
+                "running" if cleanup == "PENDING" else ("done" if outcome == "PASSED" else "failed")
+            )
+            data = {"status": outcome, "cleanup_status": cleanup, "digest": digest}
+            await emit(
+                ("sandbox.done", status, data, event_key(run, self.attempt, "done", cleanup))
+            )
+
         namespace = sandbox_namespace(data["migration_id"], data["run_id"])
         requirements_ref, source = data["requirements_ref"], data["source"]
         outcome, reasons = "FAILED", []
@@ -184,6 +243,8 @@ class SandboxVerificationWorkflow:
         last_results: list[dict] = []
         built_sha: str | None = None
         builds_ref: dict | None = None
+        digest: str | None = None
+        review = False
         suite_ref = data["suite_ref"]
         try:
             self.phase = "sbx_build"
@@ -195,6 +256,7 @@ class SandboxVerificationWorkflow:
                     "migration_id": data["migration_id"],
                     "run_id": data["run_id"],
                     "attempt": 1,
+                    **ctx(run, 1),
                 },
                 minutes=30,
             )
@@ -204,13 +266,20 @@ class SandboxVerificationWorkflow:
                 # The real build path produced no image: a person looks at it, no Sandbox exists.
                 reasons = [f"BUILD:{built['build_error']}"]
                 outcome = "NEEDS_REVIEW"
+                await emit_attempt(run, 1, {"passed": False, "reasons": reasons}, "BUILD", None)
             else:
                 images, built_sha = built["images"], built.get("source_sha256")
+                digest = image_digest(images)
                 self.phase = "sbx_prepare"
                 prepared = True
                 prep = await act(
                     "sbx_prepare",
-                    {"input": data, "requirements_ref": requirements_ref, "images": images},
+                    {
+                        "input": data,
+                        "requirements_ref": requirements_ref,
+                        "images": images,
+                        **ctx(run, 1),
+                    },
                 )
                 plan = prep["plan"]
                 if plan is None:
@@ -219,7 +288,11 @@ class SandboxVerificationWorkflow:
             infra_streak, tests_ran, baseline_ok = 0, False, False
             ai_pending = True
             self.attempt = 1
+            first_run = True
             while plan is not None:
+                if not first_run:
+                    run += 1
+                first_run = False
                 self.phase = "sbx_apply"
                 applied = await act(
                     "sbx_apply",
@@ -229,6 +302,7 @@ class SandboxVerificationWorkflow:
                         "previous_plan": previous,
                         "attempt": self.attempt,
                         "baseline_ok": baseline_ok,
+                        **ctx(run, self.attempt),
                     },
                     minutes=20,
                 )
@@ -251,6 +325,7 @@ class SandboxVerificationWorkflow:
                             "suite_ref": suite_ref,
                             "analysis_report_ref": data.get("analysis_report_ref"),
                             "migration_id": data["migration_id"],
+                            **ctx(run, self.attempt),
                         },
                         minutes=20,
                     )
@@ -270,15 +345,18 @@ class SandboxVerificationWorkflow:
                         "source": source,
                         "suite_ref": suite_ref,
                         "reset": tests_ran,
+                        **ctx(run, self.attempt),
                     },
                     minutes=15,
                 )
                 tests_ran = tests_ran or applied.get("sandbox_error") is None
                 self.verdict = verified["verdict"]
+                checks = verified.get("checks")
                 if self.verdict["passed"]:
                     last_results = verified["results"]
                     self.attempts.append({"attempt": self.attempt, "passed": True})
                     outcome = "PASSED"
+                    await emit_attempt(run, self.attempt, self.verdict, None, checks)
                     break
                 self.phase = "sbx_classify"
                 classified = await act(
@@ -295,6 +373,7 @@ class SandboxVerificationWorkflow:
                     }
                 )
                 reasons = classified["reasons"]
+                await emit_attempt(run, self.attempt, self.verdict, klass, checks)
                 if klass == "RENDER":
                     outcome = "STOPPED_RENDER"
                     break
@@ -307,6 +386,7 @@ class SandboxVerificationWorkflow:
                 infra_streak = 0
                 if self.attempt >= 3:
                     outcome = "NEEDS_REVIEW"
+                    review = True
                     break
                 self.phase = "sbx_fix"
                 fix = await act(
@@ -319,9 +399,14 @@ class SandboxVerificationWorkflow:
                         "source": source,
                         "analysis_report_ref": data.get("analysis_report_ref"),
                         "migration_id": data["migration_id"],
+                        **ctx(run, self.attempt),
                     },
                     minutes=20,
                 )
+                if fix.get("fix_ids"):
+                    await emit_attempt(
+                        run, self.attempt, self.verdict, klass, checks, fix["fix_ids"], "fixed"
+                    )
                 if fix["status"] != "PROPOSED":
                     reasons = [*reasons, f"FIXER:{fix.get('reason') or fix['status']}"]
                     outcome = "NEEDS_REVIEW"
@@ -342,14 +427,19 @@ class SandboxVerificationWorkflow:
                             "migration_id": data["migration_id"],
                             "run_id": data["run_id"],
                             "attempt": self.attempt,
+                            **ctx(run + 1, self.attempt),
                         },
                         minutes=30,
                     )
                     if rebuilt.get("build_error"):
                         reasons = [f"BUILD:{rebuilt['build_error']}"]
                         outcome = "NEEDS_REVIEW"
+                        run += 1
+                        verdict = {"passed": False, "reasons": reasons}
+                        await emit_attempt(run, self.attempt, verdict, "BUILD", None)
                         break
                     images, built_sha = rebuilt["images"], rebuilt.get("source_sha256")
+                    digest = image_digest(images)
                     builds_ref = rebuilt.get("builds_ref") or builds_ref
                 prep = await act(
                     "sbx_prepare",
@@ -358,6 +448,7 @@ class SandboxVerificationWorkflow:
                         "requirements_ref": requirements_ref,
                         "images": images,
                         "previous_plan": plan,
+                        **ctx(run + 1, self.attempt),
                     },
                 )
                 if prep["plan"] is None:
@@ -370,12 +461,20 @@ class SandboxVerificationWorkflow:
             raise
         finally:
             if prepared:
+                if not failed:
+                    await emit_done("PENDING", digest if outcome == "PASSED" else None)
                 try:
                     await asyncio.shield(act("sbx_teardown", {"namespace": namespace}, minutes=10))
                 except ActivityError:
                     self.cleanup_failed = True
                     if not failed:
                         raise
+        # A run that never reached a Sandbox has nothing to clean up.
+        await emit_done("CLEANED", digest if outcome == "PASSED" else None)
+        if review:
+            data_review = {"reason": "max_attempts", "attempts": self.attempt}
+            key = event_key(run, self.attempt, "review", "waiting")
+            await emit(("build.review", "waiting", data_review, key))
         published = None
         if outcome == "PASSED":
             self.phase = "sbx_plan_publish"
@@ -390,6 +489,7 @@ class SandboxVerificationWorkflow:
             decisions = None
             if planned["error"]:
                 outcome, reasons = "NEEDS_REVIEW", [f"PUBLISH:{planned['error']}"]
+                await emit_done("CLEANED", None)
             elif planned["changed"]:
                 # Rows the loop handled differently go back to a person before anything is published.
                 self.reapproval = ReapprovalGate(
@@ -405,6 +505,7 @@ class SandboxVerificationWorkflow:
                 if self.reapproval.phase == "BLOCKED":
                     outcome = "NEEDS_REVIEW"
                     reasons = [f"ROW_BLOCKED:{b['id']}" for b in self.reapproval.blocked()]
+                    await emit_done("CLEANED", None)
                 else:
                     decisions = self.reapproval.decisions()
             if outcome == "PASSED":

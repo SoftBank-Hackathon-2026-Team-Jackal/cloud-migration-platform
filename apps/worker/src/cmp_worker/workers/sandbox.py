@@ -16,6 +16,7 @@ from cmp_worker.build_request import InMemoryBuildStore
 from cmp_worker.build_wiring import BuildSettings, ImageBuildAdapter, upload_suite
 from cmp_worker.prebuilt_builder import PrebuiltImages
 from cmp_worker.sandbox_deploy import SANDBOX_CONTEXT, SandboxCluster, SandboxService
+from cmp_worker.sandbox_events import sbx_emit
 from cmp_worker.source_archive import AwsCliArchiveStore
 
 if TYPE_CHECKING:
@@ -103,6 +104,7 @@ def create_worker(client: Client, loop: SandboxLoopActivities | None = None) -> 
         task_queue=SANDBOX_QUEUE,
         activities=[
             *(loop.all() if loop is not None else []),
+            sbx_emit,  # Provisioning 59: Workflow-level sandbox events
             sandbox.sandbox_queue_probe,
             sandbox.request_build,
             sandbox.prepare_sandbox,

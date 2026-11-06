@@ -14,6 +14,7 @@ from cmp_api.routes.migration_report import router as migration_report_router
 from cmp_api.routes.migrations import router as migration_router
 from cmp_api.routes.onprem_rollout import router as rollout_router
 from cmp_api.routes.plan_inputs import router as plan_input_router
+from cmp_api.routes.traffic_actions import router as traffic_action_router
 from cmp_api.routes.tunnels import router as tunnel_router
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ app.include_router(tunnel_router)
 app.include_router(plan_input_router)
 app.include_router(connection_router)
 app.include_router(env_file_router)
+app.include_router(traffic_action_router)  # #234
 
 
 @app.get("/health")
