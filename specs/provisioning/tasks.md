@@ -58,6 +58,7 @@
 | [48 GCP 대상 플랫폼 주체와 GCP 연결 확인 (B-06·B-07·D-07)](../../tickets/provisioning/48-gcp-target-principal.md) | IN_PROGRESS (로컬 완료, 리뷰·SA 생성·키 배치·서버 반영 승인 대기) | 06, 10, 21, 23, 46 | PROV-003, 007, 021, 022 | [#183](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/183) | ☐ |
 | [56 이전 범위 선택 API (EKS Namespace·워크로드 목록과 범위 후보)](../../tickets/provisioning/56-scope-selection.md) | IN_PROGRESS (로컬·실제 원본 읽기 완료, 리뷰·플랫폼 서버에서 원본 역할로 확인 대기) | 23, 46 | PROV-021 | [#219](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/219) | ☐ |
 | [57 데모 에지 /migrations·/provisioning SSE 라우트(#227로 반영)와 리허설 기본 테스트 경로 (분석·샌드박스·트래픽 범위 대행)](../../tickets/provisioning/57-demo-edge-sse-routes.md) | IN_PROGRESS (로컬 완료, 리뷰·데모 서버 반영 승인 대기) | 21, 44, 45 | PROV-021 | [#228](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/228) | ☐ |
+| [59 실제 모드 샌드박스 이벤트 발행 (build.*·sandbox.*, 샌드박스 범위 대행)](../../tickets/provisioning/59-sandbox-events.md) | IN_PROGRESS (로컬 완료, 리뷰 대기) | 14, 21, 24 | PROV-021 | [#230](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/230) | ☐ |
 
 ## 선행 관계
 
