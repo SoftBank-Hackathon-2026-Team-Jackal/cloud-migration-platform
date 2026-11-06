@@ -51,6 +51,7 @@ Resources:
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      # GroupDescription must not change: it forces the security group to be replaced.
       GroupDescription: CMP demo relay; WireGuard UDP and user HTTP only. No SSH, no Envoy admin port (9901).
       VpcId: !Ref VpcId
       SecurityGroupIngress:
@@ -64,6 +65,19 @@ Resources:
           ToPort: !Ref UserPort
           CidrIp: 0.0.0.0/0
           Description: User traffic into the Envoy relay
+        # #TLS: HTTPS in front of the relay. Caddy (setup-tls.sh) answers on 443 with a certificate for
+        # <public-ip>.sslip.io and forwards to Envoy on the user port; port 80 is the certificate
+        # challenge and the redirect to HTTPS. The plain user port stays open, so nothing that worked breaks.
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS to the relay (Caddy, then Envoy)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Certificate challenge and redirect to HTTPS
       SecurityGroupEgress:
         - IpProtocol: '-1'
           CidrIp: 0.0.0.0/0

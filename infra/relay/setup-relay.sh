@@ -10,7 +10,7 @@
 #       print(render_bootstrap(('원본주소', 80), ('10.200.0.2', 8080)))" > bootstrap.yaml
 #   RDS_INIT=rds.json         python -c "import json; from cmp_traffic.envoy import build_route_config; \
 #       print(json.dumps(build_route_config({'origin': 100, 'target': 0}, 1)))" > rds.json
-# 보안 그룹: UDP 51820(Agent 공인 IP만), TCP 8080(사용자), 관리 포트 9901은 열지 않는다.
+# 보안 그룹: UDP 51820(Agent 공인 IP만), TCP 8080(사용자), TCP 443·80(HTTPS, setup-tls.sh), 관리 포트 9901은 열지 않는다.
 #
 # 단서: dnf·WireGuard 설정·Envoy 실행은 시험 때 같은 명령으로 확인했고, systemd 등록(wg-quick@wg0)은 아직 다시 돌려보지 않았다.
 #
