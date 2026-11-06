@@ -23,6 +23,10 @@ from urllib.parse import quote, urlencode
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
+from cmp_providers.aws_credentials import (
+    PROFILE_PREFIX,  # noqa: F401 - start_request (44)
+    connection_profile,
+)
 from sqlalchemy import Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
@@ -33,7 +37,6 @@ from cmp_api.tunnels import TunnelStatus, tunnel_freshness
 AWS_KINDS = ("AWS_SOURCE", "AWS_TARGET")
 KINDS = (*AWS_KINDS, "GCP_TARGET")
 TEMPLATES = {"AWS_SOURCE": "source-role.yaml", "AWS_TARGET": "target-role.yaml"}
-PROFILE_PREFIX = "cmp-conn-"
 SESSION_SECONDS = 900  # verify/discovery sessions; generated profiles use the role maximum
 PROFILE_SESSION_SECONDS = 3600  # Terraform Apply outlives 15 minutes; SDKs refresh on expiry
 ONLINE_SECONDS = 60
@@ -83,7 +86,23 @@ def _now() -> int:
 def credential_ref(connection: EnvironmentConnection) -> str | None:
     if connection.kind not in AWS_KINDS or not connection.role_arn:
         return None
-    return PROFILE_PREFIX + connection.id.removeprefix("conn-")
+    return connection_profile(connection.id)  # ticket 46: the same name Provisioning resolves
+
+
+def check_target_connection(
+    session: Session, connection_id: str, *, account_id: str
+) -> EnvironmentConnection:
+    """Ticket 46: a Plan may run only with a verified target connection in its own account."""
+    connection = session.get(EnvironmentConnection, connection_id)
+    if connection is None:
+        raise ConnectionFailure("TARGET_CONNECTION_NOT_FOUND")
+    if connection.kind != "AWS_TARGET":
+        raise ConnectionFailure("TARGET_CONNECTION_KIND_MISMATCH")
+    if not connection.role_arn or connection.status != "CONNECTED":
+        raise ConnectionFailure("TARGET_CONNECTION_NOT_VERIFIED")
+    if connection.account_id != account_id:
+        raise ConnectionFailure("TARGET_CONNECTION_ACCOUNT_MISMATCH")
+    return connection
 
 
 def stack_name(connection: EnvironmentConnection) -> str:

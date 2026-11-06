@@ -16,7 +16,8 @@ done
 docker compose version
 
 # Keys/passwords are generated once and kept; the AWS profile file is regenerated (ticket 21).
-bash infra/demo/ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets
+# Ticket 46: the third directory holds the API-generated connection profiles shared with the worker.
+bash infra/demo/ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets /opt/cmp/data/aws-connections
 
 # Ticket 54: user-app build steps (RUN on docker0) must not reach the instance metadata service.
 sh infra/demo/build-imds-guard.sh install

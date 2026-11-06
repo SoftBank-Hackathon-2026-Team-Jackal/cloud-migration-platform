@@ -79,7 +79,8 @@ def test_cloud_credentials_are_mounted_read_only_not_set_as_values():
     worker = services["worker"]
     assert "/opt/cmp/secrets/aws:/run/cmp/aws:ro" in worker["volumes"]
     assert "/opt/cmp/secrets/gcp:/run/cmp/gcp:ro" in worker["volumes"]
-    assert worker["environment"]["AWS_CONFIG_FILE"] == "/run/cmp/aws/config"
+    # Ticket 46: the worker reads the API-generated config (base profiles + `cmp-conn-*`).
+    assert worker["environment"]["AWS_CONFIG_FILE"] == "/run/cmp/aws-connections/config"
     assert "/root/.config/gcloud:mode=0700" in worker["tmpfs"]
     forbidden = {
         "AWS_ACCESS_KEY_ID",
@@ -337,8 +338,9 @@ def test_api_uses_the_instance_role_build_profile_without_gcp_credentials():
     assert "/opt/cmp/secrets/aws:/run/cmp/aws:ro" in api["volumes"]
     # Same profile the worker's Build module uses; ensure-secrets.sh writes it as the instance
     # role itself (never PROVISIONING_AWS_ROLE_ARN).
+    # Ticket 23b·46: the connection principal stays this profile; ECR tokens have their own.
     assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
-    assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
+    assert env["PLATFORM_ECR_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
     assert "PROVISIONING_AWS_PROFILE" not in env
     # The API never gets the GCP key or a gcloud configuration.
     assert not [m for m in api["volumes"] if "/secrets/gcp" in m or "/run/cmp/gcp" in m]

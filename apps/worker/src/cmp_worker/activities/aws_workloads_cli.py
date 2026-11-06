@@ -47,6 +47,13 @@ class CliRuntime(CommandRunner):
             kubectl=kubectl, helm=helm, env={"AWS_PROFILE": aws_profile} if aws_profile else None
         )
         self.aws = aws
+        self.aws_profile = aws_profile
+
+    def with_profile(self, profile: str) -> "CliRuntime":
+        """Ticket 46: the same tools with the run's connection profile (`aws_credentials`)."""
+        if profile == self.aws_profile:
+            return self
+        return CliRuntime(kubectl=self.kubectl, helm=self.helm, aws=self.aws, aws_profile=profile)
 
     def account_id(self) -> str:
         out = self.run(

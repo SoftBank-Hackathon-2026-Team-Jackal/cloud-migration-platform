@@ -82,6 +82,12 @@ services:
       # the template bucket. API only; the worker never builds the link.
       CONNECTION_PLATFORM_PRINCIPAL_ARN: ${CONNECTION_PLATFORM_PRINCIPAL_ARN:-}
       CONNECTION_TEMPLATE_BASE_URL: ${CONNECTION_TEMPLATE_BASE_URL:-}
+      # Ticket 46 (#181): the API writes the generated connection profiles (`cmp-conn-*`, whose
+      # source_profile is cmp-demo-build = the instance role) here; the worker reads the same file.
+      CONNECTION_AWS_CONFIG_FILE: /run/cmp/aws-connections/config
+      CONNECTION_AWS_BASE_CONFIG_FILE: /run/cmp/aws/config
+      # K3s Agent ECR pull tokens stay with the instance-role build profile (ticket 41).
+      PLATFORM_ECR_AWS_PROFILE: cmp-demo-build
       # Platform registry for ON_PREM rollout jobs, from /opt/cmp/.env (deploy-build-stack.sh
       # prints it). Empty keeps the pre-ticket-29 behavior (no platform registry).
       PLATFORM_ECR_REGISTRY: ${PLATFORM_ECR_REGISTRY:-}
@@ -94,6 +100,8 @@ services:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
+      # Ticket 46: no keys in it (ARNs, External IDs, profile names), so it lives with the data.
+      - /opt/cmp/data/aws-connections:/run/cmp/aws-connections
       - /opt/cmp/config:/opt/cmp/config:ro
     command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     # Loopback only; the public edge forwards /agents/* and /relays/* on the internal network.
@@ -116,8 +124,9 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       ARTIFACT_STORE_DIR: /opt/cmp/artifact-store
       PROVISIONING_ARTIFACT_ROOT: /opt/cmp/plans
-      # AWS: named profile backed by the EC2 instance role (ensure-secrets.sh); no static keys.
-      AWS_CONFIG_FILE: /run/cmp/aws/config
+      # AWS: named profiles backed by the EC2 instance role (ensure-secrets.sh) plus the API's
+      # generated connection profiles `cmp-conn-*` (ticket 46); no static keys.
+      AWS_CONFIG_FILE: /run/cmp/aws-connections/config
       PROVISIONING_AWS_PROFILE: ${PROVISIONING_AWS_PROFILE:-cmp-demo-provisioning}
       # GCP: operator-provided service-account key, activated by the entrypoint into tmpfs.
       CMP_GCP_KEY_FILE: /run/cmp/gcp/key.json
@@ -136,6 +145,7 @@ services:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
+      - /opt/cmp/data/aws-connections:/run/cmp/aws-connections:ro
       - /opt/cmp/secrets/gcp:/run/cmp/gcp:ro
       # Ticket 28: builds run on the host daemon. Whoever holds this socket is root-equivalent on
       # the host; only the worker gets it (production: rootless BuildKit, see README).

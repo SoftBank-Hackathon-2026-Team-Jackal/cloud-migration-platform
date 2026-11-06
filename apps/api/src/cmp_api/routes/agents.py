@@ -316,7 +316,9 @@ def job_env_secrets_route(
 
 def get_ecr_minter() -> EcrTokenMinter:
     """Ticket 29 (I2): the platform principal mints; the Agent never holds AWS credentials."""
-    return boto3_minter(settings.connection_platform_aws_profile)
+    return boto3_minter(
+        settings.platform_ecr_aws_profile or settings.connection_platform_aws_profile
+    )
 
 
 class ImagePullCredential(Request):

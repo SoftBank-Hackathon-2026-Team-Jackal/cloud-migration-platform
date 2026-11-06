@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Create or complete demo host secrets without overwriting existing values (ticket 21, #100).
-#   ensure-secrets.sh <env-file> <secrets-dir>
+#   ensure-secrets.sh <env-file> <secrets-dir> [connections-dir]
 # - <env-file>: generated keys are appended only when missing (redeploys keep existing keys).
 # - <secrets-dir>/aws/config: named profiles backed by the EC2 instance role (no static keys):
-#   Provisioning (optionally assuming PROVISIONING_AWS_ROLE_ARN) and cmp-demo-build (ticket 28).
+#   Provisioning (optionally assuming PROVISIONING_AWS_ROLE_ARN) and cmp-demo-build (ticket 28,
+#   also the connection principal: generated `cmp-conn-*` profiles use it as source_profile).
+# - [connections-dir]/config: the API-owned generated connection config (ticket 46), shared with
+#   the worker. Holds no key. Seeded from aws/config only when missing; the API rewrites it.
 # - <secrets-dir>/gcp/: operator places key.json here out of band; this script never creates it.
 set -euo pipefail
 
 env_file="${1:?env file required}"
 secrets_dir="${2:?secrets directory required}"
+connections_dir="${3:-}"
 umask 077
 
 touch "$env_file"
@@ -53,6 +57,12 @@ aws_config="$secrets_dir/aws/config"
 } >"$aws_config.tmp"
 mv "$aws_config.tmp" "$aws_config"
 chmod 600 "$aws_config"
+if [[ -n "$connections_dir" ]]; then
+  install -d -m 700 "$connections_dir"
+  if [[ ! -f "$connections_dir/config" ]]; then
+    install -m 640 "$aws_config" "$connections_dir/config"
+  fi
+fi
 if [[ -f "$secrets_dir/gcp/key.json" ]]; then
   chmod 600 "$secrets_dir/gcp/key.json"
 fi

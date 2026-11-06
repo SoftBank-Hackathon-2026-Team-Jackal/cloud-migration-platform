@@ -93,3 +93,6 @@ PROV-003, PROV-021, **PROV-022(신규, 환경 연결 발급)**
 ## 확인 필요
 - 웹 계약 예시의 `EXTERNAL_ID_MISMATCH`는 AWS가 구별해 주지 않는다. 웹은 `ASSUME_ROLE_DENIED`에서 "External ID·플랫폼 주체 확인" 안내를 보여 줘야 한다.
 - 시각 필드는 epoch 초 정수다. 웹 목업이 ISO 문자열이면 BFF에서 변환하거나 계약을 맞춰야 한다.
+
+## 후속 (티켓 46, 2026-11-06)
+- Provisioning이 연결 `credential_ref`로 Plan·Apply·워크로드를 실행하고 State backend는 플랫폼 프로필을 따로 쓴다. 생성 config는 api·worker가 `/opt/cmp/data/aws-connections/config`로 공유하고 API 시작 때도 다시 쓴다. 위 "남는 일"의 backend profile·compose 연결 항목을 처리했다(AssumeRole 권한·템플릿 버킷은 23b). [46](46-connection-credentials.md)

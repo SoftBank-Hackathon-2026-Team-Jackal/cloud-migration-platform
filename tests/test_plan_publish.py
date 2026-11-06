@@ -375,7 +375,7 @@ def test_aws_plan_failure_and_location_mismatch_are_not_published(db, store, tmp
     pub = publisher(db, store, tmp_path, aws_profile="fixture", terraform_bin=str(terraform))
     result = pub.publish(MIGRATION)
     assert (result["status"], result["code"]) == ("FAILED", "PLAN_FAILED")
-    assert result["issues"] == ["PLAN_COMMAND_FAILED"]
+    assert result["issues"] == ["PLAN_COMMAND_FAILED", "PLAN_STEP_PLAN"]  # 46: step code
     assert "TOP_SECRET" not in json.dumps(result)
     payload, _ = planning_request()
     selection = {**payload["target_selection"], "provider": "AWS", "location": "us-east-1"}

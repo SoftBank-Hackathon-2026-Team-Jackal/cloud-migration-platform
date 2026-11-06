@@ -165,6 +165,7 @@ class Approved:
     files: dict[str, bytes]
     env_plan: EnvPlan | None = None  # ENV-04: from the approved SPEC artifact
     network_policies: list[dict] | None = None  # ticket 26; None on Plans published before it
+    spec: dict | None = None  # ticket 46: the approved SPEC document (None on old/odd Plans)
 
 
 def outcome(status: str, code: str, refs: dict[str, str]) -> dict:
@@ -240,6 +241,10 @@ class ApprovedWorkloads:
     def default_timeouts() -> Timeouts:
         return Timeouts()
 
+    def runtime_for(self, approved: Approved) -> WorkloadRuntime:
+        """Ticket 46: the runtime for this approved run (AWS: the pinned connection's profile)."""
+        return self._runtime
+
     def check_target(self, manifest: PlanManifest, target: Any) -> None:
         """Raise WorkloadFailure when the resolved cluster is not the approved target."""
 
@@ -296,13 +301,14 @@ class ApprovedWorkloads:
                 raise WorkloadFailure("SCOPE_MISMATCH")
             files = self._read_artifacts(manifest)
             db_values, app_values = self._verify_values(manifest, files)
-            env_plan = self._env_plan(manifest, app_values)
+            spec = self._spec_document(manifest)
+            env_plan = self._env_plan(spec, app_values)
             policies = self._network_policies(manifest, db_values.namespace)
             target = self._resolver.resolve(session, manifest, request)
         if target is None:
             raise WorkloadFailure("CLUSTER_TARGET_UNAVAILABLE")
         self.check_target(manifest, target)
-        return Approved(manifest, target, db_values, app_values, files, env_plan, policies)
+        return Approved(manifest, target, db_values, app_values, files, env_plan, policies, spec)
 
     def _network_policies(self, manifest: PlanManifest, namespace: str) -> list[dict] | None:
         """Ticket 26: the approved NetworkPolicy objects; each must be a platform-managed
@@ -333,8 +339,8 @@ class ApprovedWorkloads:
             raise WorkloadFailure("INVALID_NETWORK_POLICIES") from None
         return policies
 
-    def _env_plan(self, manifest: PlanManifest, app_values: dict) -> EnvPlan | None:
-        """ENV-04: the EnvPlan pinned in the approved SPEC artifact, or None (old Plans)."""
+    def _spec_document(self, manifest: PlanManifest) -> dict | None:
+        """The approved SPEC artifact as a JSON object, or None (absent or not an object)."""
         ref = manifest.artifacts.get("spec")
         if ref is None:
             return None
@@ -351,7 +357,11 @@ class ApprovedWorkloads:
             document = json.loads(content)
         except ValueError:
             return None
-        if not isinstance(document, dict) or "env_plan" not in document:
+        return document if isinstance(document, dict) else None
+
+    def _env_plan(self, document: dict | None, app_values: dict) -> EnvPlan | None:
+        """ENV-04: the EnvPlan pinned in the approved SPEC artifact, or None (old Plans)."""
+        if document is None or "env_plan" not in document:
             return None
         try:
             plan = EnvPlan.model_validate(document["env_plan"])
@@ -748,7 +758,7 @@ class ApprovedWorkloads:
             await self.check_identity(approved)
             refs.update(self.target_refs(approved.target))
             activity.heartbeat("connect")
-            connection = self._runtime.connect(approved.target)
+            connection = self.runtime_for(approved).connect(approved.target)
             try:
                 cluster = await self._call(connection.__enter__)
             except Exception:  # noqa: BLE001 - no kubeconfig or CLI output in results

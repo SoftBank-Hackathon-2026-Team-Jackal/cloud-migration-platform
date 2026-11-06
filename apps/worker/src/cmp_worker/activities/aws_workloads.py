@@ -12,6 +12,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
+from cmp_contracts.provisioning import ProvisioningInputError, VersionRef
+from cmp_providers.aws_credentials import connection_id_of, resolve_aws_profiles
 from cmp_providers.network_policy import aws_vpc_cni_enforces
 from temporalio import activity
 
@@ -73,6 +75,9 @@ class ClusterSession(_ClusterSession, Protocol):
 
 
 class WorkloadRuntime(Protocol):
+    aws_profile: str | None  # ticket 46: the platform profile this runtime runs with
+
+    def with_profile(self, profile: str) -> "WorkloadRuntime": ...
     def account_id(self) -> str: ...
     def connect(self, target: ClusterTarget) -> AbstractContextManager[ClusterSession]: ...
     def http_get_ok(self, url: str) -> bool: ...
@@ -141,13 +146,34 @@ class AwsWorkloadsActivities(ApprovedWorkloads):
     def default_timeouts() -> Timeouts:
         return Timeouts()
 
+    def runtime_for(self, approved: Approved) -> WorkloadRuntime:
+        """Ticket 46: `aws eks`/kubectl/STS with the connection pinned in the approved Spec.
+
+        The WORKLOADS Spec artifact carries the registration's target settings, so the run uses
+        the same `credential_ref` as the infrastructure Plan. Without a connection (or a Spec
+        without target settings, as before ticket 46) the configured runtime is used unchanged.
+        """
+        try:
+            settings = (approved.spec or {})["target"]["settings"]
+            credential_ref = VersionRef.model_validate(settings["credential_ref"])
+        except (KeyError, TypeError, ValueError):
+            return self._runtime
+        try:
+            if connection_id_of(credential_ref) is None:
+                return self._runtime
+            platform = getattr(self._runtime, "aws_profile", None)
+            profiles = resolve_aws_profiles(credential_ref, platform_profile=platform)
+        except ProvisioningInputError as error:
+            raise WorkloadFailure(error.issues[0].code) from None
+        return self._runtime.with_profile(profiles.provider)
+
     def check_target(self, manifest, target: ClusterTarget) -> None:
         if target.region != manifest.target.region:
             raise WorkloadFailure("REGION_MISMATCH")
 
     async def check_identity(self, approved: Approved) -> None:
         try:
-            account = await self._call(self._runtime.account_id)
+            account = await self._call(self.runtime_for(approved).account_id)
         except Exception:  # noqa: BLE001
             raise WorkloadFailure("AWS_IDENTITY_UNAVAILABLE") from None
         if account != approved.manifest.target.account_id:

@@ -2402,6 +2402,11 @@ components:
           - type: string
           - type: 'null'
           title: Launch Stack Url
+        platform_principal_arn:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Platform Principal Arn
         stack_name:
           anyOf:
           - type: string
@@ -2533,6 +2538,11 @@ components:
           - type: string
           - type: 'null'
           title: Launch Stack Url
+        platform_principal_arn:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Platform Principal Arn
       type: object
       required:
       - connection_id

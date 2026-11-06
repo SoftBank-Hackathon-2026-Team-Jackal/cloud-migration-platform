@@ -23,6 +23,7 @@ from cmp_contracts.provisioning import (
 from pydantic import Field
 
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes
+from cmp_providers.aws_credentials import resolve_aws_profiles
 from cmp_providers.plans import manifest_digest
 from cmp_providers.resources import resource_root
 
@@ -276,16 +277,33 @@ def preview_from_plan(plan_json: dict, request: AwsPlanInput, digest: str) -> Pr
     )
 
 
-def _run(args: list[str], cwd: Path, env: dict[str, str]) -> bytes:
+# Ticket 46 (D-20): a failed command names its step as a second code, so `plan_failed` issues
+# (codes only) show where it stopped. The first code is unchanged except for the identity step.
+_STEP_FAILURES = {"identity": "AWS_IDENTITY_UNAVAILABLE"}
+
+
+def _run(args: list[str], cwd: Path, env: dict[str, str], step: str) -> bytes:
+    def fail(code: str, message: str):
+        raise ProvisioningInputError(
+            [
+                ValidationIssue(code=code, path=f"terraform.{step}", message=message),
+                ValidationIssue(
+                    code=f"PLAN_STEP_{step.upper()}",
+                    path=f"terraform.{step}",
+                    message=f"{step} 단계에서 멈췄습니다.",
+                ),
+            ]
+        )
+
     try:
         result = subprocess.run(
             args, cwd=cwd, env=env, capture_output=True, check=False, timeout=600
         )
     except (OSError, subprocess.TimeoutExpired):
-        _reject("TOOL_UNAVAILABLE", "terraform", "Terraform 또는 AWS CLI를 완료하지 못했습니다.")
+        fail("TOOL_UNAVAILABLE", "Terraform 또는 AWS CLI를 완료하지 못했습니다.")
     if result.returncode:
-        # Terraform 출력에는 자격 증명이나 민감한 State 값이 있을 수 있다.
-        _reject("PLAN_COMMAND_FAILED", "terraform", f"Terraform 명령 {args[1]}이 실패했습니다.")
+        # Terraform·AWS CLI 출력에는 자격 증명이나 민감한 State 값이 있을 수 있다.
+        fail(_STEP_FAILURES.get(step, "PLAN_COMMAND_FAILED"), f"{step} 명령이 실패했습니다.")
     return result.stdout
 
 
@@ -298,7 +316,11 @@ def plan_aws_infrastructure(
     template_dir: Path | None = None,
     backend_mode: BackendMode = "S3",
 ) -> tuple[PlanManifest, Preview]:
-    """저장 Plan을 실행한다. 로컬 검증 Plan은 운영 승인이 불가능하다."""
+    """저장 Plan을 실행한다. 로컬 검증 Plan은 운영 승인이 불가능하다.
+
+    `aws_profile`은 플랫폼 프로필이다(State backend, 연결이 없을 때의 고정 프로필). 대상 계정
+    프로필은 `request.credential_ref`에서 해석한다(46, `aws_credentials`).
+    """
     variables = terraform_variables(request)
     if backend_mode not in {"S3", "LOCAL_VALIDATION"}:
         _reject("UNSUPPORTED_BACKEND", "backend_mode", "알 수 없는 Plan Backend 모드입니다.")
@@ -310,8 +332,14 @@ def plan_aws_infrastructure(
             "state_bucket",
             "로컬 검증에서는 State 버킷을 지정할 수 없습니다.",
         )
-    if not aws_profile or aws_profile == "default":
-        _reject("MISSING_PROFILE", "aws_profile", "이름이 지정된 AWS 프로필이 필요합니다.")
+    profiles = resolve_aws_profiles(request.credential_ref, platform_profile=aws_profile)
+    if profiles.connection_id is not None and not request.cluster_name.startswith("cmp-"):
+        # 46 (B-12): 대상 연결 역할은 `cmp-` IAM 이름만 만들 수 있고 Terraform IAM 이름은 `${name}-…`다.
+        _reject(
+            "INVALID_CLUSTER_NAME",
+            "cluster_name",
+            "대상 연결로 만드는 클러스터 이름은 cmp-로 시작해야 합니다.",
+        )
     root = template_dir or resource_root() / "infra/terraform/aws"
     output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(output_dir, 0o700)
@@ -344,16 +372,25 @@ def plan_aws_infrastructure(
         os.chmod(var_file, 0o600)
         env = dict(
             os.environ,
-            AWS_PROFILE=aws_profile,
-            AWS_DEFAULT_PROFILE=aws_profile,
+            AWS_PROFILE=profiles.provider,
+            AWS_DEFAULT_PROFILE=profiles.provider,
             TF_IN_AUTOMATION="1",
             TF_INPUT="0",
         )
         env.pop("TF_LOG", None)
         identity = _run(
-            ["aws", "sts", "get-caller-identity", "--profile", aws_profile, "--output", "json"],
+            [
+                "aws",
+                "sts",
+                "get-caller-identity",
+                "--profile",
+                profiles.provider,
+                "--output",
+                "json",
+            ],
             work,
             env,
+            "identity",
         )
         try:
             account = json.loads(identity)["Account"]
@@ -370,19 +407,24 @@ def plan_aws_infrastructure(
                     f"-backend-config=region={request.region}",
                     "-backend-config=encrypt=true",
                     "-backend-config=use_lockfile=true",
+                    # 46 (B-13): State는 플랫폼 계정 버킷이므로 provider와 따로 플랫폼 프로필.
+                    f"-backend-config=profile={profiles.state}",
                 ]
             )
         else:
             init_args.append("-backend=false")
-        _run(init_args, work, env)
-        _run([terraform_bin, "validate", "-no-color"], work, env)
+        _run(init_args, work, env, "init")
+        _run([terraform_bin, "validate", "-no-color"], work, env, "validate")
         plan_file = work / "saved.tfplan"
         _run(
             [terraform_bin, "plan", "-input=false", "-lock=true", "-no-color", "-out=saved.tfplan"],
             work,
             env,
+            "plan",
         )
-        plan_json = json.loads(_run([terraform_bin, "show", "-json", str(plan_file)], work, env))
+        plan_json = json.loads(
+            _run([terraform_bin, "show", "-json", str(plan_file)], work, env, "show")
+        )
         plan_bytes = plan_file.read_bytes()
         spec_bytes = canonical_json_bytes(request.model_dump(mode="json"))
 
