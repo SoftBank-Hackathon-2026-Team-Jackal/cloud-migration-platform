@@ -23,6 +23,13 @@ bash infra/demo/ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets /opt/cmp/data/a
 
 # Ticket 54: user-app build steps (RUN on docker0) must not reach the instance metadata service.
 sh infra/demo/build-imds-guard.sh install
+# Ticket 58: QEMU emulation for the other architecture (multi-arch builds). Required, and a failed
+# install fails the release, only when BUILD_PLATFORM names linux/arm64.
+if grep -q '^BUILD_PLATFORM=.*linux/arm64' /opt/cmp/.env; then
+  sh infra/demo/build-binfmt.sh install
+else
+  sh infra/demo/build-binfmt.sh install || echo "warning: build-binfmt install failed" >&2
+fi
 
 compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
 "${compose[@]}" up -d platform-db temporal-db temporal temporal-ui

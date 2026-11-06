@@ -285,3 +285,14 @@ Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`�
 ## GCP 주체 확인과 연결 확인 (48)
 
 [티켓 48](../../tickets/provisioning/48-gcp-target-principal.md#착수-결정-2026-11-06). 공개 모듈: `cmp_providers.gcp_adc`(`read_adc_source → AdcSource(kind, declared)`, `token_command`, `adc_principal(env, cwd=) → str | None`). `gcp_preview.verify_adc_principal`·`_verify_adc`와 `gcp_apply.default_adc_email`이 이 함수를 쓴다. 코드는 그대로 `ADC_PRINCIPAL_MISMATCH`·`ADC_UNAVAILABLE`(토큰 명령 실패 포함, 이전 Plan은 `PLAN_COMMAND_FAILED`)·`ADC_CHECK_FAILED`·`ADC_SOURCE_UNSUPPORTED`. Temporal: 상수 `cmp_contracts.queues.GCP_CONNECTION_CHECK_WORKFLOW_NAME = "GcpConnectionCheckWorkflow"`(`migration` 큐, 입력 예상 주체 이메일 문자열)와 `GCP_CONNECTION_CHECK_ACTIVITY = "verify_gcp_connection"`(`provisioning` 큐) → `{code: "OK" | ADC_*, principal: str | None}`. API: `cmp_api.gcp_connection_check.TemporalGcpChecker`(연결 확인 실패 코드 추가 `GCP_CHECK_UNAVAILABLE`·`GCP_CHECK_FAILED`). HTTP 경로·응답 모양은 바뀌지 않았다.
+
+## 멀티 아키텍처 빌드 (58)
+
+[티켓 58](../../tickets/provisioning/58-multiarch-build.md#착수-결정-2026-11-07). worker 설정 `BUILD_PLATFORM`은 한 값 또는 쉼표 목록(`linux/amd64,linux/arm64`)이다. 허용 값 밖·중복·빈 항목은 `BUILD_PLATFORM_INVALID`. **첫 항목이 Sandbox 아키텍처**다.
+- 공개 함수: `cmp_worker.image_build.parse_platforms(value) -> list[str]`, `PLATFORMS`.
+- Build 모듈·연결 모델(`BuildContext`·`BuildOutcome`·`BuildTarget`·`BuildResult`·`BuildSettings`): `platforms: list` 필드, `platform`은 첫 항목 읽기 속성. 생성 때 `platform=` 단일 값도 받는다. `BuildStore.find(resource_id, source_sha256, platforms)`.
+- 여러 플랫폼이면 `image_digest`·`image_uri`는 매니페스트 목록의 Digest다(플랫폼별 이미지 태그 `<태그>-amd64`·`<태그>-arm64`, 목록 태그 `<태그>`). 새 실패 코드 `BUILD_INDEX_INVALID`·`BUILD_INDEX_PLATFORM_MISMATCH`(분류 `BUILD`).
+- 계약 추가(없으면 `[platform]`으로 읽음): `BuildAttempt.platforms`(`platform`은 Sandbox 실행 플랫폼, 목록 안에 있어야 함), `ValidatedImageV2.platforms`(빌드 증거 목록). `BuildEvidenceV2.platforms`는 원래 목록이고 이제 목록 전체가 들어간다.
+- Plan(ON_PREM·클라우드 WORKLOADS)의 앱·DB `image.platforms`는 `ValidatedImageV2.platforms`다. Chart의 노드 조건(`kubernetes.io/arch In`)이 이 목록 전체를 허용한다.
+- HTTP·OpenAPI·Workflow 변경 없음.
+

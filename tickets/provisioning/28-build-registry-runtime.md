@@ -91,3 +91,6 @@ Blocked by: B-01 (DONE), 21 (로컬 완료). 29(#153, Agent 이미지 pull·토�
 
 ## 후속 (티켓 46, 2026-11-06)
 - 46은 AWS 리소스를 추가하지 않는다. 연결 AssumeRole 권한은 23b가 이 스택(`cmp-demo-build`)의 `ConnectionAssumePolicy`로 넣었다. [46](46-connection-credentials.md)
+
+## 후속 (티켓 58, 2026-11-07)
+- `BUILD_PLATFORM` 안내 기본값이 `linux/amd64,linux/arm64`다(`deploy-build-stack.sh` 출력). 다른 아키텍처 빌드는 호스트 QEMU binfmt가 필요하다(`infra/demo/build-binfmt.sh`, `start.sh`가 설치). AWS 리소스·권한 변경은 없다(같은 ECR에 아키텍처 태그 두 개와 목록 태그 하나가 더 생긴다). [58](58-multiarch-build.md)

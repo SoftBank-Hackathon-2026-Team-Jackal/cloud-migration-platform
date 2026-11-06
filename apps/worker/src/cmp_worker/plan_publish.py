@@ -232,6 +232,9 @@ def deployment_request(
     requirements' bindings."""
     database, app = _topology(spec)
     [image] = [i for i in spec.images if i.resource_id == app.id]
+    # Ticket 58: every platform the built image has, for both workloads. The pinned official
+    # PostgreSQL image is a multi-architecture list, so the DB may sit on the same nodes.
+    platforms = list(image.platforms)
     db_release = _release(database.id)
     return {
         "contract_version": "2",
@@ -243,7 +246,7 @@ def deployment_request(
                 "id": database.id,
                 "kind": "POSTGRESQL",
                 "release_name": db_release,
-                "image": {"uri": target.database_image, "platforms": [image.platform]},
+                "image": {"uri": target.database_image, "platforms": platforms},
                 "version": "16",
                 "extensions": [],
                 "database": {
@@ -261,7 +264,7 @@ def deployment_request(
                 "id": app.id,
                 "kind": "APPLICATION",
                 "release_name": _release(app.id),
-                "image": {"uri": image.image_uri, "platforms": [image.platform]},
+                "image": {"uri": image.image_uri, "platforms": platforms},
                 "replicas": app.replicas,
                 "resources": {"cpu_millicores": app.cpu_millicores, "memory_mib": app.memory_mib},
                 "port": app.port,

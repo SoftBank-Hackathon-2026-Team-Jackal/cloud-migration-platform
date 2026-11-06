@@ -136,7 +136,7 @@ DB 쓰기·읽기와 재시작 후 유지 테스트는 앱이 쓰기를 받는 �
 BUILD_SOURCE_BUCKET=<소스·테스트 묶음 버킷>
 BUILD_ECR_REPOSITORY=<계정>.dkr.ecr.<리전>.amazonaws.com/<저장소>
 BUILD_LOG_BUCKET=<빌드 로그 버킷>
-BUILD_PLATFORM=linux/amd64
+BUILD_PLATFORM=linux/amd64   # 또는 쉼표 목록 linux/amd64,linux/arm64 (Provisioning 58, 첫 항목 = Sandbox 아키텍처)
 BUILD_AWS_PROFILE=<이름 있는 프로필, 승인된 것만>   # 선택
 ```
 

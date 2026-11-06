@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, model_validator
 
 from cmp_contracts.analysis import AnalysisReport
-from cmp_contracts.provisioning import ContentRef, Contract, VersionRef
+from cmp_contracts.provisioning import ContentRef, Contract, Platform, VersionRef
 from cmp_contracts.provisioning_v2 import (
     AnalysisInputV2,
     BuildEvidenceV2,
@@ -47,11 +47,28 @@ class BuildAttempt(Contract):
     result_ref: VersionRef
     status: Literal["SUCCEEDED", "FAILED"]
     source_ref: S3ArchiveRef
-    platform: Literal["linux/amd64", "linux/arm64"]
+    # The platform the Sandbox ran (the first configured one) and, ticket 58, every platform in
+    # the image (a manifest list when there are several). Records written before 58 have only
+    # `platform`; they read as a one-platform list.
+    platform: Platform
+    platforms: list[Platform] = Field(min_length=1)
     image_uri: str | None = None
     image_digest: str | None = None
     log: BuildLogRef | None = None
     error_code: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def platforms_before_58(cls, data):
+        if isinstance(data, dict) and "platforms" not in data and "platform" in data:
+            data = {**data, "platforms": [data["platform"]]}
+        return data
+
+    @model_validator(mode="after")
+    def platform_in_platforms(self):
+        if self.platform not in self.platforms or len(set(self.platforms)) != len(self.platforms):
+            raise ValueError("The Sandbox platform must be one of the image's platforms")
+        return self
 
 
 class Verdict(Contract):
@@ -123,7 +140,7 @@ def project_planning(
                 source_ref=build.source_ref,
                 image_uri=build.image_uri,
                 image_digest=build.image_digest,
-                platforms=[build.platform],
+                platforms=list(build.platforms),
             )
         )
     request = PlanningRequestV2(

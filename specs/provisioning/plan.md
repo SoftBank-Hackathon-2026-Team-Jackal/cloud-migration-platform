@@ -284,7 +284,7 @@ Temporal Retry가 외부 부수효과의 정확히 한 번 실행을 보장하�
 | Agent 완료 통지·작업 인증 | 12에서 폴링+결과 보고+Activity 상태 조회로 확정. 콜백/비동기 완료와 장기 lease는 미채택 |
 | Temporal 분할·Task Queue·Timeout/Retry | 실제 외부 작업 시간과 재시도 안전성 측정 후 결정 |
 | Apply 실패·취소 후 자동 정리 | 공유 자원·PVC 데이터 보존과 비용 사이 정책 결정 |
-| Sandbox 검증 이미지 | 동일 Digest 재사용은 ADR-003으로 결정. B-01은 공통 빌더, 계약 버전 전환·플랫폼별 검증 증거는 후속 통합 작업 |
+| Sandbox 검증 이미지 | 동일 Digest 재사용은 ADR-003으로 결정. B-01은 공통 빌더, 계약 버전 전환·플랫폼별 검증 증거는 후속 통합 작업. 58: 여러 플랫폼은 매니페스트 목록 Digest 하나로 Sandbox·배포에 같이 쓰고, Sandbox는 설정 첫 항목 플랫폼을 검증한다 |
 | Production 기능 테스트 | 테스트 계정·데이터 변경·정리 범위 결정 |
 | K3s 사전 준비·macOS Linux 환경 | Agent가 확인할 최소 클러스터/StorageClass 계약 결정 |
 | 온프레미스 중계·WireGuard, Route 53·Envoy | 최종 채택 및 장기 운영 주체는 Migration 영역과 함께 결정 |
