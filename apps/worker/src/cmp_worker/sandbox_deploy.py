@@ -1006,9 +1006,16 @@ class SandboxService:
 
     # ------------------------------------------------------------------------ cleanup
 
-    def teardown_sandbox(self, namespace: str) -> None:
+    def teardown_sandbox(self, namespace: str, *, wait: bool = True) -> None:
+        """Delete the Namespace. `wait=False` only asks the cluster to delete it and returns; a
+        Namespace that stays behind is removed by the expiry sweep (`cleanup_expired`)."""
         if not _NAMESPACE.fullmatch(namespace):
             raise SandboxError("NOT_A_SANDBOX_NAMESPACE")
+        if not wait:
+            self.cluster.kubectl(
+                "delete", "namespace", namespace, "--ignore-not-found", "--wait=false"
+            )  # fmt: skip
+            return
         self.cluster.kubectl(
             "delete", "namespace", namespace, "--ignore-not-found", "--wait=true",
             "--timeout=180s", timeout=240,

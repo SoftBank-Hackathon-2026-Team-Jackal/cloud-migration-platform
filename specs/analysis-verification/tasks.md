@@ -47,6 +47,7 @@
 | [29 보안 동등 판정·약점 표시·승인 게이트 연결](../../tickets/analysis-verification/29-security-judge.md) | DONE (PR #257·#261 병합, 남음: 상헌 승인 화면·API 합의, 정책 P-12 사용자 검토) | 28, 08B, D-17(정책) | AV-023, AV-022 | #256 | ☑ |
 | [30 Sandbox 보안 프로브](../../tickets/analysis-verification/30-security-probes.md) | DONE (PR #260 병합, 실제 k3d 확인은 PR #263. 평문 DB·운영 경로 프로브와 Skill은 후속) | 12, 13, 24, 28, D-18 | AV-023, AV-012, AV-013 | #259 | ☑ |
 | [31 Fixer가 상황에 맞는 Skill을 필요할 때 불러 쓰게 연결](../../tickets/analysis-verification/31-fixer-skills.md) | DONE (PR #252·#253 병합, 미확인: 실제 Claude 1회) | 14A, 20 (병합됨) | AV-007, AV-015, AV-020 | #251 | ☑ |
+| [32 Sandbox 종료 지연 줄이기(정리 비동기화·만료 정리 Schedule·이미지 사전 적재)](../../tickets/analysis-verification/32-sandbox-speed.md) | IN_PROGRESS (구현 완료, PR 대기, 미확인: 실제 k3d 시간 측정) | 11, 21, 24 | AV-015, AV-016 | 미생성 | ☐ |
 
 ## 선행 관계
 

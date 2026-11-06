@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from cmp_worker.sandbox_ops import cleanup_sandboxes, format_status
+from cmp_worker.sandbox_ops import PREWARM_IMAGES, cleanup_sandboxes, format_status, prewarm_images
 
 from .test_deploy import FakeRunner, make_service
 
@@ -75,3 +75,16 @@ def test_the_command_line_wraps_status_and_cleanup_with_exit_codes():
     assert runner.commands("delete") == []
     code, text = run_command(["cleanup"], service, now=NOW)
     assert code == 0 and "cmp-sbx-old" in text and "cmp-sbx-new" not in text
+
+
+def test_prewarm_pulls_each_shared_image_into_the_node_once():
+    calls = []
+
+    class Runner:
+        def run(self, args, **kwargs):
+            calls.append(args)
+            return b""
+
+    assert prewarm_images(Runner(), node="n0") == list(PREWARM_IMAGES)
+    assert calls == [["docker", "exec", "n0", "crictl", "pull", image] for image in PREWARM_IMAGES]
+    assert all("@sha256:" in image for image in PREWARM_IMAGES)

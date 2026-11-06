@@ -464,7 +464,9 @@ class SandboxVerificationWorkflow:
                 if not failed:
                     await emit_done("PENDING", digest if outcome == "PASSED" else None)
                 try:
-                    await asyncio.shield(act("sbx_teardown", {"namespace": namespace}, minutes=10))
+                    await asyncio.shield(
+                        act("sbx_teardown", {"namespace": namespace, "wait": False}, minutes=10)
+                    )
                 except ActivityError:
                     self.cleanup_failed = True
                     if not failed:

@@ -282,6 +282,17 @@ def test_teardown_deletes_the_namespace_and_waits(tmp_path):
     assert "--wait=true" in delete and "--ignore-not-found" in delete
 
 
+def test_teardown_without_waiting_only_asks_for_the_deletion(tmp_path):
+    runner = FakeRunner()
+    service = make_service(runner)
+    plan = prepare(service, tmp_path)
+    runner.calls.clear()
+    service.teardown_sandbox(plan.namespace, wait=False)
+    [delete] = runner.commands("delete")
+    assert "--wait=false" in delete and plan.namespace in delete
+    assert not runner.commands("get")  # no check that it is gone: the expiry sweep covers it
+
+
 def test_teardown_refuses_namespaces_that_are_not_sandboxes():
     service = make_service(FakeRunner())
     for name in ("default", "kube-system", "cmp-prod-demo", "cmp-sbx-"):

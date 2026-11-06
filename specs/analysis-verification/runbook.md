@@ -67,7 +67,7 @@ uv run python scripts/review_signal.py approve <Workflow ID> --version <버전> 
 
 - 부모 Query `status`의 `pipeline`에 분석·요구사항 참조와 발행 결과가 있다. 종료 상태는 `scaffold_complete`(통과), `failed`(원인은 `failure_code`), `cancelled`다.
 - 발행된 최종 분석 버전·요구사항·패치 산출물은 저장소 디렉터리에 해시 이름 파일로 있다.
-- Sandbox 네임스페이스(`cmp-sbx-*`)는 통과·실패·취소 모두 워커가 지운다. 남았다면 `kubectl --kubeconfig $SANDBOX_KUBECONFIG --context k3d-cmp-sandbox get ns`로 찾아 지운다(라벨 `cmp.sandbox/expires-at`이 만료 시각이다).
+- Sandbox 네임스페이스(`cmp-sbx-*`)는 통과·실패·취소 모두 워커가 지운다. 남았다면 `kubectl --kubeconfig $SANDBOX_KUBECONFIG --context k3d-cmp-sandbox get ns`로 찾아 지운다(라벨 `cmp.sandbox/expires-at`이 만료 시각이다). 루프 끝의 삭제는 요청만 보내고 기다리지 않는다(티켓 32). 끝나지 않은 것은 15분마다 도는 Temporal Schedule `cmp-sandbox-expire-sweep`이 만료 뒤 지운다(sandbox 큐 워커가 있어야 실행됨).
 
 ### Sandbox 상태 보기와 정리
 
@@ -75,9 +75,10 @@ uv run python scripts/review_signal.py approve <Workflow ID> --version <버전> 
 uv run python scripts/sandbox_ctl.py status
 uv run python scripts/sandbox_ctl.py cleanup                          # 만료된 것만
 uv run python scripts/sandbox_ctl.py cleanup --all --confirm DELETE-ALL  # 전부(확인어 필요)
+uv run python scripts/sandbox_ctl.py prewarm                          # postgres·프록시 이미지를 노드에 미리 받기
 ```
 
-전용 클러스터(`k3d-cmp-sandbox`)의 `cmp-sbx-*`만 다룬다. 워커가 죽어 남은 만료 Sandbox는 `cleanup`을 주기적으로(예: 15분마다 cron·launchd) 실행해 지운다. 출력에는 네임스페이스·실행 ID·만료 시각만 나온다.
+전용 클러스터(`k3d-cmp-sandbox`)의 `cmp-sbx-*`만 다룬다. `prewarm`은 클러스터를 새로 만든 뒤 한 번 실행한다(반복해도 안전, 이미 받은 이미지는 다시 받지 않는다). 만료된 Sandbox는 워커의 Schedule이 지우고, 그 워커가 없을 때는 `cleanup`을 직접(또는 cron·launchd로 15분마다) 실행한다. 출력에는 네임스페이스·실행 ID·만료 시각만 나온다.
 
 ### 표준 테스트의 쓰기 모양 (티켓 27)
 
