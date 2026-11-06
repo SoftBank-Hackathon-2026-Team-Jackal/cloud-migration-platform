@@ -5,6 +5,7 @@ Workflow heartbeat strings (`started`, `running`, `connect`, `helm:<name>`, ...)
 values for Temporal liveness; these helpers emit the web events at step boundaries instead (E16).
 """
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -156,22 +157,91 @@ class PlanView:
     target: dict | None = None  # {provider, platform, location}
     security_rules: tuple[dict, ...] = ()
     rows: tuple[MappingRow, ...] | None = None  # None: analysis report not readable
+    # Analysis risks `MAPPING_NOT_RUN: <reason>`: mapping did not run, so there are no rows.
+    mapping_risks: tuple[str, ...] = ()
 
 
-def plan_step(row: MappingRow) -> dict:
-    """Analysis mapping row → web `plan.step` (events-guide §2 계획: 매핑)."""
+# Catalog capabilities (catalog/*.yaml) → web diagram kind (PlanStepData.kind).
+CAPABILITY_KIND = {
+    "container-runtime": "compute",
+    "environment-config": "config",
+    "ingress": "ingress",
+    "network-policy": "network",
+    "object-storage": "storage",
+    "pod-identity": "config",
+    "postgres": "database",
+    "volume": "storage",
+}
+# Other capability names (the mapper may cite AWS services): first matching word wins.
+KIND_WORDS = (
+    ("proxy", r"pgbouncer|proxy|pooler"),
+    ("cache", r"redis|memcache|cache"),
+    ("queue", r"sqs|sns|kafka|queue|pubsub|rabbit|kinesis"),
+    ("storage", r"s3|bucket|storage|blob|gcs|efs|ebs|volume"),
+    ("database", r"postgres|mysql|database|rds|aurora|dynamo|sql|\bdb\b"),
+    ("ingress", r"alb|nlb|elb|ingress|load-?balancer|gateway|cloudfront|route-?53"),
+    ("network", r"vpc|subnet|network|nat|security-group"),
+    ("config", r"env|config|secret|parameter|ssm|iam|identity|kms"),
+    ("compute", r"eks|ec2|ecs|lambda|fargate|compute|container|runtime|pod|node"),
+)
+# Diagram kind → Preview `ResourceChange.resource_type` that is its target-side resource.
+KIND_RESOURCE_TYPES = {
+    "compute": ("APP", "CLUSTER", "NODE"),
+    "database": ("DATABASE",),
+    "ingress": ("INGRESS",),
+    "network": ("NETWORK",),
+    "storage": ("STORAGE",),
+}
+
+
+def step_kind(capability: str) -> str:
+    """Mapping capability → `ingress|network|compute|proxy|database|cache|queue|storage|config|other`."""
+    name = capability.lower()
+    if name in CAPABILITY_KIND:
+        return CAPABILITY_KIND[name]
+    for kind, words in KIND_WORDS:
+        if re.search(words, name):
+            return kind
+    return "other"
+
+
+def step_target(kind: str, preview: dict | None) -> str:
+    """Name of the Revision's Preview resource of this kind (target side); "" when none."""
+    changes = [*(preview or {}).get("changes", ()), *(preview or {}).get("applied_defaults", ())]
+    for resource_type in KIND_RESOURCE_TYPES.get(kind, ()):
+        for change in changes:
+            if change.get("resource_type") == resource_type and change.get("action") != "DELETE":
+                return change.get("name") or ""
+    return ""
+
+
+def plan_step(row: MappingRow, preview: dict | None = None) -> dict:
+    """Analysis mapping row → web `plan.step` (events-guide §2 계획: 매핑).
+
+    `preview` is the same Revision's stored Preview: `after` names its target resource of the
+    row's kind. A KEEP row stays on the source, so it has no target."""
+    kind = step_kind(row.capability)
+    keep = row.disposition == "KEEP"
     return {
         "id": row.id,
         "group": "code" if row.evidence and row.evidence[0].kind == "CODE" else "infrastructure",
         "grade": row.grade,
         "before": row.capability,
-        "after": "",  # MappingRow has no target service value yet
+        "after": "" if keep else step_target(kind, preview),
         "evidence": ", ".join(item.locator for item in row.evidence),
         "change": row.usage,
         "action": row.treatment or "APPROVAL",
-        "keep_source": row.disposition == "KEEP",
+        "keep_source": keep,
         "verification": row.status,
+        "kind": kind,
     }
+
+
+def mapping_warnings(risks: tuple[str, ...]) -> list[dict]:
+    """`MAPPING_NOT_RUN: <reason>` risks → Preview `warnings` (ValidationIssue) for the web."""
+    return [
+        {"code": "MAPPING_NOT_RUN", "path": "analysis.mapping", "message": risk} for risk in risks
+    ]
 
 
 def emit_plan_events(migration_id: str, result: dict, view: PlanView | None) -> None:
@@ -188,11 +258,16 @@ def emit_plan_events(migration_id: str, result: dict, view: PlanView | None) -> 
                 "plan.step",
                 "planning",
                 "running",
-                plan_step(row),
+                plan_step(row, view.preview),
                 idempotency_key=f"{plan_key}:step:{row.id}",
             )
         preview = {
             **view.preview,
+            # Event-only: the stored, digested Preview is unchanged.
+            "warnings": [
+                *view.preview.get("warnings", []),
+                *mapping_warnings(view.mapping_risks),
+            ],
             "plan_id": result["plan_id"],
             "revision": result["revision"],
             "security_rules": list(view.security_rules),

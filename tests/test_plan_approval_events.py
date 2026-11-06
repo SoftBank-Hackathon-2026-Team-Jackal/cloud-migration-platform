@@ -19,7 +19,7 @@ from cmp_contracts.analysis import AnalysisReport, MappingRow
 from cmp_contracts.events import validate_data
 from cmp_contracts.queues import PROVISIONING_QUEUE, WORKFLOW_QUEUE
 from cmp_worker.events import configure_emitter
-from cmp_worker.provisioning_events import PlanEvents, plan_step
+from cmp_worker.provisioning_events import PlanEvents, plan_step, step_kind, step_target
 from temporalio import activity
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -107,6 +107,7 @@ def test_mapping_row_becomes_a_web_plan_step():
         "action": "APPROVAL",
         "keep_source": False,
         "verification": "EVIDENCE_CHECKED",
+        "kind": "database",
     }
     infra = MappingRow.model_validate(
         {
@@ -128,6 +129,66 @@ def test_mapping_row_becomes_a_web_plan_step():
     validate_data("plan.step", step)
 
 
+@pytest.mark.parametrize(
+    ("capability", "kind"),
+    [
+        ("postgres", "database"),
+        ("container-runtime", "compute"),
+        ("ingress", "ingress"),
+        ("network-policy", "network"),
+        ("object-storage", "storage"),
+        ("volume", "storage"),
+        ("environment-config", "config"),
+        ("pod-identity", "config"),
+        ("s3", "storage"),
+        ("elasticache-redis", "cache"),
+        ("sqs", "queue"),
+        ("pgbouncer", "proxy"),
+        ("rds-mysql", "database"),
+        ("alb", "ingress"),
+        ("something-new", "other"),
+    ],
+)
+def test_step_kind_follows_the_mapping_capability(capability, kind):
+    assert step_kind(capability) == kind
+
+
+PREVIEW = {
+    "changes": [
+        {"resource_type": "APP", "action": "CREATE", "name": "api-main"},
+        {"resource_type": "DATABASE", "action": "DELETE", "name": "old-db"},
+        {"resource_type": "DATABASE", "action": "CREATE", "name": "postgres-main"},
+        {"resource_type": "INGRESS", "action": "UPDATE", "name": "edge"},
+    ],
+    "applied_defaults": [{"resource_type": "STORAGE", "action": "CREATE", "name": "data-pvc"}],
+}
+
+
+@pytest.mark.parametrize(
+    ("kind", "after"),
+    [
+        ("database", "postgres-main"),  # a deleted resource is not the target
+        ("compute", "api-main"),
+        ("ingress", "edge"),
+        ("storage", "data-pvc"),  # applied defaults are target resources too
+        ("network", ""),  # no corresponding Preview resource
+        ("cache", ""),
+        ("config", ""),
+    ],
+)
+def test_step_target_is_the_preview_resource_of_the_same_kind(kind, after):
+    assert step_target(kind, PREVIEW) == after
+
+
+def test_plan_step_fills_kind_and_after_from_the_revision_preview():
+    rows = report().mapping
+    moved, kept = plan_step(rows[0], PREVIEW), plan_step(rows[1], PREVIEW)
+    assert (moved["kind"], moved["after"]) == ("database", "postgres-main")
+    assert (kept["kind"], kept["after"]) == ("storage", "")  # KEEP stays on the source
+    for step in (moved, kept):
+        validate_data("plan.step", step)
+
+
 # --- publication events ----------------------------------------------------------------------
 
 
@@ -140,6 +201,16 @@ async def test_publication_emits_steps_preview_ready_then_approval_required(
     events = events_of(emitted)
     assert [e.type for e in events] == ORDER
     assert [e.data["id"] for e in events[:2]] == ["postgres-advisory-lock", "s3-object-read"]
+    database = next(
+        c["name"] for c in events[2].data["changes"] if c["resource_type"] == "DATABASE"
+    )
+    assert [(e.data["kind"], e.data["after"]) for e in events[:2]] == [
+        ("database", database),
+        ("storage", ""),
+    ]
+    for event in events:
+        validate_data(event.type, event.data)
+    assert not any(w["code"] == "MAPPING_NOT_RUN" for w in events[2].data["warnings"])
     assert {e.phase for e in events[:4]} == {"planning"}
 
     preview = events[2].data
@@ -180,6 +251,30 @@ async def test_missing_analysis_report_still_emits_preview_ready_and_required(
     types = [e.type for e in events_of(emitted)]
     assert types == ["plan.preview", "plan.ready", "approval.required"]
     assert [log["code"] for log in emitted.logs] == ["PLAN_STEP_SOURCE_UNAVAILABLE"]
+
+
+async def test_mapping_that_did_not_run_is_a_preview_warning(db, store, tmp_path, emitted, onprem):
+    unmapped = report().model_copy(
+        update={
+            "mapping": [],
+            "unverified_risks": ["MAPPING_NOT_RUN: LLM_NOT_CONFIGURED", "OTHER_RISK: x"],
+        }
+    )
+    with_report(db, store, unmapped.model_dump_json().encode())
+    result = await publish(PlanEvents(publisher(db, store, tmp_path)))
+    events = events_of(emitted)
+    assert [e.type for e in events] == ["plan.preview", "plan.ready", "approval.required"]
+    preview = events[0].data
+    validate_data("plan.preview", preview)
+    assert {
+        "code": "MAPPING_NOT_RUN",
+        "path": "analysis.mapping",
+        "message": "MAPPING_NOT_RUN: LLM_NOT_CONFIGURED",
+    } in preview["warnings"]
+    # The stored, digested Preview is unchanged: the warning is on the event only.
+    _, stored_preview = stored(db, result)
+    assert not any(w.code == "MAPPING_NOT_RUN" for w in stored_preview.warnings)
+    assert result["preview_digest"] == events[1].data["preview_digest"]
 
 
 async def test_failed_publication_emits_nothing(db, store, tmp_path, emitted):

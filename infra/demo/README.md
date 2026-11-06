@@ -38,7 +38,7 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `PROVISIONING_PLATFORM_EGRESS_CIDRS` | worker | 티켓 47(D-10): worker가 새 클러스터 API에 나가는 주소(데모 EIP `/32`, 쉼표 구분). 설정하면 AWS Plan이 이 주소를 덮지 않는 `api_access_cidrs`를 `PLATFORM_EGRESS_NOT_ALLOWED`로 거절한다. 비면 Preview에 `PLATFORM_EGRESS_UNCHECKED` 경고. 값은 `/opt/cmp/.env`(예: `PROVISIONING_PLATFORM_EGRESS_CIDRS=13.209.240.49/32`) |
 | `CONNECTION_AWS_CONFIG_FILE`, `CONNECTION_AWS_BASE_CONFIG_FILE` | api | 생성 파일 `/run/cmp/aws-connections/config`(호스트 `/opt/cmp/data/aws-connections`, api 쓰기·worker 읽기), 기본 파일 `/run/cmp/aws/config`. 키는 없다(ARN·External ID·프로필 이름). api가 시작·역할 등록·연결 삭제 때 DB에서 다시 쓴다 |
 | `CONNECTION_PLATFORM_PRINCIPAL_ARN`, `CONNECTION_TEMPLATE_BASE_URL` | api | `/opt/cmp/.env`(`deploy-connection-templates.sh` 출력, 23b). 비면 `launch_stack_url`·`platform_principal_arn`이 `null` |
-| `PLATFORM_ECR_REGISTRY`, `PLATFORM_ECR_REPOSITORIES` | api | `/opt/cmp/.env`. 레지스트리가 비면(기본) ON_PREM 작업에 플랫폼 레지스트리가 없고 토큰을 발급하지 않는다(29 이전 동작). 저장소 기본값 `cmp-platform-builds` |
+| `PLATFORM_ECR_REGISTRY`, `PLATFORM_ECR_REPOSITORIES` | api·worker | `/opt/cmp/.env`(두 컨테이너 같은 값). worker가 ON_PREM rollout 작업을 만들며 이미지 레지스트리를 검사하고, api가 pull 토큰을 발급한다. 레지스트리가 비면(기본) ON_PREM 작업에 플랫폼 레지스트리가 없고 토큰을 발급하지 않는다(29 이전 동작). 이때 ECR 앱 이미지는 `IMAGE_REGISTRY_NOT_ALLOWED`로 거부된다. 저장소 기본값 `cmp-platform-builds` |
 | `ENV_FILE_STORE_DIR=/opt/cmp/env-files`, `ENV_FILE_ENCRYPTION_KEY` | api·worker(같은 디렉터리) | 업로드한 `.env` 암호화 저장소(호스트 `/opt/cmp/data/env-files`). 키는 `/opt/cmp/.env`에 없을 때만 생성(base64url 32바이트), 바꾸지 않는다(티켓 45) |
 | 분석·Sandbox·Claude (`ANALYSIS_*`, `SANDBOX_*`, `LLM_ENABLED`, `ANTHROPIC_API_KEY`) | worker | `/opt/cmp/.env`, 비면 scaffold(아래 「분석·Sandbox·ENV 실행 설정」) |
 | `CMP_GCP_PROJECT`, `PROVISIONING_GCLOUD_CONFIGURATION=cmp-demo` | worker | 운영자가 둔 `/opt/cmp/secrets/gcp/key.json`(읽기 전용, `cmp-provisioning@sbh26-prod` 키) → 진입점이 tmpfs gcloud 구성·ADC 생성. 같은 ADC로 GCP Plan·Apply와 `GCP_TARGET` 연결 확인(48)을 한다 |
@@ -168,7 +168,7 @@ bash infra/demo/deploy-build-stack.sh          # 스택 생성·갱신, PLATFORM
 bash infra/demo/release.sh HEAD
 ```
 
-스택이 이미 있으면 두 번째 명령은 변경 없이 출력만 다시 한다(`--no-fail-on-empty-changeset`). 레지스트리 값은 저장소 URI의 호스트(`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com`)다. api는 `.env`를 다시 읽어야 하므로 릴리스(또는 api 재생성)가 필요하다.
+스택이 이미 있으면 두 번째 명령은 변경 없이 출력만 다시 한다(`--no-fail-on-empty-changeset`). 레지스트리 값은 저장소 URI의 호스트(`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com`)다. api와 worker는 `.env`를 다시 읽어야 하므로 릴리스(또는 api·worker 재생성)가 필요하다.
 
 ### 서버 점검
 
@@ -176,6 +176,7 @@ bash infra/demo/release.sh HEAD
 # SSM 세션에서
 docker exec cmp-demo-api-1 python -c 'import boto3; print(boto3.Session(profile_name="cmp-demo-build").client("sts").get_caller_identity()["Arn"])'   # .../cmp-demo-control-plane-InstanceRole-.../i-...
 docker exec cmp-demo-api-1 python -c 'from cmp_api.onprem_rollout import configured_platform_registry as r; print(r())'   # PlatformRegistry(registry='714066696240.dkr.ecr...', ...)
+docker exec cmp-demo-worker-1 python -c 'from cmp_api.onprem_rollout import configured_platform_registry as r; print(r() is not None)'   # True (worker가 rollout 작업을 만든다)
 docker exec cmp-demo-worker-1 sh -c 'docker version --format "{{.Server.Version}}"; docker buildx version'
 iptables -S DOCKER-USER | grep cmp-build-imds-guard; systemctl is-enabled cmp-build-imds-guard.service   # 규칙 1줄, enabled (티켓 54)
 docker buildx build --network default --no-cache --progress plain /opt/cmp/releases/<SHA>/infra/demo/imds-probe 2>&1 | grep 'imds_probe token'   # token_put=000 role_list=000, 빌드 성공
@@ -254,6 +255,8 @@ docker exec cmp-demo-worker-1 sh -c 'grep -c "^\[profile cmp-conn-" "$AWS_CONFIG
 | `WEB_START_SANDBOX_SETTINGS` | api | 빈 값 → 리허설은 헬스 테스트만 | 웹 실제 시작의 `sandbox`(SandboxSettings JSON 객체, CLI `--sandbox`와 같다)로 표준 DB 쓰기→읽기·재시작 후 유지 테스트까지 돈다(티켓 57). 데모 앱(demo-app) 값은 `runtime.env.example`의 줄 그대로(작은따옴표 유지). JSON 객체가 아니면 실제 시작이 503 `SANDBOX_SETTINGS_INVALID`. 다른 앱은 그 앱의 쓰기 모양을 따로 적는다 |
 | `WEB_START_DATA_MIGRATION` | api | 빈 값 → 데이터 단계는 scaffold | 웹 실제 시작의 `data_migration`(DataMigrationInput JSON 객체, CLI `--data-migration`과 같다)으로 구축 뒤 CDC 복제·DB 전환 승인(`approve?gate=cutover`)까지 실제로 돈다(data-migration 티켓 08). 원본 DB·앱·전환 설정·대상 터널 주소만 담고 비밀값은 없다. 검증에 실패하면 실제 시작이 503 `DATA_MIGRATION_SETTINGS_INVALID`. worker에 kubectl과 원본·대상 클러스터 접근(EKS·GKE 자격 증명 또는 `DATA_MIGRATION_KUBECONFIG_DIR`)이 있어야 한다. `tunnel: {"source_egress_cidrs": ["<원본 NAT IP>/32"]}`을 넣으면 플랫폼이 두 클러스터 사이 WireGuard 게이트웨이를 만들고 주소를 정한다(data-migration 티켓 10, 이때 원본 `peer_host`는 생략하고 `local_host`는 필수) |
 
+**매핑(plan.step)과 Claude**: 분석 매핑 행은 Claude(mapper)가 만든다. `LLM_ENABLED`가 꺼져 있거나 `ANTHROPIC_API_KEY`가 비어 있으면 매핑이 돌지 않아(`MAPPING_NOT_RUN: LLM_NOT_CONFIGURED`) `plan.step`이 0건이고 웹의 「매핑 근거」·「구성도」가 비며, `plan.preview`의 `warnings`에 그 코드가 실린다. 켜려면 `/opt/cmp/.env`에 두 이름을 넣고(값은 출력·커밋하지 않는다) worker를 다시 만든다(`docker compose up -d worker`). compose가 두 값과 원장(`LLM_LEDGER_PATH`)·중지 스위치(`LLM_KILL_SWITCH_PATH`)를 worker에 넘기고, 호스트 `/opt/cmp/data/llm`(start.sh가 만든다)이 `/opt/cmp/llm`으로 붙는다. 켠 뒤 `runtime-check.sh`의 `optional_unset`에서 두 이름이 빠지고, worker 사전 점검의 `llm`이 WARN에서 OK가 된다. `disabled` 파일이 있으면 켜도 돌지 않는다.
+
 지금 데모 서버에는 Sandbox 클러스터가 없다(분석 D-08: Sandbox는 로컬 k3d). 그래서 분석만 실제로 켜면 실제 시작은 Sandbox 첫 단계(`sbx_build`)에서 멈춘다. 어떤 경로를 켤지는 박승철님과 정한다(티켓 45 협의 필요).
 
 **운영자 키와 웹**: `/env-files`는 `/connections`·`/agent-enrollments`와 같은 `X-Enrollment-Admin-Key`(= `AGENT_ENROLLMENT_ADMIN_KEY`)를 요구한다(`APPROVAL_ADMIN_KEY` 아님). compose는 이 키를 웹에 넣지 않는다. 웹 실제 모드에서 연결·`.env` 업로드·실제 시작을 쓰려면 운영자가 `/opt/cmp/web.env`에 `PLATFORM_ENROLLMENT_ADMIN_KEY=<AGENT_ENROLLMENT_ADMIN_KEY와 같은 값>`을 둔다. 웹이 그 경로를 로그인으로 막은 뒤에만 한다(위 「공개 HTTPS 에지」의 이유).
@@ -288,7 +291,7 @@ sudo bash /opt/cmp/releases/$(cat /opt/cmp/current-revision)/infra/demo/runtime-
 | `revision=` | 배포한 main 커밋 앞 12자 |
 | `container=` | api·worker·temporal·DB가 `Up`, DB는 `(healthy)` |
 | `alembic=` | 그 커밋의 head(`… (head)`) |
-| worker `analysis=`·`sandbox=`·`build=`·`llm=`·`env_store=` | `real`/`scaffold`, `on`/`off`. `error:<CODE>`면 설정이 잘못됐다(예: `BUILD_SETTINGS_INCOMPLETE`, `SANDBOX_KUBECONFIG_NOT_FOUND`) |
+| worker `analysis=`·`sandbox=`·`build=`·`llm=`·`env_store=`·`platform_ecr_registry=` | `real`/`scaffold`, `on`/`off`. 빌드를 켰으면 `platform_ecr_registry=on`이어야 한다(api와 같은 값; `off`면 ON_PREM rollout이 `IMAGE_REGISTRY_NOT_ALLOWED`). `error:<CODE>`면 설정이 잘못됐다(예: `BUILD_SETTINGS_INCOMPLETE`, `SANDBOX_KUBECONFIG_NOT_FOUND`) |
 | api `env_store=`·`target_profiles=`·`connection_link=`·`platform_ecr_registry=`·`web_start_sandbox=` | `on`, 카탈로그 이름 목록(`error:TARGET_PROFILES_UNCONFIGURED`면 파일 없음), 링크·레지스트리 `on`, 리허설 기본 모양 `on`(`error:SANDBOX_SETTINGS_INVALID`면 JSON이 아니다) |
 | `imds_guard_rules=1`, `imds_guard_service=enabled` | 티켓 54 빌드 IMDS 차단 |
 | `missing=` | 비어 있어야 한다(compose 필수 키) |

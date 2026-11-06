@@ -32,7 +32,7 @@ from cmp_api.plan_inputs import (
     load_planning_input,
     template_version,
 )
-from cmp_contracts.analysis import AnalysisReport, MappingRow
+from cmp_contracts.analysis import AnalysisReport
 from cmp_contracts.artifact import ArtifactRef
 from cmp_contracts.env_plan import EnvPlan, EnvPlanEntry, EnvVarRef
 from cmp_contracts.plan import OnPremIdentity, PlanManifest, Preview, ResourceChange
@@ -409,18 +409,26 @@ class PlanPublisher:
             rules = _security_rules(spec)
         except PublishFailure:
             rules = ()
+        report = self._report(registration)
         return PlanView(
-            preview=row.preview, target=target, security_rules=rules, rows=self._rows(registration)
+            preview=row.preview,
+            target=target,
+            security_rules=rules,
+            rows=tuple(report.mapping) if report is not None else None,
+            mapping_risks=tuple(
+                risk
+                for risk in (report.unverified_risks if report is not None else ())
+                if risk.startswith("MAPPING_NOT_RUN")
+            ),
         )
 
-    def _rows(self, registration: PlanningInputRegistration) -> tuple[MappingRow, ...] | None:
-        """Mapping rows of the analysis report the Sandbox verified (shared ArtifactStore)."""
+    def _report(self, registration: PlanningInputRegistration) -> AnalysisReport | None:
+        """The analysis report the Sandbox verified (shared ArtifactStore); None: unreadable."""
         sha = registration.planning_request.sandbox.report_ref.sha256
         try:
-            report = AnalysisReport.model_validate_json(self._store.read_raw(sha))
+            return AnalysisReport.model_validate_json(self._store.read_raw(sha))
         except (RolloutError, ValueError):
             return None
-        return tuple(report.mapping)
 
     def _env(self, registration, spec, namespace: str) -> EnvRendering | None:
         """ENV-04: the approved EnvPlan → app env bindings + Preview lines (names only).

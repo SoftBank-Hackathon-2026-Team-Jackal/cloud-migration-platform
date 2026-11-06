@@ -88,14 +88,14 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 
 | 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
 | --- | --- | --- | --- |
-| `plan.step` | `map_usage`·`check_evidence` 끝(행마다) | `MappingRow`: `id`→`id`, `grade`→`grade`, `treatment`→`action`(없으면 `APPROVAL`), `disposition == "KEEP"`→`keep_source: true`, `status`→`verification`, `evidence[0].kind == CODE`면 `group: code` 아니면 `infrastructure`, `capability`→`before`, `evidence[].locator`(쉼표로) →`evidence`, `usage`→`change`, `after`는 대상 서비스 값이 없어 `""` | `{"id":"row-s3","group":"code","grade":"API_DIFF","before":"s3","after":"","evidence":"app/storage.py:12","change":"put_object","action":"PROCEED","keep_source":false,"verification":"EVIDENCE_CHECKED"}` |
+| `plan.step` | `map_usage`·`check_evidence` 끝(행마다) | `MappingRow`: `id`→`id`, `grade`→`grade`, `treatment`→`action`(없으면 `APPROVAL`), `disposition == "KEEP"`→`keep_source: true`, `status`→`verification`, `evidence[0].kind == CODE`면 `group: code` 아니면 `infrastructure`, `capability`→`before`, `evidence[].locator`(쉼표로) →`evidence`, `usage`→`change`, `capability`→`kind`(카탈로그 표 + 이름 단어, 없으면 `other`, `step_kind`), `after`는 같은 Revision Preview의 같은 kind 대상 리소스 이름(`changes`·`applied_defaults`, DELETE 제외, `step_target`). 대응이 없거나 `KEEP`이면 `""` | `{"id":"row-s3","group":"code","grade":"API_DIFF","before":"s3","after":"","evidence":"app/storage.py:12","change":"put_object","action":"PROCEED","keep_source":false,"verification":"EVIDENCE_CHECKED"}` |
 
 ### 계획 게시·승인·구축 (민서, **연결 완료**)
 
 | 이벤트 | 발행 위치 | 값 |
 | --- | --- | --- |
-| `plan.step` | `publish_migration_plan`·`publish_workload_plan` Activity(게시 성공 시, `PlanEvents` 래퍼, 티켓 60). 샌드박스가 검증한 분석 보고서(`planning_request.sandbox.report_ref`)의 `mapping[]` 행마다. 보고서를 못 읽으면 생략하고 운영 로그 `PLAN_STEP_SOURCE_UNAVAILABLE` | 아래 "계획: 매핑" 변환 규칙 그대로 |
-| `plan.preview` | 같은 래퍼, `plan.step` 다음 | 저장된 백엔드 Preview 그대로(`contract_version·manifest_digest·changes·applied_defaults·warnings·errors·pending_decisions`) + `plan_id`·`revision`·`target{provider, platform, location}`·`security_rules`(승인된 `network_intent` + 앱→DB `ALLOW`, 끝에 `* → * ANY DENY`). 웹 `previewAdapter`가 화면 모양으로 옮긴다 |
+| `plan.step` | `publish_migration_plan`·`publish_workload_plan` Activity(게시 성공 시, `PlanEvents` 래퍼, 티켓 60). 샌드박스가 검증한 분석 보고서(`planning_request.sandbox.report_ref`)의 `mapping[]` 행마다. 보고서를 못 읽으면 생략하고 운영 로그 `PLAN_STEP_SOURCE_UNAVAILABLE`. 매핑이 돌지 않았으면(LLM 꺼짐 등) 행이 0개이고 `plan.preview.warnings`에 `MAPPING_NOT_RUN`이 실린다 | 아래 "계획: 매핑" 변환 규칙 그대로 |
+| `plan.preview` | 같은 래퍼, `plan.step` 다음 | 저장된 백엔드 Preview 그대로(`contract_version·manifest_digest·changes·applied_defaults·warnings·errors·pending_decisions`) + `plan_id`·`revision`·`target{provider, platform, location}`, 분석 위험 `MAPPING_NOT_RUN: <reason>`마다 `warnings`에 `{code: MAPPING_NOT_RUN, path: analysis.mapping, message}`(이벤트에만, 저장된 Preview·Digest는 그대로)·`security_rules`(승인된 `network_intent` + 앱→DB `ALLOW`, 끝에 `* → * ANY DENY`). 웹 `previewAdapter`가 화면 모양으로 옮긴다 |
 | `plan.ready` | 같은 래퍼, `plan.preview` 다음. AWS/GCP는 인프라 Plan과 워크로드 Plan에서 한 번씩 나오며, 화면은 마지막 값을 승인 대상으로 쓴다 | `{plan_id, revision, manifest_digest, preview_digest, scope?}` — 승인 API에 그대로 되돌려 보낸다. `scope`는 그 Revision의 `PlanManifest.scope`(ON_PREM은 항상 `WORKLOADS`)로, 승인·REJECT 요청의 `scope`에 그대로 쓴다. 다르면 409 `APPROVAL_TARGET_MISMATCH`. 이전 이벤트에는 없을 수 있으며, 그때는 `GET …/preview`·`GET /migrations/{id}/plan`의 `scope`를 쓴다 |
 | `approval.required` | 같은 래퍼, `plan.ready` 다음(Workflow는 이 결과를 받자마자 승인 대기). phase `awaiting_approval`, status `waiting` | `{excluded: 원본 유지(KEEP) 행 id, rollback_policy: "", pending_decisions}`. 승인 대상 식별자는 직전 `plan.ready`에 있다 |
 | `approval.decision` | 승인 API `POST …/approvals`, 재전달 `POST …/delivery` | `ApprovalResponse`와 같은 값(승인자 ID 제외). `DELIVERED`면 `done`, `PENDING`·`FAILED`면 `waiting` |
@@ -177,7 +177,7 @@ uv run python -m cmp_worker.poc_bridge watch --migration-id <id> \
 | --- | --- |
 | 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다). `node`·`nat_gateway`·`ebs_gb`·`s3_bucket` 수집(스캐너에 없음). `analysis.finding`은 쓰지 않는다(#226: `analysis.scan`으로 대신함) |
 | 샌드박스 | `sbx_apply`가 버리는 `apply_network` 반환값(namespace·TTL·egress) 살리기, `BuildResult`를 `sbx_build`에 연결, `sandbox.tests` 출처별 개수와 `checks`(`calls_in_mapping` 등) 값을 만드는 코드, `run` 번호 규칙(웹 `[가정]`) |
-| 계획(매핑) | `MappingRow`에 대상 서비스(`after`)와 노드 분류(`kind`) 값 없음 |
+| 계획(매핑) | `MappingRow` 자체에는 `after`·`kind`가 없다. 게시 이벤트가 capability·같은 Revision Preview로 채운다(위 §2). Preview에 같은 kind 리소스가 없으면(cache·queue 등) `after`는 `""` |
 | 계획 게시·승인·구축(민서) | `plan.preview`의 `source`·`env_remap`(백엔드 값 없음, 티켓 60), ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |
 | 데이터 | 플랫폼 `copy_data` 구현 전체, `data.progress.writes_per_sec`·`lag_ms` 실측(지금 0·null), 복제 ready 시점 행 수 검증(정확한 비교는 전환 뒤만), PoC `source_lsn`/`target_lsn` 샘플링(패널 `NODE_SQL`에 `pg_current_wal_lsn()` 추가 필요), 테이블 총 행 수 |
 | 트래픽 | 플랫폼 `shift_traffic` 구현 전체, `traffic.prepare`·`traffic.snapshot` 필드 확정(#61–#63), 중계 방식(PoC HAProxy, 웹은 Envoy 가정). **롤백 기준 결정 필요: #61의 "직전 안전 값으로 되돌림" vs #63의 "원본 100%로 되돌림" — 상헌님 결정** |
