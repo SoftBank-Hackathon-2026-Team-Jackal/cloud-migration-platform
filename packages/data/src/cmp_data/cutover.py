@@ -40,6 +40,11 @@ class CutoverSettings(Strict):
     wait_ready_sec: float = Field(default=30, ge=0)
     seq_headroom: int = Field(default=10_000, ge=0)
     verify: str = Field(default="auto", pattern="^(auto|checksum|light|none)$")
+    # 승인 화면(cutover.plan)에 보이는 값. 실제 중단 시간은 cutover.outcome으로 온다.
+    expected_pause_min_ms: float = Field(default=5, ge=0)
+    expected_pause_max_ms: float = Field(default=150, ge=0)
+    # 롤백 대비로 역방향 복제를 유지할 계획 시간(표시용). 끝내기는 `finish` 신호로 한다.
+    standby_hours: float = Field(default=72, ge=0)
 
 
 class DbLogin(Strict):

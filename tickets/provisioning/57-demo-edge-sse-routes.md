@@ -14,9 +14,11 @@ PROV-021(연결·권한 경계). 21 D3(API 루프백 바인딩, 공개 경로는
 ## 선행 작업
 21(데모 에지), 44(웹 시작), 45(데모 실행 설정). 웹 실제 모드 빌드 #224.
 
+**에지 라우트는 #227(#225, 티켓 21 D3a)이 먼저 main에 넣었다**: `@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*`, SSE는 `@migration_events path /migrations/*/events` + `flush_interval -1`, 실제 Caddy 실측 테스트 `tests/test_demo_edge_live.py`. 이 티켓은 같은 변경을 따로 만들었다가 병합 때 main 쪽을 그대로 받았다(에지 파일 변경 없음). 남은 범위는 무인증 결정 기록과 리허설 기본 테스트 경로다.
+
 ## 작업 범위
 - 포함
-  - `agent-routes.caddy`의 `@backend`에 `/migrations` `/migrations/*` `/provisioning/*` 추가, `reverse_proxy`에 `flush_interval -1`
+  - (에지 라우트: #227로 완료, 이 PR은 변경 없음)
   - API 설정 `WEB_START_SANDBOX_SETTINGS`(SandboxSettings JSON 객체) → 웹 실제 시작의 `sandbox`
   - compose api 환경 변수, `runtime.env.example`의 데모 앱 줄, `runtime-check.sh` 선택 이름, API `runtime_report`의 `web_start_sandbox=`
   - README·shared-contracts(44 시작 입력) 갱신
@@ -30,8 +32,8 @@ PROV-021(연결·권한 경계). 21 D3(API 루프백 바인딩, 공개 경로는
 | ID | 항목 | 결정 | 근거 |
 | --- | --- | --- | --- |
 | E1 | 담당 | 분석·샌드박스·트래픽 범위지만 본선 일정 때문에 Provisioning(김민서)이 대행한다 | Issue #228 |
-| E2 | 공개 경로 | `/migrations`, `/migrations/*`, `/provisioning/*`만 추가한다. `/provisioning-admin/*`, `/agent-admin/*`, `/tunnel-admin/*`, `/connections`, `/env-files`, `/agent-enrollments`, `/docs`, `/openapi.json`은 계속 웹으로 간다(API에 닿지 않음) | 웹 실제 모드가 부르는 경로만 연다. Caddy `path /provisioning/*`는 `/provisioning/` 접두만 맞아 `/provisioning-admin`은 걸리지 않는다(실제 Caddy로 확인) |
-| E3 | SSE 버퍼링 | `reverse_proxy { flush_interval -1 }` | 응답 조각을 바로 보낸다. Caddy는 `text/event-stream`을 기본으로도 바로 보내지만 설정으로 고정한다 |
+| E2 | 공개 경로 | (#227로 main에 반영, 이 티켓은 같은 결정을 확인만) `/migrations`, `/migrations/*`, `/provisioning/*`만 연다. `/provisioning-admin/*`, `/agent-admin/*`, `/tunnel-admin/*`, `/connections`, `/env-files`, `/agent-enrollments`, `/docs`, `/openapi.json`은 계속 웹으로 간다(API에 닿지 않음) | 웹 실제 모드가 부르는 경로만 연다. Caddy `path /provisioning/*`는 `/provisioning/` 접두만 맞아 `/provisioning-admin`은 걸리지 않는다(실제 Caddy로 확인) |
+| E3 | SSE 버퍼링 | #227의 `@migration_events`(`/migrations/*/events`)에 `flush_interval -1`. 이 티켓이 처음 만든 `@backend` 전체 `flush_interval -1`은 병합 때 버렸다 | SSE 경로에만 두는 쪽이 범위가 좁다. Caddy는 `text/event-stream`을 기본으로도 바로 보낸다 |
 | E4 | /migrations 인증 | 데모용으로 무인증 공개를 감수한다(흐름 점검 N11 공백). 실행 ID(`migration-<uuid4>`)를 아는 사람은 상태·이벤트·로그를 읽고 `approve`·`cancel`을 보낼 수 있다. 데모 뒤에는 경로를 빼거나 에지를 내리고, 운영 전 사용자 인증이 먼저다. README에 기록 | Issue #228. `/provisioning/*` 승인 경로는 API의 승인자 자격 증명·관리자 키 확인을 그대로 받는다 |
 | E5 | 리허설 기본값 위치 | 서버 환경 변수 하나(`WEB_START_SANDBOX_SETTINGS`, SandboxSettings JSON 객체)로만 둔다. 코드에 앱 경로를 넣지 않는다. 비어 있으면 `sandbox: null`(헬스 테스트만, 기존 동작) | Issue #228. CLI `--sandbox`와 같은 값이라 runbook(분석·검증 27) 모양을 그대로 쓴다. 필드를 하나씩 환경 변수로 나누면 `write_body` 같은 객체를 다시 조립해야 한다 |
 | E6 | 검증 범위 | API는 "JSON 객체인가"만 본다. 아니면 실제 시작이 503 `SANDBOX_SETTINGS_INVALID`(값을 응답에 넣지 않음). 필드는 worker가 `assemble_sandbox_input`에서 `SandboxSettings`로 검증한다 | API는 `cmp_worker`를 import하지 않는다(44 S10). 잘못된 운영 설정은 시작 전에 막고, 필드 단위 검증은 한곳에 둔다 |
@@ -40,14 +42,14 @@ PROV-021(연결·권한 경계). 21 D3(API 루프백 바인딩, 공개 경로는
 
 ## 검증 기록 (2026-11-06, 로컬)
 - `tests/test_demo_runtime.py`
-  - 에지 라우트 전체 줄 비교(`@backend` 경로 5개, `flush_interval -1`)
+  - (에지 라우트 줄 비교는 #227 테스트를 그대로 쓴다)
   - api 환경 `WEB_START_SANDBOX_SETTINGS: ${WEB_START_SANDBOX_SETTINGS:-}`(worker에는 없음), `runtime.env.example` 값이 `SandboxSettings`로 검증되고 demo-app 모양(201·`id`·`body`·`REPEAT_WRITE`)이며 표준 케이스 3개(헬스·왕복·재시작 후 유지)를 만든다
   - API `runtime_report`의 `web_start_sandbox=off/on/error:SANDBOX_SETTINGS_INVALID`
 - `tests/test_web_start_request.py`
   - 설정 없음 → `sandbox: null`, 설정 있음 → 그 객체이고 CLI `build_start_input(sandbox_json=…)`과 같은 입력, worker `SandboxSettings`로 검증됨
   - JSON 아님·배열·문자열·null → 503 `SANDBOX_SETTINGS_INVALID`, 시작 없음
   - scaffold 시작은 설정과 무관
-- 실제 Caddy(`caddy:2.10.2-alpine`, compose와 같은 digest)
+- 실제 Caddy(`caddy:2.10.2-alpine`, compose와 같은 digest) — 병합 전 이 티켓의 `@backend` 전체 flush 버전으로 확인했고, 병합 뒤에는 main의 `tests/test_demo_edge_live.py`(실제 Caddy·가짜 업스트림)가 통과한다
   - `caddy adapt --validate`로 실제 `Caddyfile` + `agent-routes.caddy` 통과(API reverse_proxy `flush_interval: -1`, 경로 5개)
   - 같은 라우트를 HTTP로 띄우고 가짜 API·웹으로 확인: `/migrations`, `/migrations/m-1`, `/migrations/m-1/logs`, `/provisioning/plans/…/approvals`, `/agents/register`, `/relays/r/agents` → API. `/provisioning-admin/teardowns`, `/agent-admin/agents`, `/connections`, `/env-files`, `/agent-enrollments`, `/tunnel-admin/relays/r`, `/docs`, `/openapi.json`, `/migrationsX`, `/health`, `/` → 웹
   - SSE: 3초 간격 이벤트 두 개가 에지를 지나 3초 간격 그대로 도착(버퍼링 없음)

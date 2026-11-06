@@ -6,6 +6,10 @@
 
 감시는 짧은 Activity를 타이머 간격으로 반복한다(무기한 Activity 없음). 이력이 길어지지 않게 일정 횟수마다
 continue-as-new로 상태를 넘긴다. Traffic의 DB 게이트는 `db_gate` Query로 읽는다(DM-007).
+
+원본이 쓰기 주체이고 복제가 streaming이면 웹 두 번째 승인 화면용 `cutover.plan`과
+`approval.required`(gate=cutover)를 낸다. 웹 승인(`POST /migrations/{id}/approve?gate=cutover`)은
+API가 이 Workflow에 `switchover` 신호로 보낸다.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ with workflow.unsafe.imports_passed_through():
 
 MONITOR_ROUNDS_BEFORE_CONTINUE = 200
 PARENT_SIGNAL = "data_migration_state"
+ANNOUNCE_PATCH = "data-cutover-announce-v1"
 SWITCH_FROM = {"switchover": "source", "rollback": "target"}
 
 
@@ -42,6 +47,8 @@ class DataMigrationWorkflow:
         self.switches: list[dict] = []
         self.failure_code: str | None = None
         self.requested: str | None = None  # switchover | rollback | finish | cancel
+        self.last_steps: list[dict] | None = None  # 지난 전환의 단계별 시간(계획 화면에 보인다)
+        self.announced: list | None = None  # 마지막으로 알린 [복제 준비됨, 전환 시도 수]
 
     # ---- 신호·조회 ----
 
@@ -151,14 +158,32 @@ class DataMigrationWorkflow:
         self.phase = "cancelled"
         return "cancelled"
 
+    async def _announce(self, args: dict) -> None:
+        """원본이 쓰기 주체일 때 전환 계획을 알린다. 복제 준비 상태나 시도 수가 바뀔 때만 다시 보낸다.
+        새 시도(처음, 거부 뒤, 롤백 뒤)마다 승인 요청도 함께 보낸다. 알림 실패는 이전을 막지 않는다."""
+        if self.active != "source" or not workflow.patched(ANNOUNCE_PATCH):
+            return
+        sample = self.last_sample
+        key = [sample.get("phase") == "streaming" and not sample.get("stale"), len(self.switches)]
+        if key == self.announced:
+            return
+        payload = {**self._cutover_payload(args), "sample": sample,
+                   "readiness": self.last_readiness, "last_steps": self.last_steps,
+                   "approval": self.announced is None or self.announced[1] != key[1]}  # fmt: skip
+        try:
+            await self._call(dc.dm_announce_cutover, payload, timeout_s=60)
+        except ActivityError:
+            return
+        self.announced = key
+
     async def _switch(self, args: dict) -> None:
         going = "switching" if self.active == "source" else "rolling_back"
         self.phase = going
+        payload = {**self._cutover_payload(args), "attempt": len(self.switches) + 1,
+                   "readiness": self.last_readiness}  # fmt: skip
         try:
             # 전환은 한 번만 시도한다(재시도는 사람이 상태를 보고 다시 신호를 보낸다).
-            result = await self._call(
-                dc.dm_switchover, self._cutover_payload(args), timeout_s=300, attempts=1
-            )
+            result = await self._call(dc.dm_switchover, payload, timeout_s=300, attempts=1)
         except ActivityError as exc:
             self.switches.append({"switched": False, "code": _code(exc), "from": self.active})
             self.phase = "streaming" if self.active == "source" else "switched"
@@ -168,6 +193,7 @@ class DataMigrationWorkflow:
             {k: result.get(k) for k in ("switched", "active", "write_pause_ms", "verify_ok")}
         )
         self.active = result["active"]
+        self.last_steps = result.get("steps") or self.last_steps
         self.phase = "switched" if self.active == "target" else "streaming"
         await self._notify()
 
@@ -197,6 +223,7 @@ class DataMigrationWorkflow:
         if state:
             self.phase, self.active = state["phase"], state["active"]
             self.switches, self.requested = state["switches"], state.get("requested")
+            self.last_steps, self.announced = state.get("last_steps"), state.get("announced")
         else:
             try:
                 outcome = await self._replicate(args)
@@ -221,6 +248,7 @@ class DataMigrationWorkflow:
                 self.phase = "done"
                 return await self._finish("done")
             await self._monitor_once(args)
+            await self._announce(args)
             try:
                 await workflow.wait_condition(
                     lambda: self.requested is not None, timeout=timedelta(seconds=interval)
@@ -228,7 +256,8 @@ class DataMigrationWorkflow:
             except TimeoutError:
                 pass
         state = {"phase": self.phase, "active": self.active, "switches": self.switches,
-                 "requested": self.requested}  # fmt: skip
+                 "requested": self.requested, "last_steps": self.last_steps,
+                 "announced": self.announced}  # fmt: skip
         workflow.continue_as_new({**args, "state": state})
         raise ApplicationError("unreachable")  # continue_as_new does not return
 

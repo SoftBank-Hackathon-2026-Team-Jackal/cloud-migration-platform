@@ -400,6 +400,7 @@ class AnalysisPipeline:
             source_db_images=assembly["database_images"],
             unmapped_items=unmapped,
             unverified_risks=risks,
+            scope=data.scope,
         )
         return {
             "ref": report.ref.model_dump(),

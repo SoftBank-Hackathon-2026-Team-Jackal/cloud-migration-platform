@@ -41,6 +41,7 @@ def create_activity_worker(client: Client) -> Worker:
             data_cutover.dm_install_cutover,
             data_cutover.dm_route_app,
             data_cutover.dm_switchover,
+            data_cutover.dm_announce_cutover,
         ],
     )
 

@@ -24,6 +24,9 @@ RESUME 후
 rev_sub, rev_conninfo, marker_table, max_xact_ms, lag_ok_bytes, wait_ready_sec, pause_timeout_sec,
 marker_timeout_ms, seq_headroom, verify("checksum"|"light"|"auto"|"none"), app_name
 
+결과 JSON에는 웹 cutover.* 이벤트용 값도 담는다: steps(단계별 ms·PAUSE 기준 시작 시각), ready(마지막 준비도
+표본과 기다린 시간), tables(테이블별 행 수·검증 결과). 전환하지 않았을 때도 그때까지의 steps와 ready를 담는다.
+
 종료 코드: 0 전환 성공(검증 일치 또는 생략), 3 전환했지만 검증 불일치, 4 전환하지 않음(원래 DB로 재개)
 """
 
@@ -52,8 +55,53 @@ def log(msg: str) -> None:
     print(f"[{stamp}.{int(t * 1000) % 1000:03d}] {msg}", file=sys.stderr, flush=True)
 
 
-def now_ms() -> int:
-    return time.monotonic_ns() // 1_000_000
+def now_ms() -> float:
+    return time.monotonic_ns() / 1_000_000
+
+
+# (단계 id, 시작 표시, 끝 표시, 구간). id는 웹 cutover.step·outcome.steps의 단계 이름이다.
+# sub_off와 reverse는 병렬로 실행하므로 같은 구간을 쓴다.
+TIMELINE = [
+    ("reverse_prep", "prepare", "seq_prebump", "pre"),
+    ("seq_raise", "seq_prebump", "sync_on", "pre"),
+    ("sync_on", "sync_on", "wait_ready", "pre"),
+    ("wait_ready", "wait_ready", "start", "pre"),
+    ("pause", "start", "paused", "pause"),
+    ("marker", "paused", "marker", "pause"),
+    ("seq", "marker", "snapshot", "pause"),
+    ("sub_off", "snapshot", "subs", "pause"),
+    ("reverse", "snapshot", "subs", "pause"),
+    ("liveness", "subs", "live", "pause"),
+    ("retarget", "live", "retargeted", "pause"),
+    ("resume", "retargeted", "resumed", "pause"),
+]
+
+
+def timeline(ts: dict) -> list[dict]:
+    """지금까지 지난 단계만. pause 구간 단계의 start_ms는 PAUSE 시작 기준이다."""
+    out = []
+    for step_id, a, b, window in TIMELINE:
+        if a not in ts or b not in ts:
+            continue
+        step = {"id": step_id, "ms": round(ts[b] - ts[a], 2), "window": window}
+        if window == "pause":
+            step["start_ms"] = round(ts[a] - ts["start"], 2)
+        out.append(step)
+    return out
+
+
+def table_rows(a: dict, b: dict) -> list[dict]:
+    """table_summary 두 개 → 테이블별 행 수와 일치 여부(값은 [행 수, 체크섬 또는 max(id)])."""
+    rows = []
+    for t in sorted(set(a) | set(b)):
+        src, dst = a.get(t), b.get(t)
+        rows.append({
+            "table": t,
+            "source_rows": int(src[0]) if src else 0,
+            "target_rows": int(dst[0]) if dst else None,
+            "match": src == dst,
+        })  # fmt: skip
+    return rows
 
 
 def one(conn, query, params=None):
@@ -191,7 +239,8 @@ def write_route(path: str, line: str) -> None:
         f.write(f"[databases]\n{line}\n")
 
 
-def switchover(cfg: dict) -> tuple[dict, int]:
+def switchover(cfg: dict, info: dict) -> tuple[dict, int]:
+    """info: 실패해도 결과에 담을 진행 기록(ts: 단계 시각, ready: 준비도 표본)."""
     app = cfg.get("app_name", "cmp-data-migration")
 
     def connect(url):
@@ -234,7 +283,7 @@ def switchover(cfg: dict) -> tuple[dict, int]:
         size = one(old, "select pg_database_size(current_database())")
         verify_mode = "checksum" if size <= 100 << 20 else "light"
 
-    ts: dict[str, int] = {}
+    ts: dict[str, float] = info.setdefault("ts", {})
     st = {key: False for key in ("prepared", "sync_on", "paused", "fwd_disabled", "rev_enabled",
                                  "retargeted", "switched")}  # fmt: skip
     seq_fixed = 0
@@ -277,15 +326,17 @@ def switchover(cfg: dict) -> tuple[dict, int]:
         old.execute("SET synchronous_commit = remote_apply")
 
         ts["wait_ready"] = now_ms()
-        if cfg["wait_ready_sec"] > 0:
-            log(f"0d. waiting for a ready moment (max {cfg['wait_ready_sec']}s)")
-            while True:
-                ok, reasons = is_ready(readiness(old, fwd, app), cfg)
-                if ok:
-                    break
-                if now_ms() - ts["wait_ready"] > cfg["wait_ready_sec"] * 1000:
-                    raise Abort("NOT_READY", ",".join(reasons))
-                time.sleep(0.02)
+        log(f"0d. waiting for a ready moment (max {cfg['wait_ready_sec']}s)")
+        while True:
+            sample = readiness(old, fwd, app)
+            ok, reasons = is_ready(sample, cfg)
+            waited = round(now_ms() - ts["wait_ready"], 2)
+            info["ready"] = {**sample, "ready": ok, "reasons": reasons, "waited_ms": waited}
+            if ok or cfg["wait_ready_sec"] <= 0:
+                break  # wait_ready_sec가 0이면 기다리지 않는다(표본만 남긴다)
+            if waited > cfg["wait_ready_sec"] * 1000:
+                raise Abort("NOT_READY", ",".join(reasons))
+            time.sleep(0.02)
         if direct := direct_clients(old, app):
             raise Abort("DIRECT_CLIENTS", f"{direct} sessions bypass PgBouncer")
 
@@ -357,14 +408,16 @@ def switchover(cfg: dict) -> tuple[dict, int]:
             one(new, "select 1")
         except psycopg.OperationalError:
             raise Abort("NEW_PRIMARY_UNREACHABLE") from None
+        ts["live"] = now_ms()
         st["retargeted"] = True
         write_route(cfg["route_file"], cfg["new_route"])
         pgb.cmd("RELOAD;")
         pgb.cmd(f"RECONNECT {pgb_db};")
+        ts["retargeted"] = now_ms()
         pgb.cmd(f"RESUME {pgb_db};")
         st["switched"] = True
         ts["resumed"] = now_ms()
-        pause_ms = ts["resumed"] - ts["start"]
+        pause_ms = round(ts["resumed"] - ts["start"], 2)
         log(f"   write pause {pause_ms}ms")
     except BaseException:
         undo(st, cfg, old, new, pgb)
@@ -389,6 +442,7 @@ def switchover(cfg: dict) -> tuple[dict, int]:
 
     verify_ok = None
     mismatched: list[str] = []
+    tables: list[dict] = []
     if verify_mode != "none":
         log(f"7. verify snapshot ({verify_mode})")
         f_old, f_new = (
@@ -398,6 +452,7 @@ def switchover(cfg: dict) -> tuple[dict, int]:
         a, b = f_old.result(), f_new.result()
         verify_ok = a == b
         mismatched = sorted(t for t in set(a) | set(b) if a.get(t) != b.get(t))
+        tables = table_rows(a, b)
     for c in (old_v, new_v):
         c.execute("ROLLBACK")
     ts["verified"] = now_ms()
@@ -409,6 +464,9 @@ def switchover(cfg: dict) -> tuple[dict, int]:
         "verify_ok": verify_ok,
         "mismatched_tables": mismatched,
         "seq_fixed_in_pause": seq_fixed,
+        "steps": timeline(ts),
+        "ready": info.get("ready"),
+        "tables": tables,
         "steps_ms": {
             "prepare_reverse (PAUSE 전)": ts["seq_prebump"] - ts["prepare"],
             "seq_prebump (PAUSE 전)": ts["sync_on"] - ts["seq_prebump"],
@@ -423,6 +481,7 @@ def switchover(cfg: dict) -> tuple[dict, int]:
             "verify (RESUME 후)": ts["verified"] - ts["dropped"],
         },
     }
+    result["steps_ms"] = {k: round(v, 2) for k, v in result["steps_ms"].items()}
     return result, (0 if verify_ok is not False else 3)
 
 
@@ -459,15 +518,22 @@ def drop_reverse(old, name: str) -> None:
 
 def main() -> int:
     cfg = json.load(sys.stdin)
-    try:
-        result, code = switchover(cfg)
-    except Abort as exc:
-        print(json.dumps({"switched": False, "code": exc.code, "detail": exc.detail}))
+    info: dict = {}
+
+    def refused(code: str, detail: str) -> int:
+        ts = info.get("ts", {})
+        print(json.dumps({"switched": False, "code": code, "detail": detail,
+                          "paused": "start" in ts, "steps": timeline(ts),
+                          "ready": info.get("ready")}))  # fmt: skip
         return 4
+
+    try:
+        result, code = switchover(cfg, info)
+    except Abort as exc:
+        return refused(exc.code, exc.detail)
     except Exception as exc:  # noqa: BLE001 - 결과 JSON은 항상 낸다. 메시지 첫 줄만(비밀값 없음)
         detail = f"{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-        print(json.dumps({"switched": False, "code": "RUNNER_ERROR", "detail": detail[:300]}))
-        return 4
+        return refused("RUNNER_ERROR", detail[:300])
     print(json.dumps({"switched": True, **result}))
     return code
 
