@@ -1,7 +1,7 @@
 # Ticket 30 — Sandbox 보안 프로브
 
 ## 상태
-IN_PROGRESS — DB 접근 프로브는 구현·자동 테스트 완료(2026-11-06). 실제 k3d 확인은 환경이 있을 때(`CMP_SANDBOX_KUBECONFIG`) 남음. 평문 DB 거절·운영용 경로 차단 프로브와 `security-posture` Skill은 대상이 없어 후속. Issue 번호는 사용자가 발행한 뒤 기록한다.
+DONE (구현 완료, PR 대기) — DB 접근 프로브는 자동 테스트와 **실제 k3d(`cmp-sandbox`) 확인까지 완료**(2026-11-06). 평문 DB 거절·운영용 경로 차단 프로브와 `security-posture` Skill은 대상이 없어 후속. Issue 번호는 사용자가 발행한 뒤 기록한다.
 
 ## 목적
 승인된 통신 의도와 기본 차단 NetworkPolicy가 Sandbox에서 실제로 동작하는지 시험 Pod로 증명한다. 원본에서는 클러스터 안 모든 Pod가 DB에 닿았는데 대상에서는 앱만 닿는다는 것을 "표시"가 아니라 "시험 결과"로 보여 준다.
@@ -33,15 +33,14 @@ Blocked by: 12, 13, 24, 28 (병합됨).
 - [x] 대상이 없는 템플릿은 케이스를 만들지 않고 사유가 남는다.
 - [x] Sandbox 구현은 시험 Pod와 임시 정책을 어떤 종료 경로(통과, 실패, 대기 시간 초과)에서도 지운다. 비특권이고 비밀 값이 없다.
 - [x] `security_probes`가 꺼져 있으면 묶음이 지금과 같고, 켜면 같은 입력에서 같은 묶음과 같은 해시가 나온다.
-- [ ] 실제 k3d에서 허용 출발지는 연결되고 외부 Pod는 차단되며 시험 Pod가 남지 않는다(`tests/integration/sandbox/test_k3d.py`, `CMP_SANDBOX_KUBECONFIG` 필요. 이 변경에서는 실행하지 못함).
+- [x] 실제 k3d에서 허용 출발지는 연결되고 외부 Pod는 차단되며 시험 Pod가 남지 않는다. `network_probe`를 직접 부른 것과, 통신 의도에서 케이스를 만들어 묶음으로 고정하고 `run_suite`로 돌린 전체 흐름 모두 통과했다(`tests/integration/sandbox/test_k3d.py::test_security_probes_show_only_the_intents_sources_reach_the_database`, 2026-11-06, 약 90초, 실행 뒤 `cmp-sbx` Namespace 0개).
 
 ## 테스트 전략
-- Test Seam: 묶음 모델·러너(가짜 probe 구현), 순수 케이스 생성, `SandboxService`(기록하는 `FakeRunner`), 입력 조립. 잡는 것: 판정 코드, 케이스 구성, 정리, 하위 호환. 못 잡는 것: 실제 CNI에서의 NetworkPolicy 동작(실제 k3d 1회).
+- Test Seam: 묶음 모델·러너(가짜 probe 구현), 순수 케이스 생성, `SandboxService`(기록하는 `FakeRunner`), 입력 조립, 실제 k3d 1회. 잡는 것: 판정 코드, 케이스 구성, 정리, 하위 호환, 실제 CNI에서의 NetworkPolicy 동작. 못 잡는 것: NetworkPolicy를 적용하지 않는 CNI(그 클러스터에서는 의미가 없다).
 - 실행: `uv run pytest tests/testsuite tests/sandbox/test_network_probe.py tests/analysis/test_sandbox_input.py -q`, 이후 `make check`. 실제: `CMP_SANDBOX_KUBECONFIG=~/.kube/cmp-sandbox.yaml uv run pytest tests/integration/sandbox -m k3d`
 
 ## 문서
 spec AV-023, runbook(보안 프로브), tasks.md를 같은 PR에서 갱신한다.
 
 ## 결정 대기
-- 실제 k3d 확인(환경 필요).
 - 평문 DB 거절 프로브는 DB SSL 공급 방식(D-18)이 정해진 뒤, 운영용 경로 프로브는 29-B의 사용자 확정 뒤에 추가한다.

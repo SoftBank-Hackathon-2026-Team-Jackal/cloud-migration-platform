@@ -357,6 +357,30 @@ def test_security_probes_show_only_the_intents_sources_reach_the_database(servic
         # The probe Pods and the temporary policy are gone.
         left = kubectl("get", "pods,networkpolicies", "-n", plan.namespace, "-o", "name").stdout
         assert "cmp-probe-" not in left
+
+        # The same, end to end: cases made from the intent, pinned, run, judged by the runner.
+        from cmp_testsuite import Suite, dump_bundle, run_suite
+        from cmp_testsuite.security import security_probe_cases
+        from cmp_worker.activities.sandbox_loop import probe_runner
+        from cmp_worker.artifact_store import LocalArtifactStore
+
+        cases = security_probe_cases(RequirementsV2.model_validate(base)).cases
+        assert [c.id for c in cases] == [
+            "sec-db-allowed-demo-api-demo-db",
+            "sec-db-outsider-demo-db",
+        ]
+        store = LocalArtifactStore(tmp_path / "probe-store")
+        ref = store.put(
+            dump_bundle(Suite(name="probes", cases=cases)), ref_id="p", kind="test-suite"
+        )
+        with service.cluster.proxy() as proxy:
+            result = run_suite(
+                ref, proxy + service.service_path(plan, "demo-api"), store=store,
+                probes=probe_runner(service, plan),
+            )  # fmt: skip
+        assert {r.id: r.status for r in result.results} == {c.id: "PASSED" for c in cases}, result
+        left = kubectl("get", "pods,networkpolicies", "-n", plan.namespace, "-o", "name").stdout
+        assert "cmp-probe-" not in left
     finally:
         service.teardown_sandbox(plan.namespace)
 
