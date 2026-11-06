@@ -184,6 +184,9 @@ async def test_a_spec_failure_is_fixed_by_a_new_requirements_version_without_a_b
     applies = [p for n, p in script.calls if n == "sbx_apply"]
     assert applies[0]["previous_plan"] is None and applies[1]["previous_plan"] == {"n": 1}
     assert script.names()[-3:] == ["sbx_teardown", "sbx_plan_publish", "sbx_publish"]
+    # The run does not wait for the cluster to finish deleting the Namespace (ticket 32).
+    teardowns = [p for n, p in script.calls if n == "sbx_teardown"]
+    assert [t["wait"] for t in teardowns] == [False]
     verifies = [p for n, p in script.calls if n == "sbx_verify"]
     assert [v["reset"] for v in verifies] == [False, True]
 

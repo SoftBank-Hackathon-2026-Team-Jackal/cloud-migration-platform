@@ -8,8 +8,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from cmp_worker.sandbox_deploy import SandboxService
+from cmp_worker.sandbox_input import POSTGRES_16
+from cmp_worker.sandbox_network import PROXY_IMAGE
 
 CONFIRM_ALL = "DELETE-ALL"
+# The k3d node of the dedicated Sandbox cluster (`k3d cluster create cmp-sandbox`, one server).
+SANDBOX_NODE = "k3d-cmp-sandbox-server-0"
+# Images every Sandbox run pulls that are not the application's own (ticket 32).
+PREWARM_IMAGES = (POSTGRES_16.uri, PROXY_IMAGE)
 
 
 def format_status(rows: list[dict[str, Any]]) -> str:
@@ -62,3 +68,12 @@ def run_command(
             return 0, "지울 Sandbox가 없습니다."
         return 0, "지운 Sandbox:\n" + "\n".join(deleted)
     return 2, "사용법: status | cleanup [--all --confirm DELETE-ALL]"
+
+
+def prewarm_images(runner, *, node: str = SANDBOX_NODE) -> list[str]:
+    """Pull the images every Sandbox run needs into the node's containerd, so a run does not wait
+    for them. Safe to repeat: an image the node already has is not downloaded again. The images
+    are pinned by digest and public, so no credential is involved."""
+    for image in PREWARM_IMAGES:
+        runner.run(["docker", "exec", node, "crictl", "pull", image], timeout=600)
+    return list(PREWARM_IMAGES)

@@ -900,12 +900,20 @@ class SandboxLoopActivities:
 
     @activity.defn(name="sbx_teardown")
     async def sbx_teardown(self, payload: dict) -> dict:
-        self.service.teardown_sandbox(payload["namespace"])
+        # `wait: False`: the run is not held up while the cluster deletes the Namespace. A failed
+        # request still raises; one that is accepted but never finishes is caught by the expiry
+        # sweep (`sbx_cleanup_expired`). CLEANED means the deletion was accepted (ticket 32).
+        self.service.teardown_sandbox(payload["namespace"], wait=payload.get("wait", True))
         return {"cleanup_status": "CLEANED"}
+
+    @activity.defn(name="sbx_cleanup_expired")
+    async def sbx_cleanup_expired(self, payload: dict) -> dict:
+        """Delete Sandbox Namespaces past their expiry label. Started by a Temporal Schedule."""
+        return {"deleted": self.service.cleanup_expired()}
 
     def all(self) -> list[Callable]:
         return [
             self.sbx_build, self.sbx_prepare, self.sbx_apply, self.sbx_verify,
             self.sbx_classify, self.sbx_fix, self.sbx_ai_tests, self.sbx_plan_assemble, self.sbx_plan_publish, self.sbx_publish,
-            self.sbx_teardown,
+            self.sbx_teardown, self.sbx_cleanup_expired,
         ]  # fmt: skip

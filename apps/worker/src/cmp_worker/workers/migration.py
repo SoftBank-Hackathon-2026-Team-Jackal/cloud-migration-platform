@@ -13,6 +13,7 @@ from cmp_worker.workflows.data_migration import DataMigrationWorkflow
 from cmp_worker.workflows.migration import MigrationWorkflow
 from cmp_worker.workflows.pull_refresh import GcpPullSecretRefreshWorkflow
 from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
+from cmp_worker.workflows.sandbox_expire import SandboxExpireWorkflow
 from cmp_worker.workflows.traffic import TrafficShiftWorkflow
 
 
@@ -62,6 +63,7 @@ def create_workflow_worker(client: Client) -> Worker:
             SandboxVerificationWorkflow,
             TrafficShiftWorkflow,
             GcpPullSecretRefreshWorkflow,  # ticket 29
+            SandboxExpireWorkflow,  # ticket 32
             CloudTeardownWorkflow,  # ticket 53
             GcpConnectionCheckWorkflow,  # ticket 48
             DataMigrationWorkflow,
