@@ -7,6 +7,8 @@ from cmp_contracts.provisioning import ContentRef
 TargetProvider = Literal["AWS", "GCP", "ON_PREM"]
 # Ticket 44 (S5): the web sends the upload `id` only; the API pins its latest version at start.
 EnvFileId = Annotated[str, Field(pattern=r"^envf-[a-f0-9]{32}$")]
+# Ticket 06B: the confirmed analysis scope (`POST /scope-analyses/{id}/confirm` -> `scope_id`).
+ScopeId = Annotated[str, Field(pattern=r"^scope-[a-f0-9]{16}$")]
 
 
 class StartTarget(BaseModel):
@@ -47,6 +49,9 @@ class MigrationRequest(BaseModel):
     source: StartSource | None = None
     # ENV-02: reference returned by `POST /env-files`; the `.env` values never travel here.
     env_file_ref: ContentRef | EnvFileId | None = None
+    # Ticket 06B: the API reads the confirmed scope and its source connection; the web sends
+    # only this ID. Optional: without it the analysis has no cluster to scan (as before).
+    scope_id: ScopeId | None = None
 
 
 class MigrationCreated(BaseModel):

@@ -114,6 +114,7 @@
 - 외부 진입(인터넷 → 앱 포트·TLS)과 원본 CIDR은 v2 intent에 자리가 없으므로 `AnalysisReport`에 기록한다(외부 진입 표현은 D-15).
 - 대상 CIDR·NAT·LB 종류·Security Group ID는 넣지 않는다.
 - 권한 거부는 필요한 권한 이름과 함께 실패로 반환한다. 코드 스캔과 병렬로 실행한다.
+- **범위 입력(티켓 06B):** 웹의 범위 선택에서 확정된 범위(`scope_id`)를 API가 저장된 기록에서 읽어 `AnalysisInput`의 `credential_ref`·`cluster_name`·`region`·`role_arns`(포함된 IAM 역할 후보만)·`scope`를 채운다. 웹이 값을 직접 보내지 않는다. 범위가 없으면 클러스터가 없어 인프라 스캔이 건너뛰어진다(결정 대기). 확정 범위는 `AnalysisReport.scope`에 기록하고, 스캔 필터·`MIGRATE`/`KEEP` 반영은 후속이다.
 
 #### AV-006 — 요구사항·사용 프로필과 사전 점검
 
