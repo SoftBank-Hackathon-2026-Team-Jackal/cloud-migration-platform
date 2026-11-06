@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # app being migrated. Unset: no `data_migration`, so the data step stays the scaffold; not a
     # valid input: 503 `DATA_MIGRATION_SETTINGS_INVALID`.
     web_start_data_migration: str | None = None
+    # #128: the traffic step's input for web (`target`) starts, a `TrafficShiftInput` JSON object
+    # (relay worker queue, step policy; the CLI's `--traffic`, no secrets). Operator configuration
+    # for the relay server. Unset: no `traffic`, so the traffic step stays the scaffold and the relay
+    # is never touched; not a valid input: 503 `TRAFFIC_SETTINGS_INVALID`.
+    web_start_traffic: str | None = None
 
 
 settings = Settings()

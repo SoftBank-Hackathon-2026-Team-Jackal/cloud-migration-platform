@@ -39,6 +39,7 @@ from cmp_api.start_request import (
     sandbox_settings,
     scope_analysis_fields,
     start_input,
+    traffic_settings,
 )
 from cmp_api.temporal_client import get_temporal_client
 
@@ -131,10 +132,13 @@ def _real_start_input(
                 scope_fields = scope_analysis_fields(scope, credential_ref(source_connection))
         sandbox = sandbox_settings(settings.web_start_sandbox_settings)
         data_migration = data_migration_settings(settings.web_start_data_migration)
+        traffic = traffic_settings(settings.web_start_traffic)
     except StartRefused as exc:
         raise _refused(exc.code, exc.status) from None
     store, env_ref = _env_ref(request, env_store)
-    data = start_input(request, source, planning, env_ref, scope_fields, sandbox, data_migration)
+    data = start_input(
+        request, source, planning, env_ref, scope_fields, sandbox, data_migration, traffic
+    )
     return data, store, env_ref
 
 
@@ -152,7 +156,8 @@ async def start_migration(
     `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`; 503
     `TARGET_PROFILES_UNCONFIGURED`, `SANDBOX_SETTINGS_INVALID` (the server's rehearsal shape is
     not a JSON object), `DATA_MIGRATION_SETTINGS_INVALID` (the server's data-migration input is
-    not a valid `DataMigrationInput`) or the `.env` store codes. Nothing starts on a refusal."""
+    not a valid `DataMigrationInput`), `TRAFFIC_SETTINGS_INVALID` (the server's traffic input is not
+    a valid `TrafficShiftInput`) or the `.env` store codes. Nothing starts on a refusal."""
     store = env_ref = None
     if request.scope_id is not None and request.target is None:
         raise _refused("SCOPE_NOT_APPLICABLE")  # 06B: a scope belongs to a real start

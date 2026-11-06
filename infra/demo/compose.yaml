@@ -114,6 +114,10 @@ services:
       # object in /opt/cmp/.env (source DB, source app, cutover settings, target tunnel address;
       # no secrets). Empty: the data step stays the scaffold (today's behavior).
       WEB_START_DATA_MIGRATION: ${WEB_START_DATA_MIGRATION:-}
+      # #128: the traffic step's input for web starts, a TrafficShiftInput JSON object in
+      # /opt/cmp/.env (relay worker queue, step policy; no secrets). Empty: the traffic step stays
+      # the scaffold and the relay server is never touched (today's behavior).
+      WEB_START_TRAFFIC: ${WEB_START_TRAFFIC:-}
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans

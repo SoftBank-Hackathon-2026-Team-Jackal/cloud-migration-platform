@@ -125,6 +125,7 @@ def api(db, env_store, catalog, monkeypatch):
     monkeypatch.setattr(settings, "planning_target_profiles_file", str(catalog))
     monkeypatch.setattr(settings, "web_start_sandbox_settings", None)
     monkeypatch.setattr(settings, "web_start_data_migration", None)
+    monkeypatch.setattr(settings, "web_start_traffic", None)
     app.dependency_overrides[migration_routes.get_env_file_store_factory] = lambda: (
         lambda: env_store
     )
@@ -717,6 +718,55 @@ def test_unusable_server_data_migration_refuses_the_start(api, env_ref, agent, m
     client, temporal = api
     response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
     assert (response.status_code, code_of(response)) == (503, "DATA_MIGRATION_SETTINGS_INVALID")
+    assert temporal.started == []
+    assert "never-shown" not in response.text
+
+
+TRAFFIC = {"relay_queue": "relay-1", "policy": {"observe_seconds": 20, "min_requests": 10}}
+
+
+def test_without_server_traffic_the_traffic_step_stays_scaffold(api, env_ref, agent):
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    assert "traffic" not in temporal.started[0]["data"]
+
+
+def test_server_traffic_reaches_the_start_input_as_the_cli_would(api, env_ref, agent, monkeypatch):
+    from cmp_traffic import TrafficShiftInput
+
+    monkeypatch.setattr(settings, "web_start_traffic", json.dumps(TRAFFIC))
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    data = temporal.started[0]["data"]
+    # What `MigrationWorkflow._shift_traffic` hands the `traffic-<id>` child.
+    given = TrafficShiftInput.model_validate(data["traffic"])
+    assert given.relay_queue == "relay-1" and given.policy.observe_seconds == 20
+    cli = build_start_input(
+        project_id="demo",
+        repository=data["analysis"]["repository"],
+        commit=COMMIT,
+        planning_json=json.dumps(data["planning"]),
+        env_file_ref_json=json.dumps(data["env_file_ref"]),
+        traffic_json=json.dumps(TRAFFIC),
+    )
+    assert data == cli
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not json",
+        "[1]",
+        json.dumps({"relay_queue": "bad queue name"}),  # not a worker queue name
+        json.dumps({"relay_queue": "relay-1", "policy": {"steps": [10, 50]}}),  # must end at 100
+        json.dumps({"policy": {"steps": [50, 10, 100]}}),  # steps must ascend
+    ],
+)
+def test_unusable_server_traffic_refuses_the_start(api, env_ref, agent, monkeypatch, value):
+    monkeypatch.setattr(settings, "web_start_traffic", value)
+    client, temporal = api
+    response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
+    assert (response.status_code, code_of(response)) == (503, "TRAFFIC_SETTINGS_INVALID")
     assert temporal.started == []
     assert "never-shown" not in response.text
 

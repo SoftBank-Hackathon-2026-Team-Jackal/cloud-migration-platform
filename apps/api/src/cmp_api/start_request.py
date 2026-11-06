@@ -21,6 +21,7 @@ from cmp_data.cutover import CutoverSettings, SourceApp
 from cmp_data.handoff import DataMigrationInput
 from cmp_providers.aws_preview import AwsPlanInput, validate_aws_input
 from cmp_providers.gcp_preview import GcpPlanInput, terraform_variables
+from cmp_traffic import TrafficShiftInput
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session
 
@@ -282,6 +283,21 @@ def data_migration_settings(value: str | None) -> dict | None:
     return parsed.model_dump(mode="json")
 
 
+def traffic_settings(value: str | None) -> dict | None:
+    """#128: the server's `TrafficShiftInput` JSON or None when unset.
+
+    Same value as the CLI's `--traffic` (relay worker queue, step policy). Checked here so a bad
+    value refuses the start instead of failing at the traffic step, after provisioning. The value is
+    never echoed in the refusal."""
+    if not value:
+        return None
+    try:
+        parsed = TrafficShiftInput.model_validate_json(value)
+    except (ValidationError, ValueError):
+        raise StartRefused("TRAFFIC_SETTINGS_INVALID", 503) from None
+    return parsed.model_dump(mode="json")
+
+
 def start_input(
     request: MigrationRequest,
     source: StartSource,
@@ -290,6 +306,7 @@ def start_input(
     scope_fields: dict | None = None,
     sandbox: dict | None = None,
     data_migration: dict | None = None,
+    traffic: dict | None = None,
 ) -> dict:
     """S10: the `build_start_input` shape (CLI) for a public GitHub source.
 
@@ -297,7 +314,8 @@ def start_input(
     profile, role ARNs and the confirmed scope; without it the analysis input is as before.
     `sandbox` (ticket 57) is the server's rehearsal shape, the CLI's `--sandbox`.
     `data_migration` (data-migration ticket 08) is the CLI's `--data-migration`; without it the
-    data step stays the scaffold, as before."""
+    data step stays the scaffold, as before. `traffic` (#128) is the CLI's `--traffic`; without it
+    the traffic step stays the scaffold, as before."""
     analysis = AnalysisInput(
         migration_id=request.project_id,
         repository=f"https://github.com/{source.full_name}.git",
@@ -312,4 +330,5 @@ def start_input(
         "planning": planning,
         "env_file_ref": env_ref.model_dump(mode="json"),
         **({"data_migration": data_migration} if data_migration else {}),
+        **({"traffic": traffic} if traffic else {}),
     }

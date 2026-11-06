@@ -803,6 +803,25 @@ def test_api_runtime_report_names_the_web_start_data_migration_state(monkeypatch
     assert report()["web_start_data_migration"] == "error:DATA_MIGRATION_SETTINGS_INVALID"
 
 
+def test_web_start_traffic_is_an_api_value_off_by_default():
+    assert _env("api")["WEB_START_TRAFFIC"] == "${WEB_START_TRAFFIC:-}"
+    assert "WEB_START_TRAFFIC" not in _env("worker")
+    assert _runtime_example()["WEB_START_TRAFFIC"] == ""  # needs the relay server's queue name
+    assert "WEB_START_TRAFFIC" in (DEMO / "runtime-check.sh").read_text()
+
+
+def test_api_runtime_report_names_the_web_start_traffic_state(monkeypatch):
+    from cmp_api.config import settings
+    from cmp_api.runtime_report import report
+
+    monkeypatch.setattr(settings, "web_start_traffic", None)
+    assert report()["web_start_traffic"] == "off"
+    monkeypatch.setattr(settings, "web_start_traffic", '{"relay_queue": "relay-1"}')
+    assert report()["web_start_traffic"] == "on"
+    monkeypatch.setattr(settings, "web_start_traffic", '{"relay_queue": "bad queue"}')
+    assert report()["web_start_traffic"] == "error:TRAFFIC_SETTINGS_INVALID"
+
+
 def test_worker_clis_come_before_the_platform_source():
     """Deploy speed: a code-only change must not rebuild the ~1.4 GB CLI layer. The worker installs
     the pinned CLIs before copying the source, and both targets copy the same source set."""
