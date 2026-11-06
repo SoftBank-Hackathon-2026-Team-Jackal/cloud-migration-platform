@@ -7,7 +7,8 @@
 #   - IAM writes only on roles/policies named with ResourcePrefix, PassRole only to EKS/EC2,
 #   - explicit deny for IAM users, access keys and changes to this role itself.
 # Actions that IAM cannot tag-scope (e.g. CreateRoute, AuthorizeSecurityGroupEgress) are limited
-# to the ec2 resource-tag condition where AWS evaluates it. Real Apply with this role is unverified.
+# to the ec2 resource-tag condition where AWS evaluates it. Real Apply with this role is unverified
+# (ticket 46: new security-group-rule resources and EKS tag-on-create are allowed explicitly).
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Cloud Migration Platform target build role (cross-account AssumeRole with External ID)
 Parameters:
@@ -22,8 +23,10 @@ Parameters:
   ResourcePrefix:
     Type: String
     Default: cmp-
-    Description: Name prefix of IAM roles/policies the platform's Terraform creates
-    AllowedPattern: "^[a-z][a-z0-9-]{1,19}$"
+    Description: Name prefix of IAM roles/policies the platform's Terraform creates (fixed)
+    # Ticket 46 (B-12): the platform requires cluster names starting with cmp- on this path.
+    AllowedValues:
+      - cmp-
   ManagedByTag:
     Type: String
     Default: terraform
@@ -32,6 +35,17 @@ Resources:
   ConnectionRole:
     Type: AWS::IAM::Role
     Properties:
+      # Ticket 46: a fixed cmp- name (from the External ID's hex) whatever the stack is called, so
+      # the platform principal's sts:AssumeRole scope (role/cmp-*) always matches.
+      RoleName:
+        Fn::Sub:
+          - "cmp-target-${Id}"
+          - Id:
+              Fn::Select:
+                - 1
+                - Fn::Split:
+                    - "-"
+                    - Ref: ExternalId
       Description: Cloud Migration Platform target build role
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
@@ -85,6 +99,8 @@ Resources:
               - eks:CreateAddon
               - eks:CreateCluster
               - eks:CreateNodegroup
+              # Ticket 46 (B-14): tag-on-create may also authorize eks:TagResource.
+              - eks:TagResource
             Resource: "*"
             Condition:
               StringEquals:
@@ -138,6 +154,15 @@ Resources:
               StringEquals:
                 aws:ResourceTag/cmp:managed-by:
                   Ref: ManagedByTag
+          # Ticket 46 (B-14): Authorize* also creates a new, untagged security-group-rule
+          # resource. The security group itself stays scoped by ChangeTagged.
+          - Sid: SecurityGroupRules
+            Effect: Allow
+            Action:
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:AuthorizeSecurityGroupIngress
+            Resource:
+              Fn::Sub: "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:security-group-rule/*"
           - Sid: PlatformIamOnly
             Effect: Allow
             Action:

@@ -16,7 +16,8 @@ done
 docker compose version
 
 # Keys/passwords are generated once and kept; the AWS profile file is regenerated (ticket 21).
-bash infra/demo/ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets
+# Ticket 46: the third directory holds the API-generated connection profiles shared with the worker.
+bash infra/demo/ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets /opt/cmp/data/aws-connections
 
 compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
 "${compose[@]}" up -d platform-db temporal-db temporal temporal-ui

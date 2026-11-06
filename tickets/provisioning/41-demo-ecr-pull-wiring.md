@@ -79,3 +79,6 @@ Blocked by: 28 (#152, 스택 배포 완료), 29 (#153, main 병합). 코드(`app
 - 서버 `.env` 반영·릴리스, 서버 api에서 인스턴스 역할로의 실제 `ecr:GetAuthorizationToken`, Agent의 실제 토큰 수신·pull은 실행하지 않았다(승인 필요).
 - 서버 `/opt/cmp/.env`의 `PROVISIONING_AWS_ROLE_ARN` 설정 여부를 확인하지 않았다 → D4의 GKE 토큰 발급 주체가 인스턴스 역할인지 미확인.
 - 연결 관리의 실제 AssumeRole 동작이 같은지(D3)는 코드·botocore 체인으로만 확인했다.
+
+## 후속 (티켓 46, 2026-11-06)
+- D2·D3의 "토큰 발급과 연결이 같은 프로필"을 나눴다. api `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build`(토큰 발급, 그대로 인스턴스 역할), `CONNECTION_PLATFORM_AWS_PROFILE`은 연결 주체 스택 배포 뒤 `cmp-platform-connector`. 설정이 없으면 41 동작 그대로. [46](46-connection-credentials.md)

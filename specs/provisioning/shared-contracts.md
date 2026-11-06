@@ -161,8 +161,16 @@ API 설정(`cmp_api.config`):
 - `connection_platform_aws_profile`: verify가 쓰는 플랫폼 주체 프로필이자 `source_profile`
 - `connection_platform_principal_arn`: 템플릿 신뢰 대상
 - `connection_template_base_url`: S3 템플릿 접두어
-- `connection_aws_config_file`, `connection_aws_base_config_file`
+- `connection_aws_config_file`, `connection_aws_base_config_file`: API가 시작·역할 등록·삭제 때 다시 쓴다(46)
 - `connection_gcp_project_id`
+- `platform_ecr_aws_profile`(46): Agent ECR 토큰 발급 주체. 없으면 `connection_platform_aws_profile`(41 동작)
+
+**Provisioning의 연결 사용 (46):** AWS Plan 입력 `credential_ref`(`VersionRef`)의 `id`가 연결 ID `conn-<12 hex>`면 대상 연결이고, `version`은 `"1"`이다(Role ARN은 한 번만 등록). 새 계약 필드는 없다. 44의 시작 요청은 `PlanningSettings.target.settings.credential_ref`에 이 값을 넣는다. `conn-`으로 시작하지만 형식이 틀리면 `INVALID_CREDENTIAL_REF`, 연결 ID가 아니면 worker 고정 프로필(이전 동작).
+- `cmp_providers.aws_credentials`: `connection_profile(id)`, `connection_id_of(ref)`, `resolve_aws_profiles(ref, *, platform_profile) -> AwsProfiles(provider, state, connection_id)`. `plan_aws_infrastructure`·`apply_aws_infrastructure`의 `aws_profile`은 플랫폼 프로필(State backend·기본값) 뜻이다. S3 backend `init`에 `-backend-config=profile=<state>`가 항상 붙는다.
+- `cmp_api.connections.check_target_connection(session, id, *, account_id)`: Plan 게시 전 검사. 실패 `PLAN_FAILED` + `TARGET_CONNECTION_NOT_FOUND`·`TARGET_CONNECTION_KIND_MISMATCH`·`TARGET_CONNECTION_NOT_VERIFIED`·`TARGET_CONNECTION_ACCOUNT_MISMATCH`.
+- 연결 경로 Plan: `cluster_name`이 `cmp-`로 시작해야 한다(`INVALID_CLUSTER_NAME`).
+- AWS Plan 명령 실패 issues: 첫 코드(계정 확인 단계는 `AWS_IDENTITY_UNAVAILABLE`, 그 밖은 `PLAN_COMMAND_FAILED`) + 단계 코드 `PLAN_STEP_IDENTITY|INIT|VALIDATE|PLAN|SHOW`(경로 `terraform.<단계>`).
+- AWS 워크로드: `ApprovedWorkloads.runtime_for(approved)` 훅, `Approved.spec`(승인된 SPEC 문서), `CliRuntime.with_profile`. 응답 추가: `POST /connections`·`GET /connections/{id}`의 `platform_principal_arn`(AWS만, 설정 없으면 `null`).
 
 ## 이전 이벤트 저장소·SSE (24)
 

@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # (`connection_platform_aws_profile`, the instance role on the demo host) mints pull tokens.
     platform_ecr_registry: str | None = None
     platform_ecr_repositories: str = "cmp-platform-builds"
+    # Ticket 46: the principal that mints those pull tokens when it is not the connection
+    # principal (demo: `cmp-demo-build`, the instance role with the ticket-28 ECR policy; the
+    # connector role `cmp-platform-connector` has no ECR access). Unset: ticket-41 behavior.
+    platform_ecr_aws_profile: str | None = None
 
 
 settings = Settings()

@@ -88,3 +88,6 @@ Blocked by: B-01 (DONE), 21 (로컬 완료). 29(#153, Agent 이미지 pull·토�
 - 호스트 Docker Engine 버전(AL2023 패키지)을 확인하지 않았다. CLI 28.5.2는 구 API로 협상하지만 서버에서 `docker version`으로 확인한다(start.sh 검사).
 - 대상 클러스터의 pull: EKS 노드 역할의 ECR 읽기 권한과 GKE용 토큰(29)은 이 티켓 범위 밖이다. 29는 `PROVISIONING_AWS_ROLE_ARN`을 쓰는 경우를 대비해 `cmp-demo-build` 프로필(인스턴스 역할)로 토큰을 발급해야 이 정책이 적용된다.
 - 접두사 `sources/`·`tests/`·`builds/`는 박승철님 확인 대기.
+
+## 후속 (티켓 46, 2026-11-06)
+- 같은 방식(D1)으로 별도 스택 `cmp-demo-connector`를 둔다: 인스턴스 역할에 인라인 정책 `cmp-demo-connector`(연결 주체 역할 Assume만)를 붙이고 컨트롤 플레인 스택은 갱신하지 않는다. [46](46-connection-credentials.md)

@@ -17,9 +17,11 @@ from pathlib import Path
 from tempfile import mkdtemp
 
 from cmp_contracts.plan import PlanManifest, Preview
+from cmp_contracts.provisioning import ProvisioningInputError
 from pydantic import ValidationError
 
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes, verify_artifact_bytes
+from cmp_providers.aws_credentials import resolve_aws_profiles
 from cmp_providers.aws_preview import AwsPlanInput
 from cmp_providers.resources import resource_root
 from cmp_providers.terraform_events import apply_runner, is_stale
@@ -179,13 +181,17 @@ def apply_aws_infrastructure(
     if failure:
         return failure
     spec, plan_bytes = checked
-    if not aws_profile or aws_profile == "default":
-        return _failed("MISSING_PROFILE")
+    # Ticket 46: the connection pinned in the approved Spec runs the target; `aws_profile` is the
+    # platform profile (State backend, or everything when the Spec names no connection).
+    try:
+        profiles = resolve_aws_profiles(spec.credential_ref, platform_profile=aws_profile)
+    except ProvisioningInputError as error:
+        return _failed(error.issues[0].code)
 
     env = dict(
         os.environ,
-        AWS_PROFILE=aws_profile,
-        AWS_DEFAULT_PROFILE=aws_profile,
+        AWS_PROFILE=profiles.provider,
+        AWS_DEFAULT_PROFILE=profiles.provider,
         AWS_REGION=spec.region,
         TF_IN_AUTOMATION="1",
         TF_INPUT="0",
@@ -195,7 +201,7 @@ def apply_aws_infrastructure(
     os.chmod(work, 0o700)
 
     def aws(args: list[str]) -> CommandResult:
-        command = ["aws", *args, "--profile", aws_profile, "--region", spec.region]
+        command = ["aws", *args, "--profile", profiles.provider, "--region", spec.region]
         return runner([*command, "--output", "json"], work, env, QUERY_TIMEOUT_SECONDS)
 
     def terraform(args: list[str], timeout: int) -> CommandResult:
@@ -224,6 +230,7 @@ def apply_aws_infrastructure(
                 f"-backend-config=region={spec.region}",
                 "-backend-config=encrypt=true",
                 "-backend-config=use_lockfile=true",
+                f"-backend-config=profile={profiles.state}",  # 46 (B-13): platform State bucket
             ],
             QUERY_TIMEOUT_SECONDS,
         )

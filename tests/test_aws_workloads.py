@@ -138,14 +138,22 @@ class Plan:
     """Writes the approved artifacts and publishes + approves one Revision."""
 
     def __init__(
-        self, root: Path, db, *, app=None, image_uri=APP_IMAGE, scope="WORKLOADS", rules_from=None
+        self,
+        root: Path,
+        db,
+        *,
+        app=None,
+        image_uri=APP_IMAGE,
+        scope="WORKLOADS",
+        rules_from=None,
+        spec=None,
     ):
         self.root = root
         app = app or app_template()
         # Binding rules are approved from a clean template; pass `rules_from` for custom apps.
         rules = bindings_bytes(rules_from or app_template())
         self.contents = {
-            "spec": canonical_json_bytes({"spec": "demo"}),
+            "spec": canonical_json_bytes(spec or {"spec": "demo"}),
             "database_chart": chart_tgz("postgres"),
             "database_values": canonical_json_bytes(db_values()),
             "application_chart": chart_tgz("application"),
