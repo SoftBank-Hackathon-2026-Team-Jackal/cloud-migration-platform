@@ -114,6 +114,8 @@ Helm heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`)은 Temp
 | `traffic.snapshot` | 가중치 변경·관찰 주기마다 | 가중치·게이트·잔여 연결 | `{"phase":"observing","weights":{"origin":50,"target":50},"step":50,"gate":{…},"residual":{…}}` |
 | `traffic.ready` | 전환 조건 확인 | 복제 지연·가장 긴 트랜잭션·초당 커밋 | `{"state":"done","lag_ms":0,"longest_tx_ms":12,"commits_per_sec":40}` |
 
+**실제 발행(#234, 트래픽 범위 대행).** 세 트래픽 이벤트는 모두 `TrafficShiftWorkflow`가 `emit_migration_event`로 낸다(중계 서버 워커에는 이벤트 저장소가 없다). 순서는 웹 목업과 같다: `traffic.ready` running → `traffic.prepare` running(`handoff_status`·`ready` done, `external_endpoint` running) → `traffic_prepare`(중계 대상 일치·대상 `health_path` 확인) → `traffic.prepare` done(네 확인 done) 또는 failed(`reason` 코드) → `traffic.ready` done(DB 게이트가 막으면 waiting) → `traffic.snapshot`. `traffic.ready` 숫자는 같은 실행의 `data-<id>` `status` Query 값이며 하나라도 모르면 내지 않는다. 사람이 누르는 `POST /migrations/{id}/traffic/rollback`·`/retry`는 자식 `traffic-<id>`에 `request_rollback`·`request_retry` Signal을 보낸다(없는 migration 404, 지금 받을 수 없으면 409 `TRAFFIC_NOT_RUNNING`·`TRAFFIC_ACTION_NOT_ALLOWED`). 수동 롤백 스냅샷은 `notes: [{key: "manual", activity: "traffic_rollback"}]`, 재시도 첫 스냅샷은 `notes: [{key: "restart"}]`이다. 롤백 뒤 재시도를 기다리는 동안 `rolledback` 스냅샷은 `running`이고, 기다림(기본 900초)이 끝나면 같은 스냅샷을 `failed`로 한 번 더 낸다. 자세한 결정: [ticket 61](../../tickets/provisioning/61-traffic-events-actions.md).
+
 ### 전환·인계 (상헌님·데이터 담당) — `phase: verification`
 
 | 보낼 이벤트 | 어느 Activity에서 | 값 | 예시 |
