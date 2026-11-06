@@ -86,6 +86,18 @@
       "$ref": "#/$defs/event:cutover.handover"
     },
     {
+      "$ref": "#/$defs/event:cutover.plan"
+    },
+    {
+      "$ref": "#/$defs/event:cutover.ready"
+    },
+    {
+      "$ref": "#/$defs/event:cutover.outcome"
+    },
+    {
+      "$ref": "#/$defs/event:cutover.verify"
+    },
+    {
       "$ref": "#/$defs/event:error"
     },
     {
@@ -818,13 +830,45 @@
         "n": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 6
+          "maximum": 32
         },
         "state": {
           "enum": [
             "running",
             "done",
             "verify"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "description": "[가정] 단계 이름(예: pause, marker, sub_off, seq, reverse, liveness, retarget, resume, checksum, revert)"
+        },
+        "ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "method": {
+          "enum": [
+            "fast",
+            "classic"
+          ]
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "result": {
+          "enum": [
+            "ok",
+            "fail",
+            "revert"
+          ]
+        },
+        "window": {
+          "enum": [
+            "pre",
+            "pause"
           ]
         }
       },
@@ -1615,6 +1659,18 @@
           "$ref": "#/$defs/event:cutover.handover"
         },
         {
+          "$ref": "#/$defs/event:cutover.plan"
+        },
+        {
+          "$ref": "#/$defs/event:cutover.ready"
+        },
+        {
+          "$ref": "#/$defs/event:cutover.outcome"
+        },
+        {
+          "$ref": "#/$defs/event:cutover.verify"
+        },
+        {
           "$ref": "#/$defs/event:error"
         },
         {
@@ -1931,8 +1987,12 @@
         "state": {
           "enum": [
             "running",
-            "done"
+            "done",
+            "held"
           ]
+        },
+        "detail": {
+          "type": "string"
         }
       },
       "required": [
@@ -3693,6 +3753,578 @@
         },
         "data": {
           "$ref": "#/$defs/data:traffic.prepare"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "data:cutover.plan": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "fast",
+            "classic"
+          ]
+        },
+        "expected_pause_ms": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "min",
+            "max"
+          ],
+          "additionalProperties": false
+        },
+        "rehearsal": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "runs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "fast",
+                      "classic"
+                    ]
+                  },
+                  "pause_ms": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "method",
+                  "pause_ms"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "source",
+            "runs",
+            "methods"
+          ],
+          "additionalProperties": false
+        },
+        "preconditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "pass",
+                  "wait",
+                  "fail"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "string"
+              },
+              "proposal": {
+                "type": "boolean",
+                "description": "백엔드에 아직 없는 제안안 조건"
+              }
+            },
+            "required": [
+              "id",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "start_ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "window": {
+                "enum": [
+                  "pre",
+                  "pause"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "ms"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "properties": {
+            "standby_hours": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "standby_hours"
+          ],
+          "additionalProperties": false
+        },
+        "topology": {
+          "type": "object",
+          "properties": {
+            "app": {
+              "type": "string"
+            },
+            "pooler": {
+              "type": "string"
+            },
+            "source_db": {
+              "type": "string"
+            },
+            "target_db": {
+              "type": "string"
+            },
+            "source_where": {
+              "type": "string"
+            },
+            "target_where": {
+              "type": "string"
+            },
+            "writes_per_sec": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "app",
+            "pooler",
+            "source_db",
+            "target_db",
+            "source_where",
+            "target_where",
+            "writes_per_sec"
+          ],
+          "additionalProperties": false
+        },
+        "handover": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item": {
+                "enum": [
+                  "dns",
+                  "origin",
+                  "access"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "item"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "method",
+        "expected_pause_ms",
+        "rehearsal",
+        "preconditions",
+        "steps",
+        "rollback",
+        "topology",
+        "handover"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 두 번째 승인 전 전환 계획"
+    },
+    "event:cutover.plan": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.plan"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.plan"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "data:cutover.ready": {
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "longest_tx_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lock_waits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "commits_per_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "longest_tx_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "lock_waits": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "longest_tx_ms",
+            "lock_waits"
+          ],
+          "additionalProperties": false
+        },
+        "waiting_on": {
+          "type": "string"
+        },
+        "waited_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "attempt",
+        "longest_tx_ms",
+        "lock_waits",
+        "commits_per_sec",
+        "ready",
+        "limits"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 전환 가능 시점 대기"
+    },
+    "event:cutover.ready": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.ready"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.ready"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "data:cutover.outcome": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "enum": [
+            "switched",
+            "refused"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "active": {
+          "enum": [
+            "source",
+            "target"
+          ]
+        },
+        "pause_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "held_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replication": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "enum": [
+                "reverse",
+                "forward"
+              ]
+            },
+            "lag_ms": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "direction",
+            "lag_ms"
+          ],
+          "additionalProperties": false
+        },
+        "message": {
+          "type": "string",
+          "description": "중단 시 stderr 글"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "start_ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "window": {
+                "enum": [
+                  "pre",
+                  "pause"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "ms"
+            ],
+            "additionalProperties": false
+          },
+          "description": "통과 시 steps_ms"
+        }
+      },
+      "required": [
+        "result",
+        "active",
+        "pause_ms",
+        "replication"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 전환 결과(통과·거부)"
+    },
+    "event:cutover.outcome": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.outcome"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.outcome"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "data:cutover.verify": {
+      "type": "object",
+      "properties": {
+        "table": {
+          "type": "string"
+        },
+        "source_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_rows": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "checksum": {
+          "enum": [
+            "match",
+            "mismatch",
+            "pending",
+            "skipped"
+          ]
+        }
+      },
+      "required": [
+        "table",
+        "source_rows",
+        "target_rows",
+        "checksum"
+      ],
+      "additionalProperties": false,
+      "description": "[가정] 전환 순간 스냅샷 기준 테이블별 검증"
+    },
+    "event:cutover.verify": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "cutover.verify"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:cutover.verify"
         }
       },
       "required": [

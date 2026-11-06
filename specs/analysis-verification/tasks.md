@@ -12,6 +12,7 @@
 | [04 매니페스트·클러스터 리소스 스캔](../../tickets/analysis-verification/04-manifest-scan.md) | DONE (PR #54 병합) | 01 | AV-004 | #50 | ☑ |
 | [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DONE (PR #58 병합) | 03, D-07(언어별 어댑터만) | AV-003 | #57 | ☑ |
 | [06 AWS 인프라·네트워크 스캔과 통신 의도](../../tickets/analysis-verification/06-aws-infra-scan.md) | IN_PROGRESS (PR #90 병합, 실제 계정 실행 남음) | 01, AWS 테스트 계정(외부) | AV-005, AV-020 | #89 | ☐ |
+| [06B 확정된 분석 범위를 분석 입력으로 연결](../../tickets/analysis-verification/06b-scope-input.md) | IN_PROGRESS | 06, 티켓 56(병합) | AV-001, AV-005, AV-020 | 미발행(사용자 발행 후 기록) | ☐ |
 | [07 요구사항·사용 프로필·사전 점검 조립](../../tickets/analysis-verification/07-profile-precheck.md) | DONE (PR #64, #77, #86 병합) | 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시) | AV-006, AV-017 | #59 | ☑ |
 | [08A 에이전트 실행 기반과 Skill 형식](../../tickets/analysis-verification/08a-agent-runtime.md) | DONE (PR #68 병합) | 01 | AV-007, AV-020 | #67 | ☑ |
 | [08 카탈로그·Skill v1과 매핑](../../tickets/analysis-verification/08-mapping.md) | DONE (PR #73 병합) | 07, 08A, D-01(실제 LLM 연결 시) | AV-007, AV-008, AV-020 | #72 | ☑ |
