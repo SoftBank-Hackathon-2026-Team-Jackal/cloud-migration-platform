@@ -38,8 +38,10 @@ paths:
         `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`;
         503
 
-        `TARGET_PROFILES_UNCONFIGURED` or the `.env` store codes. Nothing starts on
-        a refusal.'
+        `TARGET_PROFILES_UNCONFIGURED`, `SANDBOX_SETTINGS_INVALID` (the server''s
+        rehearsal shape is
+
+        not a JSON object) or the `.env` store codes. Nothing starts on a refusal.'
       operationId: start_migration_migrations_post
       requestBody:
         content:

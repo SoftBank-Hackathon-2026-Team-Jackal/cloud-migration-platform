@@ -26,6 +26,7 @@ from cmp_contracts.verification import BuildAttempt, canonical_requirements
 from cmp_providers.env_file_store import EncryptedEnvFileStore, load_key
 from cmp_worker.plan_publish import PlanPublisher
 from cmp_worker.planning_handoff import PlanningSettings, assemble_registration
+from cmp_worker.sandbox_input import SandboxSettings
 from cmp_worker.start_input import build_start_input
 from fastapi.testclient import TestClient
 from onprem_rollout_support import register_agent
@@ -122,6 +123,7 @@ def api(db, env_store, catalog, monkeypatch):
 
     monkeypatch.setattr(migration_routes, "get_temporal_client", get_client)
     monkeypatch.setattr(settings, "planning_target_profiles_file", str(catalog))
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", None)
     app.dependency_overrides[migration_routes.get_env_file_store_factory] = lambda: (
         lambda: env_store
     )
@@ -396,6 +398,64 @@ def test_the_start_input_equals_the_cli_start_input(api, env_ref, agent):
         env_file_ref_json=json.dumps(data["env_file_ref"]),
     )
     assert data == cli
+
+
+# --- ticket 57 (#228): the server's default rehearsal write/read shape ----------------------
+
+# The Go demo app's shape as the runbook gives it to `--sandbox` (test data; the server value is
+# operator configuration, never code).
+GO_SHAPE = {
+    "write_path": "/api/messages",
+    "write_body": {"client_msg_id": "std-{{run_id}}", "author": "cmp", "body": "value-{{run_id}}"},
+    "write_status": 201,
+    "id_from_response": "id",
+    "value_field": "body",
+    "read_back": "REPEAT_WRITE",
+}
+
+
+def test_without_server_sandbox_settings_the_rehearsal_stays_health_only(api, env_ref, agent):
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    assert temporal.started[0]["data"]["sandbox"] is None
+
+
+def test_server_sandbox_settings_reach_the_start_input_as_the_cli_would(
+    api, env_ref, agent, monkeypatch
+):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", json.dumps(GO_SHAPE))
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    data = temporal.started[0]["data"]
+    assert data["sandbox"] == GO_SHAPE
+    cli = build_start_input(
+        project_id="demo",
+        repository=data["analysis"]["repository"],
+        commit=COMMIT,
+        sandbox_json=json.dumps(GO_SHAPE),
+        planning_json=json.dumps(data["planning"]),
+        env_file_ref_json=json.dumps(data["env_file_ref"]),
+    )
+    assert data == cli
+    # What the parent hands `assemble_sandbox_input` is a valid SandboxSettings.
+    assert SandboxSettings.model_validate(data["sandbox"]).read_back == "REPEAT_WRITE"
+
+
+@pytest.mark.parametrize("value", ["not json", "[1, 2]", '"text"', "null"])
+def test_unusable_server_sandbox_settings_refuse_the_start(api, env_ref, agent, monkeypatch, value):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", value)
+    client, temporal = api
+    response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
+    assert (response.status_code, code_of(response)) == (503, "SANDBOX_SETTINGS_INVALID")
+    assert temporal.started == []
+    assert value not in response.text or value == "null"
+
+
+def test_server_sandbox_settings_leave_the_scaffold_start_alone(api, monkeypatch):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", json.dumps(GO_SHAPE))
+    client, temporal = api
+    assert client.post("/migrations", json={"project_id": "demo"}).status_code == 202
+    assert temporal.started[0]["data"] == "demo"
 
 
 def registration_for(planning: dict, env_ref: ContentRef):

@@ -60,7 +60,7 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `/provisioning/*` | API | 브라우저의 Plan 미리보기·승인. 승인자 Bearer, 승인자 등록·Plan 입력은 `APPROVAL_ADMIN_KEY` |
 | 그 밖의 모든 경로 | 웹 화면(`web:3000`) | `/`, `/settings`, `/api/*`(웹 서버 경로) 등 |
 
-`/migrations`에서 누구나 이전을 시작할 수 있다(실제 시작은 대상 프로필·업로드한 `.env`가 있어야 하고, 없으면 422/503으로 거절된다). `/migrations/{id}/approve`(scaffold Signal)는 실제 경로의 Plan 승인을 대신하지 못하지만, `/migrations/{id}/cancel`·조회·로그는 Workflow ID(UUID)를 아는 사람이면 부를 수 있다. 데모가 끝나면 인증을 붙이거나 이 경로를 다시 닫는다.
+`/migrations`에서 누구나 이전을 시작할 수 있다(실제 시작은 대상 프로필·업로드한 `.env`가 있어야 하고, 없으면 422/503으로 거절된다). `/migrations/{id}/approve`(scaffold Signal)는 실제 경로의 Plan 승인을 대신하지 못하지만, `/migrations/{id}/cancel`·조회·로그는 Workflow ID(UUID)를 아는 사람이면 부를 수 있다. 데모가 끝나면 인증을 붙이거나 이 경로를 다시 닫는다. 이 무인증 공개는 데모 한정으로 감수한다는 결정이다(흐름 점검 N11 공백, [티켓 57](../../tickets/provisioning/57-demo-edge-sse-routes.md) E4). 운영 전환 전에는 사용자 인증(웹 로그인과 API 확인)이 먼저다.
 - Temporal gRPC(`/temporal.api.*`, `/grpc.health.v1.Health/*`) → `temporal:7233`. **`CMP_TEMPORAL_ALLOWED_IP`(`/opt/cmp/.env`)에 적은 주소에서 온 요청만** 통과한다(중계 서버 `cmp-demo-relay`의 워커용). 설정하지 않으면 사용할 수 없는 문서용 주소(`192.0.2.1/32`)라 아무도 못 붙는다. 중계 서버 워커는 `TEMPORAL_ADDRESS=<CMP_PUBLIC_HOST>:443`, `TEMPORAL_TLS=true`로 접속한다.
 
 운영자·Agent 등록·터널 관리 API(`/agent-admin/*`, `/agent-enrollments`, `/tunnel-admin/*`, `/provisioning-admin/*`, `/connections`, `/env-files`)와 `/docs`, `/openapi.json`은 에지가 API로 넘기지 않으므로 계속 SSM 포트 포워딩으로만 쓴다(웹 서버 코드가 내부망에서 `http://api:8000`을 부를 뿐, 받은 경로를 그대로 전달하지 않는다). `/agent-enrollments`, `/docs` 같은 경로를 인터넷에서 열면 API가 아니라 웹이 404를 돌려준다. Traffic 중계 서버(별도 호스트, DNS 전환 P0 제외)와 포트·도메인을 공유하지 않는다.
@@ -249,6 +249,7 @@ docker exec cmp-demo-worker-1 sh -c 'grep -c "^\[profile cmp-conn-" "$AWS_CONFIG
 | `SANDBOX_PREBUILT_IMAGES` | worker | 빈 값 | 실제 루프의 앱 이미지(Digest 고정 JSON). `BUILD_*`가 모두 있으면 대신 실제 빌드 |
 | `LLM_ENABLED=true`, `ANTHROPIC_API_KEY` | worker | 꺼짐 | Claude 사용. 원장 `/opt/cmp/data/llm/ledger.json`, 즉시 중지 `touch /opt/cmp/data/llm/disabled` |
 | `PLANNING_TARGET_PROFILES_FILE=/opt/cmp/config/target-profiles.json` | api | 파일 없음 → 실제 시작 503 `TARGET_PROFILES_UNCONFIGURED` | 웹 `target.profile`이 고르는 대상 설정(44) |
+| `WEB_START_SANDBOX_SETTINGS` | api | 빈 값 → 리허설은 헬스 테스트만 | 웹 실제 시작의 `sandbox`(SandboxSettings JSON 객체, CLI `--sandbox`와 같다)로 표준 DB 쓰기→읽기·재시작 후 유지 테스트까지 돈다(티켓 57). 데모 앱(demo-app) 값은 `runtime.env.example`의 줄 그대로(작은따옴표 유지). JSON 객체가 아니면 실제 시작이 503 `SANDBOX_SETTINGS_INVALID`. 다른 앱은 그 앱의 쓰기 모양을 따로 적는다 |
 
 지금 데모 서버에는 Sandbox 클러스터가 없다(분석 D-08: Sandbox는 로컬 k3d). 그래서 분석만 실제로 켜면 실제 시작은 Sandbox 첫 단계(`sbx_build`)에서 멈춘다. 어떤 경로를 켤지는 박승철님과 정한다(티켓 45 협의 필요).
 
@@ -285,7 +286,7 @@ sudo bash /opt/cmp/releases/$(cat /opt/cmp/current-revision)/infra/demo/runtime-
 | `container=` | api·worker·temporal·DB가 `Up`, DB는 `(healthy)` |
 | `alembic=` | 그 커밋의 head(`… (head)`) |
 | worker `analysis=`·`sandbox=`·`build=`·`llm=`·`env_store=` | `real`/`scaffold`, `on`/`off`. `error:<CODE>`면 설정이 잘못됐다(예: `BUILD_SETTINGS_INCOMPLETE`, `SANDBOX_KUBECONFIG_NOT_FOUND`) |
-| api `env_store=`·`target_profiles=`·`connection_link=`·`platform_ecr_registry=` | `on`, 카탈로그 이름 목록(`error:TARGET_PROFILES_UNCONFIGURED`면 파일 없음), 링크·레지스트리 `on` |
+| api `env_store=`·`target_profiles=`·`connection_link=`·`platform_ecr_registry=`·`web_start_sandbox=` | `on`, 카탈로그 이름 목록(`error:TARGET_PROFILES_UNCONFIGURED`면 파일 없음), 링크·레지스트리 `on`, 리허설 기본 모양 `on`(`error:SANDBOX_SETTINGS_INVALID`면 JSON이 아니다) |
 | `imds_guard_rules=1`, `imds_guard_service=enabled` | 티켓 54 빌드 IMDS 차단 |
 | `missing=` | 비어 있어야 한다(compose 필수 키) |
 | `optional_unset=` | 아직 켜지 않은 선택 기능 이름 |
