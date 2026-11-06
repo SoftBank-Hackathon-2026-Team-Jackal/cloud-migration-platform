@@ -61,6 +61,8 @@ uv run python scripts/review_signal.py approve <Workflow ID> --version <버전> 
 
 `BLOCK`이 있으면 Sandbox로 가지 않고 사유가 보고된다. 통과하면 Sandbox 루프가 돌고, 실패하면 분류·수정·갱신을 최대 3회 반복한다. 루프 중 처리가 바뀐 행이 있으면 `sandbox-<Workflow ID>` 자식에 `approve_changed_rows` Signal로 다시 승인한다.
 
+보안 항목(티켓 29-B): `state`의 `security`에 원본·대상 상태와 판정이 나온다. 판정이 `LOWER`인 항목(`approvable: true`)은 같은 `approve` 신호에 `security:<기준>`으로 답한다(`--approve security:EXTERNAL_HTTPS=APPROVED`). 필수 기능 확정(`confirm`) 뒤에 열리고, 모든 승인 대상(매핑 행과 보안 항목)에 한 번에 답해야 한다. 거절(`REJECTED`)하면 이전이 막히고 사유와 제안 코드가 `blocked`에 남는다. `UNKNOWN`·약점·`SAME`·`HIGHER`는 승인 대상이 아니다. `proof`가 `POST_DEPLOY`인 항목(외부 HTTPS, 입구의 경로 차단)은 Sandbox로 증명되지 않고 배포 후 측정이 필요하다.
+
 ## 6. 결과 확인과 정리
 
 - 부모 Query `status`의 `pipeline`에 분석·요구사항 참조와 발행 결과가 있다. 종료 상태는 `scaffold_complete`(통과), `failed`(원인은 `failure_code`), `cancelled`다.

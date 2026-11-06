@@ -26,7 +26,9 @@ class Recorder:
         return {"status": "PREPARED", "branch": artifact.branch}
 
 
-def world(tmp_path, *, with_analysis=True, llm=None, target_provider=None):
+def world(
+    tmp_path, *, with_analysis=True, llm=None, target_provider=None, security=None, judgements=None
+):
     store = LocalArtifactStore(tmp_path / "store")
     base = tmp_path / "base"
     base.mkdir()
@@ -41,7 +43,7 @@ def world(tmp_path, *, with_analysis=True, llm=None, target_provider=None):
             migration_id="mig-1", ref=REF, base_commit="c" * 40, commit_verified=False,
             usage_profile={"usages": []}, mapping=rows(), precheck={"findings": []},
             external_entries=[], source_cidrs=[], source_db_images={}, unmapped_items=[], unverified_risks=[],
-            target_provider=target_provider,
+            target_provider=target_provider, security=security, security_judgements=judgements,
         )  # fmt: skip
         record = ReviewRecord(
             analysis_ref=REF,

@@ -87,6 +87,7 @@ from cmp_worker.sandbox_events import (
 from cmp_worker.sandbox_handoff import sandbox_outcome
 from cmp_worker.sandbox_judge import judge
 from cmp_worker.sandbox_network import allowlist
+from cmp_worker.security_guard import code_fix_lowers_security, requirements_fix_lowers_security
 
 SuiteRunner = Callable[[SandboxPlan, ArtifactRef, LocalArtifactStore], SuiteResult]
 Builder = Callable[[str, dict[str, Any]], Image]
@@ -538,6 +539,12 @@ class SandboxLoopActivities:
                 except FinalReportError as exc:
                     return {"status": "FAILED", "reason": exc.code}
             fixed = apply_requirements_fix(requirements, outcome.requirements_fix)
+            # Ticket 29-B: a fix may not make a security judgement worse.
+            lowered = requirements_fix_lowers_security(
+                self._report(payload.get("analysis_report_ref")), fixed
+            )
+            if lowered:
+                return {"status": "FAILED", "reason": lowered[0]}
             data, _ = canonical_requirements(fixed)
             ref = self.store.put(data, ref_id="requirements", kind="requirements")
             fix_ids = await self._emit_fixes(
@@ -549,6 +556,23 @@ class SandboxLoopActivities:
                 **fix_ids,
             }  # fmt: skip
         fix = outcome.code_fix
+        # Ticket 29-B: a code fix may not turn a protection off, however it makes the app pass.
+        before = Path(workspace) if workspace else None
+        lowered = code_fix_lowers_security(
+            self._report(payload.get("analysis_report_ref")),
+            [
+                (
+                    c.path,
+                    (before / c.path).read_text(errors="ignore")
+                    if before and (before / c.path).is_file()
+                    else "",
+                    c.content,
+                )
+                for c in fix.files
+            ],
+        )
+        if lowered:
+            return {"status": "FAILED", "reason": lowered[0]}
         digest = self.store.put(
             "\n".join(f"{c.path}\0{c.content}" for c in fix.files).encode(),
             ref_id="code-fix", kind="code-fix",

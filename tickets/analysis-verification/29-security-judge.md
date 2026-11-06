@@ -1,7 +1,7 @@
 # Ticket 29 — 보안 동등 판정과 약점 표시, 승인 게이트 연결
 
 ## 상태
-IN_PROGRESS — **29-A**(판정과 표시)는 구현·자동 테스트 완료(2026-11-06). **29-B**(승인 게이트 연결)는 DRAFT: 정책 결정(D-17)과 상헌님 합의 후. 29-A·29-B는 한 Issue로 다룬다. Issue 번호는 사용자가 발행한 뒤 기록한다.
+IN_PROGRESS — **29-A**(판정과 표시)와 **29-B**(승인 게이트 연결)는 구현·자동 테스트 완료(2026-11-06). 상헌님과 승인 화면·API 합의, 실제 Temporal 서버에서의 흐름 확인, 정책 P-12 검토가 남음. 29-A·29-B는 한 Issue로 다룬다. Issue 번호는 사용자가 발행한 뒤 기록한다.
 
 ## 목적
 측정(28)을 대상(예정) 상태와 비교해 `LOWER` / `SAME` / `HIGHER` / `UNKNOWN`을 내고, 원본부터 약한 항목(`WEAK_SOURCE`)과 보강 제안을 분석 결과에 싣는다. 이후 낮아짐을 기존 필수 기능·손실 승인 게이트(AV-022)에 올려 승인 없이 Sandbox로 가지 못하게 한다.
@@ -27,10 +27,13 @@ Blocked by: 28, 08B (병합됨). 29-B는 D-17(약점 보강을 제품 정책으�
 - **보고서:** `AnalysisReport.security_judgements`(선택 필드)와 `unverified_risks`의 `SECURITY_LOWER: <기준>`·`SECURITY_WEAK_SOURCE: <기준>`. 입력의 대상 Provider(티켓 31의 `target_provider`)와 요구사항을 쓴다.
 - 데모 원본(CloudFront HTTPS, DB 접근 무제한, 평문 DB, 운영 경로 노출)을 ON_PREM 대상에 판정하면: 외부 HTTPS `LOWER`, DB 접근 `HIGHER`, DB 전송 암호화 `SAME`(약점), 운영용 API `SAME`(약점)이다. 기획의 "대상 HTTPS로 같음"과 "SSL 강제·운영 경로 차단으로 높아짐"은 29-B와 보강 반영(Provisioning)이 있어야 한다.
 
-## 29-B — 승인 게이트 연결 (DRAFT)
-- `LOWER`를 `APPROVAL`(잃는 것 표시)로 올려 승인 없이 Sandbox로 가지 못하게 한다. 승인·거절은 `ReviewRecord`에 같은 방식으로 남기고 같은 분석 버전에서 재사용한다. 자동 승인은 없다. `UNKNOWN`은 사람 검토 항목.
-- 지금 `ReviewGate`는 매핑 행 ID 단위(`approvals: {행ID: ...}`)다. 보안 항목은 키 `security:<기준>`을 허용하는 확장이 필요하다. 분석 자식 Workflow 안의 상태 기계라 **`workflow.patched`로 replay 호환을 검토**한다(기존 Signal·Query 유지).
-- 승인 API·화면은 상헌님과 합의한다(지금은 CLI Signal만).
+## 29-B — 승인 게이트 연결 (구현 완료)
+결정(2026-11-06): 약점 보강은 표시·승인 기록까지(적용은 후속), 승인 대상은 `LOWER`만, 승인을 거절하면 `BLOCK`. 제품 정책 P-12(보안 수준의 동등성)로 올렸다.
+- **게이트:** `ReviewGate(analysis_ref, rows, security=…)`가 판정이 `LOWER`인 항목을 `security:<기준>` 항목으로 승인받는다. 필수 기능 확정 뒤 승인 단계에서 매핑 행의 `APPROVAL`과 함께 묻고, 모든 승인 대상에 답해야 끝난다(빠지면 `MISSING_ROW`, `LOWER`가 아닌 기준은 `NOT_APPROVABLE`, 모르는 ID는 `UNKNOWN_ROW`). 거절하면 필수로 바꿔 재계산하는 단계 없이 바로 `BLOCKED`이고, 사유(`SECURITY_LOWER: <기준>`)와 제안 코드가 `blocked`에 실린다. 보안 항목에는 필수 여부가 없어서 `required`에 들어가지 않는다. 매핑 행이 없어도 `LOWER`가 있으면 게이트가 선다.
+- **`UNKNOWN`·약점·`SAME`·`HIGHER`는 승인 대상이 아니다.** 상태 조회(`review_state`)의 `security`에 모든 판정(원본·대상 상태, 판정, 약점, 제안, 증명 방식 `SANDBOX`/`POST_DEPLOY`, `approvable`, 지금까지의 `decision`)이 실려 승인 화면이 나란히 보일 수 있다. `proof`는 클러스터 안의 보호(DB 접근, DB 전송 암호화)는 `SANDBOX`, 외부 네트워크를 지나는 항목(외부 HTTPS, 입구 경로 차단)은 `POST_DEPLOY`다.
+- **신호와 CLI는 그대로다.** `approve --approve security:EXTERNAL_HTTPS=APPROVED`처럼 같은 `approve_losses` 신호에 `security:<기준>` 키로 답한다. 승인·거절은 `ReviewRecord.approvals`에 같은 키로 남고 Sandbox 이후 흐름은 이 키를 행 ID로 가정하지 않아 그대로 이어진다.
+- **Workflow:** 분석 자식의 `_review`가 `workflow.patched("security-gate-v1")` 아래에서 `check_evidence` 결과의 `security_judgements`를 읽는다. 이 필드가 없는 기존 이력은 이전과 같게 동작한다. `check_evidence`의 반환에 필드가 더해졌을 뿐 Activity 이름·입력은 같다.
+- **수정이 보안을 낮추는 것 막기(`cmp_worker/security_guard.py`):** `sbx_fix`가 Fixer의 수정안을 쓰거나 저장하기 전에 확인한다. (1) 코드 수정이 파일에 없던 평문 `sslmode`(`disable`·`allow`·`prefer`)를 들이면(원본이 이미 평문이면 제외) (2) 요구사항 수정으로 판정을 다시 했을 때 대상 상태가 나빠지거나 `LOWER`가 새로 생기면 거절하고 `SECURITY_LOWERED_BY_FIX:<기준>`으로 사람 검토에 넘긴다. 현재 대상 상태는 Provider·DB 유무·원본 운영용 API 측정에서만 정해져서 요구사항 수정이 판정을 바꾸는 경우는 드물다(규칙은 대상 상태가 의도에 의존하게 되면 쓰인다).
 
 ## 작업 범위
 - 29-A 포함: 위 대상 상태, 판정, 약점·제안, 보고서, 테스트.
@@ -43,9 +46,13 @@ Blocked by: 28, 08B (병합됨). 29-B는 D-17(약점 보강을 제품 정책으�
 - [x] 같은 입력이면 같은 판정과 같은 순서가 나온다. 제안은 코드일 뿐 적용되지 않는다.
 - [x] 보고서에 판정과 위험 코드가 실리고, 필드가 없는 기존 보고서가 그대로 읽힌다. Workflow 변경이 없다.
 
-## 수용 기준 (29-B, 결정 후)
-- [ ] `LOWER`는 승인 없이 Sandbox로 가지 못한다. 승인·거절이 기록되고 같은 분석 버전에서 재사용된다. 자동 승인이 없다.
-- [ ] Workflow 변경은 replay 호환을 검증한다. 승인 API·화면 연결은 상헌님과 합의한다.
+## 수용 기준 (29-B)
+- [x] `LOWER`는 승인 없이 Sandbox로 가지 못한다(분석 자식이 승인을 기다린다). 승인·거절이 `ReviewRecord`에 기록된다. 자동 승인이 없다. 매핑 행이 없어도 `LOWER`가 있으면 선다.
+- [x] 거절하면 `BLOCK`되고 사유와 제안 코드가 보고된다. `UNKNOWN`·약점은 표시만 하고 승인을 요구하지 않는다.
+- [x] 상태 조회에 모든 보안 판정과 증명 방식이 실리고, 기존 신호 이름·CLI·`ReviewRecord` 흐름은 그대로다.
+- [x] Fixer의 수정이 평문 `sslmode`를 들이거나 판정을 나쁘게 하면 거절되고, 코드 수정은 쓰이지 않는다.
+- [x] 분석 자식 Workflow 변경은 `workflow.patched`로 기존 이력과 호환된다. 필드가 없는 결과는 이전과 같다.
+- [ ] 상헌님과 승인 화면·API 합의, 정책 P-12 검토(사용자).
 
 ## 테스트 전략
 - Test Seam: 순수 함수 `judge_security`(원본 × 대상 표)와 `target_security`(Provider·요구사항), 파이프라인 보고서. 잡는 것: 판정 표, `UNKNOWN` 처리, 제안 조건, 기준 순서. 못 잡는 것: 대상 능력 프로필이 Provisioning의 실제 동작과 같은지(담당 확인).
@@ -57,4 +64,5 @@ spec AV-023, plan, tasks.md를 같은 PR에서 갱신한다. 정책 문서(`poli
 ## 결정 대기
 - D-17: 약점 보강을 제품 정책으로 받을지(`policies.md` 변경), 보강의 대상 구성 반영 방법(Provisioning 계약).
 - 대상 능력 프로필 값(입구 TLS 없음, DB SSL 없음, 경로 필터 없음)이 Provisioning·트래픽의 실제 동작과 맞는지 확인(담당자). 특히 외부 HTTPS는 ADR-006(P0에 도메인·TLS 없음)을 그대로 옮긴 값이며, 기획의 데모 1행("대상 입구 HTTPS")과 어긋난다. ADR-006은 트래픽 담당 영역이라 이 티켓에서 바꾸지 않는다.
-- 29-B의 승인 신호 형식(`security:<기준>` 키)과 승인 화면.
+- 승인 화면이 `review_state`의 `security`를 어떻게 보일지와 승인 API(상헌님). 지금은 CLI Signal뿐이다.
+- 정책 P-12를 사용자가 검토(약점 보강의 대상 구성 반영은 Provisioning 계약 뒤).

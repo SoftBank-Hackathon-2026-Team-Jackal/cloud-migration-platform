@@ -8,8 +8,17 @@ automatic approval: the gate only moves when a valid decision from a person arri
 from typing import Any
 
 from cmp_agents.mapping import compute_treatments
-from cmp_contracts.analysis import ApproveLossesSignal, ConfirmRequirementsSignal, MappingRow
+from cmp_contracts.analysis import (
+    ApproveLossesSignal,
+    ConfirmRequirementsSignal,
+    MappingRow,
+    SecurityJudgement,
+)
+from cmp_scanners.security_judge import PROOF
 from pydantic import ValidationError
+
+# A security judgement is approved or rejected under this id, next to the mapping rows' ids.
+SECURITY_PREFIX = "security:"
 
 WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
 WAITING_APPROVAL = "WAITING_APPROVAL"
@@ -23,9 +32,23 @@ _ALTERNATIVES = {
 
 
 class ReviewGate:
-    def __init__(self, analysis_ref: dict[str, str], rows: list[dict[str, Any] | MappingRow]):
+    def __init__(
+        self,
+        analysis_ref: dict[str, str],
+        rows: list[dict[str, Any] | MappingRow],
+        security: list[dict[str, Any] | SecurityJudgement] | None = None,
+    ):
         self.analysis_ref = dict(analysis_ref)
         self.rows = [r if isinstance(r, MappingRow) else MappingRow.model_validate(r) for r in rows]
+        # Ticket 29-B: only a LOWER judgement asks for an answer; the rest is shown, never asked.
+        self.security = [
+            j if isinstance(j, SecurityJudgement) else SecurityJudgement.model_validate(j)
+            for j in security or []
+        ]
+        self._security_ids = {f"{SECURITY_PREFIX}{j.criterion}" for j in self.security}
+        self._security_lower = {
+            f"{SECURITY_PREFIX}{j.criterion}" for j in self.security if j.verdict == "LOWER"
+        }
         self.phase = WAITING_CONFIRMATION
         self.rejections: list[dict[str, str]] = []
         self._required: dict[str, bool] = {}
@@ -74,7 +97,7 @@ class ReviewGate:
             return self._reject(name, "INVALID_PAYLOAD")
         if signal.analysis_ref.model_dump() != self.analysis_ref:
             return self._reject(name, "ANALYSIS_REF_MISMATCH")
-        known = {r.id for r in self.rows}
+        known = {r.id for r in self.rows} | self._security_ids
         approvable = self._approvable()
         if set(signal.approvals) - known:
             return self._reject(name, "UNKNOWN_ROW")
@@ -85,20 +108,23 @@ class ReviewGate:
         self._approvals = dict(signal.approvals)
         self._actor = signal.actor
         for row_id, decision in signal.approvals.items():
-            if decision == "REJECTED":
+            if decision == "REJECTED" and row_id not in self._security_ids:
                 self._required[row_id] = True  # a rejected loss means the feature is required
         self._recompute()
         return True
 
     def _approvable(self) -> set[str]:
-        return {r.id for r in self.rows if r.treatment == "APPROVAL"}
+        return {r.id for r in self.rows if r.treatment == "APPROVAL"} | self._security_lower
+
+    def _security_rejected(self) -> list[str]:
+        return sorted(i for i in self._security_lower if self._approvals.get(i) == "REJECTED")
 
     def _recompute(self) -> None:
         self.rows = compute_treatments(self.rows, self._required)
         treatments = {r.treatment for r in self.rows}
-        if "BLOCK" in treatments:
-            self.phase = BLOCKED
-        elif "APPROVAL" in treatments and not self._approvals:
+        if "BLOCK" in treatments or self._security_rejected():
+            self.phase = BLOCKED  # refusing a lower security level stops the move
+        elif ("APPROVAL" in treatments or self._security_lower) and not self._approvals:
             self.phase = WAITING_APPROVAL
         else:
             self.phase = APPROVED
@@ -106,6 +132,18 @@ class ReviewGate:
     # -- reports -----------------------------------------------------------------
 
     def blocked(self) -> list[dict[str, str]]:
+        refused = {f"{SECURITY_PREFIX}{j.criterion}": j for j in self.security}
+        lost_security = [
+            {
+                "id": item,
+                "capability": "security",
+                "usage": refused[item].criterion,
+                "grade": "LOWER",
+                "reason": f"SECURITY_LOWER: {refused[item].criterion}",
+                "alternative": refused[item].suggestion or "",
+            }
+            for item in self._security_rejected()
+        ]
         return [
             {
                 "id": r.id,
@@ -117,7 +155,7 @@ class ReviewGate:
             }
             for r in self.rows
             if r.treatment == "BLOCK"
-        ]
+        ] + lost_security
 
     def decisions(self) -> dict[str, Any]:
         return {
@@ -146,6 +184,22 @@ class ReviewGate:
                     "treatment": r.treatment,
                 }
                 for r in self.rows
+            ],
+            "security": [
+                {
+                    "id": f"{SECURITY_PREFIX}{j.criterion}",
+                    "criterion": j.criterion,
+                    "source_state": j.source_state,
+                    "target_state": j.target_state,
+                    "verdict": j.verdict,
+                    "weak_source": j.weak_source,
+                    "reasons": list(j.reasons),
+                    "suggestion": j.suggestion,
+                    "proof": PROOF.get(j.criterion),
+                    "approvable": j.verdict == "LOWER",
+                    "decision": self._approvals.get(f"{SECURITY_PREFIX}{j.criterion}"),
+                }
+                for j in self.security
             ],
             "blocked": self.blocked(),
             "rejections": list(self.rejections),
