@@ -13,6 +13,7 @@ from cmp_traffic.envoy import (
     build_route_config,
     parse_cluster_stats,
 )
+from temporalio.exceptions import ApplicationError
 
 
 def test_route_config_splits_weights_between_the_two_clusters() -> None:
@@ -207,3 +208,117 @@ def test_observer_uses_prometheus_buckets_for_p99_when_available() -> None:
     )
     sample = observer.sample_target(5)
     assert sample.requests == 60 and sample.p99_ms == 1000
+
+
+# ---- 실시간 연결 경로(#294): 제한시간·재시도 없이 ----
+
+
+def _routes(doc: dict) -> list[dict]:
+    return doc["resources"][0]["virtual_hosts"][0]["routes"]
+
+
+def test_stream_routes_sit_before_the_catch_all_without_timeout_or_retry() -> None:
+    doc = build_route_config(
+        {"origin": 70, "target": 30},
+        version=3,
+        target_host="app.example",
+        stream_prefixes=("/api/stream", "/events"),
+    )
+    routes = _routes(doc)
+    prefixes = [r["match"]["prefix"] for r in routes]
+    assert prefixes == ["/admin", "/__cmp", "/api/stream", "/events", "/"]
+    catch_all = routes[-1]["route"]
+    for stream in routes[2:4]:
+        route = stream["route"]
+        assert route["timeout"] == "0s"
+        assert "retry_policy" not in route
+        # 같은 가중치·같은 host_rewrite: 실시간 연결도 전환 비율을 그대로 따른다
+        assert route["weighted_clusters"] == catch_all["weighted_clusters"]
+    assert catch_all["timeout"] == "5s" and "retry_policy" in catch_all
+
+
+def test_without_stream_prefixes_the_route_config_is_unchanged() -> None:
+    clusters = [
+        {
+            "name": "cluster_origin",
+            "weight": 90,
+            "response_headers_to_add": [{"header": {"key": "x-tp-env", "value": "origin"}}],
+        },
+        {
+            "name": "cluster_target",
+            "weight": 10,
+            "response_headers_to_add": [{"header": {"key": "x-tp-env", "value": "target"}}],
+            "host_rewrite_literal": "app.example",
+        },
+    ]
+    forbidden = {"status": 403, "body": {"inline_string": "forbidden\n"}}
+    expected = [
+        {"match": {"prefix": "/admin"}, "direct_response": forbidden},
+        {"match": {"prefix": "/__cmp"}, "direct_response": forbidden},
+        {
+            "match": {"prefix": "/"},
+            "route": {
+                "weighted_clusters": {"clusters": clusters},
+                "timeout": "5s",
+                "retry_policy": {
+                    "retry_on": "connect-failure",
+                    "num_retries": 2,
+                    "per_try_timeout": "3s",
+                },
+            },
+        },
+    ]
+    doc = build_route_config({"origin": 90, "target": 10}, 4, target_host="app.example")
+    assert _routes(doc) == expected
+    assert (
+        build_route_config(
+            {"origin": 90, "target": 10}, 4, target_host="app.example", stream_prefixes=()
+        )
+        == doc
+    )
+
+
+@pytest.mark.parametrize(
+    "bad", ["api/stream", "", "/", "/a", "/admin", "/admin/stream", "/__cmp", "/__cmpx"]
+)
+def test_stream_prefixes_must_be_paths_that_do_not_touch_blocked_paths(bad: str) -> None:
+    with pytest.raises(ValueError):
+        build_route_config({"origin": 100, "target": 0}, 1, stream_prefixes=(bad,))
+
+
+def test_apply_keeps_the_stream_routes_every_time_the_weights_change(tmp_path) -> None:
+    rds = tmp_path / "rds.json"
+    proxy = EnvoyProxy(
+        rds_path=rds,
+        fetch=FakeAdmin(rds),
+        confirm_timeout=0.05,
+        poll_interval=0.01,
+        stream_prefixes=("/api/stream",),
+    )
+    for target in (10, 50):
+        proxy.apply({"origin": 100 - target, "target": target})
+        routes = _routes(json.loads(rds.read_text()))
+        stream = routes[2]
+        assert stream["match"]["prefix"] == "/api/stream"
+        assert stream["route"]["timeout"] == "0s"
+        weights = {c["name"]: c["weight"] for c in stream["route"]["weighted_clusters"]["clusters"]}
+        assert weights == {"cluster_origin": 100 - target, "cluster_target": target}
+    assert proxy.target_weight() == 50
+
+
+def test_relay_worker_reads_stream_prefixes_from_the_environment(tmp_path, monkeypatch) -> None:
+    from cmp_worker.activities import traffic as activities
+
+    monkeypatch.setenv("TRAFFIC_RDS_PATH", str(tmp_path / "rds.json"))
+    monkeypatch.setenv("TRAFFIC_STREAM_PREFIXES", " /api/stream, ,/events ")
+    proxy, _ = activities.build_ports()
+    assert proxy.stream_prefixes == ("/api/stream", "/events")
+
+    monkeypatch.delenv("TRAFFIC_STREAM_PREFIXES")
+    proxy, _ = activities.build_ports()
+    assert proxy.stream_prefixes == ()
+
+    monkeypatch.setenv("TRAFFIC_STREAM_PREFIXES", "/admin")
+    with pytest.raises(ApplicationError) as error:
+        activities.build_ports()
+    assert error.value.type == "RelayNotConfigured" and error.value.non_retryable
