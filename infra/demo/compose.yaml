@@ -128,7 +128,8 @@ services:
       # generated connection profiles `cmp-conn-*` (ticket 46); no static keys.
       AWS_CONFIG_FILE: /run/cmp/aws-connections/config
       PROVISIONING_AWS_PROFILE: ${PROVISIONING_AWS_PROFILE:-cmp-demo-provisioning}
-      # GCP: operator-provided service-account key, activated by the entrypoint into tmpfs.
+      # GCP: operator-provided service-account key, activated by the entrypoint into tmpfs. The same
+      # ADC serves GCP Plan/Apply and the API's GCP_TARGET connection check (ticket 48 Activity).
       CMP_GCP_KEY_FILE: /run/cmp/gcp/key.json
       CMP_GCP_PROJECT: ${CMP_GCP_PROJECT:-}
       PROVISIONING_GCLOUD_CONFIGURATION: cmp-demo
