@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict
 
 from cmp_scanners.code import CodeScan, _files, _read
 from cmp_scanners.manifests import ManifestScan, Workload
+from cmp_scanners.routes import HttpRoute
 
 DEFAULT_APP_CPU_MILLICORES = 250
 DEFAULT_APP_MEMORY_MIB = 256
@@ -33,6 +34,9 @@ DEFAULT_DB_CPU_MILLICORES = 250
 DEFAULT_DB_MEMORY_MIB = 512
 DEFAULT_DB_STORAGE_GIB = 5
 DEFAULT_APP_PORT = 8080
+DEFAULT_APP_HEALTH_PATH = "/"  # only when neither a probe nor a health-like route is found
+# Health-like route names, most specific first. Only these exact paths count as a health route.
+HEALTH_ROUTE_PATHS = ("/healthz", "/health", "/readyz", "/livez", "/ready", "/ping")
 DEFAULT_POSTGRES_PORT = 5432
 SUPPORTED_POSTGRES_MAJOR = "16"
 
@@ -149,6 +153,16 @@ def _health_path(workload: Workload) -> str | None:
     return None
 
 
+def _route_health_path(routes: Sequence[HttpRoute]) -> HttpRoute | None:
+    """A GET (or any-method) route with a well-known health name, used when no probe exists."""
+    usable = [r for r in routes if r.method in (None, "GET")]
+    for path in HEALTH_ROUTE_PATHS:
+        for route in usable:
+            if route.path == path:
+                return route
+    return None
+
+
 def _postgres_requirement(workload: Workload, image: str, manifests, taken, assumptions, blocks):
     ident = f"{workload.kind}/{workload.name}"
     tag = image.split("@")[0].split("/")[-1].partition(":")[2]
@@ -237,7 +251,10 @@ def build_requirements(
     manifests: ManifestScan,
     code: CodeScan,
     env_names: Mapping[str, Sequence[str]],
+    routes: Sequence[HttpRoute] = (),
 ) -> RequirementsBuild:
+    """`routes` (scan_go_routes) only fill a missing health path: readiness probe > liveness
+    probe > a health-like code route > `DEFAULT_APP_HEALTH_PATH`."""
     assumptions: list[str] = []
     unmapped: list[str] = []
     blocks: list[Block] = [
@@ -290,6 +307,12 @@ def build_requirements(
         cpu = _first(_cpu_millicores(res.cpu_request), _cpu_millicores(res.cpu_limit))
         memory = _first(_memory_mib(res.memory_request), _memory_mib(res.memory_limit))
         health = _health_path(workload)
+        if health is None and (route := _route_health_path(routes)) is not None:
+            health = route.path
+            assumptions.append(
+                f"HEALTH_PATH_FROM_CODE_ROUTE: {resource} uses {route.path} "
+                f"({route.file}:{route.line})"
+            )
         port = container.ports[0] if container.ports else None
         for code_, value in (
             ("REPLICAS", workload.replicas), ("CPU", cpu), ("MEMORY", memory),
@@ -307,7 +330,7 @@ def build_requirements(
                 cpu_millicores=cpu or DEFAULT_APP_CPU_MILLICORES,
                 memory_mib=memory or DEFAULT_APP_MEMORY_MIB,
                 port=port or DEFAULT_APP_PORT,
-                health_path=health or "/",
+                health_path=health or DEFAULT_APP_HEALTH_PATH,
                 env_bindings=bindings,
             )
         )
