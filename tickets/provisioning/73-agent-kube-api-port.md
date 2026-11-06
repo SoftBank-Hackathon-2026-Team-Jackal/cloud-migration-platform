@@ -63,4 +63,4 @@ TunnelManager(..., tcp_ok=tcp_connect_ok, expose_kube_api=False)
 ## 남은 일
 - Agent 이미지 릴리스(이 변경을 담은 태그) — 승인 필요
 - 중계 서버 TCP 전달(4단계, 트래픽 담당): 중계 서버 주소의 포트 → `터널IP:6443`, worker 출발지만
-- kubeconfig·ServiceAccount 발급(5단계): K8 TLS 설정 포함
+- kubeconfig·ServiceAccount 발급(5단계): K8 TLS 설정 포함 → [75](75-data-migration-kubeconfig.md)

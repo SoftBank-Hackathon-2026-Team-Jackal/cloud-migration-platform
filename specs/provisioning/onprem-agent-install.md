@@ -148,9 +148,30 @@ kubectl -n cmp-system exec deploy/cmp-onprem-agent -c tunnel -- wg show wg0 late
 
 UDP가 막힌 네트워크(행사장 Wi-Fi 등) 대체 터널은 아직 없다(Traffic 담당과 결정 대기). 그런 곳에서는 `HANDSHAKE_MISSING`이 보고되고 ON_PREM Traffic 인계가 막힌다.
 
+## 8. 데이터 이전 kubeconfig (75, ADR-007 2안 5단계)
+
+데이터 이전 worker가 대상 K3s에서 `kubectl exec … psql`과 데이터 게이트웨이(`cmp-data-tunnel`)를 다룰 때 쓰는 좁힌 ServiceAccount `cmp-data-migration/cmp-data-migration`과 kubeconfig를 사용자 맥에서 만든다. Agent Chart와 별개다(Chart 연동은 후속). 권한 표와 결정 R1~R11은 [75 티켓](../../tickets/provisioning/75-data-migration-kubeconfig.md)에 있다. 와일드카드와 Namespace 생성 권한이 없고, 대상 앱 Namespace에는 Pod 조회·삭제·exec, Secret get·create, NetworkPolicy만 준다.
+
+```bash
+# 1. Agent가 앱을 배포해 대상 Namespace가 생긴 뒤(없으면 kubeconfig만 쓰고 종료 코드 3 → 배포 뒤 bind)
+python3 infra/onprem-agent/make-data-kubeconfig.py apply --context k3d-cmp-local \
+  --namespace <대상 앱 Namespace> --server https://<중계 서버 사설 IP>:<16400+터널 IP 마지막 옥텟> --ref <kubeconfig_ref> --duration 12h
+python3 infra/onprem-agent/make-data-kubeconfig.py bind --context k3d-cmp-local --namespace <ns> --wait-namespace 900
+# 2. 권한이 표만큼인지(impersonation)
+python3 infra/onprem-agent/make-data-kubeconfig.py verify --context k3d-cmp-local --namespace <ns>
+# 3. 끝나면 SA·RBAC 삭제(토큰 즉시 무효). cmp-data-tunnel은 데이터 정리가 비운 뒤 직접 지운다
+python3 infra/onprem-agent/make-data-kubeconfig.py delete --context k3d-cmp-local --namespace <ns>
+```
+
+- 서버 포트 규칙은 [74 티켓](../../tickets/provisioning/74-relay-kube-api-forward.md) R4다(예: 터널 IP 10.200.0.2 → 16402).
+- 파일은 `~/.config/cmp/data-migration/<ref>.yaml`(0600)이다. 토큰은 화면에 나오지 않고 만료 시각만 나온다.
+- kubeconfig는 `tls-server-name: kubernetes.default.svc`와 클러스터 CA(`kube-root-ca.crt`)를 쓴다. k3s 인증서 SAN에 터널·중계 서버 IP가 없어서다(73 K8). `insecure-skip-tls-verify`는 쓰지 않는다.
+- 이 경로는 Chart `tunnel.exposeKubeApi=true`·플랫폼 `TUNNEL_EXPOSE_KUBE_API=true`(§7)와 중계 서버 전달(74)이 있어야 서버에서 닿는다. 서버 배치와 확인은 [데모 README](../../infra/demo/README.md)의 `DATA_MIGRATION_KUBECONFIG_DIR` 줄을 따른다.
+
 ## 검증과 미검증
 
 - 재현: `scripts/smoke_onprem_agent_install.py`(격리 k3d·전용 kubeconfig·`k3d-cmp-*` context 필수). 결과는 [provisioning-15-k3s.json](../../docs/verification/provisioning-15-k3s.json).
 - 터널(17) 재현: `scripts/smoke_onprem_agent_tunnel.py`(격리 k3d + 테스트용 WireGuard 상대). 결과는 [provisioning-17-k3s.json](../../docs/verification/provisioning-17-k3s.json). 실제 중계 서버 경로는 미검증.
 - GHCR 게시(42): `agent-v0.3.0`은 게시됐지만 2026-11-06 기준 두 패키지 모두 익명 `PRIVATE`이다(점검 C-01). 공개 전환은 조직 패키지 설정에서 소유자가 한 번 한다(승인 대기, [42 티켓](../../tickets/provisioning/42-agent-package-access.md)). 그전에는 위 인증 pull 경로를 쓴다.
+- 데이터 이전 kubeconfig(75): k3d에서 worker 실제 kubectl 경로 22단계·`verify` 49/49 확인. 중계 서버 경유는 미검증.
 - 확인하지 않은 것: NAT 뒤 원격 노트북과 실제 공개 플랫폼 주소, 공개 전환 뒤 익명 설치, 다양한 K3s 배포판·macOS VM, 장시간 실행.
