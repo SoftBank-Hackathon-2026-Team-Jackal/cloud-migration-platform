@@ -28,9 +28,12 @@ from cmp_api.approvals import (
     authorize_view,
     execution_status,
     get_approval,
+    grant_approver_migrations,
     mark_delivery,
     record_decision,
     register_approver,
+    revoke_approver_credential,
+    rotate_approver_credential,
 )
 from cmp_api.config import settings
 from cmp_api.db import SessionLocal
@@ -46,6 +49,7 @@ STATUS = {
     "PLAN_NOT_FOUND": 404,
     "RESULT_NOT_FOUND": 404,
     "APPROVAL_NOT_FOUND": 404,
+    "APPROVER_NOT_FOUND": 404,
     "STALE_REVISION": 409,
     "APPROVAL_TARGET_MISMATCH": 409,
     "ALREADY_DECIDED": 409,
@@ -66,6 +70,15 @@ class ApproverRegistration(Request):
 class ApproverCredential(Request):
     approver_id: str
     credential: str
+
+
+class ApproverGrant(Request):
+    migration_ids: list[Text] = Field(min_length=1)
+
+
+class ApproverGrants(Request):
+    approver_id: str
+    migration_ids: list[str]
 
 
 class ApprovalRequest(Request):
@@ -205,6 +218,48 @@ def create_approver(request: ApproverRegistration, session: SessionDep):
     except ApprovalError as exc:
         raise _http_error(exc) from None
     return ApproverCredential(approver_id=request.approver_id, credential=credential)
+
+
+@router.post(
+    "/approvers/{approver_id}/credential",
+    response_model=ApproverCredential,
+    dependencies=[Depends(require_admin)],
+)
+def rotate_approver(approver_id: str, session: SessionDep):
+    """Issue a new credential once; the previous one is rejected (401) from now on."""
+    try:
+        credential = rotate_approver_credential(session, approver_id)
+    except ApprovalError as exc:
+        raise _http_error(exc) from None
+    return ApproverCredential(approver_id=approver_id, credential=credential)
+
+
+@router.post(
+    "/approvers/{approver_id}/migrations",
+    response_model=ApproverGrants,
+    dependencies=[Depends(require_admin)],
+)
+def grant_approver(approver_id: str, request: ApproverGrant, session: SessionDep):
+    """Add Migration IDs this approver may decide (the credential is unchanged)."""
+    try:
+        migration_ids = grant_approver_migrations(session, approver_id, request.migration_ids)
+    except ApprovalError as exc:
+        raise _http_error(exc) from None
+    return ApproverGrants(approver_id=approver_id, migration_ids=migration_ids)
+
+
+@router.delete(
+    "/approvers/{approver_id}/credential",
+    status_code=204,
+    dependencies=[Depends(require_admin)],
+)
+def revoke_approver(approver_id: str, session: SessionDep) -> Response:
+    """Revoke without a replacement; rotate again to re-enable the same approver."""
+    try:
+        revoke_approver_credential(session, approver_id)
+    except ApprovalError as exc:
+        raise _http_error(exc) from None
+    return Response(status_code=204)
 
 
 @router.post(

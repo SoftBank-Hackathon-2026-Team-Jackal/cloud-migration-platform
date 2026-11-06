@@ -26,6 +26,7 @@ from cmp_contracts.verification import BuildAttempt, canonical_requirements
 from cmp_providers.env_file_store import EncryptedEnvFileStore, load_key
 from cmp_worker.plan_publish import PlanPublisher
 from cmp_worker.planning_handoff import PlanningSettings, assemble_registration
+from cmp_worker.sandbox_input import SandboxSettings
 from cmp_worker.start_input import build_start_input
 from fastapi.testclient import TestClient
 from onprem_rollout_support import register_agent
@@ -122,6 +123,7 @@ def api(db, env_store, catalog, monkeypatch):
 
     monkeypatch.setattr(migration_routes, "get_temporal_client", get_client)
     monkeypatch.setattr(settings, "planning_target_profiles_file", str(catalog))
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", None)
     app.dependency_overrides[migration_routes.get_env_file_store_factory] = lambda: (
         lambda: env_store
     )
@@ -139,7 +141,7 @@ def env_ref(env_store) -> ContentRef:
 @pytest.fixture
 def agent(db):
     with db() as session:
-        register_agent(session, agent_id="office-seoul-01", cluster_uid="cluster-seoul")
+        return register_agent(session, agent_id="office-seoul-01", cluster_uid="cluster-seoul")
 
 
 def add_connection(db, kind, *, status="CONNECTED", **fields) -> str:
@@ -398,6 +400,64 @@ def test_the_start_input_equals_the_cli_start_input(api, env_ref, agent):
     assert data == cli
 
 
+# --- ticket 57 (#228): the server's default rehearsal write/read shape ----------------------
+
+# The Go demo app's shape as the runbook gives it to `--sandbox` (test data; the server value is
+# operator configuration, never code).
+GO_SHAPE = {
+    "write_path": "/api/messages",
+    "write_body": {"client_msg_id": "std-{{run_id}}", "author": "cmp", "body": "value-{{run_id}}"},
+    "write_status": 201,
+    "id_from_response": "id",
+    "value_field": "body",
+    "read_back": "REPEAT_WRITE",
+}
+
+
+def test_without_server_sandbox_settings_the_rehearsal_stays_health_only(api, env_ref, agent):
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    assert temporal.started[0]["data"]["sandbox"] is None
+
+
+def test_server_sandbox_settings_reach_the_start_input_as_the_cli_would(
+    api, env_ref, agent, monkeypatch
+):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", json.dumps(GO_SHAPE))
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    data = temporal.started[0]["data"]
+    assert data["sandbox"] == GO_SHAPE
+    cli = build_start_input(
+        project_id="demo",
+        repository=data["analysis"]["repository"],
+        commit=COMMIT,
+        sandbox_json=json.dumps(GO_SHAPE),
+        planning_json=json.dumps(data["planning"]),
+        env_file_ref_json=json.dumps(data["env_file_ref"]),
+    )
+    assert data == cli
+    # What the parent hands `assemble_sandbox_input` is a valid SandboxSettings.
+    assert SandboxSettings.model_validate(data["sandbox"]).read_back == "REPEAT_WRITE"
+
+
+@pytest.mark.parametrize("value", ["not json", "[1, 2]", '"text"', "null"])
+def test_unusable_server_sandbox_settings_refuse_the_start(api, env_ref, agent, monkeypatch, value):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", value)
+    client, temporal = api
+    response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
+    assert (response.status_code, code_of(response)) == (503, "SANDBOX_SETTINGS_INVALID")
+    assert temporal.started == []
+    assert value not in response.text or value == "null"
+
+
+def test_server_sandbox_settings_leave_the_scaffold_start_alone(api, monkeypatch):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", json.dumps(GO_SHAPE))
+    client, temporal = api
+    assert client.post("/migrations", json={"project_id": "demo"}).status_code == 202
+    assert temporal.started[0]["data"] == "demo"
+
+
 def registration_for(planning: dict, env_ref: ContentRef):
     """What `sbx_plan_assemble` does with the start input (parent copies `env_file_ref` in)."""
     data = json.loads((ANALYSIS / "analysis-report-eks-k3s.json").read_text(encoding="utf-8"))
@@ -497,3 +557,102 @@ def test_the_demo_example_catalog_is_valid():
         target = StartTarget(provider=entry["provider"], profile=name)
         planning = planning_settings(target, entry, agent=agent)
         assert PlanningSettings.model_validate(planning).target.provider == entry["provider"]
+
+
+# --- finals demo: ON_PREM is the default and only real build target -------------------------
+
+DEMO_CATALOG = ROOT / "infra/demo/target-profiles.demo.json"
+
+
+def test_the_finals_demo_catalog_is_the_onprem_example_entry_only():
+    """The finals catalog is the example's `onprem-k3s-basic` entry, unchanged (one source)."""
+    demo = json.loads(DEMO_CATALOG.read_text(encoding="utf-8"))["profiles"]
+    example = json.loads(
+        (ROOT / "infra/demo/target-profiles.example.json").read_text(encoding="utf-8")
+    )["profiles"]
+    assert demo == {"onprem-k3s-basic": example["onprem-k3s-basic"]}
+
+
+def test_finals_onprem_start_is_planned_approved_and_handed_to_the_agent(
+    api, db, env_ref, agent, tmp_path, platform_registry, monkeypatch
+):
+    """Web start (demo catalog) → Plan publish → web plan read → APPROVE → claim → Agent job."""
+    from cmp_api.agent_registry import poll_job
+    from cmp_api.approvals import claim_execution
+    from cmp_api.onprem_rollout import build_rollout_job, dispatch
+    from cmp_api.routes import approvals as approval_routes
+    from cmp_api.routes import plan_inputs as plan_routes
+    from test_approval_gate import FakeDelivery
+
+    monkeypatch.setattr(settings, "planning_target_profiles_file", str(DEMO_CATALOG))
+    monkeypatch.setattr(settings, "approval_admin_key", "admin-key-for-tests")
+    client, temporal = api
+    gcp = {"provider": "GCP", "profile": "gcp-vm-basic", "region": "asia-northeast3"}
+    refused = client.post("/migrations", json=web_request(gcp, env_ref.id))
+    assert refused.json()["detail"]["code"] == "TARGET_PROFILE_NOT_FOUND"  # fails fast
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    [started] = temporal.started
+
+    migration_id, registration = registration_for(started["data"]["planning"], env_ref)
+    store = LocalArtifactStore(tmp_path / "store")
+    with db() as session:
+        register_planning_input(session, migration_id, registration, store)
+    published = PlanPublisher(db, store, cloud_artifact_root=tmp_path / "plans").publish(
+        migration_id
+    )
+    assert published["status"] == "PUBLISHED", published
+
+    def session():
+        with db() as s:
+            yield s
+
+    delivery = FakeDelivery()
+    app.dependency_overrides[approval_routes.get_session] = session
+    app.dependency_overrides[plan_routes.get_session] = session
+    app.dependency_overrides[plan_routes.get_artifact_store] = lambda: store
+    app.dependency_overrides[approval_routes.get_approval_delivery] = lambda: delivery
+    credential = client.post(
+        "/provisioning/approvers",
+        json={"approver_id": "presenter", "migration_ids": [migration_id]},
+        headers={"X-Approval-Admin-Key": "admin-key-for-tests"},
+    ).json()["credential"]
+    headers = {"Authorization": f"Bearer {credential}"}
+
+    view = client.get(f"/provisioning/migrations/{migration_id}/plan", headers=headers).json()
+    assert (view["plan_id"], view["revision"], view["approvable"]) == (
+        published["plan_id"],
+        1,
+        True,
+    )
+    decision = client.post(  # the body `sseProvider.decide('APPROVE')` sends
+        f"/provisioning/plans/{view['plan_id']}/revisions/1/approvals",
+        json={
+            "decision": "APPROVE",
+            "scope": view["scope"],
+            "manifest_digest": view["manifest_digest"],
+            "preview_digest": view["preview_digest"],
+        },
+        headers=headers,
+    )
+    assert decision.status_code == 201, decision.text
+    assert decision.json()["delivery_status"] == "DELIVERED"
+    assert delivery.delivered == [decision.json()["approval_id"]]
+
+    with db() as session:
+        claim = claim_execution(session, decision.json()["approval_id"])
+        assert (claim["status"], claim["provider"]) == ("CLAIMED", "ON_PREM")
+        job, owner = build_rollout_job(session, claim, store)  # what execute_on_prem_plan queues
+        dispatch(session, job, owner)
+        polled = poll_job(session, agent_id="office-seoul-01", credential=agent)
+    profile = json.loads(DEMO_CATALOG.read_text(encoding="utf-8"))["profiles"]["onprem-k3s-basic"]
+    job = polled["payload"]
+    assert (polled["status"], job["mode"], job["plan_id"]) == (
+        "RUNNING",
+        "PRODUCTION_ROLLOUT",
+        view["plan_id"],
+    )
+    assert (job["agent_id"], job["cluster_uid"]) == ("office-seoul-01", "cluster-seoul")
+    assert (job["namespace"], job["storage_class"]) == (
+        profile["namespace"],
+        profile["storage_class"],
+    )
