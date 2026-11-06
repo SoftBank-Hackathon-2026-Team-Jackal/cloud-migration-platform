@@ -190,3 +190,28 @@ def test_no_secret_reaches_any_stored_artifact_or_returned_value(repo):
     blobs = [p.read_bytes().decode(errors="ignore") for p in (pipeline.store.root).iterdir()]
     assert not any(SECRET in b or "p4ss" in b for b in blobs)
     assert SECRET not in str([source, built, pre, mapped, report])
+
+
+def test_a_cloudtrail_read_that_failed_is_reported_and_not_used_for_usage(repo, monkeypatch):
+    from cmp_scanners.aws_infra import AwsInfraScan, EksCluster
+    from cmp_worker import analysis_pipeline
+
+    def scan(clients, **kw):
+        return AwsInfraScan(
+            cluster=EksCluster(name="shop", version="1.30", vpc_id="vpc-1", security_group_ids=[]),
+            vpcs=[], subnets=[], route_tables=[], security_groups=[], load_balancers=[],
+            role_policies=[], cloudtrail=[], duration_seconds=0.0,
+            cloudtrail_status="NOT_COLLECTED", cloudtrail_error="THROTTLED",
+        )  # fmt: skip
+
+    monkeypatch.setattr(analysis_pipeline, "run_aws_scan", scan)
+    pipeline = make(repo, aws_clients_factory=lambda inp: object())
+    inp = analysis_input(repo, cluster_name="shop", credential_ref="demo-source")
+    source, code, manifests, infra, built = run_to_requirements(pipeline, inp)
+    assert infra["status"] == "COLLECTED"
+    pre = pipeline.precheck(inp, source, code, manifests)
+    mapped = pipeline.map_usage(inp, source, code, manifests, built, pre)
+    report = pipeline.check_evidence(inp, source, built, infra, pre, mapped)
+    full = pipeline.store.get_json(ArtifactRef.model_validate(report["report_ref"]))
+    assert "CLOUDTRAIL_NOT_COLLECTED: THROTTLED" in full["unverified_risks"]
+    assert not any("INFRA_" in r for r in full["unverified_risks"])

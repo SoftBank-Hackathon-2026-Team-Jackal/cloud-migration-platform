@@ -385,6 +385,9 @@ class AnalysisPipeline:
             risks.append("INFRA_NOT_COLLECTED: the AWS infrastructure scan did not run")
         elif infra.get("status") == "FAILED":
             risks.append(f"INFRA_SCAN_FAILED: {infra.get('code')}")
+        trail = infra_scan if infra_scan and infra_scan.cloudtrail_status == "COLLECTED" else None
+        if infra_scan and trail is None:
+            risks.append(f"CLOUDTRAIL_NOT_COLLECTED: {infra_scan.cloudtrail_error}")
         if mapped.get("status") != "MAPPED":
             risks.append(f"MAPPING_NOT_RUN: {mapped.get('reason') or mapped.get('status')}")
         code = CodeScan.model_validate(self._get(built["code_ref"]))
@@ -395,7 +398,7 @@ class AnalysisPipeline:
             reconcile_usage(
                 data.scope,
                 code_services=code_services(code),
-                trail_services=trail_services(infra_scan.cloudtrail) if infra_scan else None,
+                trail_services=trail_services(trail.cloudtrail) if trail else None,
             )
         )
         unmapped = [

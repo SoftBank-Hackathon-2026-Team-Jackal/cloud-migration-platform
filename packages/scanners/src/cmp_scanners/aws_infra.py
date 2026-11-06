@@ -29,6 +29,11 @@ _THROTTLED = {
     "TooManyRequestsException", "ThrottledException", "RequestThrottled",
 }  # fmt: skip
 _ATTEMPTS = 4
+# LookupEvents allows 2 requests per second per account; one page every 0.5 s stays inside it.
+_CLOUDTRAIL_PAGE_SIZE = 50
+_CLOUDTRAIL_PAGE_INTERVAL = 0.5
+# A CloudTrail read that fails with these leaves the rest of the scan intact (NOT_COLLECTED).
+_CLOUDTRAIL_SOFT_ERRORS = {"THROTTLED", "PERMISSION_DENIED", "AWS_ERROR"}
 
 
 @dataclass(frozen=True)
@@ -226,6 +231,10 @@ class AwsInfraScan(_Model):
     # NOT_REQUESTED: no client or no load balancer to match. DENIED: the role predates the
     # permission (the scan goes on). Never read it as "no distribution" unless COLLECTED.
     cloudfront_status: Literal["COLLECTED", "DENIED", "NOT_REQUESTED"] = "NOT_REQUESTED"
+    # NOT_COLLECTED: LookupEvents failed (code in `cloudtrail_error`), so `cloudtrail` is empty
+    # and must not be read as "no calls". Older stored scans default to COLLECTED.
+    cloudtrail_status: Literal["COLLECTED", "NOT_COLLECTED"] = "COLLECTED"
+    cloudtrail_error: str | None = None
 
 
 # ------------------------------------------------------------------------------- calls
@@ -263,9 +272,20 @@ class _Caller:
         raise AwsScanError("THROTTLED", operation=op.operation)  # pragma: no cover
 
     def pages(
-        self, client: str, method: str, key: str, token: str = "NextToken", **params: Any
+        self,
+        client: str,
+        method: str,
+        key: str,
+        token: str = "NextToken",
+        *,
+        limit: int | None = None,
+        interval: float = 0.0,
+        **params: Any,
     ) -> list[dict[str, Any]]:
-        """All items under `key`, following `NextToken` (or `Marker`/`NextMarker`)."""
+        """All items under `key`, following `NextToken` (or `Marker`/`NextMarker`).
+
+        With `limit`, no further page is requested once that many items are in hand (the
+        result is cut to `limit`). With `interval`, that many seconds pass between pages."""
         request_token, response_token = (
             (token, token) if token == "NextToken" else ("Marker", "NextMarker")
         )
@@ -274,8 +294,12 @@ class _Caller:
             response = self(client, method, **params)
             items.extend(response.get(key, []))
             following = response.get(response_token)
+            if limit is not None and len(items) >= limit:
+                return items[:limit]
             if not following:
                 return items
+            if interval:
+                self._sleep(interval)
             params = {**params, request_token: following}
 
 
@@ -396,6 +420,38 @@ def _role_policy(call: _Caller, role_arn: str) -> RolePolicyInfo:
     return RolePolicyInfo(role_arn=role_arn, actions=sorted(actions), wildcard_resources=wildcard)
 
 
+def _read_cloudtrail(
+    call: _Caller, *, end: datetime, days: int, max_events: int
+) -> tuple[list[CloudTrailEventSummary], str | None]:
+    """The newest `max_events` management events, at most ceil(max_events / 50) pages, paced
+    under the LookupEvents rate. A throttled, denied or failed read gives (`[]`, code) so the
+    infrastructure already read is kept."""
+    if max_events <= 0:
+        return [], None
+    try:
+        events = call.pages(
+            "cloudtrail",
+            "lookup_events",
+            "Events",
+            limit=max_events,
+            interval=_CLOUDTRAIL_PAGE_INTERVAL,
+            StartTime=end - timedelta(days=days),
+            EndTime=end,
+            MaxResults=min(_CLOUDTRAIL_PAGE_SIZE, max_events),
+        )
+    except AwsScanError as error:
+        if error.code not in _CLOUDTRAIL_SOFT_ERRORS:
+            raise
+        return [], error.code
+    counts: Counter[tuple[str, str]] = Counter(
+        (event.get("EventSource", ""), event.get("EventName", "")) for event in events
+    )
+    return [
+        CloudTrailEventSummary(event_source=s, event_name=n, count=c)
+        for (s, n), c in sorted(counts.items())
+    ], None
+
+
 def scan_aws_infra(
     clients: AwsClients,
     *,
@@ -503,22 +559,12 @@ def scan_aws_infra(
 
     roles = [_role_policy(call, arn) for arn in role_arns]
 
-    end = now or datetime.now(UTC)
-    counts: Counter[tuple[str, str]] = Counter()
-    events = call.pages(
-        "cloudtrail",
-        "lookup_events",
-        "Events",
-        StartTime=end - timedelta(days=cloudtrail_days),
-        EndTime=end,
-        MaxResults=50,
+    summary, cloudtrail_error = _read_cloudtrail(
+        call,
+        end=now or datetime.now(UTC),
+        days=cloudtrail_days,
+        max_events=cloudtrail_max_events,
     )
-    for event in events[:cloudtrail_max_events]:
-        counts[(event.get("EventSource", ""), event.get("EventName", ""))] += 1
-    summary = [
-        CloudTrailEventSummary(event_source=s, event_name=n, count=c)
-        for (s, n), c in sorted(counts.items())
-    ]
 
     return AwsInfraScan(
         cluster=cluster,
@@ -532,4 +578,6 @@ def scan_aws_infra(
         duration_seconds=clock() - started,
         cloudfront=distributions,
         cloudfront_status=cloudfront_status,
+        cloudtrail_status="NOT_COLLECTED" if cloudtrail_error else "COLLECTED",
+        cloudtrail_error=cloudtrail_error,
     )
