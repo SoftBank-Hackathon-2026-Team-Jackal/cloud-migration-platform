@@ -8,7 +8,7 @@ refuses anything that is not backed by evidence (no build, a different target, a
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Literal
 
 from cmp_contracts.analysis import AnalysisReport
 from cmp_contracts.env_plan import EnvPlan
@@ -67,7 +67,11 @@ def assemble_registration(
     settings: PlanningSettings,
     expected_target_ref: VersionRef | None = None,
     env_plan: EnvPlan | None = None,
+    cleanup_status: Literal["CLEANED", "FAILED", "PENDING"] = "CLEANED",
 ) -> PlanningInputRegistration:
+    """`expected_target_ref` is the target the Sandbox verified, when it recorded one; it must be
+    the Planning target. `cleanup_status` is the Sandbox's teardown state (ticket 55); anything
+    but CLEANED becomes a `CLEANUP_POLICY_REQUIRED` decision on the Plan."""
     if not builds or any(b.status != "SUCCEEDED" or not b.image_digest for b in builds):
         raise HandoffError("BUILD_EVIDENCE_MISSING")
     if settings.env_file_ref is None:
@@ -114,7 +118,7 @@ def assemble_registration(
                 "report_ref": report_ref.model_dump(mode="json"),
                 "test_suite_ref": suite_ref.model_dump(mode="json"),
                 "attempts": recorded,
-                "cleanup_status": "CLEANED",
+                "cleanup_status": cleanup_status,
             }
         )
         request = project_planning(

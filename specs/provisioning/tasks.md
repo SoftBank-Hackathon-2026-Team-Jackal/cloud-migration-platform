@@ -51,6 +51,7 @@
 | [49 실패 이벤트·실패 사유 보존과 running 고착 해소](../../tickets/provisioning/49-failure-visibility.md) | IN_PROGRESS (로컬 완료, 리뷰 대기) | 07, 18, 22, 24 | PROV-014, 015, 016, 018, 021 | [#184](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/184) | ☐ |
 | [54 빌드 중 인스턴스 메타데이터 자격 노출 차단](../../tickets/provisioning/54-build-isolation.md) | IN_PROGRESS (로컬 완료, 리뷰·서버 반영 승인 대기) | 28, B-01 | PROV-001, 021 | [#189](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/189) | ☐ |
 | [50 Provisioning 인계 조회 방식과 Traffic Handover 정합 (#128 선행)](../../tickets/provisioning/50-handoff-contract.md) | IN_PROGRESS (로컬 완료, 리뷰·이상헌님 확인 대기) | 13, 16, 25, 49 | PROV-018, 019, 020, 021 | [#185](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/185) | ☐ |
+| [55 샌드박스 결과(EnvPlan·정리 상태·검증 대상)를 Plan에 반영](../../tickets/provisioning/55-sandbox-results-into-plan.md) | IN_PROGRESS (로컬 완료, 리뷰 대기. 생산 쪽 필드는 박승철님 협의 필요) | 15, 18, 44, ENV-04, ENV-05 | PROV-002, 004, 021 | [#190](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/190) | ☐ |
 
 ## 선행 관계
 

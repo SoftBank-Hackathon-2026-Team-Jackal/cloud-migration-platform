@@ -241,6 +241,14 @@ Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`�
 - 거절 코드(`{"detail": {"code"}}`, 시작하지 않음): 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`, ENV-02 코드, `TARGET_PROVIDER_MISMATCH`, `TARGET_PROFILE_NOT_FOUND`, `TARGET_PROFILE_PROVIDER_MISMATCH`, `TARGET_FIELD_NOT_APPLICABLE`, `TARGET_REGION_REQUIRED`, `TARGET_AGENT_REQUIRED`, `TARGET_AGENT_NOT_FOUND`(없음·폐기), `TARGET_CONNECTION_NOT_FOUND`, `TARGET_CONNECTION_KIND_MISMATCH`, `TARGET_CONNECTION_NOT_READY`, `TARGET_SETTINGS_INVALID`(`TargetSettings`·05/06 입력 검증 실패); 503 `TARGET_PROFILES_UNCONFIGURED`, `.env` 저장소 코드.
 - 추가 공개 함수: `EncryptedEnvFileStore.latest(file_id) -> ContentRef`.
 
+## 샌드박스 결과 → Planning 인계 (55)
+
+[55 티켓](../../tickets/provisioning/55-sandbox-results-into-plan.md#착수-결정-2026-11-06). 받는 쪽만 바꿨고 샌드박스 결과·분석 `assembly` 형식은 그대로다. `MigrationWorkflow`는 바뀌지 않았다(patch 없음).
+- 추가 공개 함수: `cmp_worker.sandbox_handoff.sandbox_outcome(result: dict) -> SandboxOutcome{cleanup_status, verified_target_ref}`. 정리 상태는 결과의 `cleanup_status` → `cleanup_failed`(bool) → `CLEANED` 순으로 읽는다. 검증 대상은 결과의 `target_selection_ref`(`VersionRef`)가 있을 때만 읽는다. 있는데 형식이 틀리면 `HandoffError("SANDBOX_RESULT_INVALID")`.
+- `assemble_registration(..., cleanup_status="CLEANED")` 선택 인자 추가(기본값이면 이전 바이트 그대로). `sbx_plan_assemble`은 어댑터 값을 `cleanup_status`와 `expected_target_ref`(입력 `target_selection_ref`가 없을 때)로 넘긴다.
+- 결과: 정리 상태가 `CLEANED`가 아니면 Plan Revision에 `CLEANUP_POLICY_REQUIRED`(승인 불가), 기록된 대상이 Planning 대상과 다르면 인계 거절 `TARGET_SELECTION_CHANGED`, 형식 오류는 `SANDBOX_RESULT_INVALID`(인계 `REFUSED` → Migration `failed`).
+- EnvPlan은 #197 경로(`assembly.env_plan_ref` → `assemble_registration(env_plan=...)`) 그대로이고, `PlanningSettings`에는 싣지 않는다(44 S12).
+
 ## 구축 env 렌더 (ENV-04)
 
 [ENV-04](../../tickets/env-file-ref/04-provisioning-render-env.md#착수-결정-2026-11-06). 추가 공개 함수: `cmp_providers.env_file.preview_env`·`database_outputs`·`deployment_secrets`, 저장소 연결 `cmp_api.env_store.configured_env_file_store`·`optional_env_file_store`. 계약 추가(모두 선택, 없으면 이전 바이트 그대로): `PlanningInputRegistration.env_plan: EnvPlan`, `RolloutApplication.env_secrets: [RolloutEnvSecret{name, keys}]`. SPEC 산출물 JSON에 `env_plan`이 생긴다(있을 때만). `onprem_preview(..., platform_secrets=...)` 선택 인자. HTTP: `GET /agents/{agent_id}/jobs/{job_id}/env-secrets` → `{secrets: [{name, data}]}`(Agent 인증, 자기 RUNNING 작업, `no-store`; 404 `ENV_SECRETS_NOT_FOUND`, 409 승인·저장소·결정 코드, 503 저장소 미설정). `GkeKubectlSession.apply_secret`는 공통 3인자 형태도 받는다.
