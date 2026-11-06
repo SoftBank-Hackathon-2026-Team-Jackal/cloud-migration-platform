@@ -378,7 +378,9 @@ class MigrationWorkflow:
                 "policy": parsed.policy.model_dump(mode="json"),
                 "relay_queue": parsed.relay_queue,
                 # 입력으로 정하지 않았으면 이 실행의 데이터 이전 상태(DM-007)로 판단한다.
-                "db_gate_ok": parsed.db_gate_ok if parsed.db_gate_ok is not None else self.db_gate_ok(),
+                "db_gate_ok": parsed.db_gate_ok
+                if parsed.db_gate_ok is not None
+                else self.db_gate_ok(),
             },
             id=f"traffic-{workflow.info().workflow_id}",
             task_queue=WORKFLOW_QUEUE,
