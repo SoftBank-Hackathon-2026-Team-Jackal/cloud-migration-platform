@@ -359,6 +359,7 @@ skills/<name>/
 | `db-postgres` | 버전·확장·연결 변수, 세션 기능(advisory lock, LISTEN/NOTIFY), 마이그레이션 실행 방식 |
 | `network` | SG·Ingress·ALB·CloudFront → `network_intent`·외부 진입, 외부 호출의 `MIGRATE`/`KEEP` 판단 |
 | `config-env` | `.env` 대조, 원본 환경에 묶인 변수의 제외·대체, 비밀 분류 |
+| `security-posture` (티켓 30, 초안) | 보안 프로브 대상 선택: DB 클라이언트 식별, 운영용 경로 후보 제안(근거 필수), 부수효과 경로 제외. 기대값·판정은 다루지 않음 |
 
 고도화: `storage-s3`(엔드포인트·인증 변경과 코드 수정 패턴).
 

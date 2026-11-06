@@ -40,6 +40,9 @@
 | [ENV-06 Sandbox: render_env로 앱 Secret 만들기](../../tickets/env-file-ref/06-sandbox-render-env.md) | DONE (구현 완료, PR 대기) | ENV-03, ENV-05 | AV-011, AV-020 | #197 | ☐ |
 | [26 Sandbox의 비공개 ECR 이미지 pull](../../tickets/analysis-verification/26-sandbox-ecr-pull.md) | DONE (구현 완료, PR 대기, 실제 토큰은 승인 후) | 25, Provisioning 29 (실제 토큰은 승인 필요) | AV-010, AV-011, AV-020 | #197 | ☐ |
 | [27 표준 테스트를 앱 API 모양에 맞추기](../../tickets/analysis-verification/27-standard-test-shapes.md) | IN_PROGRESS (27-A 구현·k3d 확인 완료, 27-B 구현 완료·실제 Claude와 k3d 확인 대기) | 12, 22, 24 (D-09 재정의 결정됨) | AV-012 | #199 | ☐ |
+| [28 보안 측정 모델과 원본 측정(데모 4행)](../../tickets/analysis-verification/28-security-measure.md) | DRAFT | 04, 06, 07, 19 (병합됨) | AV-023 | 미생성 | ☐ |
+| [29 보안 동등 판정·약점 표시·승인 게이트 연결](../../tickets/analysis-verification/29-security-judge.md) | DRAFT | 28, 08B, D-17(정책) | AV-023, AV-022 | 미생성 | ☐ |
+| [30 Sandbox 보안 프로브](../../tickets/analysis-verification/30-security-probes.md) | DRAFT | 12, 13, 24, 28, D-18 | AV-023, AV-012, AV-013 | 미생성 | ☐ |
 
 ## 선행 관계
 
@@ -87,6 +90,8 @@ Q-01 ────┴→ 02B ─┐
 | D-14 | PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체(현재 확장 요구는 Planning이 거절) | 07 | 민서 |
 | D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법(그 전까지 `AnalysisReport`에 기록) | 01, 06, 13 | 민서 |
 | D-16 | 결정됨, V2·렌더러 구현 완료(#79, #81), 07 바인딩 반영 — DB 연결을 단일 URL 변수로 받는 앱은 `env_bindings`에 `connection_url_secret_ref` 출력으로 바인딩. Sandbox와 운영이 각각 URL을 만들어 Secret에 저장하고 앱에는 Secret 이름·키만 주입. 형식(URL 인코딩, Secret 키 이름)은 민서님과 확정 | 07, 11 | 민서(V2·공통 렌더러·Secret 주입)·승철(07 바인딩, 11 검증) |
+| D-17 | 보안 동등성 정책: "원본 약점을 승인하면 대상에서 고쳐서 배포"를 제품 정책으로 인정할지(`policies.md` 변경 필요), 보강의 대상 구성 반영 방법(Provisioning 계약) | 29, 후속 | 사용자·민서
+| D-18 | DB SSL 강제를 Sandbox·대상에서 구현하는 방식(이미지 인증서·설정 공급 주체)과 운영용 API 판별 기준 | 28, 30 | 승철·민서
 
 ## 변경 기록
 
