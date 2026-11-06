@@ -27,7 +27,8 @@ terraform apply -var 'eks_nat_ips=["<EKS NAT IP>/32"]'
 # 키: "<eks|gke> <private> <public>" 두 줄
 docker run --rm alpine:3.22 sh -c 'apk add -q wireguard-tools; for s in eks gke; do k=$(wg genkey); echo "$s $k $(echo $k | wg pubkey)"; done' > wgkeys.txt
 
-docker buildx build --platform linux/amd64 -t <ECR>/<repo>:<tag> --push ../cutover
+bash ../cutover/build-image.sh <ECR>/<repo>   # linux/amd64 로컬 빌드, 태그 cmp-cutover-<커밋 12자리>, push 안 함
+docker push <ECR>/<repo>:cmp-cutover-<커밋>    # 승인 뒤. 출력된 image= 값을 cutover 설정 image에 넣는다
 EKS_KUBECONFIG=... GKE_KUBECONFIG=... WG_KEYS=wgkeys.txt EKS_NAT_CIDRS=<IP>/32 \
   APP_IMAGE=<ECR>/<repo>:<tag> EKS_STORAGE_CLASS=<sc> ./up.sh
 ```

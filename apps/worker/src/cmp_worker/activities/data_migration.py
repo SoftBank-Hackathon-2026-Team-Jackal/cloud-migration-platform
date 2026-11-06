@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import secrets
+import shlex
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -71,7 +72,7 @@ class DbPod(Protocol):
 
     def query(self, sql: str) -> str: ...
     def execute(self, sql: str) -> None: ...
-    def dump_schema(self) -> bytes: ...
+    def dump_schema(self, exclude: frozenset[str] = frozenset()) -> bytes: ...
     def restore(self, script: bytes) -> None: ...
     def restart(self, timeout: int = 180) -> None: ...
     def read_secret(self, name: str) -> str | None: ...
@@ -97,8 +98,9 @@ class KubectlDbPod:
     def execute(self, sql: str) -> None:
         self._exec(PSQL, sql.encode())
 
-    def dump_schema(self) -> bytes:
-        return self._exec(PG_DUMP_SCHEMA, timeout=300)
+    def dump_schema(self, exclude: frozenset[str] = frozenset()) -> bytes:
+        flags = "".join(f" --exclude-table={shlex.quote(t)}" for t in sorted(exclude))
+        return self._exec(PG_DUMP_SCHEMA + flags, timeout=300)
 
     def restore(self, script: bytes) -> None:
         self._exec(PSQL, script, timeout=300)
@@ -244,17 +246,21 @@ def prepare(req: DataMigrationRequest, actions: list[list[str]]) -> dict:
 
 def copy_schema(req: DataMigrationRequest) -> dict:
     """스키마만 복사한다(논리 복제는 DDL을 옮기지 않는다). 구독자에 이미 같은 테이블이 다 있으면
-    건너뛰고, 일부만 있으면 사람이 봐야 하므로 멈춘다."""
+    건너뛰고, 일부만 있으면 사람이 봐야 하므로 멈춘다.
+
+    비교·복사는 사용자 표만 본다. prepare가 발행자에 만든 marker 표는 빼고, 구독자에는 따로 만든다
+    (`for all tables` 발행이 marker 행도 보내므로 구독자에 표가 있어야 한다, Provisioning 72)."""
     publisher, subscriber = _sides(req)
     with OPEN_DB(publisher) as src, OPEN_DB(subscriber) as dst:
-        wanted = set(json.loads(src.query(q.USER_TABLES_SQL)))
-        present = set(json.loads(dst.query(q.USER_TABLES_SQL)))
-        if wanted <= present:
-            return {"copied": False, "tables": len(wanted)}
-        if present & wanted:
-            raise _fail("TARGET_SCHEMA_PARTIAL", retryable=False)
-        dst.restore(src.dump_schema())
-    return {"copied": True, "tables": len(wanted)}
+        wanted = q.parse_user_tables(src.query(q.USER_TABLES_SQL))
+        present = q.parse_user_tables(dst.query(q.USER_TABLES_SQL))
+        copied = not wanted <= present
+        if copied:
+            if present & wanted:
+                raise _fail("TARGET_SCHEMA_PARTIAL", retryable=False)
+            dst.restore(src.dump_schema(q.INTERNAL_TABLES))
+        dst.execute(q.ENSURE_MARKER_SQL)
+    return {"copied": copied, "tables": len(wanted)}
 
 
 def subscribe(req: DataMigrationRequest, copy_data: bool = True) -> dict:
