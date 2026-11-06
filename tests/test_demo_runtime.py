@@ -145,6 +145,13 @@ def test_edge_sends_only_agent_and_relay_routes_to_the_api():
     # Everything that is not the Agent API or the relay polling API is the web front end; the
     # operator, approval and tunnel-admin routes and /docs never get a route to the API.
     assert code == [
+        "@temporal {",
+        "path /temporal.api.* /grpc.health.v1.Health/*",
+        "remote_ip {$CMP_TEMPORAL_ALLOWED_IP}",
+        "}",
+        "handle @temporal {",
+        "reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}",
+        "}",
         "@backend path /agents/* /relays/*",
         "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
@@ -160,6 +167,9 @@ def test_edge_sends_only_agent_and_relay_routes_to_the_api():
     edge = _env("edge")
     assert edge["CMP_API_UPSTREAM"] == "api:8000"
     assert edge["CMP_WEB_UPSTREAM"] == "web:3000"
+    assert edge["CMP_TEMPORAL_UPSTREAM"] == "temporal:7233"
+    # Nobody may reach Temporal through the edge unless the operator sets an address.
+    assert edge["CMP_TEMPORAL_ALLOWED_IP"].endswith("192.0.2.1/32}")
 
 
 def test_web_is_internal_only_and_reaches_the_api_over_the_compose_network():

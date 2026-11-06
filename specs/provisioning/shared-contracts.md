@@ -17,6 +17,8 @@
 | `sha256_bytes`, `canonical_json_bytes`, `sha256_json`, `verify_artifact_bytes` | `cmp_providers.artifacts` | 순수 바이트/정규화 JSON Digest 및 조회한 실제 바이트 검증 |
 | `approval_issues`, `approval_target`, `verify_approval_target` | `cmp_providers.plans` | 계획 완전성·Preview 일치·기록된 승인 대상 및 요청 실행 범위 비교 |
 | `bind_values`, `verify_bound_values` | `cmp_providers.bindings` | 승인된 동적 자리만 채우고 나머지 Values 변경 거절 |
+| `run_graceful`, `CommandResult.stopped`, `failed_apply_refs` | `cmp_providers.terraform_process` | Terraform 명령 시한·취소 시 SIGTERM → 유예 → SIGKILL, 중단 뒤 lock·보존 State 보고(53). `aws_apply.CommandResult`는 같은 클래스 |
+| `plan_destroy`, `apply_destroy`, `destroy_addresses`, `review_digest` | `cmp_providers.cloud_destroy` | 실행된 Revision의 Spec으로 검토된 destroy. 검토 Digest = 환경·삭제 주소·GKE 보호 해제 여부(53) |
 
 `cmp_*`는 기존 packages/contracts 또는 packages/providers의 Python 패키지다. 새 하위 패키지·런타임 의존성은 추가하지 않았다. 엄격한 Pydantic 모델로 알 수 없는 필드와 암묵적 타입 변환을 거절한다.
 
@@ -240,6 +242,14 @@ Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`�
 - `TargetSelectionV2`: `ref {id: target-<profile>, version: 대상 설정 sha256 앞 16자}`, `access_ref`(클라우드 `credential_ref`, ON_PREM `{id: agent_id, version: cluster_uid}`), `capabilities_ref {id: profile-<profile>, version: 항목 sha256 앞 16자}`, `profile`.
 - 거절 코드(`{"detail": {"code"}}`, 시작하지 않음): 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`, ENV-02 코드, `TARGET_PROVIDER_MISMATCH`, `TARGET_PROFILE_NOT_FOUND`, `TARGET_PROFILE_PROVIDER_MISMATCH`, `TARGET_FIELD_NOT_APPLICABLE`, `TARGET_REGION_REQUIRED`, `TARGET_AGENT_REQUIRED`, `TARGET_AGENT_NOT_FOUND`(없음·폐기), `TARGET_CONNECTION_NOT_FOUND`, `TARGET_CONNECTION_KIND_MISMATCH`, `TARGET_CONNECTION_NOT_READY`, `TARGET_SETTINGS_INVALID`(`TargetSettings`·05/06 입력 검증 실패); 503 `TARGET_PROFILES_UNCONFIGURED`, `.env` 저장소 코드.
 - 추가 공개 함수: `EncryptedEnvFileStore.latest(file_id) -> ContentRef`.
+
+## 샌드박스 결과 → Planning 인계 (55)
+
+[55 티켓](../../tickets/provisioning/55-sandbox-results-into-plan.md#착수-결정-2026-11-06). 받는 쪽만 바꿨고 샌드박스 결과·분석 `assembly` 형식은 그대로다. `MigrationWorkflow`는 바뀌지 않았다(patch 없음).
+- 추가 공개 함수: `cmp_worker.sandbox_handoff.sandbox_outcome(result: dict) -> SandboxOutcome{cleanup_status, verified_target_ref}`. 정리 상태는 결과의 `cleanup_status` → `cleanup_failed`(bool) → `CLEANED` 순으로 읽는다. 검증 대상은 결과의 `target_selection_ref`(`VersionRef`)가 있을 때만 읽는다. 있는데 형식이 틀리면 `HandoffError("SANDBOX_RESULT_INVALID")`.
+- `assemble_registration(..., cleanup_status="CLEANED")` 선택 인자 추가(기본값이면 이전 바이트 그대로). `sbx_plan_assemble`은 어댑터 값을 `cleanup_status`와 `expected_target_ref`(입력 `target_selection_ref`가 없을 때)로 넘긴다.
+- 결과: 정리 상태가 `CLEANED`가 아니면 Plan Revision에 `CLEANUP_POLICY_REQUIRED`(승인 불가), 기록된 대상이 Planning 대상과 다르면 인계 거절 `TARGET_SELECTION_CHANGED`, 형식 오류는 `SANDBOX_RESULT_INVALID`(인계 `REFUSED` → Migration `failed`).
+- EnvPlan은 #197 경로(`assembly.env_plan_ref` → `assemble_registration(env_plan=...)`) 그대로이고, `PlanningSettings`에는 싣지 않는다(44 S12).
 
 ## 구축 env 렌더 (ENV-04)
 

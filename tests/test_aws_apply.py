@@ -260,3 +260,46 @@ def test_template_drift_since_plan_blocks_apply(tmp_path):
     result = run(manifest, preview, directory, runner)
     assert (result["status"], result["code"]) == ("FAILED", "TEMPLATE_DRIFT")
     assert "apply" not in terraform_subcommands(runner)
+
+
+class InterruptedRunner(FakeRunner):
+    """Ticket 53: Apply stopped at the deadline; Terraform left `errored.tfstate` behind."""
+
+    def __init__(self, *, stopped="TERMINATED", lock=b"", lock_rc=254, **kwargs):
+        super().__init__(**kwargs)
+        self.stopped, self.lock, self.lock_rc = stopped, lock, lock_rc
+
+    def __call__(self, args, cwd, env, timeout):
+        if args[:3] == ["aws", "s3api", "head-object"]:
+            self.commands.append(list(args))
+            stderr = b"" if self.lock_rc == 0 else b"An error occurred (404): Not Found"
+            return CommandResult(self.lock_rc, self.lock, stderr)
+        if args[1:2] == ["apply"]:
+            self.commands.append(list(args))
+            (Path(cwd) / "errored.tfstate").write_bytes(b'{"version": 4, "serial": 9}')
+            return CommandResult(-1, b"", b"", self.stopped)
+        return super().__call__(args, cwd, env, timeout)
+
+
+def test_interrupted_apply_reports_stop_lock_and_preserves_errored_state(tmp_path):
+    manifest, preview, directory = artifacts(tmp_path)
+    runner = InterruptedRunner(stopped="KILLED", lock_rc=0, lock=b'{"ContentLength": 1}')
+    result = run(manifest, preview, directory, runner)
+    assert (result["status"], result["code"]) == ("UNKNOWN", "TERRAFORM_APPLY_INTERRUPTED")
+    refs = result["resource_refs"]
+    assert refs["stopped"] == "KILLED"
+    assert refs["state_lock"] == "HELD"
+    assert refs["state_recovery"] == "PRESERVED"
+    kept = list((tmp_path / "state-recovery").iterdir())
+    assert len(kept) == 1 and kept[0].name.startswith("plan-aws-r1-")
+    assert kept[0].read_bytes() == b'{"version": 4, "serial": 9}'
+    lock = next(c for c in runner.commands if c[:3] == ["aws", "s3api", "head-object"])
+    assert lock[lock.index("--profile") + 1] == "cmp-aws-prod"  # State (platform) profile
+    assert "cmp/target-aws/terraform.tfstate.tflock" in lock
+
+
+def test_graceful_stop_with_released_lock_is_reported_as_absent(tmp_path):
+    manifest, preview, directory = artifacts(tmp_path)
+    result = run(manifest, preview, directory, InterruptedRunner())
+    refs = result["resource_refs"]
+    assert (refs["stopped"], refs["state_lock"]) == ("TERMINATED", "ABSENT")

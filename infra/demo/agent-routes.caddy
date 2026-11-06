@@ -2,6 +2,15 @@
 # every other path is the web front end. Operator, approval and tunnel-admin routes, /docs and
 # /openapi.json stay on the loopback-bound API (SSM port forwarding) and still require keys: the web
 # container calls the API on the internal network and never forwards raw request paths.
+# Relay-host worker (cmp-demo-relay): Temporal gRPC over TLS, only from the allowed address. The
+# default is a documentation address (RFC 5737), so nothing passes unless the operator sets it.
+@temporal {
+	path /temporal.api.* /grpc.health.v1.Health/*
+	remote_ip {$CMP_TEMPORAL_ALLOWED_IP}
+}
+handle @temporal {
+	reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}
+}
 @backend path /agents/* /relays/*
 handle @backend {
 	reverse_proxy {$CMP_API_UPSTREAM}

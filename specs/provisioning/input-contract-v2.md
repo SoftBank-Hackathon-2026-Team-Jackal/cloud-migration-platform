@@ -84,7 +84,7 @@ policy: {template_version: helm-v2}
 | 설정 | 별도 `config_artifact_ref`가 있으면 Analysis·Sandbox 참조가 정확히 같음 |
 | 상태 | Build `SUCCEEDED`, Sandbox `PASSED`; 중복·누락·추가 앱 기록 거절 |
 
-Sandbox `cleanup_status`가 `CLEANED`가 아니면 결과에 `CLEANUP_POLICY_REQUIRED` 미해결 결정을 남긴다. 검증 성공이 정리 성공을 의미하지 않는다. Sandbox의 `report_ref`와 `test_suite_ref`는 보존한다. **배포 직후에는 준비 상태·헬스·기본 연결만 확인**하고, 데이터 이전 후 트래픽 전환 전에 테스트 묶음을 실행하는 것이 최신 운영 순서다.
+Sandbox `cleanup_status`가 `CLEANED`가 아니면 결과에 `CLEANUP_POLICY_REQUIRED` 미해결 결정을 남긴다. 자동 인계에서 이 값은 샌드박스 결과에서 읽는다(55, `sandbox_outcome`). 현재 샌드박스는 통과한 실행의 정리가 실패하면 결과 대신 예외를 내므로, 돌아온 결과는 `CLEANED`다. 검증 성공이 정리 성공을 의미하지 않는다. Sandbox의 `report_ref`와 `test_suite_ref`는 보존한다. **배포 직후에는 준비 상태·헬스·기본 연결만 확인**하고, 데이터 이전 후 트래픽 전환 전에 테스트 묶음을 실행하는 것이 최신 운영 순서다.
 
 공통 빌더의 `BuildContext`는 `migration_id`, `resource_id`, `attempt_id`, 플랫폼, ECR 저장소와 로그 버킷을 받는다. 호출 시 소스 URI와 **있다면** S3 Version ID를 전달한다. 같은 시도에서 서로 다른 앱은 다른 ECR 태그와 로그 경로를 사용하고, 결과에는 앱 ID·소스 버전·Digest·로그 참조를 포함한다. URI의 해시 이름을 기준으로 아카이브 내용을 검증한다. 빌드 시도/이미지 결과가 실제로 어떤 Migration 기록에 속하는지는 상위 Activity가 소유권 조회로 확인해야 한다.
 

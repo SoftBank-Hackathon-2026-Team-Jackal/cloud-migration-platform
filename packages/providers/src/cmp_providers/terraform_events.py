@@ -7,8 +7,6 @@ values and resource IDs are never copied (they may hold sensitive values). Total
 
 import json
 import logging
-import subprocess
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -115,32 +113,13 @@ def apply_runner(runner: "Runner", progress: ApplyProgress | None) -> "Runner":
 
 
 def streaming_runner(sink: LineSink) -> "Runner":
-    """A subprocess runner that hands each stdout line to `sink` while the command runs."""
-    from cmp_providers.aws_apply import CommandResult
+    """A subprocess runner that hands each stdout line to `sink` while the command runs.
+
+    Ticket 53 (D8): a timeout or stop request ends it with SIGTERM → grace → SIGKILL."""
+    from cmp_providers.terraform_process import run_graceful
 
     def run(args: list[str], cwd: Path, env: dict[str, str], timeout: int) -> "CommandResult":
-        try:
-            proc = subprocess.Popen(
-                args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-        except OSError:
-            return CommandResult(-1, b"", b"")
-        stderr: list[bytes] = []
-        reader = threading.Thread(target=lambda: stderr.append(proc.stderr.read()), daemon=True)
-        reader.start()
-        timer = threading.Timer(timeout, proc.kill)
-        timer.start()
-        lines: list[bytes] = []
-        try:
-            for line in proc.stdout:
-                lines.append(line)
-                sink(line)
-            code = proc.wait()
-        finally:
-            timer.cancel()
-            reader.join(timeout=5)
-        timed_out = code < 0
-        return CommandResult(-1 if timed_out else code, b"".join(lines), b"".join(stderr))
+        return run_graceful(args, cwd, env, timeout, sink=sink)
 
     return run
 

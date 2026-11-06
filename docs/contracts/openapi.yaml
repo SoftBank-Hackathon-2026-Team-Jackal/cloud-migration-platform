@@ -779,6 +779,128 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning-admin/teardowns:
+    post:
+      tags:
+      - provisioning administration
+      summary: Start
+      description: Start tearing down what Revision `plan_id`/`revision` created (workloads
+        first).
+      operationId: start_provisioning_admin_teardowns_post
+      parameters:
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudTeardownRequest'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudTeardownView'
+        '404':
+          description: Not Found
+        '409':
+          description: Code only, e.g. TEARDOWN_IN_PROGRESS
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning-admin/teardowns/{teardown_id}:
+    get:
+      tags:
+      - provisioning administration
+      summary: Show
+      operationId: show_provisioning_admin_teardowns__teardown_id__get
+      parameters:
+      - name: teardown_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Teardown Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudTeardownView'
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning-admin/teardowns/{teardown_id}/confirm:
+    post:
+      tags:
+      - provisioning administration
+      summary: Confirm
+      description: Destroy exactly the reviewed addresses (`review.digest`); anything
+        else is refused.
+      operationId: confirm_provisioning_admin_teardowns__teardown_id__confirm_post
+      parameters:
+      - name: teardown_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Teardown Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudTeardownConfirm'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudTeardownView'
+        '404':
+          description: Not Found
+        '409':
+          description: Code only, e.g. TEARDOWN_IN_PROGRESS
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/approvers:
     post:
       tags:
@@ -2291,6 +2413,81 @@ components:
       - payload
       - status
       title: ClaimedJob
+    CloudTeardownConfirm:
+      properties:
+        review_digest:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Review Digest
+      additionalProperties: false
+      type: object
+      required:
+      - review_digest
+      title: CloudTeardownConfirm
+    CloudTeardownRequest:
+      properties:
+        plan_id:
+          type: string
+          maxLength: 120
+          minLength: 1
+          pattern: ^[A-Za-z0-9._-]+$
+          title: Plan Id
+        revision:
+          type: integer
+          minimum: 1.0
+          title: Revision
+        delete_data:
+          type: boolean
+          title: Delete Data
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - plan_id
+      - revision
+      title: CloudTeardownRequest
+    CloudTeardownView:
+      properties:
+        teardown_id:
+          type: string
+          title: Teardown Id
+        phase:
+          type: string
+          enum:
+          - WORKLOADS
+          - DESTROY_PLAN
+          - AWAITING_CONFIRMATION
+          - DESTROYING
+          - FINISHED
+          title: Phase
+        delete_data:
+          type: boolean
+          title: Delete Data
+          default: false
+        workloads:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Workloads
+        review:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Review
+        result:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Result
+      additionalProperties: false
+      type: object
+      required:
+      - teardown_id
+      - phase
+      title: CloudTeardownView
     CloudWorkloadSettings:
       properties:
         namespace:
