@@ -22,6 +22,8 @@ Blocked by: 28, 08B (병합됨). 29-B는 D-17(약점 보강을 제품 정책으�
   | DB 전송 암호화 | `UNPROTECTED`(`TARGET_DB_SSL_NOT_CONFIGURED`) | DB 차트에 SSL 설정이 없고 플랫폼이 만드는 연결에 `sslmode`가 없다 |
   | 운영용 API | 원본이 `NOT_APPLICABLE`/`UNKNOWN`이 아니면 `UNPROTECTED`(`TARGET_ENTRY_HAS_NO_PATH_FILTER`) | 대상 입구는 경로를 거르지 않는다 |
   | (Provider 없음) | 전부 `UNKNOWN`(`TARGET_PROVIDER_UNKNOWN`) | |
+
+  **대상에 입구 TLS가 생길 때의 값(합의, 2026-11-07):** 중계 서버가 HTTPS로 받으면 사용자 입구가 암호화되므로 CloudFront 입구와 비슷한 모양이다. 다만 **브라우저가 신뢰하는 인증서**(도메인과 정식 인증서)면 `PROTECTED`, **자체 서명처럼 브라우저 경고가 뜨는 인증서**면 암호화는 되지만 원본의 정식 HTTPS와 같다고 보지 않아 `PARTIAL`(사유 `TARGET_TLS_UNTRUSTED_CERT`)로 적는다. TLS가 없으면 지금처럼 `UNPROTECTED`다. 이 값은 대상 능력 프로필 한 곳만 바꾸면 되고 판정 코드는 그대로다. 오리진 구간과 인터넷에서 ALB로의 직접 접근은 보지 않는다(티켓 28 알려진 한계).
 - **판정** (`judge_security`): 상태 강도는 `PROTECTED` > `PARTIAL` > `UNPROTECTED`. 대상이 원본보다 낮으면 `LOWER`, 같으면 `SAME`, 높으면 `HIGHER`. 어느 쪽이든 `UNKNOWN`이면 `UNKNOWN`(같은 수준으로 보지 않는다). `NOT_APPLICABLE`이 한쪽에 있으면 `SAME`. 기준 순서는 고정이고 같은 입력이면 같은 결과다.
 - **약점·제안:** 원본이 `UNPROTECTED`·`PARTIAL`이면 `weak_source`, 약점이거나 `LOWER`이면 제안 코드(`ENFORCE_HTTPS_AT_ENTRY`, `RESTRICT_DB_INGRESS_TO_APP`, `REQUIRE_DB_SSL`, `BLOCK_ADMIN_PATHS_AT_ENTRY`). 문구는 화면이 고르고 **적용하지 않는다**.
 - **보고서:** `AnalysisReport.security_judgements`(선택 필드)와 `unverified_risks`의 `SECURITY_LOWER: <기준>`·`SECURITY_WEAK_SOURCE: <기준>`. 입력의 대상 Provider(티켓 31의 `target_provider`)와 요구사항을 쓴다.
