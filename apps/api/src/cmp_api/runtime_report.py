@@ -14,6 +14,7 @@ from cmp_api.start_request import (
     data_migration_settings,
     load_target_profiles,
     sandbox_settings,
+    traffic_settings,
 )
 
 
@@ -42,6 +43,11 @@ def report() -> dict[str, str]:
         result["web_start_data_migration"] = "on" if on else "off"
     except StartRefused as exc:
         result["web_start_data_migration"] = f"error:{exc.code}"
+    try:  # #128: the web start's traffic step input
+        on = traffic_settings(settings.web_start_traffic) is not None
+        result["web_start_traffic"] = "on" if on else "off"
+    except StartRefused as exc:
+        result["web_start_traffic"] = f"error:{exc.code}"
     return result
 
 
