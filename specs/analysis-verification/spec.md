@@ -230,7 +230,7 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 - Planning 입력 v2(`PlanningRequestV2`)의 `analysis`·`builds[]`·`sandbox` 블록을 채울 수 있게 낸다: `validated_workloads`(리소스별 Build 참조·이미지 Digest·플랫폼·소스 SHA-256), 요구사항 참조, 보고서, `test_suite_ref`, 정리 상태. Build 결과는 불변 기록으로 저장해 `result_ref`를 발급한다.
 - 통과 후 다시 빌드하지 않는다. 통과 Digest = Build Digest = Production 배포 Digest(P-10).
 - 검증 이후 대상 선택이나 요구사항이 바뀌면 이전 검증을 그대로 넘기지 않는다.
-- 구현(티켓 15): 통과한 실행은 `--planning` 설정이 있을 때 Planning 입력으로 조립·검증(`prepare_plan_v2`)해 등록한다. 빌드 증거가 없으면(미리 빌드한 이미지 경로) 등록하지 않고 `BUILD_EVIDENCE_MISSING`으로 멈춘다.
+- 구현(티켓 15): 통과한 실행은 `--planning` 설정이 있을 때 Planning 입력으로 조립·검증(`prepare_plan_v2`)해 등록한다. 웹 시작(`POST /migrations`에 `target`)은 같은 `PlanningSettings`를 API가 대상 Profile 카탈로그로 만들어 시작 입력 `planning`에 넣는다([Provisioning 44](../../tickets/provisioning/44-web-start-to-planning.md#착수-결정-2026-11-06)). 인계 쪽 코드는 그대로다. 빌드 증거가 없으면(미리 빌드한 이미지 경로) 등록하지 않고 `BUILD_EVIDENCE_MISSING`으로 멈춘다.
 - Production에서는 배포 직후 준비 검사만 하고, 테스트 묶음은 데이터 이전 후·트래픽 전환 전에 실행한다(실행 시점은 해당 파트 결정).
 
 #### AV-019 — 코드 수정 반환

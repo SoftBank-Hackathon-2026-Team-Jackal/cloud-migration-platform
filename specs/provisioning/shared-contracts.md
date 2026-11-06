@@ -196,7 +196,7 @@ API 설정(`cmp_api.config`):
 | `POST /env-files` | 본문 = `.env` 원본 바이트(`application/octet-stream` 또는 `text/plain`, UTF-8, 64 KiB 이하) | 201 `{env_file_ref: {id: "envf-<32 hex>", version: "1", sha256}, keys: [이름], warnings: [{code: "ENV_KEY_DUPLICATED", key}]}`. `sha256`은 원본 바이트 기준 |
 | `POST /env-files/{id}` | 같은 본문 | 201, 같은 `id`의 다음 `version`. 이전 버전은 보관 기간까지 읽을 수 있다 |
 | `DELETE /env-files/{id}` | — | 204. 모든 버전 삭제, 반복 호출도 204 |
-| `POST /migrations` | 선택 `env_file_ref: ContentRef` | 없으면 지금과 같다. 있으면 저장소에 같은 `version`·`sha256`이 있어야 하고, 아니면 422 `ENV_FILE_NOT_FOUND`·`ENV_FILE_DIGEST_MISMATCH`·`ENV_FILE_EXPIRED`(시작하지 않음) |
+| `POST /migrations` | 선택 `env_file_ref: ContentRef` 또는 `envf-<32 hex>`(44) | 없으면 지금과 같다. 있으면 저장소에 같은 `version`·`sha256`이 있어야 하고, 아니면 422 `ENV_FILE_NOT_FOUND`·`ENV_FILE_DIGEST_MISMATCH`·`ENV_FILE_EXPIRED`(시작하지 않음). 문자열 id는 시작 순간 최신 버전으로 고정한다. `target`이 있는 웹 시작에서는 필수다(아래 44) |
 
 오류 코드: `ENV_FILE_NOT_FOUND` 404, `ENV_FILE_EXPIRED` 410(삭제·보관 만료), `ENV_FILE_TOO_LARGE` 413, `ENV_FILE_NOT_UTF8` 422, `ENV_FILE_STORE_UNCONFIGURED`·`ENV_FILE_KEY_INVALID` 503.
 
@@ -211,6 +211,27 @@ API 설정(`cmp_api.config`):
 API 설정(`cmp_api.config`): `env_file_store_dir`(`ENV_FILE_STORE_DIR`), `env_file_encryption_key`(`ENV_FILE_ENCRYPTION_KEY`, base64url 32바이트, 서버 `.env`에만).
 
 Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`를 분석 자식 입력 `AnalysisInput.env_file_ref`(추가 선택 필드), Sandbox `SandboxSettings`·`SandboxInput.env_file_ref`(추가 선택 필드), Planning 인계 설정 `PlanningSettings.env_file_ref`(시작 요청 값이 우선)로 복사한다. `status` 쿼리에 `env_file_ref`가 추가됐다. API의 scaffold 시작(`analysis` 없음)은 `{project_id, env_file_ref}` dict로 시작하며 분석·Sandbox 자식은 여전히 scaffold 문자열 입력이다.
+
+## 웹 시작 요청 → 실제 시작 입력 (44)
+
+[44 티켓](../../tickets/provisioning/44-web-start-to-planning.md#착수-결정-2026-11-06). `cmp_contracts.migration.MigrationRequest`는 웹 `cloud-migration-web` `contract/rest.schema.json` `StartRequest`와 같은 모양이고 모르는 필드는 422다(`extra="forbid"`).
+
+| 필드 | 형식 | 비고 |
+| --- | --- | --- |
+| `project_id` | 문자열(필수) | |
+| `source_provider` | `AWS` | |
+| `target_provider` | `AWS`·`GCP`·`ON_PREM`(선택) | `target.provider`와 다르면 422 `TARGET_PROVIDER_MISMATCH` |
+| `target` | `{provider, profile, region?, agent_id?, credential_ref?}` | 없으면 scaffold 시작(입력 바이트 동일). 있으면 실제 시작 |
+| `source` | `{kind: GITHUB_PUBLIC, repository_id, full_name, commit_sha}` | 실제 시작에 필수(`SOURCE_REQUIRED`) |
+| `env_file_ref` | `ContentRef` 또는 `envf-<32 hex>` | 실제 시작에 필수(`ENV_FILE_REF_REQUIRED`) |
+
+실제 시작 입력은 CLI `build_start_input`과 같은 `{project_id, analysis: AnalysisInput{repository: https://github.com/<full_name>.git, requested_commit}, sandbox: null, planning: PlanningSettings(env_file_ref null), env_file_ref}`이고 `MigrationWorkflow`는 바뀌지 않았다. `PlanningSettings`는 `cmp_api.start_request.planning_settings`가 만든다.
+
+- 대상 Profile 카탈로그(API 설정 `planning_target_profiles_file`, `PLANNING_TARGET_PROFILES_FILE`): `{"profiles": {<profile>: 항목}}`. 항목은 AWS·GCP `{provider, settings: Plan 입력에서 migration_id·plan을 뺀 필드, workloads?}`, ON_PREM `{provider, environment_id?, namespace, storage_class, database_image}`. 예시는 `infra/demo/target-profiles.example.json`. 코드 기본값은 없다. 없으면 503 `TARGET_PROFILES_UNCONFIGURED`.
+- 요청이 바꿀 수 있는 값: 클라우드 `region`(→ `settings.region`·`location`), 대상 연결 `credential_ref`(`conn-<hex>` 또는 `cmp-conn-<hex>`, `AWS_TARGET`·`GCP_TARGET`·`CONNECTED`; → `settings.credential_ref = {id: AWS는 cmp-conn-<hex>·GCP는 conn-<hex>, version: "1"}`, AWS `account_id`·GCP `project_id`도 연결 값), ON_PREM `agent_id`(→ `cluster_uid`는 등록 값, `environment_id`는 항목 값 또는 `agent_id`). 나머지는 카탈로그 값 그대로다.
+- `TargetSelectionV2`: `ref {id: target-<profile>, version: 대상 설정 sha256 앞 16자}`, `access_ref`(클라우드 `credential_ref`, ON_PREM `{id: agent_id, version: cluster_uid}`), `capabilities_ref {id: profile-<profile>, version: 항목 sha256 앞 16자}`, `profile`.
+- 거절 코드(`{"detail": {"code"}}`, 시작하지 않음): 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`, ENV-02 코드, `TARGET_PROVIDER_MISMATCH`, `TARGET_PROFILE_NOT_FOUND`, `TARGET_PROFILE_PROVIDER_MISMATCH`, `TARGET_FIELD_NOT_APPLICABLE`, `TARGET_REGION_REQUIRED`, `TARGET_AGENT_REQUIRED`, `TARGET_AGENT_NOT_FOUND`(없음·폐기), `TARGET_CONNECTION_NOT_FOUND`, `TARGET_CONNECTION_KIND_MISMATCH`, `TARGET_CONNECTION_NOT_READY`, `TARGET_SETTINGS_INVALID`(`TargetSettings`·05/06 입력 검증 실패); 503 `TARGET_PROFILES_UNCONFIGURED`, `.env` 저장소 코드.
+- 추가 공개 함수: `EncryptedEnvFileStore.latest(file_id) -> ContentRef`.
 
 ## 구축 env 렌더 (ENV-04)
 

@@ -86,10 +86,15 @@ services:
       # prints it). Empty keeps the pre-ticket-29 behavior (no platform registry).
       PLATFORM_ECR_REGISTRY: ${PLATFORM_ECR_REGISTRY:-}
       PLATFORM_ECR_REPOSITORIES: ${PLATFORM_ECR_REPOSITORIES:-cmp-platform-builds}
+      # Ticket 44 (#179): target profile catalog for web starts (shape:
+      # target-profiles.example.json). Absent file → real starts are 503
+      # TARGET_PROFILES_UNCONFIGURED; the scaffold start still works.
+      PLANNING_TARGET_PROFILES_FILE: /opt/cmp/config/target-profiles.json
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
+      - /opt/cmp/config:/opt/cmp/config:ro
     command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     # Loopback only; the public edge forwards /agents/* and /relays/* on the internal network.
     ports:
