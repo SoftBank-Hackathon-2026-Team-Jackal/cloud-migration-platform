@@ -1,7 +1,13 @@
-# Public routes. Only the Agent API (/agents/*) and the relay polling API (/relays/*) reach the backend;
-# every other path is the web front end. Operator, approval and tunnel-admin routes, /docs and
-# /openapi.json stay on the loopback-bound API (SSM port forwarding) and still require keys: the web
-# container calls the API on the internal network and never forwards raw request paths.
+# Public routes. The Agent API (/agents/*), the relay polling API (/relays/*), the browser's
+# migration API (/migrations, /migrations/*) and Plan approval/preview (/provisioning/*) reach the
+# backend; every other path is the web front end. #225: the web is built in real (sse) mode with
+# NEXT_PUBLIC_API_BASE set to this origin, so the browser calls these paths directly (same origin,
+# no CORS). /migrations has no authentication yet (accepted for the contest demo; follow-up:
+# authentication); /provisioning/* approvals and previews still require an approver Bearer
+# credential, and approver registration requires the approval admin key. Operator, enrollment and
+# tunnel-admin routes (/agent-admin/*, /agent-enrollments, /tunnel-admin/*, /provisioning-admin/*,
+# /connections, /env-files), /docs and /openapi.json stay on the loopback-bound API (SSM port
+# forwarding) and still require keys: the web container calls the API on the internal network.
 # Relay-host worker (cmp-demo-relay): Temporal gRPC over TLS, only from the allowed address. The
 # default is a documentation address (RFC 5737), so nothing passes unless the operator sets it.
 @temporal {
@@ -11,7 +17,14 @@
 handle @temporal {
 	reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}
 }
-@backend path /agents/* /relays/*
+# Migration event stream (SSE): forwarded without response buffering.
+@migration_events path /migrations/*/events
+handle @migration_events {
+	reverse_proxy {$CMP_API_UPSTREAM} {
+		flush_interval -1
+	}
+}
+@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*
 handle @backend {
 	reverse_proxy {$CMP_API_UPSTREAM}
 }
