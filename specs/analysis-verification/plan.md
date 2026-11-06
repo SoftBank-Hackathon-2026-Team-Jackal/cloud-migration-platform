@@ -350,7 +350,7 @@ skills/<name>/
 
 - 카탈로그(`catalog/*.yaml`)는 **사실**: 사용 방식 어휘, 탐지 규칙, 등급 기준, 알려진 차이, 표준 테스트, 그리고 해당 Skill 이름. Skill은 **방법**이다.
 - 로딩은 필요한 것만: 매핑 대상 capability의 카탈로그 항목이 가리키는 Skill의 `SKILL.md`만 컨텍스트에 넣고, `examples/`는 `load_skill(name, part="examples")`로 필요할 때 읽는다.
-- **Fixer(티켓 31):** 모든 Skill을 항상 주지 않는다. `skills/fixer-triggers.yaml`의 규칙(실패 분류와 사유 코드 패턴)에 맞는 상황에서만 해당 Skill 이름을 알려 주고, 모델이 필요하면 `load_skill`로 읽는다. 규칙이 없거나 맞는 것이 없으면 도구가 붙지 않는다. Tester의 `test-authoring`은 제외한다.
+- **Fixer(티켓 31):** 모든 Skill을 항상 주지 않는다. `skills/fixer-triggers.yaml`의 규칙(실패 분류와 사유 코드 패턴)에 맞는 상황에서만 해당 Skill 이름을 알려 주고, 모델이 필요하면 `load_skill`로 읽는다. 규칙은 `targets`로 대상을 제한할 수 있고(대상 Provider는 `AnalysisInput.target_provider` → `AnalysisReport.target_provider`로 전달되어 `sbx_fix`가 읽는다) Skill을 대상별로 나누거나 하나로 둘 수 있다(한 실패에 여러 Skill이 선택될 수 있음). 규칙이 없거나 맞는 것이 없으면 도구가 붙지 않는다. Tester의 `test-authoring`은 제외한다.
 - `scripts/`는 에이전트가 직접 실행하지 않는다. 스캐너·검증 단계가 결정적으로 실행하고, 결과를 도구로 조회한다.
 - 첫 사이클 Skill:
 

@@ -38,6 +38,7 @@ def build_start_input(
         check_source_input(repository, commit)
     except SourceFetchError as exc:
         raise ValueError(str(exc)) from None
+    planning = PlanningSettings.model_validate(json.loads(planning_json)) if planning_json else None
     analysis = AnalysisInput(
         migration_id=project_id,
         repository=repository,
@@ -46,9 +47,10 @@ def build_start_input(
         cluster_name=cluster_name,
         credential_ref=credential_ref,
         source_access_ref=dev_ref() if source_access == "dev-env" else None,
+        # Ticket 31: the same value the web start gives (the planning target's provider).
+        target_provider=planning.target_selection.provider if planning else None,
     )
     sandbox = SandboxSettings.model_validate(json.loads(sandbox_json) if sandbox_json else {})
-    planning = PlanningSettings.model_validate(json.loads(planning_json)) if planning_json else None
     env_ref = (
         ContentRef.model_validate(json.loads(env_file_ref_json)) if env_file_ref_json else None
     )

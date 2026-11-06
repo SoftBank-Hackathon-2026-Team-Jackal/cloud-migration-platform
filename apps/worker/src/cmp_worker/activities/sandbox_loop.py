@@ -503,7 +503,12 @@ class SandboxLoopActivities:
             workspace=workspace,
             # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
             skills_root=self.skills_root,
-            skills=select_skills(self.skills_root, klass, payload["classification"]["reasons"]),
+            skills=select_skills(
+                self.skills_root,
+                klass,
+                payload["classification"]["reasons"],
+                target_provider=self._target_provider(payload.get("analysis_report_ref")),
+            ),
         )
         if outcome.status != "PROPOSED":
             return {"status": outcome.status, "reason": outcome.reason}
@@ -646,6 +651,11 @@ class SandboxLoopActivities:
         if ref is None:
             return None
         return AnalysisReport.model_validate_json(self.store.get(ArtifactRef.model_validate(ref)))
+
+    def _target_provider(self, ref: dict | None) -> str | None:
+        """The target the user chose, from the analysis report (None when the run has none)."""
+        report = self._report(ref)
+        return report.target_provider if report else None
 
     def _report_rows(self, ref: dict | None) -> list:
         report = self._report(ref)
