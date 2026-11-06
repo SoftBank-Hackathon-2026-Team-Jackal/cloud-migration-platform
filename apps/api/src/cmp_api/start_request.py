@@ -110,16 +110,21 @@ def load_scope(session: Session, scope_id: str) -> tuple[ConfirmedScope, Environ
         raise StartRefused("SCOPE_CONNECTION_KIND_MISMATCH")
     if connection.status != "CONNECTED" or not connection.role_arn:
         raise StartRefused("SCOPE_CONNECTION_NOT_READY")
-    by_id = {item["candidate_id"]: item for item in analysis.candidates}
-    if any(candidate_id not in by_id for candidate_id in confirmation.included):
+    known = {item["candidate_id"] for item in analysis.candidates}
+    chosen = set(confirmation.included)
+    if not chosen <= known:
         raise StartRefused("SCOPE_NOT_FOUND")
     try:
+        # 06C: every candidate goes on, in the order the platform found them; `selected` says
+        # which the user kept.
         scope = ConfirmedScope.model_validate(
             {
                 "scope_id": confirmation.id,
                 "selection": analysis.selection,
-                "included": [by_id[candidate_id] for candidate_id in confirmation.included],
-                "excluded": confirmation.excluded,
+                "candidates": [
+                    {**item, "selected": item["candidate_id"] in chosen}
+                    for item in analysis.candidates
+                ],
             }
         )
     except ValidationError:
@@ -130,10 +135,12 @@ def load_scope(session: Session, scope_id: str) -> tuple[ConfirmedScope, Environ
 def scope_analysis_fields(scope: ConfirmedScope, credential_ref: str | None) -> dict:
     """06B: the `AnalysisInput` fields a confirmed scope fills (pure).
 
-    `role_arns` holds only the INCLUDED IAM role candidates that have an ARN, in order, once."""
+    `role_arns` holds only the SELECTED IAM role candidates that have an ARN, in order, once."""
     role_arns = list(
         dict.fromkeys(
-            item.arn for item in scope.included if item.resource_type == "IAM_ROLE" and item.arn
+            item.arn
+            for item in scope.candidates
+            if item.selected and item.resource_type == "IAM_ROLE" and item.arn
         )
     )
     return {
