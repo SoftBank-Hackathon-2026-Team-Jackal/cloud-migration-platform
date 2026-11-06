@@ -121,6 +121,7 @@ OTHER_NS = pod("other", **{"app.kubernetes.io/instance": "api-main"})
 AGENT = pod("cmp-agent", **{"app.kubernetes.io/name": "cmp-onprem-agent"})
 PREFLIGHT = pod(NS, **{"app.kubernetes.io/managed-by": "cmp-network-preflight"})
 DNS = pod("kube-system", **{"k8s-app": "kube-dns"})
+NODE_LOCAL_DNS = pod("kube-system", **{"k8s-app": "node-local-dns"})  # GKE NodeLocal DNSCache
 LB = {"ip": "10.0.1.5"}  # ALB ENI / NEG / Traefik source: not a selector identity
 INTERNET = {"ip": "93.184.216.34"}
 VPC_HOST = {"ip": "10.0.5.5"}
@@ -148,6 +149,8 @@ def test_only_the_intended_paths_pass_and_everything_else_is_blocked(provider):
     assert allowed(policies, APP, DB, 5432)
     assert allowed(policies, LB, APP, 8080) and allowed(policies, INTERNET, APP, 8080)
     assert allowed(policies, APP, DNS, 53, "UDP") and allowed(policies, DB, DNS, 53, "UDP")
+    assert allowed(policies, APP, NODE_LOCAL_DNS, 53, "UDP")
+    assert allowed(policies, DB, NODE_LOCAL_DNS, 53, "TCP")
     assert allowed(policies, APP, INTERNET, 443)
     assert allowed(policies, DB, VPC_HOST, 5432)  # Data Migration replication connection
     assert allowed(policies, DB, DB, 5432)  # 09/11 self-probe through the Service

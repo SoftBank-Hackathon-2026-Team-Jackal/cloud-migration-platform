@@ -48,9 +48,12 @@ def test_gateway_manifests_carry_only_the_public_key() -> None:
     items = wg.gateway_manifests(MID, "source", image="alpine:3.22", local_db="db.ns.svc",
                                  peer_public_key="PUB", peer_endpoint="34.1.2.3:51820")  # fmt: skip
     assert [i["kind"] for i in items] == ["ConfigMap", "Deployment", "Service"]
-    env = {
-        e["name"]: e["value"] for e in items[1]["spec"]["template"]["spec"]["containers"][0]["env"]
-    }
+    container = items[1]["spec"]["template"]["spec"]["containers"][0]
+    env = {e["name"]: e["value"] for e in container["env"] if "value" in e}
+    pod_ip = {"name": "POD_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}}}
+    assert pod_ip in container["env"]
+    # 대상 DB 송신 정책(TCP 5432만)을 지나도록 Service가 Pod 5432로 넘긴다(클라우드 검증에서 발견)
+    assert items[2]["spec"]["ports"][0]["targetPort"] == 5432
     assert env == {"WG_IP": "10.210.0.1", "PEER_IP": "10.210.0.2", "PEER_PUBLIC_KEY": "PUB",
                    "PEER_ENDPOINT": "34.1.2.3:51820", "LOCAL_DB": "db.ns.svc"}  # fmt: skip
     volumes = items[1]["spec"]["template"]["spec"]["volumes"]
@@ -176,7 +179,8 @@ def test_establish_waits_for_the_target_lb_then_points_the_source_at_it(clusters
     assert applies[3] == ("source", ["ConfigMap", "Deployment", "Service"])
     source_env = next(m for m in made["source"].applied if m["kind"] == "Deployment")
     env = {e["name"]: e["value"]
-           for e in source_env["spec"]["template"]["spec"]["containers"][0]["env"]}  # fmt: skip
+           for e in source_env["spec"]["template"]["spec"]["containers"][0]["env"]
+           if "value" in e}  # fmt: skip
     assert env["PEER_ENDPOINT"] == "34.64.1.2:51820"
     # 상대 공개키 = 상대 Secret의 비밀키에서 구한 값. 비밀키는 매니페스트·결과에 없다.
     target_private = made["target"].secrets[(wg.NAMESPACE, wg.name(MID))]["private"]

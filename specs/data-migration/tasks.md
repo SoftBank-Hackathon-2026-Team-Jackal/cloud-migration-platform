@@ -11,6 +11,7 @@
 | [07](../../tickets/data-migration/07-cutover-approval-events.md) | DB 전환 두 번째 승인과 웹 cutover 이벤트 | DONE(PR #215 병합), 웹 화면 순서 남음 | 04, 05 | #137 |
 | [08](../../tickets/data-migration/08-web-start-data-migration.md) | 웹 실제 시작에 데이터 이전 입력 연결 | DONE(PR #254 병합, 로컬 웹 시작 e2e 통과), 데모 서버 값·worker 클러스터 접근 남음 | 05, 07 | #137 |
 | [09](../../tickets/data-migration/09-verify-hide-marker.md) | 전환 검증 결과에서 내부 marker 테이블 제외 | DONE(PR #255 병합) | 07 | #137 |
-| [10](../../tickets/data-migration/10-wireguard-tunnel.md) | 플랫폼이 만드는 WireGuard 복제 경로(EKS ↔ GKE) | DONE(로컬), 클라우드 검증·정리 단계 남음 | 06, 08 | #137 |
+| [10](../../tickets/data-migration/10-wireguard-tunnel.md) | 플랫폼이 만드는 WireGuard 복제 경로(EKS ↔ GKE) | DONE(PR #258 병합), 정리 단계 남음 | 06, 08 | #137 |
+| [11](../../tickets/data-migration/11-tunnel-cloud-check.md) | WireGuard 복제 경로 클라우드 검증(EKS ↔ GKE)과 게이트웨이 포트·GKE DNS 정책 수정 | DONE(클라우드 검증) | 10 | #137 |
 
 Q1~Q5는 [spec.md](spec.md#open-questions)의 미결 항목이다.

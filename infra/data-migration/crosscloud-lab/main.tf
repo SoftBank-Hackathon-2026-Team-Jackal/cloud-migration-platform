@@ -50,6 +50,8 @@ resource "google_container_cluster" "lab" {
   remove_default_node_pool = true
   initial_node_count       = 1
   deletion_protection      = false
+  # Provisioning GKE(infra/terraform/gcp)와 같게: NetworkPolicy를 실제로 적용한다(ticket 10 검증)
+  datapath_provider = "ADVANCED_DATAPATH"
 
   ip_allocation_policy {
     cluster_secondary_range_name  = "pods"
