@@ -14,6 +14,7 @@ from temporalio.client import WorkflowHandle
 from temporalio.service import RPCError, RPCStatusCode
 
 from cmp_api.config import settings
+from cmp_api.connections import credential_ref
 from cmp_api.db import SessionLocal
 from cmp_api.event_stream import (
     StatusReader,
@@ -29,8 +30,10 @@ from cmp_api.start_request import (
     check_request,
     find_agent,
     find_connection,
+    load_scope,
     load_target_profiles,
     planning_settings,
+    scope_analysis_fields,
     start_input,
 )
 from cmp_api.temporal_client import get_temporal_client
@@ -98,10 +101,15 @@ def _real_start_input(
                 if target.credential_ref is not None:
                     connection = find_connection(session, target.credential_ref, target.provider)
         planning = planning_settings(target, entry, connection=connection, agent=agent)
+        scope_fields = None
+        if request.scope_id is not None:  # 06B: filled from stored records, never from the web
+            with sessions() as session:
+                scope, source_connection = load_scope(session, request.scope_id)
+                scope_fields = scope_analysis_fields(scope, credential_ref(source_connection))
     except StartRefused as exc:
         raise _refused(exc.code, exc.status) from None
     store, env_ref = _env_ref(request, env_store)
-    return start_input(request, source, planning, env_ref), store, env_ref
+    return start_input(request, source, planning, env_ref, scope_fields), store, env_ref
 
 
 @router.post("", response_model=MigrationCreated, status_code=202)
@@ -118,6 +126,8 @@ async def start_migration(
     `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`; 503
     `TARGET_PROFILES_UNCONFIGURED` or the `.env` store codes. Nothing starts on a refusal."""
     store = env_ref = None
+    if request.scope_id is not None and request.target is None:
+        raise _refused("SCOPE_NOT_APPLICABLE")  # 06B: a scope belongs to a real start
     if request.target is not None:
         data, store, env_ref = _real_start_input(request, env_store, sessions)
     elif request.env_file_ref is not None:

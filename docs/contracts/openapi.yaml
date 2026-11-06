@@ -3478,6 +3478,12 @@ components:
             pattern: ^envf-[a-f0-9]{32}$
           - type: 'null'
           title: Env File Ref
+        scope_id:
+          anyOf:
+          - type: string
+            pattern: ^scope-[a-f0-9]{16}$
+          - type: 'null'
+          title: Scope Id
       additionalProperties: false
       type: object
       required:
