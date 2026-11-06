@@ -119,6 +119,8 @@ def handover_fake(fake):
         fake.handover_requests.append(request)
         if isinstance(fake.traffic, Exception):
             raise fake.traffic
+        if callable(fake.traffic):  # ticket 64: the real Activity behind the fake
+            return await fake.traffic(request)
         return fake.traffic
 
     return handover

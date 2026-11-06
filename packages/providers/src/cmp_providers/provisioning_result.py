@@ -506,6 +506,37 @@ def traffic_handover(view: dict) -> TrafficHandoff:
     )
 
 
+# Ticket 64 (#284): ON_PREM blocks that clear by themselves once the Agent's tunnel container
+# reports this rollout's app healthy (the app port is assigned to the tunnel after the rollout).
+TUNNEL_WAIT_BLOCKS = frozenset({"EXTERNAL_ENDPOINT_UNAVAILABLE", "TUNNEL_STATUS_STALE"})
+
+
+def tunnel_wait_needed(converted: TrafficHandoff) -> bool:
+    """True when an ON_PREM handoff is blocked only by tunnel evidence that is not there yet."""
+    blocked = set(converted.blocked_by)
+    return converted.provider == "ON_PREM" and bool(blocked) and blocked <= TUNNEL_WAIT_BLOCKS
+
+
+def after_rollout(converted: TrafficHandoff, tunnel: dict | None, recorded_at: int):
+    """A proceeding ON_PREM handoff counts only with a tunnel report from after the rollout.
+
+    A report older than the stored result checked an earlier app (or no app port): it is not
+    evidence for this rollout, so the handoff is held as `TUNNEL_STATUS_STALE` (pure).
+    """
+    if converted.provider != "ON_PREM" or not converted.proceed:
+        return converted
+    reported_at = (tunnel or {}).get("reported_at")
+    if reported_at is not None and reported_at >= recorded_at:
+        return converted
+    return converted.model_copy(
+        update={
+            "proceed": False,
+            "blocked_by": ["TUNNEL_STATUS_STALE"],
+            "handover": converted.handover.model_copy(update={"ready": False}),
+        }
+    )
+
+
 def public_summary(result: ProvisioningResult) -> dict:
     """R8: the user-facing summary. No DB section, internal endpoints, releases or IDs."""
     app = result.application
