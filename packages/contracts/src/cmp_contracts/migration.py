@@ -46,6 +46,7 @@ FAILURE_OUTCOMES = frozenset(
         "provisioning_failed",
         "data_blocked",
         "data_failed",
+        "traffic_blocked",  # ticket 50: no Traffic handover, the shift was not started
     }
 )
 OUTCOME_PHASE: dict[str, str] = {
@@ -55,6 +56,7 @@ OUTCOME_PHASE: dict[str, str] = {
     "approval_expired": "awaiting_approval",
     "data_blocked": "data_copy",  # specs/data-migration: handoff/precheck blocked the copy
     "data_failed": "data_copy",
+    "traffic_blocked": "traffic",
 }
 
 

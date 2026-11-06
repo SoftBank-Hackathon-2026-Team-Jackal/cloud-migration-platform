@@ -82,6 +82,7 @@ Blocked by: 07, 18, 22, 24 (main 반영). 같은 파일을 44(시작 요청)·50
 - `specs/provisioning/migration-events.md`: E11 보강, E18~E21 추가
 - `tickets/provisioning/24-migration-events.md`: 후속 링크
 - `tickets/provisioning/18-onprem-plan-publish.md`: 실패 결과 보존 링크
+- 후속: [50](50-handoff-contract.md)이 실패 결과 `traffic_blocked`(실패 단계 `traffic`)를 추가했고, `phase` setter가 `data_migration`을 지우던 #138 병합 문제를 고쳤다(50 H8).
 
 ## 완료 체크리스트
 - [x] RED → GREEN 테스트

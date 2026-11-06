@@ -12,6 +12,11 @@ from temporalio.exceptions import (
 )
 
 with workflow.unsafe.imports_passed_through():
+    from cmp_contracts.handoff import (
+        HANDOFF_UNAVAILABLE,
+        TRAFFIC_HANDOFF_PATCH,
+        TRAFFIC_HANDOVER_ACTIVITY,
+    )
     from cmp_contracts.migration import FAILURE_OUTCOMES, OUTCOME_PHASE, WEB_PHASE
     from cmp_contracts.plan_publish import (
         DEFAULT_APPROVAL_TIMEOUT_SECONDS,
@@ -80,6 +85,10 @@ class MigrationWorkflow:
         self.env_file_ref: dict | None = None  # ENV-02: {id, version, sha256}, never values
         self.failure_phase: str | None = None  # ticket 49: web phase of the failure
         self.failure_issues: list[str] = []  # ticket 49 F3: detailed codes (Plan issues)
+        self.data_migration: dict | None = None  # specs/data-migration: child state (no secrets)
+        # Ticket 50 H5: `TrafficHandoff` read after a successful execution, for the traffic step
+        # (#128 passes `handover` to TrafficShiftWorkflow as is). No secret values.
+        self.traffic_handoff: dict | None = None
 
     @property
     def phase(self) -> str:
@@ -90,7 +99,6 @@ class MigrationWorkflow:
         if value in WEB_PHASE:
             self.stage = value
         self._phase = value
-        self.data_migration: dict | None = None  # specs/data-migration: child state (no secrets)
 
     def db_gate_ok(self) -> bool | None:
         """Traffic(#128) `require_db_gate`용(DM-007): DB 쓰기 주체가 대상이고 역방향 복제가 정상이면
@@ -135,6 +143,7 @@ class MigrationWorkflow:
             "pipeline": self.pipeline,
             "env_file_ref": self.env_file_ref,
             "data_migration": self.data_migration,
+            "traffic_handoff": self.traffic_handoff,
         }
 
     async def _hand_off(
@@ -313,6 +322,32 @@ class MigrationWorkflow:
             self.failure_code = (self.data_migration or {}).get("failure_code") or phase.upper()
             return DATA_DONE[phase]
         return None
+
+    async def _read_traffic_handover(self) -> str | None:
+        """Ticket 50 H4/H6: read the executed Revision's Traffic handover; None means go on.
+
+        A blocked view or a failed lookup ends the run as `traffic_blocked` before any traffic
+        change (#128 acceptance: no shift without a handover). The first code is the cause.
+        """
+        self.phase = "traffic"
+        try:
+            got = await workflow.execute_activity(
+                TRAFFIC_HANDOVER_ACTIVITY,
+                {"plan_id": self.plan["plan_id"], "revision": self.plan["revision"]},
+                task_queue=PROVISIONING_QUEUE,
+                schedule_to_start_timeout=timedelta(minutes=5),
+                start_to_close_timeout=timedelta(minutes=1),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+        except ActivityError:
+            self.failure_code = HANDOFF_UNAVAILABLE
+            return "traffic_blocked"
+        self.traffic_handoff = got
+        if got.get("proceed"):
+            return None
+        blocked = list(got.get("blocked_by") or []) or [HANDOFF_UNAVAILABLE]
+        self.failure_code, self.failure_issues = blocked[0], blocked
+        return "traffic_blocked"
 
     async def _step(self, name: str, fn: object, project_id: str, queue: str) -> None:
         if self.cancel_requested:
@@ -571,6 +606,19 @@ class MigrationWorkflow:
                     self.phase = stopped
                     return stopped
                 continue
+            if (
+                name == "traffic"
+                and provisioned == "executed"
+                and workflow.patched(TRAFFIC_HANDOFF_PATCH)
+            ):
+                # Ticket 50: after a successful execution (and the data step), before the shift.
+                if self.cancel_requested:
+                    self.phase = "cancelled"
+                    return "cancelled"
+                stopped = await self._read_traffic_handover()
+                if stopped:
+                    self.phase = stopped
+                    return stopped
             await self._step(name, fn, project_id, queue)
             if self.cancel_requested:
                 return "cancelled"
