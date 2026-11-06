@@ -36,6 +36,7 @@
 | [23 비공개 소스 접근(토큰 참조·교체 가능한 해석기)](../../tickets/analysis-verification/23-source-access.md) | DONE (PR #132 병합) | 03, 19, 21 | AV-001, AV-002, AV-020 | #131 | ☑ |
 | [24 실행 도구·입력 검증·만료 Sandbox 정리·Tester 연결](../../tickets/analysis-verification/24-ops-and-tester.md) | DONE | 12, 14B, 22 (D-09는 인터페이스만) | AV-011, AV-012, AV-020 | #136 | ☑ |
 | [25 빌드 연결(소스 S3 업로드 → Build 모듈 → 빌드 증거)](../../tickets/analysis-verification/25-build-wiring.md) | DONE (PR #142 병합, 미확인: 실제 AWS 실행) | 09, 10, 22 (실제 AWS는 D-06·D-12·승인) | AV-009, AV-010, AV-018 | #140 | ☑ |
+| 분석 웹 이벤트 연결(데모, Provisioning 쪽 작업) — 티켓 파일 없음, 상세는 [이벤트 안내서 §2 분석](../../docs/engineering/events-guide.md) | IN_REVIEW (PR 대기, 박승철님 확인 필요) | 19, Provisioning 24(이벤트 저장소) | AV-001, AV-020 | #226 | ☐ |
 | [ENV-05 분석: env_file_ref에서 키 읽기·EnvPlan 출력](../../tickets/env-file-ref/05-analysis-env-plan.md) | DONE (구현 완료, PR 대기) | ENV-02, ENV-03 (병합됨) | AV-001, AV-020 | #197 | ☐ |
 | [ENV-06 Sandbox: render_env로 앱 Secret 만들기](../../tickets/env-file-ref/06-sandbox-render-env.md) | DONE (구현 완료, PR 대기) | ENV-03, ENV-05 | AV-011, AV-020 | #197 | ☐ |
 | [26 Sandbox의 비공개 ECR 이미지 pull](../../tickets/analysis-verification/26-sandbox-ecr-pull.md) | DONE (구현 완료, PR 대기, 실제 토큰은 승인 후) | 25, Provisioning 29 (실제 토큰은 승인 필요) | AV-010, AV-011, AV-020 | #197 | ☐ |

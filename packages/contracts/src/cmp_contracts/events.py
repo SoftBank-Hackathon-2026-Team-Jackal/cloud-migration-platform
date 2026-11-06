@@ -63,6 +63,32 @@ class AnalysisDoneData(WebModel):
     pass
 
 
+class AnalysisScanItem(WebModel):
+    key: str
+    n: float = Field(ge=0)
+    sku: str | None = None
+
+
+class AnalysisScanEvidence(WebModel):
+    """`cmp_contracts.analysis.Evidence` (web `$defs/evidence`). Cloud read results stay unverified."""
+
+    kind: Literal["CODE", "MANIFEST", "CLOUD_RESOURCE", "IAM_POLICY", "CLOUDTRAIL", "CONFIG"]
+    locator: str
+    verified: bool
+
+
+class AnalysisScanData(WebModel):
+    """One per finished scan Activity: counts only (`items`), `completed`/`total` per stream."""
+
+    id: str
+    activity: str
+    stream: Literal["infrastructure", "code"]
+    completed: int = Field(ge=0)
+    total: int = Field(ge=1)
+    items: list[AnalysisScanItem]
+    evidence: list[AnalysisScanEvidence]
+
+
 class BuildCheckData(WebModel):
     id: Literal["build", "health", "db", "render", "secret", "scope"]
     state: Literal["running", "failed", "fixing", "recheck", "done"]
@@ -614,6 +640,7 @@ class SandboxDoneData(WebModel):
 
 DATA_MODELS: dict[str, type[WebModel]] = {
     "analysis.finding": AnalysisFindingData,
+    "analysis.scan": AnalysisScanData,
     "analysis.done": AnalysisDoneData,
     "build.check": BuildCheckData,
     "build.fix": BuildFixData,
@@ -777,6 +804,9 @@ def event_json_schema() -> dict:
         defs[f"data:{event_type}"] = data_schema
         defs[f"event:{event_type}"] = _envelope(event_type, f"#/$defs/data:{event_type}")
         one_of.append({"$ref": f"#/$defs/event:{event_type}"})
+    # The web schema names the shared Evidence object `evidence` (not `model:…`).
+    if "model:AnalysisScanEvidence" in defs:
+        defs["evidence"] = defs["model:AnalysisScanEvidence"]
     defs["nonSnapshotEvent"] = {"oneOf": list(one_of)}
     defs["snapshotData"] = {
         "type": "object",

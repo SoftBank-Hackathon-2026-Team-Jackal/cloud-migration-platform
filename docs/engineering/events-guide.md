@@ -49,14 +49,24 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 
 표의 "기존 값"은 지금 코드에 있는 모델·반환값이다. `[없음]`은 아직 값을 만드는 코드가 없다는 뜻이다(§5).
 
-### 분석 (승철님) — `phase: analysis`
+### 분석 (승철님, **연결 완료** #226) — `phase: analysis`
 
-| 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
-| --- | --- | --- | --- |
-| `analysis.finding` | `scan_code`·`scan_manifests`·`scan_aws_infra`·`scan_network`이 **끝날 때마다**(항목 단위 진행은 불가: 스캔 안에 진행 신호가 없다) | 스캔 결과 항목 → `id`(항목 ID), `stream`(`code`/`infrastructure`), `key`(능력 이름, 예 `s3`), `via`(근거 출처, §2 주의), `progress`(끝난 스캔 수 / 전체 스캔 수 ×100), `message`·`detail`은 `""` | `{"id":"f-s3-1","stream":"code","key":"s3","via":["code"],"progress":50,"message":"","detail":""}` |
-| `analysis.done` | `build_requirements` 성공 직후 | 없음(`{}`) | `{}` (status `done`) |
+`cmp_worker.analysis_events`가 실제 분석 Activity(`AnalysisActivities`) 끝에서 낸다. 스캔 안의 항목 단위 진행 신호는 없어서, 스캔이 끝날 때마다 개수를 묶어 한 건씩 낸다. 웹 기본 분석 화면(`AnalysisStage`)이 이 `analysis.scan`을 그린다. `analysis.finding`은 웹의 예전 방식(`?analysis=items`)이라 내지 않는다. 같은 item 키로 `analysis.finding`을 내면 웹에 `analysis.u.<key>` 문구가 없어서 화면에 키 이름이 그대로 나온다.
 
-주의: 백엔드 `Evidence.kind`는 `CODE/MANIFEST/CLOUD_RESOURCE/IAM_POLICY/CLOUDTRAIL/CONFIG`인데 웹 `via`는 `code/iam/trail/config`뿐이다. **결정 필요**(§5): 웹이 6개 값을 그대로 받게 할지, 백엔드가 `CODE→code, IAM_POLICY→iam, CLOUDTRAIL→trail, MANIFEST·CLOUD_RESOURCE·CONFIG→config`로 줄여 보낼지. 결정 전에는 줄인 값을 쓰면 검증을 통과한다.
+| 보낼 이벤트 | 어느 Activity에서 | `stream`·n/m | `items` (웹 `analysis.item.<key>`, 개수만) | `evidence` |
+| --- | --- | --- | --- | --- |
+| `analysis.scan` | `fetch_source` 끝 | code 1/3 | `files`(작업 공간 파일 수, `.git` 등 제외), `commit` | `CODE` `host/owner/repo@sha7`(scheme·사용자 정보·토큰 제거) |
+| `analysis.scan` | `scan_manifests` 끝 | code 2/3 | `manifests`(워크로드가 있는 파일 수), `services`, `statefulsets`, `health_endpoint`(probe가 있으면 1) | `MANIFEST` 파일:줄 |
+| `analysis.scan` | `scan_code` 끝 | code 3/3 | `db_driver`(`sku`=드라이버 이름), `s3_sdk`, `env_keys`(읽는 키 이름 수) | `CODE` 파일:줄 |
+| `analysis.scan` | `scan_aws_infra` 끝 | infrastructure 1/2 | `resources`, `eks_cluster`, `alb`, `iam_role`, `trail_calls`. 미수집·실패면 `[]` | `CLOUD_RESOURCE`·`IAM_POLICY`(`role/<이름>`, 계정 ID 없음)·`CLOUDTRAIL`, 늘 `verified: false` |
+| `analysis.scan` (`activity: scan_network`) | `build_requirements` 끝(네트워크 분석 `build_network`가 여기서 돈다) | infrastructure 2/2 | `vpc`, `subnet`, `security_group`(AWS 스캔이 있을 때) | `CLOUD_RESOURCE` VPC, `CONFIG` 외부 진입 |
+| `analysis.done` | `build_requirements`가 요구사항을 만든 직후(막혔으면 내지 않음) | — | `{}` (status `done`) | — |
+
+- `data.id`는 `scan-<activity>`로 고정이다. 웹은 같은 id를 덮어쓰고, 흐름별로 가장 큰 `completed`를 진행률로 쓴다. 그래서 병렬 스캔이 어떤 순서로 끝나든, Temporal이 재시도해 새 attempt가 새 행으로 남든 화면이 중복되거나 뒤로 가지 않는다.
+- 웹 계약에 있는 `node`·`nat_gateway`·`ebs_gb`·`s3_bucket`은 스캐너가 아직 수집하지 않아 내지 않는다.
+- 요약에 실패해도 스캔은 성공으로 끝나고, 운영 로그 `ANALYSIS_EVENT_FAILED`만 남는다.
+- `migration_id`는 분석 입력값이다. 웹 시작 경로와 CLI 시작 경로는 이 칸에 `project_id`를 넣지만, `MigrationWorkflow`가 자식을 시작할 때 자기 Workflow ID(`migration-<uuid>`)로 덮어쓴다. 이 동작은 `tests/analysis/test_scan_events_workflow.py`가 확인한다.
+- scaffold 분석(문자열 입력)은 실제 스캔을 하지 않으므로 내지 않는다.
 
 ### 샌드박스·빌드 (승철님) — `phase: build`
 
@@ -154,7 +164,7 @@ uv run python -m cmp_worker.poc_bridge watch --migration-id <id> \
 
 | 파트 | 없는 것 |
 | --- | --- |
-| 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다). `Evidence.kind` 6개 값과 웹 `via` 4개 값의 대응 **결정 필요**. `finding.key`의 웹 문구 사전과 백엔드 능력 이름 맞추기 |
+| 분석 | 스캔 안의 항목 단위 진행·heartbeat(이벤트는 스캔 Activity 끝마다). `node`·`nat_gateway`·`ebs_gb`·`s3_bucket` 수집(스캐너에 없음). `analysis.finding`은 쓰지 않는다(#226: `analysis.scan`으로 대신함) |
 | 샌드박스 | `sbx_apply`가 버리는 `apply_network` 반환값(namespace·TTL·egress) 살리기, `BuildResult`를 `sbx_build`에 연결, `sandbox.tests` 출처별 개수와 `checks`(`calls_in_mapping` 등) 값을 만드는 코드, `run` 번호 규칙(웹 `[가정]`) |
 | 계획(매핑) | `MappingRow`에 대상 서비스(`after`)와 노드 분류(`kind`) 값 없음 |
 | 계획 게시·승인·구축(민서) | `plan.preview`(Preview `changes[]`→`resources`, `{resource_type, action, name, quantity, size}` → `{id, group, name, detail:"", size, change}`; 원본·대상 환경·보안 규칙·env 재매핑 값은 Preview에 없음), `approval.required`, ON_PREM(Agent 원격 실행) 구축 이벤트, `retest` 검사, 웹 `SseProvider`가 `event: status` 블록을 건너뛰게 하기 |
