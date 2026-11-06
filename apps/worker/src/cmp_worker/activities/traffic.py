@@ -11,11 +11,20 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from cmp_traffic import Handover, Sample, TrafficPolicy, check_handover, weights_for
 from cmp_traffic.envoy import EnvoyObserver, EnvoyProxy
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
+
+
+def handover_target(handover: Handover) -> tuple[str, int] | None:
+    """핸드오버의 외부 주소를 (호스트, 포트)로. 없거나 읽을 수 없으면 None."""
+    parsed = urlparse(handover.external_endpoint or "")
+    if not parsed.hostname:
+        return None
+    return parsed.hostname, parsed.port or handover.port
 
 
 def build_ports() -> tuple[EnvoyProxy, EnvoyObserver]:
@@ -40,6 +49,15 @@ async def traffic_prepare(payload: dict) -> dict:
         raise ApplicationError(check.reason, type="HandoverNotReady", non_retryable=True)
     policy = TrafficPolicy.model_validate(payload.get("policy") or {})
     proxy, observer = build_ports()
+    # 전환 전에 이 중계 서버의 대상이 인계값의 목적지와 같은지 본다(다르면 엉뚱한 곳으로 보내지 않는다).
+    wanted = handover_target(handover)
+    actual = await asyncio.to_thread(observer.target_address)
+    if wanted is None or actual != wanted:
+        raise ApplicationError(
+            "relay target does not match the handover",
+            type="TargetMismatch",
+            non_retryable=True,
+        )
     baseline = await asyncio.to_thread(observer.sample_origin, policy.observe_seconds)
     await asyncio.to_thread(proxy.apply, weights_for(0))
     return {"baseline": baseline.model_dump()}

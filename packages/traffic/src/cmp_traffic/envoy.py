@@ -210,6 +210,24 @@ def parse_cluster_stats(data: dict[str, Any], side: str) -> dict[str, float]:
     }
 
 
+def cluster_target_address(config_dump: dict[str, Any]) -> tuple[str, int] | None:
+    """Envoy `/config_dump`의 static cluster `cluster_target`이 가리키는 (주소, 포트). 없으면 None.
+
+    DNS 이름은 풀기 전 설정값 그대로라서 핸드오버의 external_host와 같은 글자로 비교할 수 있다.
+    """
+    for section in config_dump.get("configs", []):
+        for item in section.get("static_clusters", []):
+            cluster = item.get("cluster", {})
+            if cluster.get("name") != "cluster_target":
+                continue
+            for group in cluster.get("load_assignment", {}).get("endpoints", []):
+                for entry in group.get("lb_endpoints", []):
+                    socket = entry.get("endpoint", {}).get("address", {}).get("socket_address", {})
+                    if socket.get("address") and socket.get("port_value"):
+                        return str(socket["address"]), int(socket["port_value"])
+    return None
+
+
 class EnvoyObserver:
     """ObserverPort 구현. 관찰 창 앞뒤의 카운터 차이로 요청 수와 실패 수를 낸다."""
 
@@ -225,6 +243,13 @@ class EnvoyObserver:
         self.fetch_text = fetch_text or (http_get_text if fetch is None else None)
         self.fetch = fetch or http_get_json
         self.sleep = sleep
+
+    def target_address(self) -> tuple[str, int] | None:
+        """이 중계 서버의 Envoy가 대상으로 보내는 곳. 읽지 못하면 None."""
+        try:
+            return cluster_target_address(self.fetch(f"{self.admin_url}/config_dump"))
+        except (OSError, ValueError):
+            return None
 
     def _read(self) -> dict[str, Any]:
         query = urllib.parse.urlencode({"format": "json", "filter": CLUSTER_STAT})

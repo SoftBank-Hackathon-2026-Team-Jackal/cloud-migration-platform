@@ -7,6 +7,7 @@ from cmp_contracts.analysis import AnalysisInput
 from cmp_contracts.provisioning import ContentRef
 from cmp_data.handoff import DataMigrationInput
 from cmp_scanners.source import SourceFetchError, check_source_input
+from cmp_traffic import TrafficShiftInput
 
 from cmp_worker.planning_handoff import PlanningSettings
 from cmp_worker.sandbox_input import SandboxSettings
@@ -26,6 +27,7 @@ def build_start_input(
     planning_json: str | None = None,
     env_file_ref_json: str | None = None,
     data_migration_json: str | None = None,
+    traffic_json: str | None = None,
 ) -> dict[str, Any]:
     """`{"project_id", "analysis": AnalysisInput, "sandbox": SandboxSettings}` as MigrationWorkflow expects.
 
@@ -56,6 +58,12 @@ def build_start_input(
         if data_migration_json
         else None
     )
+    # #128: 중계 서버 큐와 전환 기준. 없으면 traffic 단계는 scaffold로 남는다.
+    traffic = (
+        TrafficShiftInput.model_validate_json(traffic_json).model_dump(mode="json")
+        if traffic_json
+        else None
+    )
     return {
         "project_id": project_id,
         "analysis": analysis.model_dump(mode="json"),
@@ -64,4 +72,5 @@ def build_start_input(
         **({"planning": planning.model_dump(mode="json")} if planning else {}),
         **({"env_file_ref": env_ref.model_dump(mode="json")} if env_ref else {}),
         **({"data_migration": data_migration} if data_migration else {}),
+        **({"traffic": traffic} if traffic else {}),
     }

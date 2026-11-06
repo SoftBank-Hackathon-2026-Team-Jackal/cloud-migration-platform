@@ -22,7 +22,8 @@ Temporal에서 트래픽 전환을 Activity로 실행하고 `traffic.snapshot`�
 - [x] 롤백 Activity가 원본 100%로 되돌린다.
 - [x] 실제 중계 서버(EC2) + WireGuard 터널 + 온프레 역할 VM에서 정상 전환·롤백 시험(ADR-006 기록).
 - [x] 중계 서버 WireGuard peer 동기화: 플랫폼 `GET /relays/{relay_id}/agents`(RelayAgentList) 형식에 맞춰 단위 시험(`python -m cmp_traffic.peers`). 실제 플랫폼에 중계 서버를 등록해 받아 보는 시험은 남았다.
-- [ ] 상위 Workflow 연결(인계값 형식 확정 후), 컨트롤러와 중계 서버가 다른 호스트일 때의 설정 배포는 릴레이 워커(전용 큐)로 구현했고, 실제 중계 서버 호스트에서의 실행 시험이 남았다.
+- [x] 상위 Workflow 연결(#128): 시작 입력의 `traffic`(`relay_queue`, `policy`)이 있으면 `MigrationWorkflow`가 `shift_traffic` 대신 `TrafficShiftWorkflow`를 자식으로 시작한다(패치 `traffic-shift-v1`). 완료는 검증 단계로, 롤백·막힘·실패는 `traffic_rolled_back`·`traffic_blocked`·`traffic_failed`로 끝난다. DB 게이트는 부모의 `db_gate_ok()`. 준비 단계에서 중계 서버 Envoy의 대상 주소가 인계값과 같은지 확인하고 다르면 `TargetMismatch`로 막는다. 실제 중계 서버·온프레(OCI)에서 정방향·롤백 확인(11/6).
+- [ ] 인계값으로 중계 서버의 대상 주소를 바꾸는 동적 설정(지금은 bootstrap의 고정 주소와 일치해야 한다), 컨트롤러와 중계 서버가 다른 호스트일 때의 설정 배포(데모는 edge gRPC+TLS)
 
 ## 관련 문서
 

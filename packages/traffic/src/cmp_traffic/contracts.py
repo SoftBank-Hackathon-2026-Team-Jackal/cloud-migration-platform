@@ -34,6 +34,16 @@ class TrafficPolicy(BaseModel):
         return self
 
 
+class TrafficShiftInput(BaseModel):
+    """마이그레이션 입력의 `traffic` 항목(운영자가 주는 값, 비밀값 없음). 없으면 전환 단계는 scaffold로 남는다."""
+
+    # Envoy가 있는 중계 서버 호스트의 워커 큐(예: relay-1). 없으면 기본 큐.
+    relay_queue: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+    policy: TrafficPolicy = Field(default_factory=TrafficPolicy)
+    # 마지막(100%) 단계 전에 DB 쓰기 주체가 대상이고 역방향 복제가 정상인지(Data Migration이 알려 준다).
+    db_gate_ok: bool | None = None
+
+
 class Handover(BaseModel):
     """Provisioning이 넘기는 값 중 트래픽 전환에 필요한 것만 담는다."""
 
