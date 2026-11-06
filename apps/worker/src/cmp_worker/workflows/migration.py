@@ -16,6 +16,9 @@ with workflow.unsafe.imports_passed_through():
         HANDOFF_UNAVAILABLE,
         TRAFFIC_HANDOFF_PATCH,
         TRAFFIC_HANDOVER_ACTIVITY,
+        TRAFFIC_HANDOVER_HEARTBEAT_S,
+        TRAFFIC_HANDOVER_START_TO_CLOSE_S,
+        TRAFFIC_HANDOVER_WAIT_PATCH,
         TRAFFIC_SHIFT_PATCH,
     )
     from cmp_contracts.migration import FAILURE_OUTCOMES, OUTCOME_PHASE, WEB_PHASE
@@ -375,14 +378,23 @@ class MigrationWorkflow:
         change (#128 acceptance: no shift without a handover). The first code is the cause.
         """
         self.phase = "traffic"
+        # Ticket 64: an ON_PREM lookup waits inside the Activity for the tunnel health check.
+        timeouts = (
+            {
+                "start_to_close_timeout": timedelta(seconds=TRAFFIC_HANDOVER_START_TO_CLOSE_S),
+                "heartbeat_timeout": timedelta(seconds=TRAFFIC_HANDOVER_HEARTBEAT_S),
+            }
+            if workflow.patched(TRAFFIC_HANDOVER_WAIT_PATCH)
+            else {"start_to_close_timeout": timedelta(minutes=1)}
+        )
         try:
             got = await workflow.execute_activity(
                 TRAFFIC_HANDOVER_ACTIVITY,
                 {"plan_id": self.plan["plan_id"], "revision": self.plan["revision"]},
                 task_queue=PROVISIONING_QUEUE,
                 schedule_to_start_timeout=timedelta(minutes=5),
-                start_to_close_timeout=timedelta(minutes=1),
                 retry_policy=RetryPolicy(maximum_attempts=3),
+                **timeouts,
             )
         except ActivityError:
             self.failure_code = HANDOFF_UNAVAILABLE

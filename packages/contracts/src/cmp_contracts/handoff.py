@@ -26,6 +26,13 @@ TRAFFIC_HANDOFF_PATCH = "traffic-handoff-v1"
 # `MigrationWorkflow` runs the real `TrafficShiftWorkflow` child (#128) under this patch when the
 # start input carries `traffic`; without it the scaffold `shift_traffic` step stays.
 TRAFFIC_SHIFT_PATCH = "traffic-shift-v1"
+# Ticket 64 (#284): an ON_PREM lookup waits inside the Activity for this rollout's tunnel health
+# check, so under this patch the Workflow schedules it with a longer timeout and a heartbeat.
+TRAFFIC_HANDOVER_WAIT_PATCH = "traffic-handover-wait-v1"
+TRAFFIC_HANDOVER_START_TO_CLOSE_S = 600
+TRAFFIC_HANDOVER_HEARTBEAT_S = 30
+# The configured wait is cut to this, leaving a minute of the timeout for the reads themselves.
+TRAFFIC_HANDOVER_WAIT_MAX_S = TRAFFIC_HANDOVER_START_TO_CLOSE_S - 60
 
 # Why a view does not proceed (ticket 13 R7, 16 T2/T7/T11, 25 F3). The first code is the cause.
 BlockCode = Literal[

@@ -232,11 +232,13 @@ def scheduled_activities(history) -> list[str]:
     ]
 
 
-async def run_executed(fake, emitter_check=None):
+async def run_executed(fake, after=None):
     async def scenario(env, handle):
         await wait_phase(handle, "awaiting_approval")
         await deliver(env)
         outcome = await handle.result()
+        if after is not None:  # ticket 64: read the run's history before the env closes
+            await after(handle)
         return (
             outcome,
             await handle.query("status"),
