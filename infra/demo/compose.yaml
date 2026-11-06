@@ -196,7 +196,8 @@ services:
       - /root/.kube:mode=0700
 
   # Web front end (cloud-migration-web). Internal only: the edge forwards every path except /agents/*,
-  # /relays/*, /migrations[/*] and /provisioning/* here, and its server code reaches the API at http://api:8000. Opt-in like the edge. Built on
+  # /relays/*, /migrations[/*] and /provisioning/* here, and its server code reaches the API at
+  # http://api:8000. Opt-in like the edge. Built on
   # the host from /opt/cmp/web/current, which infra/demo/release-web.sh uploads and extracts. Operator-only
   # values (GitHub OAuth app id/secret, optional GEMINI_API_KEY) go in /opt/cmp/web.env (0600). The web does
   # NOT get AGENT_ENROLLMENT_ADMIN_KEY: its /api/agents routes have no user login yet, so a public web holding
@@ -207,9 +208,9 @@ services:
   web:
     build:
       context: ${CMP_WEB_DIR:-/opt/cmp/web/current}
-      # #225: NEXT_PUBLIC_* values are compiled into the browser bundle, so they are build args (the
-      # web Dockerfile's ARGs, default mock), not environment. Real mode: the browser starts migrations
-      # with the chosen repository (source) and follows SSE at this origin, which the edge sends to the API.
+      # NEXT_PUBLIC_* are compiled into the browser bundle, so they are build args, not environment.
+      # Real (SSE) mode: the browser calls POST /migrations and the SSE stream on the public host,
+      # which the edge must forward to the API (agent-routes.caddy).
       args:
         NEXT_PUBLIC_API_MODE: sse
         NEXT_PUBLIC_SSE_START: source
