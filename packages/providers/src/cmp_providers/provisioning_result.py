@@ -506,7 +506,7 @@ def traffic_handover(view: dict) -> TrafficHandoff:
     )
 
 
-# Ticket 64 (#284): ON_PREM blocks that clear by themselves once the Agent's tunnel container
+# Ticket 67 (#284): ON_PREM blocks that clear by themselves once the Agent's tunnel container
 # reports this rollout's app healthy (the app port is assigned to the tunnel after the rollout).
 TUNNEL_WAIT_BLOCKS = frozenset({"EXTERNAL_ENDPOINT_UNAVAILABLE", "TUNNEL_STATUS_STALE"})
 

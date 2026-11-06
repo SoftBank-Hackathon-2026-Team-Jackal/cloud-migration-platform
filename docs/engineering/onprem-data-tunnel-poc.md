@@ -1,7 +1,7 @@
 # 온프레미스 데이터 터널 2안 실측 (티켓 69)
 
 원본 EKS(`cmp-demo-source`, 서울) ↔ 맥 k3d(`k3d-cmp-local`, arm64, NAT 뒤). 입구는 원본 EKS UDP NLB, k3d가 밖으로 접속한다.
-구성·실행: [infra/data-migration/onprem-poc](../../infra/data-migration/onprem-poc/README.md). 비밀값·키·공인 IP는 이 문서에 적지 않는다.
+구성·실행: [infra/data-migration/onprem-poc](../../infra/data-migration/onprem-poc/README.md). 비밀값·키·공인 IP는 이 문서에 적지 않는다. 방식 결정: [ADR-007](../decisions/ADR-007.md).
 
 ## 결과 요약
 

@@ -45,4 +45,4 @@ Blocked by: 사용자 승인(원본 EKS·AWS 변경). 데이터 ticket 06·10(�
 | P3 | 허용 CIDR은 맥 공인 IP /32 | 입구 노출 최소화 |
 
 ## 관련 문서
-[보고서](../../docs/engineering/onprem-data-tunnel-poc.md), [PoC README](../../infra/data-migration/onprem-poc/README.md), `packages/data/src/cmp_data/tunnel.py`, [크로스 클라우드 실습](../../infra/data-migration/crosscloud-lab/README.md)
+[ADR-007](../../docs/decisions/ADR-007.md), [보고서](../../docs/engineering/onprem-data-tunnel-poc.md), [PoC README](../../infra/data-migration/onprem-poc/README.md), `packages/data/src/cmp_data/tunnel.py`, [크로스 클라우드 실습](../../infra/data-migration/crosscloud-lab/README.md)

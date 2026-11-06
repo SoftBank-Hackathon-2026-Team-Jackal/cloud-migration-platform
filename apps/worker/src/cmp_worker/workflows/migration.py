@@ -378,7 +378,7 @@ class MigrationWorkflow:
         change (#128 acceptance: no shift without a handover). The first code is the cause.
         """
         self.phase = "traffic"
-        # Ticket 64: an ON_PREM lookup waits inside the Activity for the tunnel health check.
+        # Ticket 67: an ON_PREM lookup waits inside the Activity for the tunnel health check.
         timeouts = (
             {
                 "start_to_close_timeout": timedelta(seconds=TRAFFIC_HANDOVER_START_TO_CLOSE_S),
