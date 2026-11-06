@@ -146,6 +146,26 @@ class SecurityMeasure(Contract):
     evidence: list[Evidence] = Field(default_factory=list)
 
 
+SecurityVerdict = Literal["LOWER", "SAME", "HIGHER", "UNKNOWN"]
+
+
+class SecurityJudgement(Contract):
+    """The source's state for one criterion against the target it is going to (ticket 29-A).
+
+    `LOWER` is what the approval gate stops on; `UNKNOWN` means a person has to look and is never
+    read as "the same". `weak_source` marks a criterion that was weak at the source to begin with.
+    `suggestion` is a code for how the target could do better; the screen picks the words, and
+    nothing is applied from it. `reasons` are codes about the target's side."""
+
+    criterion: SecurityCriterion
+    source_state: SecurityState
+    target_state: SecurityState
+    verdict: SecurityVerdict
+    weak_source: bool = False
+    reasons: list[Text] = Field(default_factory=list)
+    suggestion: Text | None = None
+
+
 class MappingRow(Contract):
     id: Text
     capability: str
@@ -218,6 +238,7 @@ class AnalysisReport(Contract):
     aws_usage: AwsUsage | None = None  # ticket 06C: IAM and CloudTrail evidence of resource use
     security: list[SecurityMeasure] | None = None  # ticket 28-B: None before it was measured
     target_provider: Literal["AWS", "GCP", "ON_PREM"] | None = None  # ticket 31
+    security_judgements: list[SecurityJudgement] | None = None  # ticket 29-A: None before judged
 
     @model_validator(mode="after")
     def unique_mapping_ids(self):
