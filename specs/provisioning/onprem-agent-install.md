@@ -122,7 +122,8 @@ kubectl delete namespace cmp-system
 ```text
 중계 서버 10.200.0.1 ──WireGuard(UDP, MTU 1420)── wg0 10.200.0.2 (Agent Pod netns)
                                                      ├─ 10.200.0.2:<앱포트> → <앱 Service>:<앱포트>
-                                                     └─ 10.200.0.2:5432   → <DB Service>:5432
+                                                     ├─ 10.200.0.2:5432   → <DB Service>:5432
+                                                     └─ 10.200.0.2:6443   → kubernetes.default.svc:443 (73, 켰을 때만)
 ```
 
 - **실행:** `tunnel` 컨테이너(UID 0, `NET_ADMIN`·`NET_BIND_SERVICE`만, 권한 상승 금지, 읽기 전용 루트). `hostNetwork`를 쓰지 않아 노드 LAN 인터페이스와 분리된다. `agent` 컨테이너는 15 그대로 비루트·무권한이다.
@@ -132,6 +133,7 @@ kubectl delete namespace cmp-system
 - **전달 대상:** `cmp.dev/environment-id` 주석이 있는 Namespace의 Service를 포트로 찾는다(5432 = DB, 그 외 노출 포트 = 앱, 헬스 경로는 같은 이름 Deployment의 readinessProbe). 찾지 못하거나 둘 이상이면 그 포트를 열지 않는다.
 - **감시·재연결:** handshake가 180초 넘게 없으면 peer를 다시 설정하고, 그래도 안 되면 인터페이스를 다시 만든다. 상태(handshake 시각, 터널 경유 앱 헬스·DB 확인, 원인 코드)를 매 주기 `POST .../tunnel/status`로 보고한다.
 - **즉시 재확인(66):** `agent` 컨테이너가 작업(롤아웃 등)을 처리할 때마다 공유 메모리 볼륨 `/var/run/cmp-wake/job`에 신호를 쓴다. tunnel은 1초마다 신호를 보고, 시작·새 신호·노출 포트 변경 뒤 120초 동안 보고가 정상(`code: null`)이 아니면 2초마다 다시 확인·보고한다. 정상이거나 120초가 지나면 평소 주기로 돌아간다. 확인 간격은 2초보다 짧지 않고, 플랫폼 오류 백오프는 그대로다. 그래서 READY 기록으로 앱 포트가 배정되면 보통 2초 안에 `app_health_ok: true`가 보고된다(이전에는 최대 한 주기). 결정 I1~I6은 [66 티켓](../../tickets/provisioning/66-tunnel-immediate-report.md)에 있다.
+- **K3s API 포트(73, ADR-007 2안):** 데이터 이전 worker가 kubeconfig로 이 클러스터 API에 붙을 때만 쓴다. 플랫폼 `TUNNEL_EXPOSE_KUBE_API=true`(포트 `TUNNEL_KUBE_API_PORT`, 기본 6443)와 Chart `--set tunnel.exposeKubeApi=true` **둘 다** 켜야 열린다(기본 둘 다 꺼짐). Agent는 TLS를 풀지 않고 `kubernetes.default.svc:443`으로 TCP만 전달한다(RBAC 추가 없음). 다른 포트처럼 터널 IP에만 bind하고 중계 서버 주소에서 온 연결만 받는다. 매 주기 터널 IP:포트 TCP 연결을 확인해 `kube_api_ok`로 보고하며, 이 값은 `code`와 앱·DB 인계 판정을 바꾸지 않는다. **TLS 주의:** k3s 서버 인증서 SAN에 터널 IP·중계 서버 주소가 없다. kubeconfig는 `tls-server-name: kubernetes.default.svc`를 쓰고 `insecure-skip-tls-verify`는 쓰지 않는다. 결정 K1~K8은 [73 티켓](../../tickets/provisioning/73-agent-kube-api-port.md)에 있다.
 - **Pod Security:** `NET_ADMIN`과 hostPath는 Pod Security `baseline`에 맞지 않는다. Agent Namespace에 PSA를 강제하는 클러스터라면 그 Namespace만 `privileged`로 둔다(K3s 기본값은 강제하지 않음).
 - **끄기:** `--set tunnel.enabled=false` (터널 없이 15 동작만).
 
@@ -142,7 +144,7 @@ kubectl -n cmp-system logs deploy/cmp-onprem-agent -c tunnel
 kubectl -n cmp-system exec deploy/cmp-onprem-agent -c tunnel -- wg show wg0 latest-handshakes
 ```
 
-로그 이벤트: `tunnel_key_created`, `tunnel_wake_failed`(agent 컨테이너, 신호 쓰기 실패 — 평소 주기로 동작), `tunnel_applied`(설정 버전·모드), `tunnel`(상태가 바뀔 때, 코드만), `tunnel_recover`, `retry`, `stopped`. 원인 코드: `HANDSHAKE_MISSING`(UDP 차단·중계 서버 peer 미반영·키 불일치), `RELAY_NOT_CONFIGURED`, `INVALID_TUNNEL_CONFIG`, `TUNNEL_INTERFACE_FAILED`, `FORWARDER_BIND_FAILED`, `APP_PORT_NOT_ASSIGNED`, `FORWARD_TARGET_MISSING`, `FORWARD_TARGET_AMBIGUOUS`, `APP_HEALTH_FAILED`, `DB_CONNECT_FAILED`, `KUBERNETES_UNAVAILABLE`.
+로그 이벤트: `tunnel_key_created`, `tunnel_wake_failed`(agent 컨테이너, 신호 쓰기 실패 — 평소 주기로 동작), `tunnel_applied`(설정 버전·모드), `tunnel`(상태가 바뀔 때, 코드만), `tunnel_recover`, `retry`, `stopped`. 원인 코드: `HANDSHAKE_MISSING`(UDP 차단·중계 서버 peer 미반영·키 불일치), `RELAY_NOT_CONFIGURED`, `INVALID_TUNNEL_CONFIG`, `TUNNEL_INTERFACE_FAILED`, `FORWARDER_BIND_FAILED`, `APP_PORT_NOT_ASSIGNED`, `FORWARD_TARGET_MISSING`, `FORWARD_TARGET_AMBIGUOUS`, `APP_HEALTH_FAILED`, `DB_CONNECT_FAILED`, `KUBERNETES_UNAVAILABLE`. K3s API 확인(73)은 원인 코드가 아니라 `tunnel` 이벤트의 `kube_api_ok`로 남는다.
 
 UDP가 막힌 네트워크(행사장 Wi-Fi 등) 대체 터널은 아직 없다(Traffic 담당과 결정 대기). 그런 곳에서는 `HANDSHAKE_MISSING`이 보고되고 ON_PREM Traffic 인계가 막힌다.
 

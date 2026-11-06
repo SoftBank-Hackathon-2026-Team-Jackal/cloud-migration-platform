@@ -271,7 +271,27 @@ def test_tunnel_can_be_disabled(tmp_path):
     assert [c["name"] for c in pod["spec"]["containers"]] == ["agent"]
 
 
-@pytest.mark.parametrize("bad", [{"mode": "tcp"}, {"intervalSeconds": 0}, {"extra": 1}])
+def test_kube_api_forwarding_is_off_unless_the_cluster_owner_turns_it_on(tmp_path):
+    """Ticket 73 (#299): the platform names the port, the chart value lets the Agent forward it."""
+    default = documents(tmp_path, values())
+    pod = deployment(default)["spec"]["template"]["spec"]
+    assert "--expose-kube-api" not in container(pod, "tunnel")["args"]
+    enabled = documents(tmp_path, values(tunnel={"exposeKubeApi": True}))
+    pod = deployment(enabled)["spec"]["template"]["spec"]
+    assert "--expose-kube-api" in container(pod, "tunnel")["args"]
+    # TCP relay to `kubernetes.default.svc` only: no extra RBAC.
+    assert _cluster_rules(enabled) == _cluster_rules(default)
+
+
+def _cluster_rules(docs):
+    return [
+        r for (kind, _), d in docs.items() if kind in ("ClusterRole", "Role") for r in d["rules"]
+    ]
+
+
+@pytest.mark.parametrize(
+    "bad", [{"mode": "tcp"}, {"intervalSeconds": 0}, {"extra": 1}, {"exposeKubeApi": "yes"}]
+)
 def test_tunnel_values_are_validated(tmp_path, bad):
     assert render(tmp_path, values(tunnel=bad)).returncode != 0
 

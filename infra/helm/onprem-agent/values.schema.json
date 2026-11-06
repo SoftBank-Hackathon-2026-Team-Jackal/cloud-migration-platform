@@ -73,6 +73,7 @@
         "enabled": {"type": "boolean"},
         "mode": {"enum": ["auto", "kernel", "userspace"]},
         "intervalSeconds": {"type": "number", "minimum": 5},
+        "exposeKubeApi": {"type": "boolean"},
         "resources": {"type": "object"}
       },
       "additionalProperties": false

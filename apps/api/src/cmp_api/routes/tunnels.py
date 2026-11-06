@@ -70,6 +70,9 @@ class TunnelConfigResponse(BaseModel):
     mtu: int
     persistent_keepalive: int
     exposed_ports: list[int]
+    # Ticket 73: the exposed port the Agent forwards to the K3s API (`kubernetes.default.svc:443`);
+    # null while the operator has not enabled it.
+    kube_api_port: int | None = None
     config_version: int
 
 
@@ -80,6 +83,9 @@ class TunnelStatusReport(Strict):
     db_connect_ok: bool
     # Ticket 17 W8: why a check failed (code only, never free text); null when all checks pass.
     code: Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{0,63}$")] | None = None
+    # Ticket 73: TCP connect to the K3s API port through the tunnel IP; null when not exposed.
+    # Diagnostics only: it never changes `code` or the app/DB handoff checks.
+    kube_api_ok: bool | None = None
 
 
 class RelayRegistration(Strict):

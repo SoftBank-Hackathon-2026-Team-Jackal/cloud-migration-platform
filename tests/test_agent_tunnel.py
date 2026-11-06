@@ -787,3 +787,70 @@ def test_wake_file_written_by_the_agent_is_read_by_the_tunnel(tmp_path):
     first = read_wake(path)
     write_wake(path)
     assert first is not None and read_wake(path) not in (None, first)
+
+
+# --- Ticket 73 (#299): K3s API port on the tunnel (ADR-007 step 2) ----------------------------
+
+
+def test_kube_api_port_forwards_to_the_kubernetes_service_and_is_checked():
+    client = FakeClient()
+    client.config = config(exposed_ports=[5432, 6443, 8080], kube_api_port=6443)
+    seen, probed = [], []
+    built, parts = manager(
+        client=client,
+        expose_kube_api=True,
+        discover=lambda ports: (
+            seen.append(ports) or ({p: FORWARDS[p] for p in ports if p in FORWARDS}, [])
+        ),
+        tcp_ok=lambda ip, port: probed.append((ip, port)) or True,
+    )
+    parts["link"].handshake = parts["clock"].now
+    built.start()
+    report = built.step()
+    assert seen == [[5432, 8080]]  # never looked up among the app Services
+    _, sources, forwards = parts["forwarders"].applied[-1]
+    assert sources == {"10.200.0.1", "10.200.0.2"}
+    assert forwards[6443] == Forward(6443, "kubernetes.default.svc", 443, None)
+    assert probed == [("10.200.0.2", 6443)]
+    assert report["kube_api_ok"] is True and report["code"] is None
+
+
+def test_kube_api_failure_is_reported_without_touching_the_app_and_db_checks():
+    client = FakeClient()
+    client.config = config(exposed_ports=[5432, 6443, 8080], kube_api_port=6443)
+    built, parts = manager(client=client, expose_kube_api=True, tcp_ok=lambda ip, port: False)
+    parts["link"].handshake = parts["clock"].now
+    built.start()
+    report = built.step()
+    assert report["kube_api_ok"] is False
+    assert (report["code"], report["app_health_ok"], report["db_connect_ok"]) == (None, True, True)
+
+
+def test_without_kube_api_port_the_report_keeps_its_old_shape():
+    built, parts = manager()
+    parts["link"].handshake = parts["clock"].now
+    built.start()
+    assert "kube_api_ok" not in built.step()  # older platforms reject unknown fields
+
+
+@pytest.mark.parametrize("bad", [5432, 0, 70000, "6443x", True])
+def test_an_unusable_kube_api_port_is_ignored(bad):
+    client = FakeClient()
+    client.config = config(kube_api_port=bad)
+    built, parts = manager(client=client, expose_kube_api=True)
+    parts["link"].handshake = parts["clock"].now
+    built.start()
+    report = built.step()
+    assert "kube_api_ok" not in report
+    assert "kubernetes.default.svc" not in str(parts["forwarders"].applied[-1])
+
+
+def test_agent_forwards_the_kube_api_only_when_its_chart_allows_it():
+    client = FakeClient()
+    client.config = config(exposed_ports=[5432, 6443, 8080], kube_api_port=6443)
+    built, parts = manager(client=client, expose_kube_api=False)
+    parts["link"].handshake = parts["clock"].now
+    built.start()
+    report = built.step()
+    assert 6443 not in parts["forwarders"].applied[-1][2]
+    assert "kube_api_ok" not in report and report["code"] is None
