@@ -4,14 +4,20 @@ kubectl/Helm are a fake cluster and the business DB is SQLite; no cloud or clust
 """
 
 from contextlib import contextmanager
+from datetime import timedelta
+from uuid import uuid4
 
 import pytest
 import test_aws_apply as aws_case
 from cmp_api.approvals import PlanExecution, publish_plan_revision
 from cmp_contracts.plan import Preview
+from cmp_contracts.queues import PROVISIONING_QUEUE, WORKFLOW_QUEUE
 from cmp_providers.plans import manifest_digest
 from cmp_worker.activities.cloud_teardown import CloudTeardownActivities, TeardownTimeouts
-from temporalio.testing import ActivityEnvironment
+from cmp_worker.workflows.cloud_teardown import CloudTeardownWorkflow
+from temporalio import activity
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
+from temporalio.worker import Worker
 from test_aws_workloads import ACCOUNT, NAMESPACE, Plan, db  # noqa: F401 - db is a fixture
 
 FAST = TeardownTimeouts(load_balancer_seconds=0, volume_seconds=0, interval_seconds=0)
@@ -68,7 +74,12 @@ class FakeCluster:
 
 class FakeRuntime:
     def __init__(self, cluster, *, account=ACCOUNT, aws_profile="cmp-aws-prod", fail=False):
-        self.cluster, self.account, self.aws_profile, self.fail = cluster, account, aws_profile, fail
+        self.cluster, self.account, self.aws_profile, self.fail = (
+            cluster,
+            account,
+            aws_profile,
+            fail,
+        )
         self.profiles = []
 
     def with_profile(self, profile):
@@ -232,14 +243,6 @@ async def test_cluster_access_failure_is_unknown(tmp_path, db):  # noqa: F811
 
 # ---- Workflow (D2, D3, D5, D9) ----
 
-from datetime import timedelta  # noqa: E402
-from uuid import uuid4  # noqa: E402
-
-from cmp_contracts.queues import PROVISIONING_QUEUE, WORKFLOW_QUEUE  # noqa: E402
-from cmp_worker.workflows.cloud_teardown import CloudTeardownWorkflow  # noqa: E402
-from temporalio import activity  # noqa: E402
-from temporalio.testing import WorkflowEnvironment  # noqa: E402
-from temporalio.worker import Worker  # noqa: E402
 
 REVIEW = {"digest": "d" * 64, "addresses": ["aws_vpc.target"], "unprotect": False}
 

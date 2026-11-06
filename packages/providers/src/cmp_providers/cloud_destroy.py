@@ -204,8 +204,12 @@ def _session(
     os.chmod(work, 0o700)
     try:
         identity = _json(
-            runner(["aws", "sts", "get-caller-identity", *identity_args, "--output", "json"],
-                   work, env, QUERY_TIMEOUT_SECONDS)  # fmt: skip
+            runner(
+                ["aws", "sts", "get-caller-identity", *identity_args, "--output", "json"],
+                work,
+                env,
+                QUERY_TIMEOUT_SECONDS,
+            )
         )
         if not isinstance(identity, dict) or "Account" not in identity:
             raise DestroyFailure("ACCOUNT_CHECK_FAILED")
@@ -241,6 +245,20 @@ def _session(
         shutil.rmtree(work, ignore_errors=True)
 
 
+def destroy_addresses(plan_json: dict) -> list[str]:
+    """Sorted addresses a `terraform show -json` destroy Plan deletes; ValueError on any other
+    change (create/update/replace/read)."""
+    addresses = []
+    for change in plan_json.get("resource_changes") or []:
+        actions = (change.get("change") or {}).get("actions") or []
+        if actions == ["no-op"]:
+            continue
+        if actions != ["delete"]:
+            raise ValueError(change.get("address"))
+        addresses.append(change["address"])
+    return sorted(addresses)
+
+
 def _destroy_review(run: _Run) -> tuple[list[str], bool]:
     """(addresses to delete, GKE protection must be lifted) from a fresh `plan -destroy`."""
     planned = run.terraform(
@@ -251,20 +269,16 @@ def _destroy_review(run: _Run) -> tuple[list[str], bool]:
     shown = run.show("destroy.tfplan")
     if "resource_changes" not in shown and "prior_state" not in shown:
         raise DestroyFailure("DESTROY_PLAN_FAILED", refs=run.refs)
-    addresses = []
-    for change in shown.get("resource_changes") or []:
-        actions = (change.get("change") or {}).get("actions") or []
-        if actions == ["no-op"]:
-            continue
-        if actions != ["delete"]:
-            raise DestroyFailure("DESTROY_PLAN_UNSAFE", refs=run.refs)
-        addresses.append(change["address"])
-    resources = (((shown.get("prior_state") or {}).get("values") or {}).get("root_module") or {})
+    try:
+        addresses = destroy_addresses(shown)
+    except ValueError:
+        raise DestroyFailure("DESTROY_PLAN_UNSAFE", refs=run.refs) from None
+    resources = ((shown.get("prior_state") or {}).get("values") or {}).get("root_module") or {}
     protected = any(
         item.get("type") == GKE_CLUSTER and (item.get("values") or {}).get("deletion_protection")
         for item in resources.get("resources") or []
     )
-    return sorted(addresses), protected
+    return addresses, protected
 
 
 def _unprotect_plan(run: _Run) -> None:

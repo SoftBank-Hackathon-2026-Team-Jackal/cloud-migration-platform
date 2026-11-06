@@ -63,25 +63,36 @@ PROV-008, PROV-009, PROV-016, PROV-021
 - 실측: `scripts/smoke_terraform_interrupt.py`(신규)
 
 ## 검증
-- 단위·Workflow·API: `tests/test_terraform_process.py`, `tests/test_cloud_destroy.py`, `tests/test_cloud_teardown.py`, `tests/test_cloud_teardown_api.py`, 바뀐 `test_aws_apply`·`test_gcp_apply`
-- RED: 새 테스트가 구현 전 실패(모듈 없음, SIGKILL만 보냄, 실패 뒤 `errored.tfstate` 삭제)
-- 실제 terraform: 아래 표
-- `make check`·`make openapi`: 결과는 PR 본문
-- Alembic: 변경 없음
-- `make smoke-temporal`: 로컬 Temporal이 있을 때만(PR 본문)
+- 단위·Workflow·API: `tests/test_terraform_process.py`(11), `tests/test_cloud_destroy.py`(18), `tests/test_cloud_teardown.py`(17), `tests/test_cloud_teardown_api.py`(5), 바뀐 `test_aws_apply`(+2)·`test_gcp_apply`(+1)
+- RED: 새 테스트가 구현 전 실패(모듈 없음, Apply 중단 결과에 `stopped`·`state_lock`·`state_recovery` 없음)
+- `make check`·`make openapi`: 2211 passed, 9 skipped(ruff lint·format 포함). OpenAPI는 관리자 경로 3개·스키마 3개 추가만(삭제 없음, 52 `TeardownRequest`와 이름이 겹치지 않게 `CloudTeardown*`)
+- Alembic: 변경 없음(D2)
+- `make smoke-temporal`: 로컬 Temporal이 떠 있지 않아 실행하지 않았다. `CloudTeardownWorkflow`는 Temporal 테스트 환경(time skipping)으로 확인했다(확인 Digest·24시간 시한·LB 대기 중단·정리할 것 없음)
+
+### 실제 terraform 로컬 실측 (2026-11-06)
+`scripts/smoke_terraform_interrupt.py`, 로컬 백엔드, 내장 `terraform_data`(Provider 내려받기·클라우드 호출 없음), Worker와 같은 `run_graceful`·`destroy_addresses`. Terraform 1.10.5·1.17.0(darwin_arm64) 모두 같은 결과. [증거](../../docs/verification/provisioning-53-terraform.json)
+
+| 단계 | 결과 |
+| --- | --- |
+| 1 apply | State `first`, `slow` |
+| 2 검토된 destroy | `plan -destroy` 검토 = `terraform_data.first`, `terraform_data.slow`(삭제만) → 그 Plan Apply → State 비어 있음 |
+| 3 시한 4초, SIGTERM 유예 30초 | `stopped=TERMINATED`, 4.1초, "Gracefully shutting down" 출력, **lock 파일 없음**, State `first`·`slow`(진행 중이던 `slow`는 tainted로 기록), `errored.tfstate` 없음 |
+| 4 시한 4초, 유예 0(SIGKILL만 = 53 이전 동작) | `stopped=KILLED`, **lock 파일 남음**, State `first`만(진행 중이던 `slow` 유실) |
+| 5 정리 | 남은 로컬 lock 제거(`force-unlock`에 해당) → destroy → State 비어 있음, 작업 폴더 삭제 |
 
 ## 미검증
 - 실제 EKS·GKE 정리 전체(ALB·GCE LB·NEG 소멸 시간, EBS·PD CSI 삭제, VPC 삭제, GKE 보호 해제 Apply): **승인 대기**
 - 실제 S3 `.tflock`이 SIGTERM·SIGKILL 뒤 남는지: 로컬 백엔드 lock 파일로만 확인
-- Worker 프로세스 자체 종료(N19) 중의 Apply
+- Worker 프로세스 자체 종료(N19) 중의 Apply: Activity 취소 경로만 단위 테스트(실제 Worker graceful shutdown 설정은 후속)
+- GKE ECR pull Secret 갱신 Schedule(29)이 정리된 클러스터를 계속 대상으로 삼는지: 코드 확인·처리는 후속
 
 ## 문서 변경
 - `specs/provisioning/plan.md` §8·§12, `specs/provisioning/shared-contracts.md`(정리 경로), `docs/architecture/temporal-flow.md` §11, 티켓 08·10·14에 53 후속 표시, OpenAPI 재생성
 
 ## 완료 체크리스트
 - [x] 티켓·tasks.md 행·Issue 연결
-- [ ] RED → GREEN 단위 테스트
-- [ ] 실제 terraform 로컬 실측
-- [ ] SDD 문서 갱신
+- [x] RED → GREEN 단위 테스트
+- [x] 실제 terraform 로컬 실측
+- [x] SDD 문서 갱신
 - [ ] 리뷰·병합(오케스트레이터)
 - [ ] 실제 클라우드 정리 실측(사용자 승인)

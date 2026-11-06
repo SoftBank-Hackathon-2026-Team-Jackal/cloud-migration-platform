@@ -1,0 +1,115 @@
+{
+  "ticket": "53",
+  "date": "2026-11-06",
+  "script": "scripts/smoke_terraform_interrupt.py",
+  "backend": "local",
+  "resources": "terraform_data (built-in, no provider, no cloud)",
+  "runs": [
+    {
+      "terraform": "1.10.5",
+      "steps": {
+        "1_apply": {
+          "rc": 0,
+          "state": [
+            "first",
+            "slow"
+          ]
+        },
+        "2_reviewed_destroy": {
+          "plan_rc": 0,
+          "review": [
+            "terraform_data.first",
+            "terraform_data.slow"
+          ],
+          "apply_rc": 0,
+          "state_after": []
+        },
+        "3_timeout_sigterm": {
+          "returncode": -1,
+          "stopped": "TERMINATED",
+          "seconds": 4.1,
+          "graceful_message": true,
+          "lock_left": false,
+          "state": [
+            "first",
+            "slow"
+          ],
+          "tainted": [
+            "slow"
+          ],
+          "errored_tfstate": false
+        },
+        "4_timeout_sigkill_only": {
+          "returncode": -1,
+          "stopped": "KILLED",
+          "seconds": 4.1,
+          "graceful_message": false,
+          "lock_left": true,
+          "state": [
+            "first"
+          ],
+          "tainted": [],
+          "errored_tfstate": false
+        },
+        "5_cleanup": {
+          "rc": 0,
+          "state": []
+        }
+      },
+      "workspace_removed": true
+    },
+    {
+      "terraform": "1.17.0",
+      "steps": {
+        "1_apply": {
+          "rc": 0,
+          "state": [
+            "first",
+            "slow"
+          ]
+        },
+        "2_reviewed_destroy": {
+          "plan_rc": 0,
+          "review": [
+            "terraform_data.first",
+            "terraform_data.slow"
+          ],
+          "apply_rc": 0,
+          "state_after": []
+        },
+        "3_timeout_sigterm": {
+          "returncode": -1,
+          "stopped": "TERMINATED",
+          "seconds": 4.1,
+          "graceful_message": true,
+          "lock_left": false,
+          "state": [
+            "first",
+            "slow"
+          ],
+          "tainted": [
+            "slow"
+          ],
+          "errored_tfstate": false
+        },
+        "4_timeout_sigkill_only": {
+          "returncode": -1,
+          "stopped": "KILLED",
+          "seconds": 4.1,
+          "graceful_message": false,
+          "lock_left": true,
+          "state": [
+            "first"
+          ],
+          "tainted": [],
+          "errored_tfstate": false
+        },
+        "5_cleanup": {
+          "rc": 0,
+          "state": []
+        }
+      },
+      "workspace_removed": true
+    }
+  ]
+}

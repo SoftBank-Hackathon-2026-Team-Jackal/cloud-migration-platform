@@ -68,8 +68,10 @@ class DestroyRunner:
         if rest[:2] == ["show", "-json"]:
             name = Path(rest[2]).name
             if name == "destroy.tfplan":
-                plan = self.destroy_plans.pop(0) if len(self.destroy_plans) > 1 else (
-                    self.destroy_plans[0]
+                plan = (
+                    self.destroy_plans.pop(0)
+                    if len(self.destroy_plans) > 1
+                    else (self.destroy_plans[0])
                 )
                 return CommandResult(0, json.dumps(plan).encode(), b"")
             return CommandResult(0, json.dumps(self.plans[name]).encode(), b"")
@@ -90,8 +92,16 @@ class DestroyRunner:
 
 def aws_plan(tmp_path, runner, **kwargs):
     manifest, _, directory = aws_case.artifacts(tmp_path, **kwargs)
-    return manifest, directory, plan_destroy(
-        manifest, directory, aws_profile="cmp-aws-prod", terraform_bin="terraform", runner=runner
+    return (
+        manifest,
+        directory,
+        plan_destroy(
+            manifest,
+            directory,
+            aws_profile="cmp-aws-prod",
+            terraform_bin="terraform",
+            runner=runner,
+        ),
     )
 
 
@@ -250,7 +260,7 @@ def test_gke_deletion_protection_needs_a_single_attribute_unprotect_plan(tmp_pat
     result = gcp_call(plan_destroy, tmp_path, runner)
     assert (result["status"], result["code"]) == ("SUCCEEDED", "DESTROY_PLANNED")
     assert result["review"]["unprotect"] is True
-    unprotect = [c for c in runner.terraform() if c[0] == "plan" and "-destroy" not in c][0]
+    unprotect = next(c for c in runner.terraform() if c[0] == "plan" and "-destroy" not in c)
     assert "-var=deletion_protection=false" in unprotect
     assert not any(c[0] == "apply" for c in runner.terraform())
 

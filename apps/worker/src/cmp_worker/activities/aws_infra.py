@@ -62,6 +62,4 @@ class AwsInfraActivities:
     @activity.defn(name="execute_aws_plan")
     async def execute_aws_plan(self, request: dict) -> dict:
         # Ticket 53 (D9): heartbeats; a cancellation stops Terraform gracefully first.
-        return await run_with_heartbeat(
-            self._apply, request, heartbeat_seconds=HEARTBEAT_SECONDS
-        )
+        return await run_with_heartbeat(self._apply, request, heartbeat_seconds=HEARTBEAT_SECONDS)
