@@ -175,7 +175,8 @@ class AnalysisPipeline:
         data = self._input(inp)
         code = CodeScan.model_validate(self._get(code_ref))
         manifests = ManifestScan.model_validate(self._get(manifests_ref))
-        built = assemble_requirements(manifests, code, source["env_names"])
+        routes = scan_go_routes(source["workspace"])
+        built = assemble_requirements(manifests, code, source["env_names"], routes)
         infra_scan = (
             AwsInfraScan.model_validate(self._get(infra["ref"]))
             if infra.get("status") == "COLLECTED"
@@ -216,7 +217,7 @@ class AnalysisPipeline:
             "dockerfile": check_dockerfile(source["workspace"]).model_dump(mode="json"),
             "network": network.model_dump(mode="json") if network else None,
             "database_images": database_images,
-            "http_routes": [r.model_dump(mode="json") for r in scan_go_routes(source["workspace"])],
+            "http_routes": [r.model_dump(mode="json") for r in routes],
             **({"env_plan_ref": env_plan_ref} if env_plan_ref is not None else {}),
         }
         return {

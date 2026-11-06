@@ -103,7 +103,7 @@ class OnPremExecutionActivities:
         return result
 
     async def _events(self, events_of, result: dict | None) -> None:
-        """Web events (ticket 63). Never changes the Activity result: failures only log."""
+        """Web events (ticket 65). Never changes the Activity result: failures only log."""
 
         def emit() -> None:
             events = events_of()

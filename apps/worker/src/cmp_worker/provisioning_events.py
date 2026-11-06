@@ -365,7 +365,7 @@ class PlanEvents:
 PlanReadyEvents = PlanEvents  # ticket 24 name
 
 
-# ---- ON_PREM rollout (ticket 63): Agent job → provision.resource / provision.check ----
+# ---- ON_PREM rollout (ticket 65): Agent job → provision.resource / provision.check ----
 
 # Agent `verify()` order: PVC·workloads·endpoints → pg_isready → app health (web check names).
 ONPREM_CHECKS = ("pods_ready", "db_connect", "app_health")

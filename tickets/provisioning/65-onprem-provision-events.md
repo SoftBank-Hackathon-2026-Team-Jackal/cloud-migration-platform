@@ -1,4 +1,4 @@
-# Ticket 64 — ON_PREM 구축 이벤트 (provision.resource·provision.check)
+# Ticket 65 — ON_PREM 구축 이벤트 (provision.resource·provision.check)
 
 ## 상태
 DONE (단위·Activity 시험 통과, 실제 Agent 화면 확인은 데모 리허설 때). [Issue #281](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/281). 2026-11-07 조율 세션 지시. 담당 민서.

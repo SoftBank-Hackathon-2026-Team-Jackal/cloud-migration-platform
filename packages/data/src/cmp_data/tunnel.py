@@ -7,6 +7,7 @@ Namespace에 게이트웨이 Pod 하나를 둔다.
 원본 클러스터                                         대상 클러스터
  DB ◀─ gateway 10.210.0.1 ──── WireGuard UDP ────▶ LB ─ gateway 10.210.0.2 ─▶ DB
        Service <name>-peer-db:5432 → 터널 → 대상 DB    Service <name>-peer-db:5432 → 터널 → 원본 DB
+       (게이트웨이 Pod 포트도 5432: 대상 DB 송신 정책이 5432만 허용한다)
 ```
 
 - 입구는 대상 쪽 LoadBalancer(UDP) 하나다. 원본 클러스터의 NAT 공인 IP(`source_egress_cidrs`)에서 오는 것만
@@ -31,7 +32,8 @@ from .contracts import Strict
 NAMESPACE = "cmp-data-tunnel"
 WG_PORT = 51820
 DB_PORT = 5432
-PEER_PORT = 5433  # 게이트웨이 안에서 "터널 너머 DB"로 가는 포트(Service 5432 → 5433)
+# 게이트웨이의 두 리스너는 모두 5432다. 터널 쪽(WG_IP)은 이 클러스터 DB로, Pod 주소 쪽(POD_IP)은 터널 너머
+# DB로 넘긴다. Pod 포트를 5432로 두어야 대상 DB의 Provisioning 정책(송신은 TCP 5432만)을 통과한다.
 ADDRESSES = {"source": "10.210.0.1", "target": "10.210.0.2"}
 LABELS = {"app.kubernetes.io/managed-by": "cmp-data-migration"}
 SECRET_KEY = "private"
@@ -49,7 +51,7 @@ wg set wg0 private-key /etc/wg/private listen-port 51820 \\
 ip addr add "$WG_IP/24" dev wg0
 ip link set mtu 1420 up dev wg0
 socat TCP-LISTEN:5432,bind="$WG_IP",fork,reuseaddr TCP:"$LOCAL_DB":5432 &
-socat TCP-LISTEN:5433,fork,reuseaddr TCP:"$PEER_IP":5432 &
+socat TCP-LISTEN:5432,bind="$POD_IP",fork,reuseaddr TCP:"$PEER_IP":5432 &
 touch /tmp/started
 wait
 """
@@ -136,10 +138,14 @@ def gateway_manifests(
                         "name": "wg",
                         "image": image,
                         "command": ["sh", "/opt/start.sh"],
-                        "env": [{"name": k, "value": v} for k, v in env.items()],
+                        "env": [
+                            *({"name": k, "value": v} for k, v in env.items()),
+                            {"name": "POD_IP",
+                             "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}}},
+                        ],
                         "ports": [
                             {"name": "wg", "containerPort": WG_PORT, "protocol": "UDP"},
-                            {"name": "peer-db", "containerPort": PEER_PORT},
+                            {"name": "peer-db", "containerPort": DB_PORT},
                         ],
                         # 커널 WireGuard·tun 장치가 필요하다(ticket 06 실습과 같음)
                         "securityContext": {"privileged": True},
@@ -165,7 +171,7 @@ def gateway_manifests(
         "kind": "Service",
         "metadata": _meta(f"{base}-peer-db", migration_id),
         "spec": {"selector": selector,
-                 "ports": [{"name": "postgres", "port": DB_PORT, "targetPort": PEER_PORT}]},
+                 "ports": [{"name": "postgres", "port": DB_PORT, "targetPort": DB_PORT}]},
     }  # fmt: skip
     return [config, deployment, service]
 
