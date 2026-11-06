@@ -2,7 +2,7 @@
 
 ## 상태
 
-DONE(로컬 검증: k3d 두 개 + 로컬 플랫폼). 실제 EKS ↔ Provisioning GKE 검증과 데모 서버 값은 남아 있다.
+DONE(PR #258 병합). 실제 EKS ↔ GKE 검증은 [ticket 11](11-tunnel-cloud-check.md)에서 했고, 거기서 게이트웨이 포트를 고쳤다.
 
 ## 배경
 

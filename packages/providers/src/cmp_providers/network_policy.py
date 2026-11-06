@@ -65,10 +65,13 @@ def allow_dns(namespace: str, labels: dict[str, str]) -> dict:
     return policy(namespace, "cmp-allow-dns", labels, {
         "podSelector": {}, "policyTypes": ["Egress"],
         "egress": [{
+            # GKE NodeLocal DNSCache(1.36 신규 클러스터 기본값, Dataplane V2)는 kube-dns Service로 가는
+            # 질의를 노드의 node-local-dns Pod가 받는다. 둘 다 허용하지 않으면 Namespace 안 DNS가 모두 막힌다
+            # (data-migration ticket 11 클라우드 검증에서 발견).
             "to": [{
                 "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
-                "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
-            }],
+                "podSelector": {"matchLabels": {"k8s-app": name}},
+            } for name in ("kube-dns", "node-local-dns")],
             "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}],
         }],
     })  # fmt: skip
@@ -236,7 +239,7 @@ def describe(
             )
     for app, port in sorted(applications.items()):
         lines.append(f"외부 진입(LB/Ingress) → {app} TCP {port} 허용, 다른 포트 차단")
-    defaults = ["모든 Pod → kube-system kube-dns UDP/TCP 53 허용"]
+    defaults = ["모든 Pod → kube-system kube-dns·node-local-dns UDP/TCP 53 허용"]
     for database in sorted(databases):
         defaults.append(f"{database} 자기 점검·복제 연결 TCP {DB_PORT} 허용(수신은 자신만)")
         if provider == "ON_PREM":
