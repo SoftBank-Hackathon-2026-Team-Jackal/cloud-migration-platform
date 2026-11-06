@@ -91,6 +91,7 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
         build=build,
         suite_runner=make_proxy_suite_runner(service),
         llm_factory=build_llm_factory(config),
+        skills_root=resources / "skills",  # ticket 27-B: the Tester's `test-authoring` skill
     )
 
 

@@ -5,7 +5,7 @@ Names avoid a `Test` prefix so pytest never collects them.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 
 class _Strict(BaseModel):
@@ -48,6 +48,13 @@ class ActionStep(_Strict):
 Step = HttpStep | ActionStep  # told apart by `action`; extra fields are forbidden
 
 
+class Evidence(_Strict):
+    """A place in the fetched source that a test was written from (ticket 27-B)."""
+
+    file: str = Field(min_length=1, max_length=512)
+    line: int = Field(ge=1)
+
+
 class SuiteCase(_Strict):
     id: Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]*$")]
     description: str = ""
@@ -55,7 +62,23 @@ class SuiteCase(_Strict):
     effect: Literal["READ_ONLY", "WRITES_DATA"]
     external_side_effects: bool = False
     covers: list[str] = Field(default_factory=list)  # catalog capabilities this test exercises
+    # Where in the source an AI test comes from. `evidence` and `basis` are left out of the bytes
+    # when unset, so suites pinned before these fields existed keep their SHA-256.
+    evidence: list[Evidence] = Field(default_factory=list)
+    # How the expected values came to be. FREE: written by someone (a model, a person). RECORDED:
+    # taken from what the app answered when the platform asked it (ticket 27-B); only the recorder
+    # sets this, a model's submission may not.
+    basis: Literal["FREE", "RECORDED"] = "FREE"
     steps: list[Step] = Field(min_length=1)
+
+    @model_serializer(mode="wrap")
+    def _leave_out_what_is_unset(self, handler):
+        data = handler(self)
+        if not data.get("evidence"):
+            data.pop("evidence", None)
+        if data.get("basis") == "FREE":
+            data.pop("basis", None)
+        return data
 
     def has_value_assertion(self) -> bool:
         return any(s.expect.has_value_assertion() for s in self.steps if isinstance(s, HttpStep))
