@@ -1,8 +1,8 @@
 """Ticket 23 (#118) seam: FastAPI TestClient + SQLite business DB + an injected cloud connector.
 
 STS/EKS are botocore clients wrapped in `Stubber`, so no request leaves the process and the
-exact AssumeRole parameters (External ID included) are asserted. GCP verification reuses the ADC
-principal check through an injected checker. Real AWS/GCP accounts are out of scope (ADR-005).
+exact AssumeRole parameters (External ID included) are asserted. GCP verification goes through an
+injected checker (the real one asks the provisioning worker, ticket 48). Real AWS/GCP accounts are out of scope (ADR-005).
 """
 
 import configparser
@@ -655,9 +655,12 @@ def test_external_id_is_shown_only_to_the_operator_detail_not_the_list(client):
     assert detail["external_id"] == created["external_id"]
 
 
-def test_default_gcp_checker_reuses_the_planning_adc_check(monkeypatch):
-    from cmp_api.routes import connections as routes
+def test_worker_gcp_check_reuses_the_planning_adc_check(monkeypatch):
+    # Ticket 48 G7: the check moved to the provisioning worker Activity (the API has no ADC).
+    import asyncio
+
     from cmp_providers import gcp_preview
+    from cmp_worker.activities.gcp_connection import verify_gcp_connection
 
     seen = []
 
@@ -667,9 +670,8 @@ def test_default_gcp_checker_reuses_the_planning_adc_check(monkeypatch):
             gcp_preview._reject("ADC_PRINCIPAL_MISMATCH", "adc", "mismatch")
 
     monkeypatch.setattr(gcp_preview, "_verify_adc", fake)
-    checker = routes.get_gcp_checker()
-    assert checker("ok@p.iam.gserviceaccount.com") == "ok@p.iam.gserviceaccount.com"
-    with pytest.raises(ConnectionFailure) as failure:
-        checker("bad@p.iam.gserviceaccount.com")
-    assert failure.value.code == "ADC_PRINCIPAL_MISMATCH"
+    ok = asyncio.run(verify_gcp_connection("ok@p.iam.gserviceaccount.com"))
+    assert ok == {"code": "OK", "principal": "ok@p.iam.gserviceaccount.com"}
+    bad = asyncio.run(verify_gcp_connection("bad@p.iam.gserviceaccount.com"))
+    assert bad == {"code": "ADC_PRINCIPAL_MISMATCH", "principal": None}
     assert seen == ["ok@p.iam.gserviceaccount.com", "bad@p.iam.gserviceaccount.com"]

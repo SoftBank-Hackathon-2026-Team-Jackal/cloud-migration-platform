@@ -132,7 +132,8 @@ services:
       # Ticket 47 (D-10): the demo host EIP as /32 in /opt/cmp/.env; AWS Plans then refuse
       # api_access_cidrs that leave it out. Empty = not checked (Preview warning).
       PROVISIONING_PLATFORM_EGRESS_CIDRS: ${PROVISIONING_PLATFORM_EGRESS_CIDRS:-}
-      # GCP: operator-provided service-account key, activated by the entrypoint into tmpfs.
+      # GCP: operator-provided service-account key, activated by the entrypoint into tmpfs. The same
+      # ADC serves GCP Plan/Apply and the API's GCP_TARGET connection check (ticket 48 Activity).
       CMP_GCP_KEY_FILE: /run/cmp/gcp/key.json
       CMP_GCP_PROJECT: ${CMP_GCP_PROJECT:-}
       PROVISIONING_GCLOUD_CONFIGURATION: cmp-demo
@@ -196,10 +197,14 @@ services:
     profiles: ["public"]
     depends_on:
       - api
+      - temporal
     environment:
       CMP_PUBLIC_HOST: ${CMP_PUBLIC_HOST:-}
       CMP_API_UPSTREAM: api:8000
       CMP_WEB_UPSTREAM: web:3000
+      CMP_TEMPORAL_UPSTREAM: temporal:7233
+      # Relay host address allowed to reach Temporal through the edge (default: nobody).
+      CMP_TEMPORAL_ALLOWED_IP: ${CMP_TEMPORAL_ALLOWED_IP:-192.0.2.1/32}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./agent-routes.caddy:/etc/caddy/agent-routes.caddy:ro

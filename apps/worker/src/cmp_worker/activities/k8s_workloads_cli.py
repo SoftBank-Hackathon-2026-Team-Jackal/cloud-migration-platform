@@ -289,3 +289,51 @@ class KubectlSession:
             return None
         entries = item.get("status", {}).get("loadBalancer", {}).get("ingress") or []
         return entries[0] if entries else None
+
+    # --- teardown (ticket 53) ---
+
+    def helm_uninstall(self, namespace: str, name: str) -> None:
+        """Any Release state (`pending-*`, `failed`) is removed; an absent one is a no-op."""
+        self._helm("uninstall", name, "-n", namespace, "--ignore-not-found")
+
+    def load_balancer_objects(self) -> list[tuple[str, str, str]]:
+        """Every Ingress and `type: LoadBalancer` Service: they hold cloud LBs outside State."""
+        found = []
+        ingresses = json.loads(self._kubectl("get", "ingress", "-A", "-o", "json"))
+        for item in ingresses.get("items", []):
+            found.append(("ingress", item["metadata"]["namespace"], item["metadata"]["name"]))
+        services = json.loads(self._kubectl("get", "service", "-A", "-o", "json"))
+        for item in services.get("items", []):
+            if item.get("spec", {}).get("type") == "LoadBalancer":
+                found.append(("service", item["metadata"]["namespace"], item["metadata"]["name"]))
+        return found
+
+    def delete_object(self, kind: str, namespace: str | None, name: str) -> None:
+        scope = ["-n", namespace] if namespace else []
+        self._kubectl("delete", kind, name, *scope, "--ignore-not-found", "--wait=false")
+
+    def claims(self, namespace: str) -> list[dict]:
+        listed = json.loads(self._kubectl("get", "pvc", "-n", namespace, "-o", "json"))
+        return [
+            {"name": item["metadata"]["name"], "volume": item.get("spec", {}).get("volumeName")}
+            for item in listed.get("items", [])
+        ]
+
+    def persistent_volumes(self) -> list[dict]:
+        listed = json.loads(self._kubectl("get", "pv", "-o", "json"))
+        volumes = []
+        for item in listed.get("items", []):
+            spec = item.get("spec", {})
+            volumes.append(
+                {
+                    "name": item["metadata"]["name"],
+                    "reclaim": spec.get("persistentVolumeReclaimPolicy"),
+                    "handle": (spec.get("csi") or {}).get("volumeHandle"),
+                    "namespace": (spec.get("claimRef") or {}).get("namespace"),
+                }
+            )
+        return volumes
+
+    def set_reclaim_policy(self, volume: str, policy: str) -> None:
+        patch = {"spec": {"persistentVolumeReclaimPolicy": policy}}
+        self._kubectl("patch", "pv", volume, "--type=merge", "-p", json.dumps(patch))

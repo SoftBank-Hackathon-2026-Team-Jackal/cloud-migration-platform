@@ -9,7 +9,6 @@ import re
 from collections.abc import Callable
 from typing import Annotated, Literal
 
-from cmp_contracts.provisioning import ProvisioningInputError
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -27,6 +26,7 @@ from cmp_api.connections import (
     ConnectionFailure,
     EnvironmentConnection,
 )
+from cmp_api.gcp_connection_check import TemporalGcpChecker
 from cmp_api.routes.agents import SessionDep, require_admin
 
 
@@ -213,17 +213,9 @@ def get_aws_connector() -> AwsConnector:
     return AwsConnector(settings.connection_platform_aws_profile)
 
 
-def _adc_checker(expected_principal: str) -> str:
-    from cmp_providers.gcp_preview import verify_adc_principal
-
-    try:
-        return verify_adc_principal(expected_principal)
-    except ProvisioningInputError as exc:
-        raise ConnectionFailure(exc.issues[0].code) from None
-
-
 def get_gcp_checker() -> Callable[[str], str]:
-    return _adc_checker
+    # Ticket 48 G7: the GCP identity lives in the provisioning worker; the API asks it.
+    return TemporalGcpChecker()
 
 
 AwsDep = Annotated[AwsConnector, Depends(get_aws_connector)]

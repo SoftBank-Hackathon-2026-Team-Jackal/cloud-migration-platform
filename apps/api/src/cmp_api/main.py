@@ -7,6 +7,7 @@ from cmp_api.config import settings
 from cmp_api.routes.agent_jobs import router as agent_job_router
 from cmp_api.routes.agents import router as agent_router
 from cmp_api.routes.approvals import router as approval_router
+from cmp_api.routes.cloud_teardown import router as cloud_teardown_router
 from cmp_api.routes.connections import router as connection_router
 from cmp_api.routes.env_files import router as env_file_router
 from cmp_api.routes.migrations import router as migration_router
@@ -54,6 +55,7 @@ app = FastAPI(title="Cloud Migration Platform", version="0.1.0", lifespan=lifesp
 app.include_router(migration_router)
 app.include_router(agent_router)
 app.include_router(agent_job_router)
+app.include_router(cloud_teardown_router)  # ticket 53
 app.include_router(approval_router)
 app.include_router(rollout_router)
 app.include_router(tunnel_router)

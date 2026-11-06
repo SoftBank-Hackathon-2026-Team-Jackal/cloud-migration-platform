@@ -69,6 +69,7 @@ from cmp_worker.sandbox_deploy import (
     SandboxPlan,
     SandboxService,
 )
+from cmp_worker.sandbox_handoff import sandbox_outcome
 from cmp_worker.sandbox_judge import judge
 
 SuiteRunner = Callable[[SandboxPlan, ArtifactRef, LocalArtifactStore], SuiteResult]
@@ -629,6 +630,7 @@ class SandboxLoopActivities:
             raise HandoffError("BUILD_EVIDENCE_MISSING")
         if self.suite_uploader is None:
             raise HandoffError("TEST_SUITE_UPLOAD_NOT_CONFIGURED")
+        outcome = sandbox_outcome(sandbox)
 
         def content(ref: dict) -> ContentRef:
             return ContentRef(id=ref["id"], version=ref["version"], sha256=ref["sha256"])
@@ -665,11 +667,13 @@ class SandboxLoopActivities:
             mapping_ref=content(mapping.model_dump()),
             settings=settings,
             env_plan=env_plan,
+            # Ticket 55: the Sandbox result's cleanup state and verified target (read-only adapter).
             expected_target_ref=(
                 VersionRef.model_validate(payload["target_selection_ref"])
                 if payload.get("target_selection_ref")
-                else None
+                else outcome.verified_target_ref
             ),
+            cleanup_status=outcome.cleanup_status,
         )
         check_with_planning(registration, requirements_bytes)
         stored = self.store.put_json(

@@ -100,6 +100,8 @@ def fake_tools(tmp_path: Path, monkeypatch, *, project="sbh26-test", state_accou
     monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
     monkeypatch.setenv("TOOL_CALLS", str(calls))
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    # No ADC well-known file: user/metadata ADC, compared by tokeninfo email (ticket 48 G5).
+    monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "gcloud-config"))
 
     class Response:
         def __enter__(self):
@@ -112,7 +114,7 @@ def fake_tools(tmp_path: Path, monkeypatch, *, project="sbh26-test", state_accou
             return b'{"email":"planner@example.com","email_verified":"true"}'
 
     monkeypatch.setattr(
-        "cmp_providers.gcp_preview.urllib.request.urlopen", lambda *_a, **_k: Response()
+        "cmp_providers.gcp_adc.urllib.request.urlopen", lambda *_a, **_k: Response()
     )
     return template, terraform, calls
 

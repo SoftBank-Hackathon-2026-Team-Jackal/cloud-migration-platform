@@ -143,7 +143,7 @@ Temporal은 Workflow 이력을 보존하고 Worker 재시작 후 처리를 이�
 **Workflow 취소와 실제 인프라 삭제는 별개**다. 취소 요청 시 현재 단계, 이미 적용된 외부 변경과 데이터 위치를 먼저 확인해야 한다.
 
 - **Sandbox:** 성공·실패·취소 후 임시 자원을 정리한다. 강제 종료로 남은 Namespace·리소스를 나중에 찾고 정리할 수 있는 기준이 필요하다.
-- **Production Provisioning:** 취소만으로 클라우드 리소스를 무조건 삭제하지 않는다. 부분 생성 자원과 Terraform·Kubernetes 상태, 이미 저장된 데이터에 따라 유지·정리 방침을 정한다.
+- **Production Provisioning:** 취소만으로 클라우드 리소스를 무조건 삭제하지 않는다. 부분 생성 자원과 Terraform·Kubernetes 상태, 이미 저장된 데이터에 따라 유지·정리 방침을 정한다. 클라우드 대상 정리는 운영자가 시작하는 별도 Workflow(`CloudTeardownWorkflow`)가 워크로드·LB·PVC 정책 → 검토된 destroy Plan → 운영자 확인 Signal → destroy 순서로 한다(티켓 53). ON_PREM은 Agent 정리 작업이다(52). 실행 중 Terraform을 끊을 때(시한·Activity 취소)는 SIGTERM으로 먼저 끝내 lock·State를 남기지 않게 한다.
 - **Data Migration:** 동기화 중단, DB Cutover, 역방향 복제는 서로 다른 작업이다. 정확한 쓰기 제어·복구·자동 롤백 범위는 미정이다.
 - **Traffic Migration:** 전환 중지·가중치 복귀가 DB의 데이터 복구를 의미하지 않는다. Cutover 전후의 롤백 가능 범위를 별도로 정해야 한다.
 
@@ -188,6 +188,8 @@ Provisioning 진입 계약은 [Provision 입력 계약](../../specs/provisioning
 Temporal 측에서는 요청·Agent 작업 ID의 상관관계, 완료·실패 보고, 연결 단절과 재연결, 중복 전달 방지, 재연결 후 실제 작업 상태 조회를 다뤄야 한다. 장시간 결과 대기를 일반적인 동기 API 호출로 고정하지 않는다. 12(#36)는 Provisioning Activity(`execute_on_prem_plan`)가 heartbeat하며 업무 DB의 Agent 작업 상태를 조회하는 방식을 택했다. 대기 한도를 넘으면 작업을 보존한 채 `UNKNOWN`을 반환하며 같은 작업을 재발행하지 않는다. Workflow 측 claim/complete 연결은 08 소유다.
 
 이미지 pull 자격(29, #153)은 Temporal을 거치지 않는다. 플랫폼 API가 Agent 요청마다 ECR 토큰을 발급하고 Agent가 클러스터 안의 pull Secret을 만들고 갱신한다. GKE의 pull Secret은 플랫폼 측 Temporal Schedule `cmp-gcp-ecr-pull-refresh`(6시간, 겹침 건너뜀)가 `GcpPullSecretRefreshWorkflow` → Provisioning Activity `refresh_gcp_pull_secrets`로 갱신한다. Workflow 입력·결과·이력에는 개수·코드만 있고 토큰은 Activity 메모리에만 있다. Schedule은 Workflow Worker 시작 때 없으면 만든다(`ensure_refresh_schedule`).
+
+GCP 연결 확인(48, #183)은 API가 짧은 `GcpConnectionCheckWorkflow`를 실행하고 결과를 기다린다(최대 45초). Workflow는 GCP 자격이 있는 provisioning worker의 Activity `verify_gcp_connection` 하나만 부른다(시도 2회). 입력은 예상 주체 이메일, 결과는 코드와 확인된 주체뿐이다. AWS 연결 확인은 Temporal을 거치지 않는다.
 
 ## 15. 실제 배포 후 검증
 
