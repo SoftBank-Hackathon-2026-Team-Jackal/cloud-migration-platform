@@ -135,7 +135,10 @@ class DataMigrationWorkflow:
             # ticket 10: 두 클러스터 사이 WireGuard 게이트웨이. LB 주소·handshake를 기다린다.
             self.phase = "tunnel"
             self.tunnel = await self._call(
-                dt.dm_tunnel, {"request": req, "tunnel": args["tunnel"]}, timeout_s=1800, attempts=2
+                dt.dm_tunnel,
+                {"request": req, "tunnel": args["tunnel"]},
+                timeout_s=3600 if args["tunnel"].get("ingress") == "source" else 1800,
+                attempts=2,
             )
         self.phase = "precheck"
         pre = await self._call(dm.dm_precheck, req, timeout_s=120)

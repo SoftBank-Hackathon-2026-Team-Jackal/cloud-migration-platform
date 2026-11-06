@@ -118,3 +118,11 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 ## 이미지 흐름 변경 (ADR-003, Issue #17)
 
 이전 내부 v1 Planning은 Build가 Sandbox를 참조하는 순서로 남는다. 새 제품 정책은 Build 선행·Sandbox 실행 Digest 검증·동일 Digest 배포다. [B-01](../../tickets/provisioning/b-01-image-build.md)은 공통 빌드 모듈이고 [01A](../../tickets/provisioning/01a-input-contract-v2.md)는 앱별 Build→Sandbox 출처·Digest의 **로컬 v2 Planning 검증**이다. 실제 S3/업무 DB 참조 조회, 다중 리소스 렌더, Workflow/Worker 연결과 승인 Plan 저장은 후속 범위다. 현재 01의 DONE은 **당시 v1 범위의 완료**이고 새 이미지 동일성 정책의 증거가 아니다. 04의 격리 Agent 배포 테스트도 수정 루프/Build 모듈의 완료 증거가 아니다.
+
+## 데이터 터널 입구 방향 옵션
+
+| 티켓 | 상태 | 의존 | Issue |
+| --- | --- | --- | --- |
+| [67-data-tunnel-reverse-ingress](../../tickets/provisioning/67-data-tunnel-reverse-ingress.md) | IN_REVIEW(로컬 PASS, 제품 실측 대기) | 데이터 10·11, Provisioning 69 | #297 |
+
+기존 67 인계 대기 티켓(#284)과 별개다. #297 제목은 71이지만 이 작업의 파일·브랜치·커밋 번호는 사용자 지정 67을 따른다.

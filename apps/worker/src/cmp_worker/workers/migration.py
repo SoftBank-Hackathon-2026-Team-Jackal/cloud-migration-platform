@@ -44,6 +44,7 @@ def create_activity_worker(client: Client) -> Worker:
             data_cutover.dm_switchover,
             data_cutover.dm_announce_cutover,
             data_tunnel.dm_tunnel,  # ticket 10: WireGuard 복제 경로
+            data_tunnel.dm_tunnel_cleanup,  # Provisioning 67: 사용 종료 뒤 명시적 정리
         ],
     )
 

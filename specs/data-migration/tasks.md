@@ -11,9 +11,9 @@
 | [07](../../tickets/data-migration/07-cutover-approval-events.md) | DB 전환 두 번째 승인과 웹 cutover 이벤트 | DONE(PR #215 병합), 웹 화면 순서 남음 | 04, 05 | #137 |
 | [08](../../tickets/data-migration/08-web-start-data-migration.md) | 웹 실제 시작에 데이터 이전 입력 연결 | DONE(PR #254 병합, 로컬 웹 시작 e2e 통과), 데모 서버 값·worker 클러스터 접근 남음 | 05, 07 | #137 |
 | [09](../../tickets/data-migration/09-verify-hide-marker.md) | 전환 검증 결과에서 내부 marker 테이블 제외 | DONE(PR #255 병합) | 07 | #137 |
-| [10](../../tickets/data-migration/10-wireguard-tunnel.md) | 플랫폼이 만드는 WireGuard 복제 경로(EKS ↔ GKE) | DONE(PR #258 병합), 정리 단계 남음 | 06, 08 | #137 |
+| [10](../../tickets/data-migration/10-wireguard-tunnel.md) | 플랫폼이 만드는 WireGuard 복제 경로(EKS ↔ GKE) | DONE(PR #258 병합), 명시적 정리 Activity는 #297, 자동 호출 통합 남음 | 06, 08 | #137 |
 | [11](../../tickets/data-migration/11-tunnel-cloud-check.md) | WireGuard 복제 경로 클라우드 검증(EKS ↔ GKE)과 게이트웨이 포트·GKE DNS 정책 수정 | DONE(클라우드 검증) | 10 | #137 |
-| 12 | ON_PREM 복제 경로 2안: 게이트웨이 입구를 원본 쪽에 두는 옵션([ADR-007](../../docs/decisions/ADR-007.md) 단계 3, 티켓 67) | TODO | 10, 11 | #288 |
+| 12 | ON_PREM 복제 경로 2안: 게이트웨이 입구 방향 옵션([티켓 67](../../tickets/provisioning/67-data-tunnel-reverse-ingress.md), ADR-007 단계 3) | IN_REVIEW(로컬 PASS, 제품 실측 대기) | 10, 11, Provisioning 69 | #297 |
 | 13 | 원본 쪽 수정 5개(compose `DATA_MIGRATION_AWS_PROFILE`, marker 표 비교 제외, cutover 이미지 빌드, 실패 시 슬롯 정리, 체크섬 UTC, ADR-007 단계 6) | IN_PROGRESS(로컬 완료, [Provisioning 72](../../tickets/provisioning/72-data-source-fixes.md) 대행, PR 리뷰·데이터 담당 확인 대기) | 12 | #288, #298 |
 
 Q1~Q5는 [spec.md](spec.md#open-questions)의 미결 항목이다.

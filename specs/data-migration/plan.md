@@ -57,11 +57,11 @@ PoC 스크립트와의 대응:
 
 ## ON_PREM 복제 경로 (2안, ADR-007)
 
-NAT 뒤 K3s 대상은 [ADR-007](../../docs/decisions/ADR-007.md)을 따른다. `dm_path`는 같은 게이트웨이 매니페스트를 쓰되 입구 Service(UDP LoadBalancer)를 **원본 클러스터**에 두고, 허용 대역을 대상 공인 IP로 둔다. 대상 게이트웨이가 `PEER_ENDPOINT`(원본 NLB 주소)로 접속한다. Worker의 대상 접근은 `target_kubeconfig_ref`(Agent 터널 + 중계 서버 경유, 좁힌 ServiceAccount)다.
+NAT 뒤 K3s 대상은 [ADR-007](../../docs/decisions/ADR-007.md)을 따른다. `dm_tunnel`은 같은 게이트웨이 매니페스트를 쓰되 입구 Service(UDP LoadBalancer)를 **원본 클러스터**에 두고, 허용 대역을 대상 공인 IP로 둔다. 대상 게이트웨이가 `PEER_ENDPOINT`(원본 NLB 주소)로 접속한다. Worker의 대상 접근은 `target_kubeconfig_ref`(Agent 터널 + 중계 서버 경유, 좁힌 ServiceAccount)다.
 
 | 단계 | 내용 | 담당·티켓 |
 | --- | --- | --- |
-| 1 | PoC: 원본 EKS UDP NLB ↔ 맥 k3d 게이트웨이로 실제 복제·전환 | Provisioning 69 |
+| 1 | PoC: 원본 EKS UDP NLB ↔ 맥 k3d handshake·터널 DB 조회 실측 완료(전체 복제·전환은 후속) | Provisioning 69 |
 | 2 | Agent가 k3d API 포트를 터널에 노출 | Provisioning |
 | 3 | 게이트웨이 입구 방향 옵션(`tunnel.py`) | 티켓 67 |
 | 4 | 중계 서버 TCP 전달(worker → k3d API) | 트래픽 담당 확인 |
@@ -69,6 +69,17 @@ NAT 뒤 K3s 대상은 [ADR-007](../../docs/decisions/ADR-007.md)을 따른다. `
 | 6 | 원본 쪽 수정 5개(compose `DATA_MIGRATION_AWS_PROFILE`, marker 표 비교 제외, cutover 이미지 빌드, 실패 시 슬롯 정리, 체크섬 UTC) | 데이터 담당 확인 |
 | 7 | 웹 시작 입력 연결 | Provisioning |
 | 8 | 웹 화면·report | Provisioning |
+
+## 입구 방향 옵션 구현 (#297, Provisioning 67)
+
+- 입력: `WireGuardTunnel.ingress: "target" | "source" = "target"`. target는 `source_egress_cidrs`, source는 `target_egress_cidrs`가 필요하다. 반대편 CIDR 필드는 생략/null만 가능하다. 빈 목록·동시 지정·IPv6·/16보다 넓은 범위·호스트 비트가 있는 CIDR·9개 이상은 거절한다.
+- 원본 입구 Service: `loadBalancerClass: service.k8s.aws/nlb`; `service.beta.kubernetes.io/aws-load-balancer-` 접두사의 annotation은 `scheme=internet-facing`, `nlb-target-type=ip`, `attributes=load_balancing.cross_zone.enabled=true`, `healthcheck-protocol=tcp`, `healthcheck-port=8080`이다. in-tree `type: nlb` annotation은 쓰지 않는다. 헬스 포트는 원본 Pod에만 열고 공개 Service에는 UDP 51820만 둔다.
+- 원본 입구 모드에서 대상 게이트웨이는 `PEER_ENDPOINT=<NLB DNS>:51820`, keepalive 25를 쓴다. 기본 target 입구의 15초 keepalive는 보존한다. 양쪽 DB 프록시 포트(5432), Secret 키 `private`, 리소스 이름 및 대상 DB NetworkPolicy는 그대로다.
+- Activity 순서: 양쪽 Namespace·키 준비 → 선택한 입구의 게이트웨이·LB → **같은 클러스터**의 주소 대기 → 반대편 게이트웨이 → rollout → **접속하는 쪽**에서 handshake 확인. 대상 DB 허용 정책은 항상 대상 게이트웨이와 함께 적용한다. 재시도는 기존 Secret의 키를 재사용한다.
+- `endpoint_timeout_s=600`, `handshake_timeout_s=180` 기본값은 유지한다. source 입구는 NLB DNS가 즉시 생기고 대상 healthy가 약 150초 뒤인 실측을 반영하여 handshake 마감 시각을 `max(주소 대기 시작 + endpoint_timeout_s, rollout 완료 + handshake_timeout_s)`로 둔다. AWS 상태 조회 권한을 추가하지 않고 실제 handshake로 확인한다. 주소/handshake 실패 코드는 기존 retryable 코드를 유지한다. source 입구 Workflow Activity 제한은 3600초로, 설정 상한(주소 1800·handshake 900)과 양쪽 rollout 대기까지 수용한다. target 입구는 기존 1800초다.
+- `dm_tunnel_cleanup({request, tunnel})`: `dm_tunnel`과 같은 입력을 migration Activity worker에서 받는다. 반환은 `{name, cleaned: true}`, 명령 실패는 retryable `TUNNEL_CLEANUP_FAILED`다. Service를 먼저 `--wait=true --timeout=300s --ignore-not-found`로 삭제하여 LBC finalizer를 기다린다. 실패하면 나머지 리소스를 보존한다. 성공 뒤 양쪽 Deployment·peer Service·ConfigMap·Secret, 대상 DB NetworkPolicy를 이름으로 삭제한다. 공유 Namespace·다른 이전·DB는 보존한다.
+- 정리는 호출자가 복제/역방향 복제와 PgBouncer의 터널 사용 종료를 확인한 뒤 명시적으로 실행한다. 자동 Workflow 호출은 하지 않는다. 호출 Activity의 전체 제한은 개별 삭제 대기(최대 10개 × 330초)를 고려해 3600초 이상으로 두며, heartbeat timeout을 지정한다면 단일 삭제 대기보다 길어야 한다. 실패 시 남은 자원에 대해 같은 입력으로 재시도할 수 있다. #72 슬롯 정리·자동 호출 정책은 별도 작업이다.
+- [PoC 69 결과](../../docs/engineering/onprem-data-tunnel-poc.md)는 방향과 NAT keepalive의 선행 근거다. 제품 Activity, cross-zone 활성화, 전체 DB 복제·전환·롤백, AWS 자원 삭제 실측은 아직 별도 검증이 필요하다.
 
 ## Verification
 

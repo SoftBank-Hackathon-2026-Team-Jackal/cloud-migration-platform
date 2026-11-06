@@ -2,7 +2,8 @@
 
 인계값에는 클러스터·Namespace·DB 릴리스(StatefulSet 이름)가 있다. DB Pod는 `<release>-0`이다.
 상대(원본)가 대상 DB로 오는 주소(`peer_host`)는 WireGuard 구성에서 정해지므로 입력으로 받는다.
-ON_PREM은 터널 쪽 DB 주소(`tunnel_endpoint`)를 기본 `peer_host`로 쓴다.
+ON_PREM은 ADR-007에 따라 `tunnel.ingress="source"`와 `target_kubeconfig_ref`를 쓴다.
+명시적 데이터 게이트웨이 입력이 없는 기존 경로는 `tunnel_endpoint`를 기본 `peer_host`로 읽는다.
 `tunnel`(ticket 10)이 있으면 플랫폼이 두 클러스터 사이에 WireGuard 게이트웨이를 두므로 양쪽 `peer_host`를
 게이트웨이 Service 주소로 정한다(입력의 `peer_host`·`target_peer_host`는 쓰지 않는다).
 """
