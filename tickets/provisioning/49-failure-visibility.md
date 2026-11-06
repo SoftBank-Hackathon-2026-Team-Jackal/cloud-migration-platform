@@ -83,6 +83,32 @@ Blocked by: 07, 18, 22, 24 (main 반영). 같은 파일을 44(시작 요청)·50
 - `tickets/provisioning/24-migration-events.md`: 후속 링크
 - `tickets/provisioning/18-onprem-plan-publish.md`: 실패 결과 보존 링크
 
+## 후속 (D-19, 2026-11-06 재검사)
+### 배경
+재검사(`c9d565a`)에서 회귀가 나왔다. worker가 멈춘 동안(재배포·장애) 이미 끝난 실패 실행(Temporal COMPLETED인 `plan_failed`)을 조회하면 상태 API가 `phase=created`, `failure_code=null`을 돌려주고 SSE는 `running`으로 남아 닫히지 않았다.
+- 원인: 닫힌 실행의 query가 실패하면 `state=None`이 되고, COMPLETED는 실패 상태 목록에 없어 기본값 `created`로 떨어졌다. SSE `RUNNING_PHASES`에는 `created`가 들어 있다.
+- 같은 이유로 FAILED 실행은 Workflow가 보고한 코드(`CHILD_WORKFLOW_FAILED` 등) 대신 일반 코드 `WORKFLOW_FAILED`로 나왔다.
+- 참고(N34): 실행 중 Workflow를 worker 없이 조회하면 상태 API가 30초 뒤 503을 내고, SSE는 15초 동안 아무것도 보내지 않았다.
+
+### 결정
+| ID | 결정 | 근거·대안 |
+| --- | --- | --- |
+| F12 닫힌 실행의 결과 | query가 실패한 닫힌 실행은 Temporal과 이벤트 저장소가 이미 가진 값으로 판정한다. COMPLETED는 `handle.result()`(닫힌 실행은 worker 없이 즉시 반환) 문자열을 phase로 쓴다. 그 phase가 실패 결과이거나 Temporal 실행이 실패면, 저장된 마지막 `error` 이벤트(`migration_events`)의 code·phase를 쓴다. 없으면 결과 이름 대문자·`OUTCOME_PHASE`, 또는 `WORKFLOW_<상태>`를 쓴다. 결과를 읽을 수 없으면 `phase=unknown` | 끝난 실행의 결과는 이력에 있다. worker 유무에 따라 판정이 바뀌면 안 된다 |
+| F13 SSE 판정 | `execution_status`가 RUNNING이 아닌데 done·cancelled가 아니면, phase와 상관없이 `failed`로 닫는다 | 어떤 기본값이 새어 들어와도 닫힌 실행이 `running`·`waiting`으로 보이지 않게 막는 마지막 방어선이다 |
+| F14 실행 중 + worker 없음 (N34 일부) | 실행 중 Workflow의 query에도 5초 제한을 둔다. 상태 API는 그대로 503(상태를 모름)이다. SSE는 5초 안에 저장 이벤트로 판단해 snapshot을 보낸다 | 실행 중인 phase는 worker 없이 알 수 없어 지어내지 않는다. 30초·15초 무응답만 줄인다. 응답 계약은 바꾸지 않는다 |
+
+### 변경 위치
+`cmp_api.migration_state`(`read_migration_state(handle, *, last_error=)`, `_recorded_outcome`, `closed_state`, `stored_last_error`), `cmp_api.event_stream.migration_status`, `cmp_api.routes.migrations`(`get_migration`·`read_workflow_status`의 호출 인자만). Workflow 파일은 고치지 않았다(44·50과 겹치지 않음).
+
+### 검증
+- `tests/test_closed_run_state.py` 6건(RED 6건 → GREEN). 실제 worker로 끝낸 뒤 모든 worker를 멈추고 확인했다:
+  - plan_failed(저장 이벤트 있음·없음)
+  - scaffold_complete → done
+  - Temporal FAILED → 보고한 `ACTIVITY_FAILED` 유지
+  - 닫힌 실행은 phase와 상관없이 running 아님
+  - 실행 중 + worker 없음 → 10초 안에 오류
+- 로컬 compose 실측과 `make check` 결과는 PR 본문에 적는다.
+
 ## 완료 체크리스트
 - [x] RED → GREEN 테스트
 - [x] `make check`, `make openapi`, Alembic(SQLite) upgrade/check
