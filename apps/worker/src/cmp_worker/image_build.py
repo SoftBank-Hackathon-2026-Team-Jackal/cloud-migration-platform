@@ -31,6 +31,12 @@ _BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
 _MAX_ARCHIVE_BYTES = 250 * 1024 * 1024
 _MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
 _MAX_FILES = 20000
+# Ticket 54: RUN steps use the daemon's default bridge (`docker0`); the demo host drops traffic from
+# there to the instance metadata service (infra/demo/build-imds-guard.sh). Never `host`, and no
+# `--allow network.host`, so a Dockerfile `RUN --network=host` is refused by BuildKit.
+BUILD_NETWORK = "default"
+# Selecting another builder (e.g. a docker-container or remote BuildKit) would leave `docker0`.
+_BUILDER_SELECTORS = ("BUILDX_BUILDER",)
 
 
 class S3Ref(BaseModel):
@@ -296,10 +302,38 @@ def _require_immutable_ecr(request: _BuildRequest) -> None:
         raise BuildFailure("ECR_REPOSITORY_NOT_IMMUTABLE")
 
 
+def _docker_env(docker_config: Path) -> dict[str, str]:
+    """Process environment for Docker CLI calls: a fresh per-build config, the daemon's builder."""
+    env = {key: value for key, value in os.environ.items() if key not in _BUILDER_SELECTORS}
+    env["DOCKER_CONFIG"] = str(docker_config)
+    return env
+
+
+def _buildx_command(*, platform: str, context: Path, image: str, metadata: Path) -> list[str]:
+    return [
+        "docker",
+        "buildx",
+        "build",
+        "--push",
+        "--progress",
+        "quiet",
+        "--network",
+        BUILD_NETWORK,
+        "--platform",
+        platform,
+        "--file",
+        str(context / "Dockerfile"),
+        "--tag",
+        image,
+        "--metadata-file",
+        str(metadata),
+        str(context),
+    ]
+
+
 def _login(request: _BuildRequest, docker_config: Path) -> dict[str, str]:
     match = _ECR.fullmatch(request.ecr_repository)
-    env = os.environ.copy()
-    env["DOCKER_CONFIG"] = str(docker_config)
+    env = _docker_env(docker_config)
     password = _run(
         [
             "aws",
@@ -328,23 +362,12 @@ def _publish(request: _BuildRequest, context: Path, docker_config: Path, tag: st
     env = _login(request, docker_config)
     metadata = context.parent / "build-metadata.json"
     _run(
-        [
-            "docker",
-            "buildx",
-            "build",
-            "--push",
-            "--progress",
-            "quiet",
-            "--platform",
-            request.platform,
-            "--file",
-            str(context / "Dockerfile"),
-            "--tag",
-            f"{request.ecr_repository}:{tag}",
-            "--metadata-file",
-            str(metadata),
-            str(context),
-        ],
+        _buildx_command(
+            platform=request.platform,
+            context=context,
+            image=f"{request.ecr_repository}:{tag}",
+            metadata=metadata,
+        ),
         env=env,
     )
     try:

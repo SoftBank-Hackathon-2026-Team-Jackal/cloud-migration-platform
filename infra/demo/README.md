@@ -95,7 +95,9 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 | api 설정 (#176, 티켓 41·46) | `PLATFORM_ECR_REGISTRY`(`/opt/cmp/.env`, 비면 꺼짐)·`PLATFORM_ECR_REPOSITORIES`(기본 `cmp-platform-builds`), `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build`, AWS 설정 파일 읽기 전용 마운트. K3s Agent의 `GET /agents/{agent_id}/jobs/{job_id}/image-pull` 토큰을 이 프로필(인스턴스 역할)로 발급한다 |
 | worker 빌드 | 이미지의 Docker CLI 28.5.2·buildx v0.37.2 → 마운트한 호스트 `/var/run/docker.sock`의 데몬 |
 
-**소켓 위험**: Docker 소켓을 가진 컨테이너는 호스트 root와 같은 권한이다. worker에만 주며, 빌드하는 앱 Dockerfile의 `RUN`도 호스트 데몬에서 실행된다. 대회용 단일 호스트에서만 허용한다. 운영급 대안은 rootless BuildKit을 별도 서비스로 두고 worker가 `BUILDKIT_HOST`(TLS)로만 접속하거나, 빌드를 CodeBuild·Kaniko 같은 격리 실행으로 옮기는 것이다.
+**소켓 위험**: Docker 소켓을 가진 컨테이너는 호스트 root와 같은 권한이다. worker에만 주며, 빌드하는 앱 Dockerfile의 `RUN`도 호스트 데몬에서 실행된다. 대회용 단일 호스트에서만 허용한다. 운영급 대안은 rootless BuildKit을 별도 서비스로 두고 worker가 `BUILDKIT_HOST`(TLS)로만 접속하거나, 빌드를 CodeBuild·Kaniko 같은 격리 실행으로 옮기는 것이다. rootless BuildKit도 `RUN`이 호스트를 거쳐 나가므로 아래 IMDS 차단은 따로 필요하다.
+
+**빌드의 인스턴스 메타데이터 차단 (#189, 티켓 54)**: 내장 BuildKit의 `RUN`은 기본 bridge `docker0`에서 돌고, IMDS hop limit 2(티켓 21) 때문에 사용자 Dockerfile이 `169.254.169.254`에서 인스턴스 역할 자격을 꺼낼 수 있다(로컬 가짜 IMDS로 재현). `start.sh`가 worker를 올리기 전에 `sh infra/demo/build-imds-guard.sh install`을 실행한다. 이 스크립트는 `DOCKER-USER` 맨 앞에 `-i docker0 -d 169.254.169.254/32 -j DROP`을 넣고, `cmp-build-imds-guard.service`가 Docker가 시작될 때마다(재부팅 포함) 다시 넣는다. 규칙이 없으면 릴리스가 실패한다. compose 서비스(worker·api)는 자기 bridge(`br-*`)에 있어 인스턴스 역할을 그대로 쓴다. 빌드 모듈은 `--network default`를 고정하고 entitlement를 주지 않아 `RUN --network=host`(규칙 우회)는 거부된다. VPC DNS(`169.254.169.253`) 등 다른 주소와 인터넷 통신은 막지 않는다. IPv6 IMDS는 템플릿에서 꺼 둔다(`HttpProtocolIpv6: disabled`).
 
 ### 반영 (각 단계 사용자 승인 필요)
 
@@ -115,6 +117,8 @@ bash infra/demo/release.sh HEAD
 docker exec cmp-demo-api-1 python -c 'import boto3; print(boto3.Session(profile_name="cmp-demo-build").client("sts").get_caller_identity()["Arn"])'   # .../cmp-demo-control-plane-InstanceRole-.../i-...
 docker exec cmp-demo-api-1 python -c 'from cmp_api.onprem_rollout import configured_platform_registry as r; print(r())'   # PlatformRegistry(registry='714066696240.dkr.ecr...', ...)
 docker exec cmp-demo-worker-1 sh -c 'docker version --format "{{.Server.Version}}"; docker buildx version'
+iptables -S DOCKER-USER | grep cmp-build-imds-guard; systemctl is-enabled cmp-build-imds-guard.service   # 규칙 1줄, enabled (티켓 54)
+docker buildx build --network default --no-cache --progress plain /opt/cmp/releases/<SHA>/infra/demo/imds-probe 2>&1 | grep 'imds_probe token'   # token_put=000 role_list=000, 빌드 성공
 docker exec cmp-demo-worker-1 aws sts get-caller-identity --query Arn --output text   # .../cmp-demo-control-plane-InstanceRole-.../i-...
 docker exec cmp-demo-worker-1 aws ecr describe-repositories --region ap-northeast-2 --repository-names cmp-platform-builds --query 'repositories[0].imageTagMutability' --output text  # IMMUTABLE
 docker exec cmp-demo-worker-1 python -c 'from cmp_worker.config import settings as s; from cmp_worker.build_wiring import BuildSettings as B; print(B.from_values(s.build_source_bucket, s.build_ecr_repository, s.build_log_bucket, s.build_platform, s.build_aws_profile))'
