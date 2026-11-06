@@ -77,6 +77,7 @@ PROV-003, PROV-021, **PROV-022(신규, 환경 연결 발급)**
   - API 컨테이너에 플랫폼 프로필·`CONNECTION_*` 설정
   - api·worker가 생성 config를 공유하고 worker `AWS_CONFIG_FILE`이 그 파일을 가리키게 함
   - 템플릿 S3 버킷 생성·업로드
+- 후속 메모(2026-11-06): 인스턴스 역할 AssumeRole 권한·api `CONNECTION_PLATFORM_PRINCIPAL_ARN`/`CONNECTION_TEMPLATE_BASE_URL`·템플릿 S3 버킷은 [23b](23b-connection-launch-stack-hotfix.md)(#205)에서 코드·변경 세트로 준비했다(반영 승인 대기). 생성 config 공유는 46(#181).
 - GCP verify의 실제 ADC 호출은 기존 06/10 경로와 같은 함수지만, API 컨테이너에는 gcloud·ADC가 없다(데모는 worker에만 있음). 데모 반영 시 API에 ADC를 줄지, 확인을 worker로 옮길지 결정이 필요하다.
 
 ## 후속 제안

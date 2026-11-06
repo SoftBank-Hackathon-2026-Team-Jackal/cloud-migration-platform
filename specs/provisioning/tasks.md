@@ -41,6 +41,7 @@
 | [29 대상별 ECR 이미지 pull 전략 (GKE 갱신·K3s pull Secret)](../../tickets/provisioning/29-image-pull-strategy.md) | IN_PROGRESS (로컬 완료, 리뷰·Agent 릴리스 승인 대기) | 11, 12, 15, ENV-04 | PROV-009, 010, 013, 018, 021 | [#153](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/153) | ☐ |
 | [28 빌드·이미지 레지스트리 실행 환경 (버킷 권한·ECR·worker 빌드)](../../tickets/provisioning/28-build-registry-runtime.md) | IN_PROGRESS (로컬 완료, 새 스택·릴리스 반영 승인 대기) | B-01, 21 | PROV-001, 004, 010, 021 | [#152](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/152) | ☐ |
 | [41 데모 서버 API에 플랫폼 ECR pull 설정 전달 (29 후속)](../../tickets/provisioning/41-demo-ecr-pull-wiring.md) | IN_PROGRESS (로컬 완료, 리뷰·서버 반영 승인 대기) | 28, 29 | PROV-009, 010, 021 | [#176](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/176) | ☐ |
+| [23B 데모 AWS 연결 Launch Stack 링크 동작 (23 후속, 핫픽스)](../../tickets/provisioning/23b-connection-launch-stack-hotfix.md) | IN_PROGRESS (로컬·변경 세트 완료, 스택 실행·서버 반영 승인 대기) | 23, 28, 41 | PROV-003, 021, 022 | [#205](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/205) | ☐ |
 | [43 worker 이미지에 Terraform·Helm·catalog 경로 포함과 Linux Provider lock](../../tickets/provisioning/43-worker-image-packaging.md) | IN_PROGRESS | 21, 28 | PROV-001, 004, 008, 021 | [#178](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/178) | ☐ |
 | [42 Agent 이미지·Chart를 사용자 클러스터가 받을 수 있게 (GHCR 공개·imagePullSecrets)](../../tickets/provisioning/42-agent-package-access.md) | IN_PROGRESS (Chart·문서 완료, GHCR 공개 전환 승인 대기) | 15 | PROV-009, 016, 021 | [#177](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/177) | ☐ |
 | [51 ON_PREM 배포 실패 시 기존 앱·DB 보존과 복구](../../tickets/provisioning/51-agent-rollout-recovery.md) | IN_PROGRESS (로컬·k3d 완료, 리뷰·Agent 릴리스 승인 대기) | 12, 15, 27 | PROV-009, 011, 016, 017, 018 | [#186](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/186) | ☐ |
@@ -66,6 +67,7 @@ ADR-003 → B-01 → Sandbox/Planning 동일 이미지 검증 → 09 / 11 / 12
 07, 13, 18 → 24          (이전 이벤트 저장소·SSE, 각 파트가 발행)
 11, 12, 15 → 29          (플랫폼 ECR 토큰으로 GKE·K3s pull Secret 생성·갱신)
 28, 29 → 41              (데모 서버 api에 플랫폼 ECR·토큰 발급 설정 전달)
+23, 28, 41 → 23B         (데모 AWS 연결 Launch Stack 링크·템플릿 버킷·AssumeRole 권한)
 ```
 
 화살표는 주요 경로를 요약한다. 정확한 모든 `Blocked by`는 위 표와 각 티켓에 있다. `02`·`05`·`06`·`07`은 `CP-01`이 main에 반영된 뒤 의존성상 독립이지만 현재는 순차로 진행하며, AWS/GCP의 배포 경로는 공통 Helm 기반과 해당 인프라 준비가 끝나면 독립 진행할 수 있다. `13`은 K3s 경로로 결과 계약을 먼저 검증한다. AWS/GCP 실제 경로와의 연결은 `14`에서 확인한다.

@@ -121,6 +121,47 @@ docker exec cmp-demo-worker-1 aws ecr describe-repositories --region ap-northeas
 docker exec cmp-demo-worker-1 python -c 'from cmp_worker.config import settings as s; from cmp_worker.build_wiring import BuildSettings as B; print(B.from_values(s.build_source_bucket, s.build_ecr_repository, s.build_log_bucket, s.build_platform, s.build_aws_profile))'
 ```
 
+## 환경 연결 Launch Stack (#205, 티켓 23b)
+
+AWS 연결 생성 응답의 `launch_stack_url`(ADR-005)은 api가 `CONNECTION_PLATFORM_PRINCIPAL_ARN`과 `CONNECTION_TEMPLATE_BASE_URL`을 모두 받아야 만들어진다. 둘 중 하나라도 비면 `null`이다(이전 동작).
+
+| 항목 | 값 |
+| --- | --- |
+| 템플릿 버킷 스택 | `cmp-demo-connection-templates`(`connection-templates-stack.yaml`). 버킷 `cmp-demo-714066696240-apne2-connection-templates`. 버킷 단위 공개 접근 차단 중 ACL 두 항목만 켜고 정책 공개는 허용. `BucketOwnerEnforced`, SSE-S3, 버전 관리(이전 버전 30일 뒤 만료), 스택 삭제 시 보존 |
+| 버킷 정책 | `connections/v1/*`만 익명 `s3:GetObject`. 비TLS 요청은 모두 거부. 공개 쓰기·목록·ACL 없음 |
+| 템플릿 URL | `https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/connections/v1/{source,target}-role.yaml` |
+| AssumeRole 권한 | 빌드 스택 `cmp-demo-build`의 인라인 정책 `cmp-demo-connections`: `sts:AssumeRole`, 리소스 `arn:aws:iam::*:role/*`, 조건 `iam:ResourceTag/cmp:managed-by = cloud-migration-platform`(두 연결 템플릿이 역할에 붙이는 태그) + `sts:ExternalId`가 `cmp-*`로 있음. `cmp-demo-control-plane`은 건드리지 않는다 |
+| api 설정 | `CONNECTION_PLATFORM_PRINCIPAL_ARN`(인스턴스 역할 ARN), `CONNECTION_TEMPLATE_BASE_URL`(위 접두어). `/opt/cmp/.env`, 비면 링크 없음. worker에는 주지 않는다(링크는 api만 만든다) |
+
+템플릿 내용을 바꾸면 `deploy-connection-templates.sh`의 `version`(스택 `TemplateVersion`)을 `v2`로 올린다. 스크립트는 같은 버전에 이미 올라간 객체가 로컬 파일과 다르면 업로드하지 않고 실패한다.
+
+### 반영 (각 단계 사용자 승인 필요)
+
+```sh
+bash infra/demo/deploy-build-stack.sh --plan             # 변경 세트: ConnectionAssumePolicy 추가 1건
+bash infra/demo/deploy-connection-templates.sh --plan    # 변경 세트: 버킷·버킷 정책 추가
+bash infra/demo/deploy-build-stack.sh                    # AssumeRole 권한 반영(.env 줄은 이미 반영돼 있으면 그대로)
+bash infra/demo/deploy-connection-templates.sh           # 버킷 생성, 템플릿 2개 업로드(text/yaml), curl -sI 200 확인, .env 두 줄 출력
+# SSM 세션에서 출력된 두 줄을 /opt/cmp/.env에 추가한 뒤
+bash infra/demo/release.sh HEAD                          # 또는 GitHub Actions Deploy demo
+```
+
+### 서버 점검
+
+```sh
+# SSM 세션에서
+docker exec cmp-demo-api-1 python -c 'from cmp_api.config import settings as s; print(s.connection_platform_principal_arn, s.connection_template_base_url)'
+# 노트북에서
+curl -sI https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/connections/v1/source-role.yaml | head -1   # 200
+curl -s -o /dev/null -w '%{http_code}\n' 'https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/?list-type=2'   # 403 (목록 금지)
+aws iam simulate-principal-policy --profile cmp-aws-prod \
+  --policy-source-arn arn:aws:iam::714066696240:role/cmp-demo-control-plane-InstanceRole-oAXRipePmZCe \
+  --action-names sts:AssumeRole --resource-arns arn:aws:iam::111122223333:role/x \
+  --context-entries ContextKeyName=iam:ResourceTag/cmp:managed-by,ContextKeyValues=cloud-migration-platform,ContextKeyType=string \
+                    ContextKeyName=sts:ExternalId,ContextKeyValues=cmp-0123456789abcdef0123456789abcdef,ContextKeyType=string \
+  --query 'EvaluationResults[0].EvalDecision'   # allowed
+```
+
 ## 접속과 확인
 
 SSM Session Manager의 포트 포워딩으로 로컬 `8000`을 EC2 `8000`에 연결하면 `/health`와 `/docs`를 볼 수 있다. Temporal UI는 같은 방식으로 `8080`에 접속한다. API/Temporal UI는 EC2의 loopback에만 바인딩된다. 공개 URL은 Agent 경로(`/agents/*`)만 전달하는 에지뿐이다.

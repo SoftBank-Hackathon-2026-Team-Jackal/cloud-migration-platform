@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  CMP demo connection template bucket (ticket 23b, #205; ADR-005). A separate stack: CloudFormation
+  quick-create needs an S3 HTTPS template URL, so infra/connections/*.yaml are published here.
+  Only connections/<version>/* is publicly readable (GetObject); no public write, list or ACL.
+
+Parameters:
+  # Bump (v2, ...) whenever a connection template changes, so stacks users already created keep
+  # pointing at the content they were created from (ADR-005).
+  TemplateVersion:
+    Type: String
+    Default: v1
+    AllowedPattern: '^v[0-9]+$'
+  NoncurrentVersionDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+
+Resources:
+  TemplateBucket:
+    Type: AWS::S3::Bucket
+    # Launch Stack links already handed to users point here; never delete it with the stack.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'cmp-demo-${AWS::AccountId}-apne2-connection-templates'
+      # ACLs can never make anything public; only the bucket policy below may (one prefix).
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      # SSE-S3: anonymous readers cannot use a KMS key.
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref NoncurrentVersionDays
+      Tags:
+        - Key: Project
+          Value: cloud-migration-platform
+        - Key: Purpose
+          Value: hackathon-demo-connection-templates
+
+  TemplateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TemplateBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # The templates hold no secret (parameters are supplied by the link).
+          - Sid: PublicReadConnectionTemplates
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${TemplateBucket.Arn}/connections/${TemplateVersion}/*'
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt TemplateBucket.Arn
+              - !Sub '${TemplateBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+Outputs:
+  BucketName:
+    Value: !Ref TemplateBucket
+  # Set as CONNECTION_TEMPLATE_BASE_URL on the API (deploy-connection-templates.sh prints it).
+  TemplateBaseUrl:
+    Value: !Sub 'https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/connections/${TemplateVersion}'
