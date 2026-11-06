@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, propose_fix
+from cmp_agents.fixer_skills import select_skills
 from cmp_agents.llm import LLMClient
 from cmp_agents.tester import SuiteRequest, generate_tests
 from cmp_contracts.analysis import AnalysisReport, EnvExceptions, ReviewRecord
@@ -500,6 +501,9 @@ class SandboxLoopActivities:
             ),
             llm=self.llm_factory(payload["migration_id"], "fixer"),
             workspace=workspace,
+            # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
+            skills_root=self.skills_root,
+            skills=select_skills(self.skills_root, klass, payload["classification"]["reasons"]),
         )
         if outcome.status != "PROPOSED":
             return {"status": outcome.status, "reason": outcome.reason}

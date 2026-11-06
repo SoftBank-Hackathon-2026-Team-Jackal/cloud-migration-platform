@@ -217,3 +217,41 @@ async def test_a_fix_may_not_change_a_rows_grade_or_required_flag(tmp_path):
     result = await activities.sbx_fix(fix_payload(payload, store))
     assert result["status"] == "PROPOSED" and result["row_changes"] == {"r2": "KEEP"}
     assert "extra_forbidden" in llm.calls[1].messages[-1].content  # the extra field was refused
+
+
+def skills_dir(tmp_path):
+    root = tmp_path / "skills"
+    (root / "network").mkdir(parents=True)
+    (root / "network" / "SKILL.md").write_text("NET-SKILL-BODY")
+    (root / "fixer-triggers.yaml").write_text(
+        "triggers:\n  - skill: network\n    reason_patterns: ['^EGRESS_BLOCKED:']\n"
+    )
+    return root
+
+
+@pytest.mark.asyncio
+async def test_the_fixer_is_offered_the_skill_that_fits_the_failure_and_can_read_it(tmp_path):
+    keep = {"row_changes": [{"row_id": "r2", "disposition": "KEEP"}]}
+    llm = FakeLLMClient(
+        [
+            LLMResponse(tool_calls=[call("load_skill", name="network")]),
+            LLMResponse(tool_calls=[call("submit_requirements_fix", reason="r", **keep)]),
+        ]
+    )
+    activities, store, payload, _, _ = world(tmp_path, llm=llm)
+    activities.skills_root = skills_dir(tmp_path)
+    result = await activities.sbx_fix(fix_payload(payload, store))  # reasons: EGRESS_BLOCKED:...
+    assert result["status"] == "PROPOSED"
+    assert "NET-SKILL-BODY" in llm.calls[1].messages[-1].content
+    assert "NET-SKILL-BODY" not in llm.calls[0].messages[0].content  # asked for, not pushed
+
+
+@pytest.mark.asyncio
+async def test_a_failure_no_rule_fits_gets_no_skill_tool(tmp_path):
+    llm = fix_llm(row_changes=[{"row_id": "r2", "disposition": "KEEP"}])
+    activities, store, payload, _, _ = world(tmp_path, llm=llm)
+    activities.skills_root = skills_dir(tmp_path)
+    other = {"failure_class": "SPEC", "reasons": ["HEALTH_FAILED"]}
+    result = await activities.sbx_fix(fix_payload(payload, store, classification=other))
+    assert result["status"] == "PROPOSED"
+    assert "load_skill" not in {tool.name for tool in llm.calls[0].tools}

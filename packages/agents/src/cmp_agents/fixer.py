@@ -6,6 +6,7 @@ call. A fix is data; applying it is mechanical code here, and tests are never wr
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from cmp_agents.llm import LLMClient
 from cmp_agents.prompt_store import load_prompt
 from cmp_agents.runtime import AgentRecord, Budget, run_agent
+from cmp_agents.skills import SkillLoader, make_load_skill_tool
 from cmp_agents.tools import ToolRegistry, ToolSpec
 
 _MAX_FILE_BYTES = 200_000
@@ -170,7 +172,7 @@ class _TestId(BaseModel):
     case_id: str
 
 
-def _task(data: FixInput) -> str:
+def _task(data: FixInput, skill_names: Sequence[str] = ()) -> str:
     return "\n".join(
         [
             f"## Failure class: {data.failure_class}",
@@ -184,6 +186,15 @@ def _task(data: FixInput) -> str:
             "",
             "## Tests (read only)",
             *[f"- {case_id}" for case_id in sorted(data.tests)],
+            *(
+                [
+                    "",
+                    "## Skills you may load with `load_skill` (read one only if it fits)",
+                    *[f"- {name}" for name in skill_names],
+                ]
+                if skill_names
+                else []
+            ),
         ]
     )
 
@@ -195,6 +206,8 @@ def propose_fix(
     workspace: Path | str | None = None,
     budget: Budget | None = None,
     max_attempts: int = 2,
+    skills_root: Path | str | None = None,
+    skills: Sequence[str] = (),
 ) -> FixOutcome:
     if data.failure_class in {"INFRA", "RENDER"}:
         return FixOutcome("NOT_CALLED", reason=f"{data.failure_class}_IS_NOT_FIXABLE")
@@ -226,6 +239,11 @@ def propose_fix(
     )
     if not wants_spec:
         tools.register(ToolSpec("read_file", "Read one file of the workspace.", _Path, read_file))
+    # Ticket 31: only the skills chosen for this failure (`select_skills`) can be read.
+    loader = None
+    if skills_root is not None and skills:
+        loader = SkillLoader(skills_root, allowed=list(skills))
+        tools.register(make_load_skill_tool(loader))
     prompt, version = load_prompt("fixer")
     submit, model = (
         ("submit_requirements_fix", RequirementsFix) if wants_spec else ("submit_code_fix", CodeFix)
@@ -233,8 +251,9 @@ def propose_fix(
     last = None
     for _ in range(max_attempts):
         last = run_agent(
-            role="fixer", task=_task(data), llm=llm, tools=tools, submit_name=submit,
-            result_model=model, budget=budget or Budget(), prompt=prompt, prompt_version=version,
+            role="fixer", task=_task(data, list(skills) if loader else ()), llm=llm, tools=tools,
+            submit_name=submit, result_model=model, budget=budget or Budget(), skills=loader,
+            prompt=prompt, prompt_version=version,
         )  # fmt: skip
         if last.status == "SUBMITTED":
             if wants_spec:
