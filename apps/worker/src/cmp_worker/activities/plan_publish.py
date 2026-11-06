@@ -71,6 +71,7 @@ def build_plan_publish_activities(session_factory) -> PlanPublishActivities:
                 gcp_adc_email=settings.provisioning_gcp_adc_email,
                 terraform_bin=settings.terraform_bin,
                 env_store=optional_env_file_store(),  # ENV-04: names only at Plan time
+                platform_egress_cidrs=settings.platform_egress_cidrs(),  # ticket 47
             )
         )
     )

@@ -34,7 +34,8 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `APPROVAL_ADMIN_KEY`, `AGENT_ENROLLMENT_ADMIN_KEY` | api만 | `/opt/cmp/.env`(0600), 없을 때만 생성 |
 | `AWS_CONFIG_FILE=/run/cmp/aws-connections/config`, `PROVISIONING_AWS_PROFILE=cmp-demo-provisioning` | worker | api가 만든 연결 설정 파일(읽기 전용, 아래 「환경 연결」) = `/opt/cmp/secrets/aws/config`의 플랫폼 프로필 + 연결 프로필 `cmp-conn-*`(티켓 46). 플랫폼 프로필은 EC2 인스턴스 역할(`credential_source = Ec2InstanceMetadata`), `.env`의 `PROVISIONING_AWS_ROLE_ARN`이 있으면 그 역할을 Assume. 연결 없는 Plan과 State backend가 이 프로필을 쓴다 |
 | `AWS_CONFIG_FILE=/run/cmp/aws/config`, `CONNECTION_PLATFORM_AWS_PROFILE` | api | `/opt/cmp/secrets/aws/config`(읽기 전용). 환경 연결(23)의 플랫폼 주체 `cmp-demo-build`(인스턴스 역할, 23b·46). api에는 GCP 키·gcloud 구성을 주지 않는다. GCP 연결 확인은 worker Activity가 한다(48) |
-| `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build` | api | Agent ECR pull 토큰 발급(29) 주체. 연결 주체와 분리(연결 주체 역할에는 ECR 권한이 없다, 티켓 46) |
+| `PLATFORM_ECR_AWS_PROFILE`(기본 `cmp-demo-build`) | api·worker | Agent·GKE ECR pull 토큰 발급(29) 주체. 티켓 47부터 `/opt/cmp/.env`에 `PLATFORM_ECR_AWS_PROFILE=cmp-demo-ecr-pull`을 두면 pull 전용 역할로 발급한다(아래 「빌드 실행 환경」) |
+| `PROVISIONING_PLATFORM_EGRESS_CIDRS` | worker | 티켓 47(D-10): worker가 새 클러스터 API에 나가는 주소(데모 EIP `/32`, 쉼표 구분). 설정하면 AWS Plan이 이 주소를 덮지 않는 `api_access_cidrs`를 `PLATFORM_EGRESS_NOT_ALLOWED`로 거절한다. 비면 Preview에 `PLATFORM_EGRESS_UNCHECKED` 경고. 값은 `/opt/cmp/.env`(예: `PROVISIONING_PLATFORM_EGRESS_CIDRS=13.209.240.49/32`) |
 | `CONNECTION_AWS_CONFIG_FILE`, `CONNECTION_AWS_BASE_CONFIG_FILE` | api | 생성 파일 `/run/cmp/aws-connections/config`(호스트 `/opt/cmp/data/aws-connections`, api 쓰기·worker 읽기), 기본 파일 `/run/cmp/aws/config`. 키는 없다(ARN·External ID·프로필 이름). api가 시작·역할 등록·연결 삭제 때 DB에서 다시 쓴다 |
 | `CONNECTION_PLATFORM_PRINCIPAL_ARN`, `CONNECTION_TEMPLATE_BASE_URL` | api | `/opt/cmp/.env`(`deploy-connection-templates.sh` 출력, 23b). 비면 `launch_stack_url`·`platform_principal_arn`이 `null` |
 | `PLATFORM_ECR_REGISTRY`, `PLATFORM_ECR_REPOSITORIES` | api | `/opt/cmp/.env`. 레지스트리가 비면(기본) ON_PREM 작업에 플랫폼 레지스트리가 없고 토큰을 발급하지 않는다(29 이전 동작). 저장소 기본값 `cmp-platform-builds` |
@@ -62,7 +63,7 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 ### 원격 반영 순서 (각 단계 사용자 승인 필요)
 
 1. CloudFormation 갱신: `bash infra/demo/deploy.sh` — SG 443 인그레스, IMDS hop limit 2, Elastic IP 추가. EIP 연결로 공인 IP가 바뀐다. 공개 IPv4 비용 발생.
-2. Provisioning 권한: 인스턴스 역할 또는 별도 역할(`PROVISIONING_AWS_ROLE_ARN`)에 대상 EKS/VPC/IAM과 State 버킷 권한을 검토 후 부여.
+2. Provisioning 권한(티켓 47): 대상 EKS/VPC/IAM 권한은 인스턴스 역할에 주지 않는다. 같은 계정도 다른 계정처럼 `infra/connections/target-role.yaml`(v2) 스택을 만들어 대상 연결로 등록하고, Plan 입력 `credential_ref`를 그 연결로 둔다(46). 플랫폼 계정은 SCP로 서울 리전만 허용된다(점검 B-15, `aws:RequestedRegion` 시뮬레이션 기준) — 같은 계정 대상은 `ap-northeast-2`만 쓴다.
 3. GCP 키: 먼저 `infra/demo/gcp-platform-identity.sh --configuration cmp-gcp-prod`(dry-run)로 확인하고 승인 뒤 `--apply`로 플랫폼 SA `cmp-provisioning`·노드 SA `cmp-gke-nodes`와 역할을 만든다(48). 그 SA의 키를 SSM 세션에서 `/opt/cmp/secrets/gcp/key.json`(root, 0600)으로 두고 `.env`에 `CMP_GCP_PROJECT=sbh26-prod`를 추가. 키를 S3 배포 버킷이나 저장소로 옮기지 않는다. 노드 풀 입력 `node_service_account_email`은 `cmp-gke-nodes@sbh26-prod.iam.gserviceaccount.com`.
 4. `.env`에 `CMP_PUBLIC_HOST=<EIP>.sslip.io`(Stack 출력 `AgentEdgeDefaultHost`) 추가 후 `bash infra/demo/release.sh HEAD`.
 5. 웹 화면: `/opt/cmp/web.env`에 GitHub 로그인 앱 값(`AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`)을 두고(콜백 주소 `https://<CMP_PUBLIC_HOST>/api/auth/callback/github`), 노트북에서 `bash infra/demo/release-web.sh <웹 저장소 경로>`. 고정 IP가 정해진 뒤에 한다(호스트 이름이 IP에서 나온다).
@@ -92,7 +93,9 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 | --- | --- |
 | ECR 저장소 | `cmp-platform-builds` (`714066696240.dkr.ecr.ap-northeast-2.amazonaws.com/cmp-platform-builds`), `IMMUTABLE`, 푸시 시 스캔, 태그 없는 이미지만 7일 뒤 만료, 스택 삭제 시 보존 |
 | 인스턴스 역할 인라인 정책 | `cmp-demo-build`: `ecr:GetAuthorizationToken`, 그 저장소의 pull·push, 배포 버킷 `sources/`·`tests/`·`builds/`의 `GetObject`·`PutObject`, 버킷 `ListBucket`. `releases/`는 읽기 전용 그대로 |
-| worker 설정 | `BUILD_ECR_REPOSITORY`·`BUILD_SOURCE_BUCKET`·`BUILD_LOG_BUCKET`·`BUILD_PLATFORM`(`/opt/cmp/.env`, 비면 사전 빌드 이미지), `BUILD_AWS_PROFILE`·`AWS_PROFILE`=`cmp-demo-build`(인스턴스 역할 프로필) |
+| worker 설정 | `BUILD_ECR_REPOSITORY`·`BUILD_SOURCE_BUCKET`·`BUILD_LOG_BUCKET`·`BUILD_PLATFORM`(`/opt/cmp/.env`, 비면 사전 빌드 이미지), `BUILD_AWS_PROFILE=cmp-demo-build`(인스턴스 역할 프로필). 티켓 47(B-20): Build 모듈이 자기 `aws` 호출에 이 프로필을 직접 넘기고, worker 전역 `AWS_PROFILE`은 없다 |
+| ECR pull 전용 역할 (티켓 47, B-09) | `cmp-demo-ecr-pull`(이 스택): `ecr:GetAuthorizationToken` + 이 저장소의 pull 세 동작만. 인스턴스 역할만 Assume. `ensure-secrets.sh`가 `.env`의 `PLATFORM_ECR_PULL_ROLE_ARN`이 있으면 프로필 `cmp-demo-ecr-pull`(`source_profile = cmp-demo-build`)을 쓴다. K3s·GKE pull Secret을 읽은 사람은 이 저장소 pull만 가능하고 push는 거부된다 |
+| 교차 계정 pull (티켓 47, B-08) | 매개변수 `PullAccountIds`(기본 빈 값 = 저장소 정책 없음)에 대상 연결 계정을 넣으면 저장소 정책이 그 계정의 `arn:aws:iam::*:role/cmp-*-eks-node`(Terraform 노드 역할)에게 pull 세 동작만 허용한다. `CMP_ECR_PULL_ACCOUNT_IDS=<id>[,<id>] bash infra/demo/deploy-build-stack.sh --plan`으로 바꾸고, 비우면 이전 값을 유지한다. 같은 계정은 필요 없다 |
 | api 설정 (#176, 티켓 41·46) | `PLATFORM_ECR_REGISTRY`(`/opt/cmp/.env`, 비면 꺼짐)·`PLATFORM_ECR_REPOSITORIES`(기본 `cmp-platform-builds`), `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build`, AWS 설정 파일 읽기 전용 마운트. K3s Agent의 `GET /agents/{agent_id}/jobs/{job_id}/image-pull` 토큰을 이 프로필(인스턴스 역할)로 발급한다 |
 | worker 빌드 | 이미지의 Docker CLI 28.5.2·buildx v0.37.2 → 마운트한 호스트 `/var/run/docker.sock`의 데몬 |
 
@@ -104,8 +107,8 @@ Agent 등록: 포트 포워딩한 API로 운영자 키를 써서 등록 토큰�
 
 ```sh
 bash infra/demo/deploy-build-stack.sh --plan   # 변경 세트만 만들고 실행하지 않음
-bash infra/demo/deploy-build-stack.sh          # 스택 생성·갱신, PLATFORM_ECR_REGISTRY와 BUILD_* 네 줄 출력
-# SSM 세션에서 출력된 다섯 줄을 /opt/cmp/.env에 추가한 뒤
+bash infra/demo/deploy-build-stack.sh          # 스택 생성·갱신, PLATFORM_ECR_REGISTRY·BUILD_* 네 줄·PLATFORM_ECR_PULL_ROLE_ARN·PLATFORM_ECR_AWS_PROFILE 출력
+# SSM 세션에서 출력된 일곱 줄을 /opt/cmp/.env에 추가한 뒤(start.sh가 ensure-secrets.sh로 pull 프로필을 쓴다)
 bash infra/demo/release.sh HEAD
 ```
 
@@ -120,7 +123,10 @@ docker exec cmp-demo-api-1 python -c 'from cmp_api.onprem_rollout import configu
 docker exec cmp-demo-worker-1 sh -c 'docker version --format "{{.Server.Version}}"; docker buildx version'
 iptables -S DOCKER-USER | grep cmp-build-imds-guard; systemctl is-enabled cmp-build-imds-guard.service   # 규칙 1줄, enabled (티켓 54)
 docker buildx build --network default --no-cache --progress plain /opt/cmp/releases/<SHA>/infra/demo/imds-probe 2>&1 | grep 'imds_probe token'   # token_put=000 role_list=000, 빌드 성공
-docker exec cmp-demo-worker-1 aws sts get-caller-identity --query Arn --output text   # .../cmp-demo-control-plane-InstanceRole-.../i-...
+docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-build --query Arn --output text   # .../cmp-demo-control-plane-InstanceRole-.../i-...
+# 티켓 47: pull 전용 토큰(api·worker 모두). worker는 공유 연결 파일을 읽으므로 api가 다시 시작된 뒤에 보인다(B-23)
+docker exec cmp-demo-api-1 python -c 'import boto3; print(boto3.Session(profile_name="cmp-demo-ecr-pull").client("sts").get_caller_identity()["Arn"])'   # .../assumed-role/cmp-demo-ecr-pull/...
+docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-ecr-pull --query Arn --output text   # 같은 역할
 docker exec cmp-demo-worker-1 aws ecr describe-repositories --region ap-northeast-2 --repository-names cmp-platform-builds --query 'repositories[0].imageTagMutability' --output text  # IMMUTABLE
 docker exec cmp-demo-worker-1 python -c 'from cmp_worker.config import settings as s; from cmp_worker.build_wiring import BuildSettings as B; print(B.from_values(s.build_source_bucket, s.build_ecr_repository, s.build_log_bucket, s.build_platform, s.build_aws_profile))'
 ```
@@ -132,8 +138,8 @@ AWS 연결 생성 응답의 `launch_stack_url`(ADR-005)은 api가 `CONNECTION_PL
 | 항목 | 값 |
 | --- | --- |
 | 템플릿 버킷 스택 | `cmp-demo-connection-templates`(`connection-templates-stack.yaml`). 버킷 `cmp-demo-714066696240-apne2-connection-templates`. 버킷 단위 공개 접근 차단 중 ACL 두 항목만 켜고 정책 공개는 허용. `BucketOwnerEnforced`, SSE-S3, 버전 관리(이전 버전 30일 뒤 만료), 스택 삭제 시 보존 |
-| 버킷 정책 | `connections/v1/*`만 익명 `s3:GetObject`. 비TLS 요청은 모두 거부. 공개 쓰기·목록·ACL 없음 |
-| 템플릿 URL | `https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/connections/v1/{source,target}-role.yaml` |
+| 버킷 정책 | `connections/<버전>/*`만 익명 `s3:GetObject`(현재 스크립트 버전 `v2`, 티켓 47 대상 템플릿 v2). 비TLS 요청은 모두 거부. 공개 쓰기·목록·ACL 없음. `v2`로 올리면 `v1` 객체는 더 이상 공개되지 않는다(이미 만든 스택은 영향 없음) |
+| 템플릿 URL | `https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/connections/v2/{source,target}-role.yaml` |
 | AssumeRole 권한 | 빌드 스택 `cmp-demo-build`의 인라인 정책 `cmp-demo-connections`: `sts:AssumeRole`, 리소스 `arn:aws:iam::*:role/*`, 조건 `iam:ResourceTag/cmp:managed-by = cloud-migration-platform`(두 연결 템플릿이 역할에 붙이는 태그) + `sts:ExternalId`가 `cmp-*`로 있음. `cmp-demo-control-plane`은 건드리지 않는다 |
 | api 설정 | `CONNECTION_PLATFORM_PRINCIPAL_ARN`(인스턴스 역할 ARN), `CONNECTION_TEMPLATE_BASE_URL`(위 접두어). `/opt/cmp/.env`, 비면 링크 없음. worker에는 주지 않는다(링크는 api만 만든다) |
 
@@ -146,7 +152,7 @@ AWS 연결 생성 응답의 `launch_stack_url`(ADR-005)은 api가 `CONNECTION_PL
 | 생성 연결 설정 파일 | api `CONNECTION_AWS_CONFIG_FILE=/run/cmp/aws-connections/config`(호스트 `/opt/cmp/data/aws-connections`, api 쓰기·worker 읽기 전용), `CONNECTION_AWS_BASE_CONFIG_FILE=/run/cmp/aws/config`. 키는 없다(ARN·External ID·프로필 이름). api가 시작·역할 등록·연결 삭제 때 DB에서 다시 쓴다. `start.sh`의 `ensure-secrets.sh`가 없을 때만 기본 파일로 씨앗을 둔다 |
 | 프로필 연쇄 | `cmp-conn-<hex>`(`source_profile = cmp-demo-build`) → `cmp-demo-build`(`credential_source = Ec2InstanceMetadata`) = 위 `CONNECTION_PLATFORM_PRINCIPAL_ARN`(인스턴스 역할) |
 | worker | `AWS_CONFIG_FILE=/run/cmp/aws-connections/config`. Plan 입력 `credential_ref.id`가 연결 ID(`conn-<hex>`)면 provider·`aws`·kubectl은 `cmp-conn-<hex>`, State backend는 `PROVISIONING_AWS_PROFILE`. 아니면 지금처럼 `PROVISIONING_AWS_PROFILE` 하나 |
-| api ECR 토큰 | `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build`(연결 주체 설정과 분리) |
+| api ECR 토큰 | `PLATFORM_ECR_AWS_PROFILE`(연결 주체 설정과 분리, 티켓 47부터 pull 전용 역할) |
 
 
 ### 반영 (각 단계 사용자 승인 필요)
@@ -166,7 +172,7 @@ bash infra/demo/release.sh HEAD                          # 또는 GitHub Actions
 # SSM 세션에서
 docker exec cmp-demo-api-1 python -c 'from cmp_api.config import settings as s; print(s.connection_platform_principal_arn, s.connection_template_base_url)'
 # 노트북에서
-curl -sI https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/connections/v1/source-role.yaml | head -1   # 200
+curl -sI https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/connections/v2/source-role.yaml | head -1   # 200
 curl -s -o /dev/null -w '%{http_code}\n' 'https://cmp-demo-714066696240-apne2-connection-templates.s3.ap-northeast-2.amazonaws.com/?list-type=2'   # 403 (목록 금지)
 aws iam simulate-principal-policy --profile cmp-aws-prod \
   --policy-source-arn arn:aws:iam::714066696240:role/cmp-demo-control-plane-InstanceRole-oAXRipePmZCe \

@@ -80,12 +80,15 @@ class ImageBuildAdapter:
         *,
         archive_store: ArchiveStore,
         build_store: BuildStore,
-        builder_factory: Callable[[Any], Any] = ImageBuilder,
+        builder_factory: Callable[[Any], Any] | None = None,
     ) -> None:
         self.settings = settings
         self.archive_store = archive_store
         self.build_store = build_store
-        self.builder_factory = builder_factory
+        # Ticket 47 (B-20): the Build module's own `aws` calls use the configured profile.
+        self.builder_factory = builder_factory or (
+            lambda context: ImageBuilder(context, aws_profile=settings.aws_profile)
+        )
 
     def build_with_evidence(
         self,

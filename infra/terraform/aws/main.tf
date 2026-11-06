@@ -95,6 +95,8 @@ resource "aws_vpc_security_group_egress_rule" "cluster" {
   security_group_id = aws_security_group.cluster.id
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
+  # Ticket 47 (B-14): the target connection role creates tagged resources only.
+  tags = local.tags
 }
 
 data "aws_iam_policy_document" "cluster_assume" {
@@ -122,6 +124,12 @@ resource "aws_eks_cluster" "target" {
   name     = var.name
   role_arn = aws_iam_role.cluster.arn
   version  = var.kubernetes_version
+  # Ticket 47 (B-10): access entries only (no aws-auth ConfigMap). The creator (the run's target
+  # connection role) stays cluster admin; user principals get entries in access.tf.
+  access_config {
+    authentication_mode                         = "API"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
   vpc_config {
     subnet_ids              = [for subnet in aws_subnet.private : subnet.id]
     security_group_ids      = [aws_security_group.cluster.id]

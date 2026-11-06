@@ -40,6 +40,8 @@ OUTPUT_REFS = {
     "oidc_provider_arn": "oidc_provider_arn",
     "ebs_csi_role_arn": "ebs_csi_role_arn",
     "lb_controller_role_arn": "lb_controller_role_arn",
+    # Ticket 47 (B-10): who got kubectl admin through an access entry (handoff display).
+    "cluster_admin_principal_arns": "eks_cluster_admin_principal_arns",
 }
 
 

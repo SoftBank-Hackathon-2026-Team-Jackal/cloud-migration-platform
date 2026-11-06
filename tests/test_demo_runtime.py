@@ -350,7 +350,8 @@ def test_api_uses_the_instance_role_build_profile_without_gcp_credentials():
     # role itself (never PROVISIONING_AWS_ROLE_ARN).
     # Ticket 23b·46: the connection principal stays this profile; ECR tokens have their own.
     assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
-    assert env["PLATFORM_ECR_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
+    # Ticket 47 (B-09): the pull-only profile once configured, the build profile until then.
+    assert env["PLATFORM_ECR_AWS_PROFILE"] == "${PLATFORM_ECR_AWS_PROFILE:-cmp-demo-build}"
     assert "PROVISIONING_AWS_PROFILE" not in env
     # The API never gets the GCP key or a gcloud configuration.
     assert not [m for m in api["volumes"] if "/secrets/gcp" in m or "/run/cmp/gcp" in m]
@@ -377,6 +378,7 @@ def _run_deploy_build_stack(tmp_path, uri: str) -> subprocess.CompletedProcess:
   *describe-stack-resource*) echo cmp-demo-control-plane-InstanceRole-ABC ;;
   *DeployBucket*) echo cmp-demo-714066696240-apne2-deploy ;;
   *RepositoryUri*) echo {uri} ;;
+  *PullRoleArn*) echo arn:aws:iam::714066696240:role/cmp-demo-ecr-pull ;;
   *"cloudformation deploy"*) ;;
   *) echo "unexpected aws $*" >&2; exit 9 ;;
 esac

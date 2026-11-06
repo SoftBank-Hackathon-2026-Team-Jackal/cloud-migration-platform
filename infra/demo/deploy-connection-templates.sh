@@ -15,7 +15,7 @@ account=714066696240
 control_stack=cmp-demo-control-plane
 stack=cmp-demo-connection-templates
 # Bump together with any change to infra/connections/*.yaml (published objects never change).
-version=v1
+version=v2
 templates=(source-role.yaml target-role.yaml)
 mode="${1:-apply}"
 [[ "$mode" == apply || "$mode" == --plan ]] || { echo "Use --plan or no argument" >&2; exit 2; }
