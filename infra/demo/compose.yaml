@@ -67,6 +67,9 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       AGENT_ENROLLMENT_ADMIN_KEY: ${AGENT_ENROLLMENT_ADMIN_KEY:?set AGENT_ENROLLMENT_ADMIN_KEY}
       APPROVAL_ADMIN_KEY: ${APPROVAL_ADMIN_KEY:?set APPROVAL_ADMIN_KEY}
+      # Ticket 60 A12: an existing approver that each new Migration is granted to at start
+      # (web PLATFORM_APPROVER_TOKEN). Empty: no automatic grant; use approver-token.py grant.
+      DEMO_APPROVER_ID: ${DEMO_APPROVER_ID:-}
       # Shared with the worker at the same paths (ticket 21): digest-named rollout bytes and Plan
       # Revision directories `<plan_id>-r<revision>/`.
       ARTIFACT_STORE_DIR: /opt/cmp/artifact-store
@@ -102,6 +105,10 @@ services:
       # (a new key makes every stored upload unreadable). Same store/key as the worker.
       ENV_FILE_STORE_DIR: /opt/cmp/env-files
       ENV_FILE_ENCRYPTION_KEY: ${ENV_FILE_ENCRYPTION_KEY:?set ENV_FILE_ENCRYPTION_KEY}
+      # Ticket 57 (#228): the rehearsal's standard write -> read shape for web starts, a
+      # SandboxSettings JSON object in /opt/cmp/.env (demo-app line: runtime.env.example). Empty:
+      # the rehearsal runs the health test only (today's behavior).
+      WEB_START_SANDBOX_SETTINGS: ${WEB_START_SANDBOX_SETTINGS:-}
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans

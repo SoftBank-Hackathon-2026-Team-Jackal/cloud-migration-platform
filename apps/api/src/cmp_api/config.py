@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # principal so either can change alone (demo: both `cmp-demo-build`, the instance role with
     # the ticket-28 ECR policy). Unset: `connection_platform_aws_profile` (ticket-41 behavior).
     platform_ecr_aws_profile: str | None = None
+    # Ticket 57 (#228): the rehearsal's standard write -> read shape for web (`target`) starts,
+    # a `SandboxSettings` JSON object (write_path, write_body, read_back, ...; the worker checks
+    # it). Operator configuration for the app being migrated, never code. Unset: `sandbox` stays
+    # null and the rehearsal runs the health test only; not a JSON object: 503
+    # `SANDBOX_SETTINGS_INVALID`.
+    web_start_sandbox_settings: str | None = None
 
 
 settings = Settings()

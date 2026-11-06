@@ -1,6 +1,8 @@
 """Ticket 60 A12: with `DEMO_APPROVER_ID` set, `POST /migrations` grants the new Migration to that
 approver (the operator grant rule of ticket 07, reused). Unset: the start is unchanged."""
 
+from pathlib import Path
+
 import test_web_start_request as start
 from cmp_api.approvals import Approver
 from cmp_api.config import settings
@@ -61,3 +63,11 @@ def test_refused_start_grants_nothing(api, db, monkeypatch):
     bad = client.post("/migrations", json=start.web_request(start.ONPREM, "envf-missing"))
     assert bad.status_code == 422 and fake.started == []
     assert grants(db) == ["demo-placeholder"]
+
+
+def test_demo_compose_passes_the_setting_empty_by_default():
+    import yaml
+
+    compose_file = Path(__file__).resolve().parents[1] / "infra/demo/compose.yaml"
+    compose = yaml.safe_load(compose_file.read_text())
+    assert compose["services"]["api"]["environment"]["DEMO_APPROVER_ID"] == "${DEMO_APPROVER_ID:-}"
