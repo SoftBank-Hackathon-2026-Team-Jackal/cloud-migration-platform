@@ -2302,6 +2302,105 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /migrations/{migration_id}/analysis/review:
+    get:
+      tags:
+      - analysis review
+      summary: Get Review
+      description: 분석이 사람의 결정을 기다리는지(`pending`)와 검토할 항목. 기다리지 않으면 `pending`은 null.
+      operationId: get_review_migrations__migration_id__analysis_review_get
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewView'
+        '404':
+          description: MIGRATION_NOT_FOUND or ANALYSIS_NOT_FOUND
+        '409':
+          description: REVIEW_NOT_PENDING or ANALYSIS_REF_MISMATCH
+        '422':
+          description: The review gate refused the decision (code in `detail`)
+        '503':
+          description: REVIEW_UNAVAILABLE
+  /migrations/{migration_id}/analysis/review/confirm:
+    post:
+      tags:
+      - analysis review
+      summary: Confirm Requirements
+      description: 필수 기능을 확정한다. 모든 행이 있어야 하고, 확정 뒤 잃는 것이 있으면 승인 단계로 넘어간다.
+      operationId: confirm_requirements_migrations__migration_id__analysis_review_confirm_post
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewAccepted'
+        '404':
+          description: MIGRATION_NOT_FOUND or ANALYSIS_NOT_FOUND
+        '409':
+          description: REVIEW_NOT_PENDING or ANALYSIS_REF_MISMATCH
+        '422':
+          description: The review gate refused the decision (code in `detail`)
+        '503':
+          description: REVIEW_UNAVAILABLE
+  /migrations/{migration_id}/analysis/review/approve:
+    post:
+      tags:
+      - analysis review
+      summary: Approve Losses
+      description: 잃는 것과 보안 낮아짐을 승인·거절한다. 승인이 필요한 항목 전부의 결정이 있어야 한다.
+      operationId: approve_losses_migrations__migration_id__analysis_review_approve_post
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRequest'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewAccepted'
+        '404':
+          description: MIGRATION_NOT_FOUND or ANALYSIS_NOT_FOUND
+        '409':
+          description: REVIEW_NOT_PENDING or ANALYSIS_REF_MISMATCH
+        '422':
+          description: The review gate refused the decision (code in `detail`)
+        '503':
+          description: REVIEW_UNAVAILABLE
   /health:
     get:
       summary: Health
@@ -2572,6 +2671,36 @@ components:
       - execution_status
       - workflow_state
       title: ApprovalResponse
+    ApproveRequest:
+      properties:
+        analysis_version:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Analysis Version
+        approvals:
+          additionalProperties:
+            type: string
+            enum:
+            - APPROVED
+            - REJECTED
+          type: object
+          minProperties: 1
+          title: Approvals
+        actor:
+          anyOf:
+          - type: string
+            maxLength: 100
+            minLength: 1
+          - type: 'null'
+          title: Actor
+      additionalProperties: false
+      type: object
+      required:
+      - analysis_version
+      - approvals
+      title: ApproveRequest
+      description: 승인이 필요한 모든 항목(행 ID·`security:<기준>`)의 결정. 거절하면 그 기능은 필수가 된다.
     ApproverCredential:
       properties:
         approver_id:
@@ -2989,6 +3118,38 @@ components:
       - region
       - eks_clusters
       title: ClusterList
+    ConfirmRequest:
+      properties:
+        analysis_version:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Analysis Version
+        required:
+          additionalProperties:
+            type: boolean
+          type: object
+          title: Required
+        operational:
+          items:
+            type: string
+          type: array
+          title: Operational
+        actor:
+          anyOf:
+          - type: string
+            maxLength: 100
+            minLength: 1
+          - type: 'null'
+          title: Actor
+      additionalProperties: false
+      type: object
+      required:
+      - analysis_version
+      - required
+      title: ConfirmRequest
+      description: 모든 매핑 행의 필수 여부(행 ID → true/false). 빠진 행이나 모르는 행은 거절된다. 행이 없으면(보안
+        승인만 남은 경우) 빈 객체.
     ConnectionDetail:
       properties:
         connection_id:
@@ -4804,6 +4965,82 @@ components:
       - name
       - location
       title: ResultCluster
+    ReviewAccepted:
+      properties:
+        migration_id:
+          type: string
+          title: Migration Id
+        signal:
+          type: string
+          title: Signal
+        phase:
+          type: string
+          title: Phase
+        pending:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pending
+      type: object
+      required:
+      - migration_id
+      - signal
+      - phase
+      - pending
+      title: ReviewAccepted
+    ReviewView:
+      properties:
+        phase:
+          type: string
+          title: Phase
+        analysis_ref:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Analysis Ref
+        pending:
+          anyOf:
+          - type: string
+            enum:
+            - confirm_requirements
+            - approve_losses
+          - type: 'null'
+          title: Pending
+        items:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Items
+        security:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Security
+        blocked:
+          items: {}
+          type: array
+          title: Blocked
+        rejections:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Rejections
+      type: object
+      required:
+      - phase
+      - analysis_ref
+      - pending
+      - items
+      - security
+      - blocked
+      - rejections
+      title: ReviewView
+      description: '`ReviewGate.view()` 그대로(웹이 보여줄 값). 항목 모양은 `cmp_worker.review_gate`가
+        정한다.'
     RoleRequest:
       properties:
         role_arn:
