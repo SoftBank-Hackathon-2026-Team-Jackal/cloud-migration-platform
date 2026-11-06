@@ -41,7 +41,8 @@ env_value() {
   sed -n "s/^$1=//p" "$env_file" | tail -n 1
 }
 
-install -d -m 700 "$secrets_dir" "$secrets_dir/aws" "$secrets_dir/gcp" "$secrets_dir/sandbox"
+install -d -m 700 "$secrets_dir" "$secrets_dir/aws" "$secrets_dir/gcp" "$secrets_dir/sandbox" \
+  "$secrets_dir/data-migration"
 profile="$(env_value PROVISIONING_AWS_PROFILE)"
 profile="${profile:-cmp-demo-provisioning}"
 region="$(env_value PROVISIONING_AWS_REGION)"

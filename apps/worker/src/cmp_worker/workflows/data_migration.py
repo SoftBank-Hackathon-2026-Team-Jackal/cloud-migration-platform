@@ -2,7 +2,8 @@
 
 흐름: (입력에 `tunnel`이 있으면) WireGuard 복제 경로 → 사전 점검 → 준비 → 스키마 → 구독 → streaming까지 감시 → PgBouncer 설치·앱 연결 →
 (감시하며 신호 대기) → `switchover` 신호로 DB 전환 → `rollback` 신호로 되돌리기 / `finish` 신호로 끝.
-`cancel` 신호는 전환 전이면 구독·발행을 지우고 끝낸다(원본 슬롯이 WAL을 붙잡지 않게).
+`cancel` 신호는 전환 전이면 구독·발행을 지우고 끝낸다(원본 슬롯이 WAL을 붙잡지 않게). 구독을 만든 뒤
+복제가 실패해도 같은 정리를 시도한다(Provisioning 72, 정리 실패는 `cleanup_code`).
 
 감시는 짧은 Activity를 타이머 간격으로 반복한다(무기한 Activity 없음). 이력이 길어지지 않게 일정 횟수마다
 continue-as-new로 상태를 넘긴다. Traffic의 DB 게이트는 `db_gate` Query로 읽는다(DM-007).
@@ -31,6 +32,7 @@ MONITOR_ROUNDS_BEFORE_CONTINUE = 200
 PARENT_SIGNAL = "data_migration_state"
 ANNOUNCE_PATCH = "data-cutover-announce-v1"
 TUNNEL_PATCH = "data-tunnel-v1"
+FAILURE_CLEANUP_PATCH = "data-failure-cleanup-v1"  # Provisioning 72: 복제 실패 때도 슬롯 정리
 SWITCH_FROM = {"switchover": "source", "rollback": "target"}
 
 
@@ -52,6 +54,8 @@ class DataMigrationWorkflow:
         self.last_steps: list[dict] | None = None  # 지난 전환의 단계별 시간(계획 화면에 보인다)
         self.announced: list | None = None  # 마지막으로 알린 [복제 준비됨, 전환 시도 수]
         self.tunnel: dict | None = None  # ticket 10: {name, endpoint, handshake, peer_host}
+        self.subscribing = False  # 구독(원본 슬롯)을 만들기 시작했는지
+        self.cleanup_code: str | None = None  # 실패 뒤 정리도 실패했을 때의 코드
 
     # ---- 신호·조회 ----
 
@@ -145,6 +149,7 @@ class DataMigrationWorkflow:
         await self._call(dm.dm_prepare, {"request": req, "actions": pre["actions"]}, timeout_s=600)
         self.phase = "schema"
         await self._call(dm.dm_copy_schema, req, timeout_s=900)
+        self.subscribing = True
         await self._call(dm.dm_subscribe, req, timeout_s=300)
         self.phase = "copy"
         deadline = workflow.now() + timedelta(seconds=args.get("sync_timeout_s", 6 * 3600))
@@ -170,6 +175,16 @@ class DataMigrationWorkflow:
             await self._call(dm.dm_cleanup, self._req(args), timeout_s=300, attempts=5)
         self.phase = "cancelled"
         return "cancelled"
+
+    async def _cleanup_after_failure(self, args: dict) -> None:
+        """복제가 실패하면 구독·발행(원본 슬롯 포함)을 지운다. 슬롯이 남으면 원본 WAL이 계속 쌓인다.
+        정리 실패는 `cleanup_code`에만 남기고 원래 실패 코드를 덮지 않는다(Provisioning 72)."""
+        if not self.subscribing or not workflow.patched(FAILURE_CLEANUP_PATCH):
+            return
+        try:
+            await self._call(dm.dm_cleanup, self._req(args), timeout_s=300, attempts=5)
+        except ActivityError as exc:
+            self.cleanup_code = _code(exc)
 
     async def _announce(self, args: dict) -> None:
         """원본이 쓰기 주체일 때 전환 계획을 알린다. 복제 준비 상태나 시도 수가 바뀔 때만 다시 보낸다.
@@ -242,8 +257,11 @@ class DataMigrationWorkflow:
                 outcome = await self._replicate(args)
             except ActivityError as exc:
                 self.failure_code, self.phase = _code(exc), "failed"
+                await self._cleanup_after_failure(args)
                 return await self._finish("failed")
             if outcome:
+                if outcome == "failed":
+                    await self._cleanup_after_failure(args)
                 self.phase = outcome
                 return await self._finish(outcome)
             self.phase = "streaming"
@@ -280,4 +298,5 @@ class DataMigrationWorkflow:
             "active": self.active,
             "switches": self.switches,
             "failure_code": self.failure_code,
+            "cleanup_code": self.cleanup_code,
         }

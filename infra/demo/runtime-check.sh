@@ -67,10 +67,13 @@ for name in CMP_PUBLIC_HOST CMP_GCP_PROJECT PLATFORM_ECR_REGISTRY PLATFORM_ECR_P
   BUILD_SOURCE_BUCKET BUILD_LOG_BUCKET BUILD_PLATFORM CONNECTION_PLATFORM_PRINCIPAL_ARN \
   CONNECTION_TEMPLATE_BASE_URL ANALYSIS_ARTIFACT_STORE_DIR ANALYSIS_WORKSPACE_ROOT \
   SANDBOX_KUBECONFIG LLM_ENABLED ANTHROPIC_API_KEY WEB_START_SANDBOX_SETTINGS \
-  WEB_START_DATA_MIGRATION WEB_START_TRAFFIC; do
+  WEB_START_DATA_MIGRATION WEB_START_TRAFFIC DATA_MIGRATION_AWS_PROFILE \
+  DATA_MIGRATION_KUBECONFIG_DIR; do
   [[ " $names " == *" $name "* ]] || optional+=("$name")
 done
 echo "optional_unset=${optional[*]:-}"
 echo "target_profiles_file=$([[ -f "$root/config/target-profiles.json" ]] && echo present || echo absent)"
 echo "sandbox_kubeconfig_file=$([[ -f "$root/secrets/sandbox/kubeconfig" ]] && echo present || echo absent)"
+# Provisioning 72: how many kubeconfig files the data-migration mount holds (count only, no names).
+echo "data_migration_kubeconfig_files=$(find "$root/secrets/data-migration" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')"
 echo "gcp_key_file=$([[ -f "$root/secrets/gcp/key.json" ]] && echo present || echo absent)"

@@ -198,6 +198,13 @@ def is_ready(s: dict, cfg: dict) -> tuple[bool, list[str]]:
     return not reasons, reasons
 
 
+def pin_text_format(conn) -> None:
+    """체크섬(md5(t::text))은 timestamptz·date 글자에 따라 달라진다. 두 DB 서버의 기본 TimeZone·DateStyle이
+    달라도 같은 값이 같은 글자가 되게 검증 접속을 UTC·ISO로 고정한다(Provisioning 72). PAUSE 전에 부른다."""
+    conn.execute("SET TIME ZONE 'UTC'")
+    conn.execute("SET DateStyle = 'ISO, YMD'")
+
+
 def begin_snapshot(conn) -> dict:
     conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
     return read_sequences(conn)
@@ -251,6 +258,8 @@ def switchover(cfg: dict, info: dict) -> tuple[dict, int]:
     # 접속은 처음에 모두 연다. *_v는 스냅샷 검증용이다.
     old, new = connect(cfg["old_url"]), connect(cfg["new_url"])
     old_v, new_v = connect(cfg["old_url"]), connect(cfg["new_url"])
+    for conn in (old_v, new_v):
+        pin_text_format(conn)
     pgb = Bouncer(cfg["pgb_admin_url"])
     pool = ThreadPoolExecutor(max_workers=2)
     fwd, rev, rev_pub, marker_table = (

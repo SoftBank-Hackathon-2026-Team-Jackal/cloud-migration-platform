@@ -90,8 +90,9 @@ class FakeDb:
         elif sql.startswith("create subscription"):
             self.subscriptions.add(sql.split()[2])
 
-    def dump_schema(self) -> bytes:
-        return b"-- schema " + ",".join(sorted(self.tables)).encode()
+    def dump_schema(self, exclude=frozenset()) -> bytes:
+        self.dumped_excluding = set(exclude)
+        return b"-- schema " + ",".join(sorted(self.tables - set(exclude))).encode()
 
     def restore(self, script: bytes) -> None:
         self.tables |= set(script.decode().removeprefix("-- schema ").split(","))
@@ -165,6 +166,47 @@ async def test_copy_schema_copies_once_and_stops_on_a_partial_target(dbs, emitte
     with pytest.raises(ApplicationError) as err:
         await run(dm.dm_copy_schema, REQUEST)
     assert err.value.type == "TARGET_SCHEMA_PARTIAL"
+
+
+async def test_copy_schema_ignores_the_marker_table_and_ensures_it_on_the_target(dbs) -> None:
+    """Provisioning 72 (#298): prepare가 원본에 만든 marker 표는 사용자 표 비교에서 빠진다. 대상에
+    사용자 표가 이미 다 있으면 건너뛰되, 전환 marker 복제를 위해 대상에도 marker 표를 만든다."""
+    dbs["src"].tables.add(q.MARKER_TABLE)
+    dbs["dst"].tables = {"public.messages", "public.rooms"}
+    result = await run(dm.dm_copy_schema, REQUEST)
+    assert result == {"copied": False, "tables": 2}
+    assert q.ENSURE_MARKER_SQL in dbs["dst"].executed
+
+
+async def test_copy_schema_restores_user_tables_without_the_marker_then_ensures_it(dbs) -> None:
+    dbs["src"].tables.add(q.MARKER_TABLE)
+    result = await run(dm.dm_copy_schema, REQUEST)
+    assert result == {"copied": True, "tables": 2}
+    # dump는 내부 표를 빼고(대상에 이미 있어도 restore가 깨지지 않게), 뒤에 marker를 보장한다
+    assert q.MARKER_TABLE in q.INTERNAL_TABLES
+    assert dbs["src"].dumped_excluding == set(q.INTERNAL_TABLES)
+    assert q.ENSURE_MARKER_SQL in dbs["dst"].executed
+
+
+def test_kubectl_schema_dump_excludes_internal_tables_by_name() -> None:
+    calls = []
+
+    class Session:
+        def _kubectl(self, *args, stdin=None, timeout=None):
+            calls.append(args)
+            return b""
+
+    ep = dm.DbEndpoint.model_validate(endpoint("src", "10.0.0.1"))
+    dm.KubectlDbPod(Session(), ep).dump_schema(q.INTERNAL_TABLES)
+    script = calls[0][-1]
+    assert script.startswith("exec pg_dump ") and "--schema-only" in script
+    assert "--exclude-table=public.cmp_switchover_marker" in script
+
+
+async def test_copy_schema_restores_when_the_target_has_only_the_marker(dbs) -> None:
+    dbs["src"].tables.add(q.MARKER_TABLE)
+    dbs["dst"].tables = {q.MARKER_TABLE}
+    assert (await run(dm.dm_copy_schema, REQUEST))["copied"] is True
 
 
 async def test_subscribe_is_idempotent_and_keeps_the_password_out_of_results(dbs) -> None:

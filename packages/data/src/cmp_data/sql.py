@@ -14,6 +14,8 @@ from .contracts import PrecheckFacts, ReadinessSample, ReplicationNames, SyncSam
 REPL_ROLE = "cmp_repl"  # 구독자가 발행 DB에 접속할 때 쓰는 전용 역할(REPLICATION + SELECT)
 TOOL_APP_NAME = "cmp-data-migration"  # 이 도구의 접속. readiness 신호에서 뺀다
 MARKER_TABLE = "public.cmp_switchover_marker"  # 전환 때 마지막 변경 도착 확인용(PoC marker)
+# 이 도구가 DB에 만드는 내부 표(schema.table). 사용자 표 비교·스키마 복사·전환 검증 결과에서 뺀다.
+INTERNAL_TABLES = frozenset({MARKER_TABLE})
 
 
 def literal(value: str) -> str:
@@ -78,6 +80,11 @@ USER_TABLES_SQL = """
 select coalesce(json_agg(format('%I.%I', schemaname, relname) order by 1), '[]')
 from pg_stat_user_tables
 """
+
+
+def parse_user_tables(raw: str) -> set[str]:
+    """`USER_TABLES_SQL` 결과에서 내부 표를 뺀 사용자 표."""
+    return set(json.loads(raw)) - INTERNAL_TABLES
 
 
 def ensure_repl_role_sql(password: str) -> str:
