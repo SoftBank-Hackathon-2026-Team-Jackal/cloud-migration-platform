@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from cmp_contracts.analysis import AnalysisInput
+from cmp_contracts.analysis import AnalysisInput, ConfirmedScope
 from cmp_contracts.migration import MigrationRequest, StartSource, StartTarget
 from cmp_contracts.plan_publish import TargetSettings
 from cmp_contracts.provisioning import ContentRef, ProvisioningInputError
@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from cmp_api.agent_registry import RegisteredAgent
 from cmp_api.connections import PROFILE_PREFIX, EnvironmentConnection, credential_ref
 from cmp_api.plan_inputs import CLOUD_TEMPLATES
+from cmp_api.scope_selection import ScopeAnalysisRecord, ScopeConfirmationRecord
 
 _TARGET_SETTINGS = TypeAdapter(TargetSettings)
 _CLOUD = {"AWS": (AwsPlanInput, validate_aws_input), "GCP": (GcpPlanInput, terraform_variables)}
@@ -91,6 +92,57 @@ def find_connection(session: Session, value: str, provider: str) -> EnvironmentC
     if connection.status != "CONNECTED":
         raise StartRefused("TARGET_CONNECTION_NOT_READY")
     return connection
+
+
+def load_scope(session: Session, scope_id: str) -> tuple[ConfirmedScope, EnvironmentConnection]:
+    """06B: the stored scope confirmation, its analysis and the source connection it was read with.
+
+    The web sends only `scope_id`; everything else comes from what the platform stored (ticket 56),
+    so a request cannot name another connection or role. Refusals are codes, never values."""
+    confirmation = session.get(ScopeConfirmationRecord, scope_id)
+    analysis = session.get(ScopeAnalysisRecord, confirmation.analysis_id) if confirmation else None
+    if confirmation is None or analysis is None:
+        raise StartRefused("SCOPE_NOT_FOUND")
+    connection = session.get(EnvironmentConnection, analysis.connection_id)
+    if connection is None:
+        raise StartRefused("SCOPE_CONNECTION_NOT_FOUND")
+    if connection.kind != "AWS_SOURCE":
+        raise StartRefused("SCOPE_CONNECTION_KIND_MISMATCH")
+    if connection.status != "CONNECTED" or not connection.role_arn:
+        raise StartRefused("SCOPE_CONNECTION_NOT_READY")
+    by_id = {item["candidate_id"]: item for item in analysis.candidates}
+    if any(candidate_id not in by_id for candidate_id in confirmation.included):
+        raise StartRefused("SCOPE_NOT_FOUND")
+    try:
+        scope = ConfirmedScope.model_validate(
+            {
+                "scope_id": confirmation.id,
+                "selection": analysis.selection,
+                "included": [by_id[candidate_id] for candidate_id in confirmation.included],
+                "excluded": confirmation.excluded,
+            }
+        )
+    except ValidationError:
+        raise StartRefused("SCOPE_NOT_FOUND") from None
+    return scope, connection
+
+
+def scope_analysis_fields(scope: ConfirmedScope, credential_ref: str | None) -> dict:
+    """06B: the `AnalysisInput` fields a confirmed scope fills (pure).
+
+    `role_arns` holds only the INCLUDED IAM role candidates that have an ARN, in order, once."""
+    role_arns = list(
+        dict.fromkeys(
+            item.arn for item in scope.included if item.resource_type == "IAM_ROLE" and item.arn
+        )
+    )
+    return {
+        "credential_ref": credential_ref,
+        "cluster_name": scope.selection.cluster,
+        "region": scope.selection.region,
+        "role_arns": role_arns,
+        "scope": scope.model_dump(mode="json"),
+    }
 
 
 def find_agent(session: Session, agent_id: str) -> RegisteredAgent:
@@ -188,13 +240,21 @@ def planning_settings(
 
 
 def start_input(
-    request: MigrationRequest, source: StartSource, planning: dict, env_ref: ContentRef
+    request: MigrationRequest,
+    source: StartSource,
+    planning: dict,
+    env_ref: ContentRef,
+    scope_fields: dict | None = None,
 ) -> dict:
-    """S10: the `build_start_input` shape (CLI) for a public GitHub source."""
+    """S10: the `build_start_input` shape (CLI) for a public GitHub source.
+
+    06B: `scope_fields` (from `scope_analysis_fields`) fills the cluster, region, credential
+    profile, role ARNs and the confirmed scope; without it the analysis input is as before."""
     analysis = AnalysisInput(
         migration_id=request.project_id,
         repository=f"https://github.com/{source.full_name}.git",
         requested_commit=source.commit_sha,
+        **(scope_fields or {}),
     )
     return {
         "project_id": request.project_id,
