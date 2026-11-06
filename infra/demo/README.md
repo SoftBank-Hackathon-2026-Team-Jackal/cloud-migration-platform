@@ -62,6 +62,8 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 
 웹 화면은 이 저장소가 아니라 `cloud-migration-web`에서 온다. 노트북에서 `bash infra/demo/release-web.sh <웹 저장소 경로>`로 올리면 `releases/web-<sha>.tar.gz`로 올라가고(인스턴스 역할은 `releases/*`만 읽을 수 있다), 서버에서 `/opt/cmp/web/<sha>`로 풀려 `/opt/cmp/web/current`가 가리키며 `web` 서비스가 다시 만들어진다. 이후 플랫폼 릴리스(`start.sh`)도 `/opt/cmp/web/current/Dockerfile`이 있으면 웹을 함께 올린다.
 
+웹은 실제(SSE) 모드로 빌드된다: compose가 빌드 인자 `NEXT_PUBLIC_API_MODE=sse`, `NEXT_PUBLIC_SSE_START=source`, `NEXT_PUBLIC_API_BASE=https://<CMP_PUBLIC_HOST>`를 넘기고(브라우저 코드에 들어가므로 실행 환경 변수가 아니다), 브라우저는 에지를 거쳐 `/migrations`(시작·이벤트)에 닿는다. 에지에 `/migrations` 경로(`agent-routes.caddy`)가 없으면 시작이 웹으로 가서 404가 난다.
+
 ### 원격 반영 순서 (각 단계 사용자 승인 필요)
 
 1. CloudFormation 갱신: `bash infra/demo/deploy.sh` — SG 443 인그레스, IMDS hop limit 2, Elastic IP 추가. EIP 연결로 공인 IP가 바뀐다. 공개 IPv4 비용 발생.
