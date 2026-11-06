@@ -22,7 +22,7 @@ bash infra/demo/release.sh HEAD
 
 ## Provisioning 실행 환경 (#100, ticket 21)
 
-worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1.17.0, kubectl v1.37.1, Helm v4.3.1, AWS CLI 2.35.21, gcloud 588.0.0(+`gke-gcloud-auth-plugin`)을 버전·SHA-256으로 고정한다. API는 도구가 없는 `api` 대상을 쓴다.
+worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1.17.0, kubectl v1.37.1, Helm v4.3.1, AWS CLI 2.35.21, gcloud 588.0.0(+`gke-gcloud-auth-plugin`)을 버전·SHA-256으로 고정한다. 실제 분석이 소스를 가져오도록 배포판 `git`도 둔다(티켓 45). API는 도구가 없는 `api` 대상을 쓴다.
 
 두 대상 모두 런타임 리소스(`infra/terraform`, `infra/helm`, `catalog`, `skills`)를 `/app` 아래 저장소와 같은 상대 경로로 복사하고 `CMP_RESOURCE_ROOT=/app`을 지정한다(ticket 43). 패키지는 site-packages에 설치되므로 코드는 자기 위치가 아니라 이 값으로 템플릿·차트를 찾는다(`cmp_providers.resources`). 새 리소스 디렉터리를 코드에서 쓰면 `RUNTIME_RESOURCE_DIRS`와 Dockerfile `COPY`를 함께 고친다(`tests/test_worker_image_resources.py`가 대조). Terraform lock 파일은 `linux_amd64`·`linux_arm64`·`darwin_arm64`·`darwin_amd64` 해시를 담는다.
 
@@ -38,6 +38,8 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `CONNECTION_AWS_CONFIG_FILE`, `CONNECTION_AWS_BASE_CONFIG_FILE` | api | 생성 파일 `/run/cmp/aws-connections/config`(호스트 `/opt/cmp/data/aws-connections`, api 쓰기·worker 읽기), 기본 파일 `/run/cmp/aws/config`. 키는 없다(ARN·External ID·프로필 이름). api가 시작·역할 등록·연결 삭제 때 DB에서 다시 쓴다 |
 | `CONNECTION_PLATFORM_PRINCIPAL_ARN`, `CONNECTION_TEMPLATE_BASE_URL` | api | `/opt/cmp/.env`(`deploy-connection-templates.sh` 출력, 23b). 비면 `launch_stack_url`·`platform_principal_arn`이 `null` |
 | `PLATFORM_ECR_REGISTRY`, `PLATFORM_ECR_REPOSITORIES` | api | `/opt/cmp/.env`. 레지스트리가 비면(기본) ON_PREM 작업에 플랫폼 레지스트리가 없고 토큰을 발급하지 않는다(29 이전 동작). 저장소 기본값 `cmp-platform-builds` |
+| `ENV_FILE_STORE_DIR=/opt/cmp/env-files`, `ENV_FILE_ENCRYPTION_KEY` | api·worker(같은 디렉터리) | 업로드한 `.env` 암호화 저장소(호스트 `/opt/cmp/data/env-files`). 키는 `/opt/cmp/.env`에 없을 때만 생성(base64url 32바이트), 바꾸지 않는다(티켓 45) |
+| 분석·Sandbox·Claude (`ANALYSIS_*`, `SANDBOX_*`, `LLM_ENABLED`, `ANTHROPIC_API_KEY`) | worker | `/opt/cmp/.env`, 비면 scaffold(아래 「분석·Sandbox·ENV 실행 설정」) |
 | `CMP_GCP_PROJECT`, `PROVISIONING_GCLOUD_CONFIGURATION=cmp-demo` | worker | 운영자가 둔 `/opt/cmp/secrets/gcp/key.json`(읽기 전용) → 진입점이 tmpfs gcloud 구성·ADC 생성 |
 | `CMP_PUBLIC_HOST` | edge | 비어 있으면 에지를 띄우지 않는다. 예: `<EIP>.sslip.io` |
 | `WEB_AUTH_SECRET` | web | `/opt/cmp/.env`에 없을 때만 생성(웹 로그인 세션 서명용). 웹은 `AUTH_SECRET`으로 받는다 |
@@ -175,6 +177,59 @@ aws iam simulate-principal-policy --profile cmp-aws-prod \
   --query 'EvaluationResults[0].EvalDecision'   # allowed
 docker exec cmp-demo-worker-1 sh -c 'grep -c "^\[profile cmp-conn-" "$AWS_CONFIG_FILE"'   # 역할이 등록된 AWS 연결 수 (티켓 46)
 ```
+
+## 분석·Sandbox·ENV 실행 설정 (#180, 티켓 45)
+
+웹 실제 시작(`POST /migrations`에 `target`)은 분석 → Sandbox → Planning 인계를 실제 Activity로 돈다. 데모 compose는 설정 **이름**만 연결하고 값은 `/opt/cmp/.env`에서 받는다. 비어 있으면 지금처럼 scaffold다. 넣을 수 있는 선택 줄은 [`runtime.env.example`](runtime.env.example)에 있다(값 없는 예시).
+
+| 설정 | 서비스 | 기본 | 켜면 |
+| --- | --- | --- | --- |
+| `ENV_FILE_STORE_DIR`, `ENV_FILE_ENCRYPTION_KEY` | api·worker | 항상 켜짐(키 자동 생성) | `POST /env-files`, 실제 시작의 `env_file_ref` 고정, 분석 EnvPlan·`render_env`가 같은 저장소를 읽는다 |
+| `ANALYSIS_ARTIFACT_STORE_DIR=/opt/cmp/artifact-store`, `ANALYSIS_WORKSPACE_ROOT=/opt/cmp/analysis-workspaces` | worker | 빈 값 → scaffold 분석 | 실제 분석 Activity 등록. **scaffold 시작(`target` 없음)은 분석에서 실패한다**(같은 Activity 이름, 인자 모양만 다름). 저장소는 `ARTIFACT_STORE_DIR`와 같아야 한다 |
+| `SANDBOX_KUBECONFIG=/run/cmp/sandbox/kubeconfig` | worker | 빈 값 → scaffold Sandbox | 전용 `k3d-cmp-sandbox` 클러스터로 실제 루프. 파일은 `/opt/cmp/secrets/sandbox/kubeconfig`(root, 0600). 경로만 있고 파일이 없으면 worker가 시작하지 못한다 |
+| `SANDBOX_PREBUILT_IMAGES` | worker | 빈 값 | 실제 루프의 앱 이미지(Digest 고정 JSON). `BUILD_*`가 모두 있으면 대신 실제 빌드 |
+| `LLM_ENABLED=true`, `ANTHROPIC_API_KEY` | worker | 꺼짐 | Claude 사용. 원장 `/opt/cmp/data/llm/ledger.json`, 즉시 중지 `touch /opt/cmp/data/llm/disabled` |
+| `PLANNING_TARGET_PROFILES_FILE=/opt/cmp/config/target-profiles.json` | api | 파일 없음 → 실제 시작 503 `TARGET_PROFILES_UNCONFIGURED` | 웹 `target.profile`이 고르는 대상 설정(44) |
+
+지금 데모 서버에는 Sandbox 클러스터가 없다(분석 D-08: Sandbox는 로컬 k3d). 그래서 분석만 실제로 켜면 실제 시작은 Sandbox 첫 단계(`sbx_build`)에서 멈춘다. 어떤 경로를 켤지는 박승철님과 정한다(티켓 45 협의 필요).
+
+**운영자 키와 웹**: `/env-files`는 `/connections`·`/agent-enrollments`와 같은 `X-Enrollment-Admin-Key`(= `AGENT_ENROLLMENT_ADMIN_KEY`)를 요구한다(`APPROVAL_ADMIN_KEY` 아님). compose는 이 키를 웹에 넣지 않는다. 웹 실제 모드에서 연결·`.env` 업로드·실제 시작을 쓰려면 운영자가 `/opt/cmp/web.env`에 `PLATFORM_ENROLLMENT_ADMIN_KEY=<AGENT_ENROLLMENT_ADMIN_KEY와 같은 값>`을 둔다. 웹이 그 경로를 로그인으로 막은 뒤에만 한다(위 「공개 HTTPS 에지」의 이유).
+
+### 반영 (각 단계 사용자 승인 필요)
+
+```sh
+# 1. 이 커밋을 main에 병합한 뒤 GitHub Actions Deploy demo(또는 bash infra/demo/release.sh HEAD).
+#    start.sh의 ensure-secrets.sh가 ENV_FILE_ENCRYPTION_KEY를 없을 때만 만들고 /opt/cmp/data/{env-files,analysis-workspaces,llm}을 만든다.
+# 2. (SSM 세션) 카탈로그: 예시를 복사해 실제 계정·프로젝트·State 버킷 값을 넣는다. 비밀 없음.
+sudo install -d -m 755 /opt/cmp/config
+sudo install -m 644 /opt/cmp/releases/<SHA>/infra/demo/target-profiles.example.json /opt/cmp/config/target-profiles.json
+sudo vi /opt/cmp/config/target-profiles.json
+# 3. (SSM 세션, 선택) 빌드 값: deploy-build-stack.sh가 출력한 다섯 줄(PLATFORM_ECR_REGISTRY, BUILD_*)을 /opt/cmp/.env에 추가.
+# 4. (SSM 세션, 선택, 협의 후) 분석·Sandbox·Claude 줄을 runtime.env.example에서 골라 /opt/cmp/.env에 추가.
+#    Sandbox는 kubeconfig를 /opt/cmp/secrets/sandbox/kubeconfig(root, 0600)에 먼저 둔다.
+# 5. .env를 바꿨으면 다시 릴리스한다(컨테이너가 .env를 다시 읽는다). 카탈로그만 바꿨으면 재시작 불필요(요청마다 읽는다).
+bash infra/demo/release.sh HEAD
+```
+
+### 서버 점검 (티켓 45)
+
+SSM 세션에서 root로 실행한다. 아무것도 바꾸지 않고, `.env`는 **이름만** 출력한다.
+
+```sh
+sudo bash /opt/cmp/releases/$(cat /opt/cmp/current-revision)/infra/demo/runtime-check.sh
+```
+
+| 줄 | 기대 |
+| --- | --- |
+| `revision=` | 배포한 main 커밋 앞 12자 |
+| `container=` | api·worker·temporal·DB가 `Up`, DB는 `(healthy)` |
+| `alembic=` | 그 커밋의 head(`… (head)`) |
+| worker `analysis=`·`sandbox=`·`build=`·`llm=`·`env_store=` | `real`/`scaffold`, `on`/`off`. `error:<CODE>`면 설정이 잘못됐다(예: `BUILD_SETTINGS_INCOMPLETE`, `SANDBOX_KUBECONFIG_NOT_FOUND`) |
+| api `env_store=`·`target_profiles=`·`connection_link=`·`platform_ecr_registry=` | `on`, 카탈로그 이름 목록(`error:TARGET_PROFILES_UNCONFIGURED`면 파일 없음), 링크·레지스트리 `on` |
+| `imds_guard_rules=1`, `imds_guard_service=enabled` | 티켓 54 빌드 IMDS 차단 |
+| `missing=` | 비어 있어야 한다(compose 필수 키) |
+| `optional_unset=` | 아직 켜지 않은 선택 기능 이름 |
+| `target_profiles_file=`·`sandbox_kubeconfig_file=`·`gcp_key_file=` | 배치 여부(`present`/`absent`) |
 
 ## 접속과 확인
 

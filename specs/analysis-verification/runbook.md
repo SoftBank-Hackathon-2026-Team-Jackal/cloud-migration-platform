@@ -160,6 +160,8 @@ result = run_suite(
 
 배포된 플랫폼은 EC2 한 대에서 Docker Compose로 API, 워커, Temporal을 돌린다. 그 워커에는 Sandbox 클러스터(`SANDBOX_KUBECONFIG`)가 없어 Sandbox 루프는 scaffold만 실행된다. 실제 루프는 k3d가 있는 이 컴퓨터의 워커와 로컬 Temporal로 돌린다. 이 컴퓨터의 워커를 배포된 Temporal(SSM 포트 포워딩)에 붙이면 같은 Task Queue를 듣는 EC2 워커와 작업을 나눠 가지므로, 그렇게 하지 않는다.
 
+데모 compose는 이 문서의 설정 이름(`ANALYSIS_*`, `SANDBOX_*`, `LLM_ENABLED`, `ANTHROPIC_API_KEY`)을 서버 `/opt/cmp/.env`에서 받도록 연결돼 있고, 비어 있으면 지금처럼 scaffold다(Provisioning 45, [데모 README](../../infra/demo/README.md#분석sandboxenv-실행-설정-180-티켓-45)). 실제 분석 Activity는 scaffold와 이름이 같아 한 워커는 한 경로만 등록한다. 서버 값과 경로 선택은 협의 대상이다.
+
 ## 9. 아직 없는 것
 
 실제 AWS에서의 빌드 실행(S3·ECR·Docker, D-06·D-12·승인), 인계 후 실제 계획 게시 확인, `make smoke-temporal`, 승인 API·화면, 수정 패치의 push·PR 자동 생성(후순위), 원본 쪽 테스트 자원(AI 테스트 실제 사용, D-09). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.

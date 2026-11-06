@@ -8,6 +8,8 @@
 
 웹 시작 요청 `POST /migrations`(`target` 있음)는 `env_file_ref`가 필수다. 값은 `POST /env-files` 응답의 `env_file_ref.id`(`envf-<32 hex>`) 문자열이면 되고, API가 그 파일의 최신 버전으로 `{id, version, sha256}`를 고정한다(정확한 버전을 쓰려면 객체를 보낸다). 없으면 422 `ENV_FILE_REF_REQUIRED`, 없는·지운 파일은 `ENV_FILE_NOT_FOUND`·`ENV_FILE_EXPIRED`다. 환경변수가 없는 앱은 빈 `.env`를 올린다. 이후 단계는 아래처럼 고정된 참조만 받는다.
 
+데모 서버(Provisioning 45): 저장소는 호스트 `/opt/cmp/data/env-files`(api·worker 모두 `/opt/cmp/env-files`, worker는 읽기만 하지만 저장소가 루트를 `chmod`하므로 읽기 전용 마운트는 쓰지 않는다), 키 `ENV_FILE_ENCRYPTION_KEY`는 `infra/demo/ensure-secrets.sh`가 `/opt/cmp/.env`에 없을 때만 만들고 바꾸지 않는다. 업로드는 `/connections`와 같은 운영자 키 `X-Enrollment-Admin-Key`다.
+
 ## 무엇을 어디서 부르나
 
 | 누가 | 부를 것 | 위치 | 값을 읽나 |

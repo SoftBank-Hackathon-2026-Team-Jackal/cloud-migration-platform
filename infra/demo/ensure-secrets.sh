@@ -8,6 +8,10 @@
 # - [connections-dir]/config: the API-owned generated connection config (ticket 46), shared with
 #   the worker. Holds no key. Seeded from aws/config only when missing; the API rewrites it.
 # - <secrets-dir>/gcp/: operator places key.json here out of band; this script never creates it.
+# - <secrets-dir>/sandbox/: operator places the k3d-cmp-sandbox kubeconfig here (ticket 45); only
+#   the empty directory is created so the worker's read-only mount always exists.
+# - ENV_FILE_ENCRYPTION_KEY (ticket 45, N12): base64url 32 bytes for the `.env` upload store. Kept
+#   forever once written: a different key makes every stored upload unreadable.
 set -euo pipefail
 
 env_file="${1:?env file required}"
@@ -28,12 +32,16 @@ ensure_key TEMPORAL_DB_PASSWORD 24
 ensure_key AGENT_ENROLLMENT_ADMIN_KEY 32
 ensure_key APPROVAL_ADMIN_KEY 32
 ensure_key WEB_AUTH_SECRET 32
+if ! grep -q "^ENV_FILE_ENCRYPTION_KEY=" "$env_file"; then
+  printf 'ENV_FILE_ENCRYPTION_KEY=%s\n' \
+    "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')" >>"$env_file"
+fi
 
 env_value() {
   sed -n "s/^$1=//p" "$env_file" | tail -n 1
 }
 
-install -d -m 700 "$secrets_dir" "$secrets_dir/aws" "$secrets_dir/gcp"
+install -d -m 700 "$secrets_dir" "$secrets_dir/aws" "$secrets_dir/gcp" "$secrets_dir/sandbox"
 profile="$(env_value PROVISIONING_AWS_PROFILE)"
 profile="${profile:-cmp-demo-provisioning}"
 region="$(env_value PROVISIONING_AWS_REGION)"
