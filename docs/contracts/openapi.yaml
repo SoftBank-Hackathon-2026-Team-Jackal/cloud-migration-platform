@@ -18,13 +18,28 @@ paths:
       tags:
       - migration scaffold
       summary: Start Migration
-      description: 'Start a migration. `env_file_ref` (from `POST /env-files`) is
-        optional; an unknown,
+      description: 'Start a migration. Unknown fields are 422.
 
-        changed or deleted reference is 422 `{"detail": {"code": "ENV_FILE_NOT_FOUND"
-        |
 
-        "ENV_FILE_DIGEST_MISMATCH" | "ENV_FILE_EXPIRED"}}` and nothing starts.'
+        Without `target` this is the scaffold start: `env_file_ref` (from `POST /env-files`)
+        is
+
+        optional. With `target` (the web `StartRequest`, ticket 44) the real pipeline
+        starts: `source`
+
+        and `env_file_ref` (an `envf-` id, pinned to its latest version, or an exact
+        reference) are
+
+        required and the target profile catalog supplies the target settings. Refusals
+        are
+
+        `{"detail": {"code": ...}}`: 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`,
+
+        `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`;
+        503
+
+        `TARGET_PROFILES_UNCONFIGURED` or the `.env` store codes. Nothing starts on
+        a refusal.'
       operationId: start_migration_migrations_post
       requestBody:
         content:
@@ -634,6 +649,252 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentAdminStatus'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/jobs/{job_id}:
+    get:
+      tags:
+      - on-premises agents
+      summary: Show Job
+      operationId: show_job_agent_admin_jobs__job_id__get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentJobView'
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/jobs/{job_id}/cancel:
+    post:
+      tags:
+      - on-premises agents
+      summary: Cancel
+      description: 'QUEUED → CANCELLED (never runs). RUNNING → cancel requested: downloads
+        stop and a reclaim
+
+        closes it as UNKNOWN; a Helm step already in progress finishes and is reported.'
+      operationId: cancel_agent_admin_jobs__job_id__cancel_post
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentJobView'
+        '404':
+          description: Not Found
+        '409':
+          description: Code only, e.g. JOB_ALREADY_FINISHED
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent-admin/jobs/{job_id}/teardown:
+    post:
+      tags:
+      - on-premises agents
+      summary: Teardown
+      description: 'Queue the removal of what rollout job `job_id` deployed (Helm
+        Releases, platform
+
+        Secrets/NetworkPolicies; with `delete_data` also the DB PVC and the Namespace).'
+      operationId: teardown_agent_admin_jobs__job_id__teardown_post
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeardownRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentJobView'
+        '409':
+          description: Code only, e.g. JOB_ALREADY_FINISHED
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning-admin/teardowns:
+    post:
+      tags:
+      - provisioning administration
+      summary: Start
+      description: Start tearing down what Revision `plan_id`/`revision` created (workloads
+        first).
+      operationId: start_provisioning_admin_teardowns_post
+      parameters:
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudTeardownRequest'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudTeardownView'
+        '404':
+          description: Not Found
+        '409':
+          description: Code only, e.g. TEARDOWN_IN_PROGRESS
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning-admin/teardowns/{teardown_id}:
+    get:
+      tags:
+      - provisioning administration
+      summary: Show
+      operationId: show_provisioning_admin_teardowns__teardown_id__get
+      parameters:
+      - name: teardown_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Teardown Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudTeardownView'
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning-admin/teardowns/{teardown_id}/confirm:
+    post:
+      tags:
+      - provisioning administration
+      summary: Confirm
+      description: Destroy exactly the reviewed addresses (`review.digest`); anything
+        else is refused.
+      operationId: confirm_provisioning_admin_teardowns__teardown_id__confirm_post
+      parameters:
+      - name: teardown_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Teardown Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudTeardownConfirm'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudTeardownView'
+        '404':
+          description: Not Found
+        '409':
+          description: Code only, e.g. TEARDOWN_IN_PROGRESS
         '422':
           description: Validation Error
           content:
@@ -1661,6 +1922,48 @@ components:
       - last_seen_at
       - revoked
       title: AgentAdminStatus
+    AgentJobView:
+      properties:
+        job_id:
+          type: string
+          title: Job Id
+        mode:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mode
+        agent_id:
+          type: string
+          title: Agent Id
+        status:
+          type: string
+          enum:
+          - QUEUED
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - UNKNOWN
+          - EXPIRED
+          - CANCELLED
+          title: Status
+        code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+        cancel_requested:
+          type: boolean
+          title: Cancel Requested
+      additionalProperties: false
+      type: object
+      required:
+      - job_id
+      - mode
+      - agent_id
+      - status
+      - code
+      - cancel_requested
+      title: AgentJobView
     AgentList:
       properties:
         agents:
@@ -2091,11 +2394,18 @@ components:
           - $ref: '#/components/schemas/QueuedWork'
           - $ref: '#/components/schemas/ProductionRolloutJob'
           - $ref: '#/components/schemas/NetworkPreflightJob'
+          - $ref: '#/components/schemas/TeardownJob'
           title: Payload
         status:
           type: string
           const: RUNNING
           title: Status
+        expires_in_seconds:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Expires In Seconds
       additionalProperties: false
       type: object
       required:
@@ -2103,6 +2413,81 @@ components:
       - payload
       - status
       title: ClaimedJob
+    CloudTeardownConfirm:
+      properties:
+        review_digest:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Review Digest
+      additionalProperties: false
+      type: object
+      required:
+      - review_digest
+      title: CloudTeardownConfirm
+    CloudTeardownRequest:
+      properties:
+        plan_id:
+          type: string
+          maxLength: 120
+          minLength: 1
+          pattern: ^[A-Za-z0-9._-]+$
+          title: Plan Id
+        revision:
+          type: integer
+          minimum: 1.0
+          title: Revision
+        delete_data:
+          type: boolean
+          title: Delete Data
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - plan_id
+      - revision
+      title: CloudTeardownRequest
+    CloudTeardownView:
+      properties:
+        teardown_id:
+          type: string
+          title: Teardown Id
+        phase:
+          type: string
+          enum:
+          - WORKLOADS
+          - DESTROY_PLAN
+          - AWAITING_CONFIRMATION
+          - DESTROYING
+          - FINISHED
+          title: Phase
+        delete_data:
+          type: boolean
+          title: Delete Data
+          default: false
+        workloads:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Workloads
+        review:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Review
+        result:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Result
+      additionalProperties: false
+      type: object
+      required:
+      - teardown_id
+      - phase
+      title: CloudTeardownView
     CloudWorkloadSettings:
       properties:
         namespace:
@@ -2214,6 +2599,11 @@ components:
           - type: string
           - type: 'null'
           title: Launch Stack Url
+        platform_principal_arn:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Platform Principal Arn
         stack_name:
           anyOf:
           - type: string
@@ -2345,6 +2735,11 @@ components:
           - type: string
           - type: 'null'
           title: Launch Stack Url
+        platform_principal_arn:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Platform Principal Arn
       type: object
       required:
       - connection_id
@@ -2867,18 +3262,39 @@ components:
           title: Source Provider
           default: AWS
         target_provider:
-          type: string
-          const: GCP
+          anyOf:
+          - type: string
+            enum:
+            - AWS
+            - GCP
+            - ON_PREM
+          - type: 'null'
           title: Target Provider
-          default: GCP
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/StartTarget'
+          - type: 'null'
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/StartSource'
+          - type: 'null'
         env_file_ref:
           anyOf:
           - $ref: '#/components/schemas/ContentRef'
+          - type: string
+            pattern: ^envf-[a-f0-9]{32}$
           - type: 'null'
+          title: Env File Ref
+      additionalProperties: false
       type: object
       required:
       - project_id
       title: MigrationRequest
+      description: 'Ticket 44: without `target` this is the scaffold start (unchanged);
+        with it the real
+
+        pipeline starts and `source` and `env_file_ref` are required. Unknown fields
+        are refused.'
     MigrationStatus:
       properties:
         workflow_id:
@@ -4024,6 +4440,8 @@ components:
           - READY
           - FAILED
           - UNKNOWN
+          - EXPIRED
+          - CANCELLED
           title: State
         code:
           anyOf:
@@ -4160,6 +4578,79 @@ components:
       - name
       - key
       title: SecretRefV2
+    StartSource:
+      properties:
+        kind:
+          type: string
+          const: GITHUB_PUBLIC
+          title: Kind
+        repository_id:
+          type: integer
+          minimum: 1.0
+          title: Repository Id
+        full_name:
+          type: string
+          maxLength: 200
+          pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+          title: Full Name
+        commit_sha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+          title: Commit Sha
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - repository_id
+      - full_name
+      - commit_sha
+      title: StartSource
+      description: 'Web `StartRequest.source`: a public GitHub repository pinned to
+        a commit.'
+    StartTarget:
+      properties:
+        provider:
+          type: string
+          enum:
+          - AWS
+          - GCP
+          - ON_PREM
+          title: Provider
+        profile:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9][a-z0-9-]*$
+          title: Profile
+        region:
+          anyOf:
+          - type: string
+            maxLength: 63
+            minLength: 1
+          - type: 'null'
+          title: Region
+        agent_id:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Agent Id
+        credential_ref:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Credential Ref
+      additionalProperties: false
+      type: object
+      required:
+      - provider
+      - profile
+      title: StartTarget
+      description: Web `StartRequest.target` (cloud-migration-web `contract/rest.schema.json`),
+        plus AWS.
     TargetSelectionV2:
       properties:
         ref:
@@ -4198,6 +4689,95 @@ components:
       - access_ref
       - capabilities_ref
       title: TargetSelectionV2
+    TeardownJob:
+      properties:
+        mode:
+          type: string
+          const: ENVIRONMENT_TEARDOWN
+          title: Mode
+        job_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Job Id
+        source_job_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Source Job Id
+        environment_id:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Environment Id
+        agent_id:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Agent Id
+        cluster_uid:
+          type: string
+          minLength: 1
+          pattern: ^\S(?:.*\S)?$
+          title: Cluster Uid
+        namespace:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Namespace
+        releases:
+          items:
+            type: string
+            maxLength: 53
+            minLength: 1
+            pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          type: array
+          maxItems: 2
+          minItems: 1
+          title: Releases
+        database_release:
+          type: string
+          maxLength: 53
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Database Release
+        database_secret:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$
+          title: Database Secret
+        delete_data:
+          type: boolean
+          title: Delete Data
+      additionalProperties: false
+      type: object
+      required:
+      - mode
+      - job_id
+      - source_job_id
+      - environment_id
+      - agent_id
+      - cluster_uid
+      - namespace
+      - releases
+      - database_release
+      - database_secret
+      - delete_data
+      title: TeardownJob
+    TeardownRequest:
+      properties:
+        delete_data:
+          type: boolean
+          title: Delete Data
+          default: false
+      additionalProperties: false
+      type: object
+      title: TeardownRequest
     Transfer:
       properties:
         bytes:

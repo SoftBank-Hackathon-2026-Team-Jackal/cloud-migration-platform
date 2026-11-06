@@ -100,3 +100,6 @@ TDD 메모: API·실행 루프·Chart는 실패 테스트를 먼저 작성했다
 - ClusterRole에 클러스터 전체 Secret 읽기·쓰기가 포함된다(H2). 다른 Namespace 보호는 코드 검사(`NAMESPACE_NOT_OWNED`)에 의존한다.
 - Agent가 실행할 ON_PREM Plan을 운영 코드가 게시하는 경로는 없다(18). 검증은 테스트 지원 코드로 Plan을 게시했다.
 - `spec.md` 요구사항·수용 기준은 바뀌지 않았다. 04A 등록 계약 변경(H3)과 폐기·마지막 접속은 `onprem-shared-deployment.md`·`shared-contracts.md`·OpenAPI에 반영했다.
+
+## 후속 (52)
+- 52 후속(#187): H6의 "401/403이면 종료 코드 2"는 "로그 후 SIGTERM까지 대기"로 바뀌었다(재시작 반복 방지). Chart에 프록시 값·probe 이미지 기본값이 생기고 ClusterRole의 `watch`가 빠졌다. [52](52-agent-job-lifecycle.md) D12~D16.

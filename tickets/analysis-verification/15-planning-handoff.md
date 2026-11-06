@@ -19,6 +19,7 @@ Blocked by: 14C, 21, 22, 25(빌드 증거). D-02는 결정됨(로컬 불변 저�
   - 등록 활동 `register_planning_input`: 민서님의 `register_planning_input`(DB 등록 함수)을 Worker의 세션으로 호출(HTTP·관리자 토큰을 쓰지 않는다). 같은 입력이면 같은 Digest, 변경되면 새 Digest
   - 부모 Workflow: Sandbox 통과 직후, 계획 게시(`publish_migration_plan`) 전에 등록 활동 호출(`workflow.patched("planning-handoff-v1")`, 실제 경로 입력일 때만). 문자열(scaffold) 입력과 기존 이력은 그대로
   - 시작 설정 `planning`(대상 선택·대상 설정·환경 참조). `.env` 참조는 ENV-02(민서님)가 생기기 전까지 시작 설정으로 받는 임시 경로
+  - (2026-11-06, Provisioning 44 #179) 웹 시작 요청도 API가 같은 `planning` 설정을 만들어 넣는다(운영자 대상 Profile 카탈로그). 이 티켓의 인계 코드는 바뀌지 않는다
   - 무효 처리: 검증 뒤 대상 선택 버전·요구사항·분석 버전이 바뀌면 이전 검증을 넘기지 않는다
   - 문서: `run_suite`를 다른 `base_url`·인증 참조로 실행하는 예시, 배포 직후에는 준비 검사만·데이터 이전 후 테스트 묶음 실행이라는 순서
 - 제외: Planning·Preview 구현과 대조 규칙(민서님), Production 테스트 실행 시점(D-10), 승인 화면·API

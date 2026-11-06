@@ -69,3 +69,4 @@ result = builder.build("s3://source-bucket/migration-001/<sha256>.tar.gz")
 - 실제 S3 버킷/ECR 저장소와 IAM 테스트 권한은 제공되지 않아 AWS 서비스 통합 호출, 대상 클러스터 Pull/Ready는 미검증이다. ECR 저장소는 `IMMUTABLE` 태그 설정이 필요하다. Docker 원시 출력은 로그에 저장하지 않고 안전한 상태·오류 기록만 남긴다.
 - 병합 후 입력 경계 정정: `ImageBuilder(context).build(source_uri)`로 소스 산출물 필드는 URI 하나가 됐다. 작업/시도 ID·아키텍처·ECR/로그 설정은 빌더 준비 맥락으로 분리했다. 새 `attempt_id`가 별도 이미지 태그를 사용하고 동일 시도는 재사용하는지 검증했다. 이 수정의 `make check`는 pytest 197개와 Ruff 검사를 통과했다.
 - 후속 [Issue #1](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/1)에서 다중 APPLICATION 대응을 위해 Builder 맥락에 `resource_id`를 추가하고 선택적 소스 S3 Version ID를 공개 호출에 열었다. 위 원래 #17 수용/검증 기록은 당시 범위를 나타내며 후속 변경의 실 AWS 검증을 뜻하지 않는다.
+- 후속 [54](54-build-isolation.md)(#189): 빌드 명령에 `--network default`를 고정하고 `BUILDX_BUILDER`를 지워, `RUN`이 호스트의 IMDS 차단 규칙이 걸린 `docker0`에서만 돈다. 공개 호출(`ImageBuilder`)은 그대로다.

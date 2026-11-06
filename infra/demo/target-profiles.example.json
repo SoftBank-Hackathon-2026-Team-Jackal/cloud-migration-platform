@@ -1,0 +1,103 @@
+{
+  "_comment": "Ticket 44 target profile catalog (example; placeholder accounts/projects/buckets). Copy to /opt/cmp/config/target-profiles.json and set real values. No secrets: credential_ref/state_ref are references only.",
+  "profiles": {
+    "onprem-k3s-basic": {
+      "provider": "ON_PREM",
+      "namespace": "cmp-app",
+      "storage_class": "local-path",
+      "database_image": "docker.io/library/postgres@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a"
+    },
+    "gcp-vm-basic": {
+      "provider": "GCP",
+      "settings": {
+        "environment_id": "demo-001",
+        "project_id": "sbh26-test",
+        "region": "asia-northeast3",
+        "credential_ref": {
+          "id": "credential-001",
+          "version": "1"
+        },
+        "state_ref": {
+          "id": "state-001",
+          "version": "1"
+        },
+        "state_bucket": "existing-state-bucket",
+        "state_key": "cmp/gcp/demo-001/terraform.tfstate",
+        "state_region": "ap-northeast-2",
+        "state_account_id": "123456789012",
+        "cluster_name": "cmp-demo",
+        "subnet_cidr": "10.30.0.0/20",
+        "pods_cidr": "10.32.0.0/14",
+        "services_cidr": "10.36.0.0/20",
+        "master_cidr": "172.16.0.0/28",
+        "api_access_cidrs": [
+          "203.0.113.10/32"
+        ],
+        "release_channel": "REGULAR",
+        "node_machine_type": "e2-standard-2",
+        "node_count": 2,
+        "node_disk_gib": 60,
+        "node_service_account_email": "cmp-node@sbh26-test.iam.gserviceaccount.com"
+      },
+      "workloads": {
+        "namespace": "cmp-app",
+        "storage_class": "pd-balanced",
+        "database_image": "docker.io/library/postgres@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a"
+      }
+    },
+    "aws-eks-basic": {
+      "provider": "AWS",
+      "settings": {
+        "environment_id": "demo-001",
+        "account_id": "123456789012",
+        "region": "ap-northeast-2",
+        "credential_ref": {
+          "id": "credential-001",
+          "version": "1"
+        },
+        "state_ref": {
+          "id": "state-001",
+          "version": "1"
+        },
+        "state_bucket": "existing-state-bucket",
+        "state_key": "cmp/demo-001/terraform.tfstate",
+        "cluster_name": "cmp-demo",
+        "kubernetes_version": "1.33",
+        "vpc_cidr": "10.20.0.0/16",
+        "subnets": [
+          {
+            "cidr": "10.20.1.0/24",
+            "zone": "ap-northeast-2a",
+            "role": "PUBLIC"
+          },
+          {
+            "cidr": "10.20.2.0/24",
+            "zone": "ap-northeast-2a",
+            "role": "PRIVATE"
+          },
+          {
+            "cidr": "10.20.3.0/24",
+            "zone": "ap-northeast-2c",
+            "role": "PUBLIC"
+          },
+          {
+            "cidr": "10.20.4.0/24",
+            "zone": "ap-northeast-2c",
+            "role": "PRIVATE"
+          }
+        ],
+        "api_access_cidrs": [
+          "203.0.113.10/32"
+        ],
+        "node_instance_type": "t3.large",
+        "node_count": 2,
+        "node_disk_gib": 60
+      },
+      "workloads": {
+        "namespace": "cmp-app",
+        "storage_class": "gp3",
+        "database_image": "docker.io/library/postgres@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a"
+      }
+    }
+  }
+}

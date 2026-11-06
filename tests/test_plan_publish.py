@@ -294,7 +294,8 @@ def test_preview_api_then_approval_starts_onprem_execution(db, store, tmp_path, 
     import asyncio
 
     result = asyncio.run(ActivityEnvironment().run(outcome.execute_on_prem_plan, claim))
-    assert (result["status"], result["code"]) == ("UNKNOWN", "AGENT_OFFLINE")
+    # Ticket 52 (D3): not started before the wait ended → closed as EXPIRED, nothing ran.
+    assert (result["status"], result["code"]) == ("FAILED", "AGENT_OFFLINE")
 
 
 def test_preview_api_requires_an_authorized_approver(db, store, tmp_path, client, onprem):
@@ -374,7 +375,7 @@ def test_aws_plan_failure_and_location_mismatch_are_not_published(db, store, tmp
     pub = publisher(db, store, tmp_path, aws_profile="fixture", terraform_bin=str(terraform))
     result = pub.publish(MIGRATION)
     assert (result["status"], result["code"]) == ("FAILED", "PLAN_FAILED")
-    assert result["issues"] == ["PLAN_COMMAND_FAILED"]
+    assert result["issues"] == ["PLAN_COMMAND_FAILED", "PLAN_STEP_PLAN"]  # 46: step code
     assert "TOP_SECRET" not in json.dumps(result)
     payload, _ = planning_request()
     selection = {**payload["target_selection"], "provider": "AWS", "location": "us-east-1"}

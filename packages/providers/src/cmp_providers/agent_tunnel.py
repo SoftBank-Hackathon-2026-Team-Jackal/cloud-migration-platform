@@ -31,6 +31,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cmp_providers.agent_runtime import halt
 from cmp_providers.onprem_agent import (
     ENVIRONMENT,
     MANAGED,
@@ -651,7 +652,8 @@ def run_tunnel(
     log: Callable[[dict], None],
     max_backoff: float = 60,
 ) -> int:
-    """`wait(seconds)` returns True when a stop was requested. Exit 2 on revocation (W9)."""
+    """`wait(seconds)` returns True when a stop was requested. On revocation (W9) the tunnel is
+    taken down and the loop idles until a stop (ticket 52, D14), then exits with code 2."""
     failures = 0
     try:
         while True:
@@ -661,7 +663,8 @@ def run_tunnel(
             except AgentTransportError as exc:
                 if str(exc) == "AGENT_UNAUTHORIZED":
                     log({"event": "stopped", "code": "AGENT_UNAUTHORIZED"})
-                    return UNAUTHORIZED_EXIT
+                    manager.shutdown()
+                    return halt(wait)
                 delay = min(2**failures, max_backoff)
                 failures += 1
                 log({"event": "retry", "code": str(exc), "seconds": delay})

@@ -120,6 +120,34 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${SuitePrefix}/*'
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${LogPrefix}/*'
 
+  # Ticket 23b (#205), ADR-005: the instance role is the platform principal of environment
+  # connections (API CONNECTION_PLATFORM_AWS_PROFILE=cmp-demo-build). Cross-account AssumeRole needs
+  # this caller-side allow besides the user's trust policy. A separate inline policy so the build
+  # policy keeps its own scope.
+  ConnectionAssumePolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref InstanceRoleName
+      PolicyName: cmp-demo-connections
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Any account (the user's) and any role name (CloudFormation generates it), but only
+          # roles carrying the tag both infra/connections templates put on the connection role,
+          # and only with a platform-issued External ID (`cmp-` + 32 hex). The tag also keeps
+          # same-account roles that merely trust the account root out of reach.
+          - Sid: ConnectionAssumeRole
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !Sub 'arn:${AWS::Partition}:iam::*:role/*'
+            Condition:
+              StringEquals:
+                iam:ResourceTag/cmp:managed-by: cloud-migration-platform
+              StringLike:
+                sts:ExternalId: cmp-*
+              'Null':
+                sts:ExternalId: 'false'
+
 Outputs:
   RepositoryName:
     Value: !Ref BuildRepository

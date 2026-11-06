@@ -7,6 +7,8 @@ from cmp_worker.activities.migration import copy_data, shift_traffic, verify_tar
 from cmp_worker.activities.network_preflight import build_network_preflight_activities
 from cmp_worker.workflows.analysis import AnalysisWorkflow
 from cmp_worker.workflows.approval import ProvisioningApprovalWorkflow
+from cmp_worker.workflows.cloud_teardown import CloudTeardownWorkflow
+from cmp_worker.workflows.connection_check import GcpConnectionCheckWorkflow
 from cmp_worker.workflows.data_migration import DataMigrationWorkflow
 from cmp_worker.workflows.migration import MigrationWorkflow
 from cmp_worker.workflows.pull_refresh import GcpPullSecretRefreshWorkflow
@@ -58,6 +60,8 @@ def create_workflow_worker(client: Client) -> Worker:
             SandboxVerificationWorkflow,
             TrafficShiftWorkflow,
             GcpPullSecretRefreshWorkflow,  # ticket 29
+            CloudTeardownWorkflow,  # ticket 53
+            GcpConnectionCheckWorkflow,  # ticket 48
             DataMigrationWorkflow,
         ],
         # Ticket 49 F7: the MigrationWorkflow failure report runs where the Workflow runs, so it

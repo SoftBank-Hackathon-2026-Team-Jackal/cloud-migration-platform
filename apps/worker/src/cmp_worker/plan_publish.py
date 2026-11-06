@@ -21,6 +21,7 @@ from cmp_api.approvals import (
     latest_revision,
     publish_plan_revision,
 )
+from cmp_api.connections import ConnectionFailure, check_target_connection
 from cmp_api.onprem_rollout import LocalArtifactStore, RolloutError
 from cmp_api.plan_inputs import (
     PlanInputError,
@@ -51,6 +52,7 @@ from cmp_contracts.shared_deployment_v2 import SecretRefV2
 from cmp_providers.app_renderer import ApplicationRenderError, render_application
 from cmp_providers.application import prepare_application, resolve_application
 from cmp_providers.artifacts import canonical_json_bytes, sha256_bytes, sha256_json
+from cmp_providers.aws_credentials import connection_id_of
 from cmp_providers.aws_preview import plan_aws_infrastructure
 from cmp_providers.chart_package import package_chart
 from cmp_providers.cloud_workload_preview import cloud_workload_preview
@@ -108,6 +110,18 @@ class PublishFailure(Exception):
         super().__init__(code)
         self.code = code
         self.issues = sorted(set(issues or [code]))
+
+
+def _check_target_connection(session: Session, request) -> None:
+    """Ticket 46 (C5): a connection `credential_ref` must be a verified target in the Plan account."""
+    try:
+        connection_id = connection_id_of(request.credential_ref)
+        if connection_id is not None:
+            check_target_connection(session, connection_id, account_id=request.account_id)
+    except ProvisioningInputError as error:
+        raise PublishFailure("PLAN_FAILED", _codes(error)) from None
+    except ConnectionFailure as failure:
+        raise PublishFailure("PLAN_FAILED", [failure.code]) from None
 
 
 def _codes(error: ProvisioningInputError) -> list[str]:
@@ -307,7 +321,7 @@ class PlanPublisher:
                     env = self._env(registration, spec, registration.target.namespace)
                     manifest, preview = self._onprem(session, registration, spec, plan, env)
                     return manifest, _with_env(preview, env), [*pending, *_pending(env)]
-                manifest, preview = self._cloud(registration, plan)
+                manifest, preview = self._cloud(session, registration, plan)
                 return manifest, preview, pending
 
             return self._publish_revision(
@@ -513,13 +527,15 @@ class PlanPublisher:
 
     # -- AWS / GCP -------------------------------------------------------------------------
 
-    def _cloud(self, registration, plan) -> tuple[PlanManifest, Preview]:
+    def _cloud(self, session, registration, plan) -> tuple[PlanManifest, Preview]:
         if self._cloud_root is None:
             raise PublishFailure("PLAN_FAILED", ["ARTIFACT_ROOT_NOT_CONFIGURED"])
         try:
             request = cloud_plan_input(registration, plan)
         except PlanInputError as error:
             raise PublishFailure("PLAN_FAILED", [error.code]) from None
+        if registration.target.provider == "AWS":
+            _check_target_connection(session, request)
         folder = self._cloud_root / f"{plan['plan_id']}-r{plan['revision']}"
         if folder.exists() or folder.is_symlink():
             return self._recover(folder, request)

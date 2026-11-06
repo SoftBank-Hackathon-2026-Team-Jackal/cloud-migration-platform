@@ -6,6 +6,8 @@ from temporalio.worker import Worker
 from cmp_worker.activities.approval import ApprovalActivities
 from cmp_worker.activities.aws_infra import AwsInfraActivities
 from cmp_worker.activities.aws_workloads_cli import build_aws_workloads_activities
+from cmp_worker.activities.cloud_teardown import build_cloud_teardown_activities
+from cmp_worker.activities.gcp_connection import verify_gcp_connection
 from cmp_worker.activities.gcp_infra import GcpInfraActivities
 from cmp_worker.activities.gcp_workloads_cli import build_gcp_workloads_activities
 from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
@@ -34,6 +36,7 @@ def create_worker(client: Client) -> Worker:
     )
     plans = build_plan_publish_activities(SessionLocal)
     gcp_workloads = build_gcp_workloads_activities(SessionLocal)
+    teardown = build_cloud_teardown_activities(SessionLocal)  # ticket 53
     return Worker(
         client,
         task_queue=PROVISIONING_QUEUE,
@@ -46,12 +49,17 @@ def create_worker(client: Client) -> Worker:
             approval.claim_approved_execution,
             approval.complete_approved_execution,
             approval.get_migration_handoff,  # ticket 13
+            approval.get_traffic_handover,  # ticket 50
             aws_infra.execute_aws_plan,
             build_aws_workloads_activities(SessionLocal).execute_aws_workloads,
             gcp_workloads.execute_gcp_workloads,  # ticket 11
             gcp_workloads.refresh_gcp_pull_secrets,  # ticket 29: Schedule-driven refresh
             execute_on_prem_plan_activity(),  # ticket 12
             gcp_infra.execute_gcp_plan,  # ticket 10
+            teardown.teardown_cloud_workloads,  # ticket 53: operator-started cloud teardown
+            teardown.plan_cloud_destroy,
+            teardown.apply_cloud_destroy,
             emit_migration_event,  # ticket 24: Workflow-side event emission
+            verify_gcp_connection,  # ticket 48: GCP_TARGET connection check
         ],
     )

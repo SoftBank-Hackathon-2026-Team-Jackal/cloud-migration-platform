@@ -17,6 +17,8 @@
 | `sha256_bytes`, `canonical_json_bytes`, `sha256_json`, `verify_artifact_bytes` | `cmp_providers.artifacts` | 순수 바이트/정규화 JSON Digest 및 조회한 실제 바이트 검증 |
 | `approval_issues`, `approval_target`, `verify_approval_target` | `cmp_providers.plans` | 계획 완전성·Preview 일치·기록된 승인 대상 및 요청 실행 범위 비교 |
 | `bind_values`, `verify_bound_values` | `cmp_providers.bindings` | 승인된 동적 자리만 채우고 나머지 Values 변경 거절 |
+| `run_graceful`, `CommandResult.stopped`, `failed_apply_refs` | `cmp_providers.terraform_process` | Terraform 명령 시한·취소 시 SIGTERM → 유예 → SIGKILL, 중단 뒤 lock·보존 State 보고(53). `aws_apply.CommandResult`는 같은 클래스 |
+| `plan_destroy`, `apply_destroy`, `destroy_addresses`, `review_digest` | `cmp_providers.cloud_destroy` | 실행된 Revision의 Spec으로 검토된 destroy. 검토 Digest = 환경·삭제 주소·GKE 보호 해제 여부(53) |
 
 `cmp_*`는 기존 packages/contracts 또는 packages/providers의 Python 패키지다. 새 하위 패키지·런타임 의존성은 추가하지 않았다. 엄격한 Pydantic 모델로 알 수 없는 필드와 암묵적 타입 변환을 거절한다.
 
@@ -97,7 +99,7 @@ identity = approval_target(manifest, preview)
 
 ## 승인된 ON_PREM 배포 소비자 (12)
 
-`cmp_api.onprem_rollout`이 07의 승인 기록·`latest_revision`·`manifest_digest`와 `verify_artifact_bytes`를 재사용해 Agent 작업을 만들고, 04A의 `agent_jobs`·인증·결과 보고와 04B의 Values 모델을 그대로 쓴다. 새 공통 모델은 Agent 작업 본문 `cmp_contracts.onprem_rollout.ProductionRolloutJob`뿐이다. 실행 dispatch는 08 소유 계약을 따른다. 상세는 [공통 배포 계약](onprem-shared-deployment.md#승인된-운영-배포-12-36)을 따른다.
+`cmp_api.onprem_rollout`이 07의 승인 기록·`latest_revision`·`manifest_digest`와 `verify_artifact_bytes`를 재사용해 Agent 작업을 만들고, 04A의 `agent_jobs`·인증·결과 보고와 04B의 Values 모델을 그대로 쓴다. 새 공통 모델은 Agent 작업 본문 `cmp_contracts.onprem_rollout.ProductionRolloutJob`뿐이다. 실행 dispatch는 08 소유 계약을 따른다. 52(#187)가 작업 본문을 바꾸지 않고 `agent_jobs`에 시한(`deadline_at`)·취소 요청(`cancel_requested_at`) 열과 상태 `EXPIRED`·`CANCELLED`를 더했다(상태 조회 `state`도 같은 두 값). claim 응답에는 선택 필드 `expires_in_seconds`가 붙는다. 새 작업 본문 `cmp_contracts.onprem_teardown.TeardownJob`(`ENVIRONMENT_TEARDOWN`)과 관리자 경로 `GET /agent-admin/jobs/{job_id}`, `POST .../cancel`, `POST .../teardown`이 생겼다. 상세는 [공통 배포 계약](onprem-shared-deployment.md#승인된-운영-배포-12-36)을 따른다.
 
 ## 온프레미스 Preview 생성 (12A)
 
@@ -108,6 +110,25 @@ identity = approval_target(manifest, preview)
 ## Provisioning 결과 인계 (13)
 
 `cmp_contracts.provisioning_result.ProvisioningResult` v1이 Provisioning → Data/Traffic Migration 인계 계약이다. `cmp_providers.provisioning_result`의 `build_provisioning_result`(실행 상태·코드·단계·refs → 결과), `handoff`(소비자별 뷰·`proceed`/`blocked_by`), `public_summary`(사용자 요약)는 순수 함수다. 저장·조회는 `cmp_api.provisioning_results`(`add_result`/`load_result`, 테이블 `provisioning_results`), Worker 진입점은 Activity `get_migration_handoff`, 사용자 조회는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`다. 필드·판정 규칙은 [티켓 13 결정 R1~R10](../../tickets/provisioning/13-result-handoff.md#착수-결정-2026-11-05)을 따른다. Provider 실행 refs의 표준 키(R4)는 이 결과의 입력이며 기존 키는 유지한다.
+
+**인계 조회 방식 (50, #185):** 이름·코드는 `cmp_contracts.handoff`에 있다. 두 Activity 모두 Provisioning 큐에서 저장된 결과를 Plan Revision(AWS/GCP는 **워크로드** Revision)으로 읽고, 조회 시점에 ON_PREM 터널 상태를 합친다.
+
+| Activity | 입력 | 출력 | 소비자 |
+| --- | --- | --- | --- |
+| `get_migration_handoff` | `{plan_id, revision, consumer}` | R7 뷰 `{plan_id, revision, consumer, common, database\|application, proceed, blocked_by}` | 데이터 이전(`cmp_data.handoff.target_endpoint`, DATA_MIGRATION) |
+| `get_traffic_handover` | `TrafficHandoverRequest{plan_id, revision}` | `TrafficHandoff{contract_version:"1", plan_id, revision, provider, proceed, blocked_by, handover}` | 상위 Workflow → `TrafficShiftWorkflow` 요청의 `handover`(#128) |
+
+`handover`(`TrafficHandover`)는 Traffic `cmp_traffic.contracts.Handover`와 필드·기본값이 같다(계약 테스트가 실제 모델로 고정). 변환 `cmp_providers.provisioning_result.traffic_handover(view)`:
+
+| Handover | 인계 뷰(TRAFFIC_MIGRATION) |
+| --- | --- |
+| `status` | `common.status`: READY→READY, FAILED→FAILED, INFRASTRUCTURE_READY·UNKNOWN·결과 없음→UNKNOWN |
+| `external_endpoint` | `http://{application.external_host}:{application.external_port}`(둘 다 있을 때만) |
+| `port` | `application.external_port`(AWS/GCP LB 80, ON_PREM 터널 쪽 앱 포트). 앱 `port`(클러스터 안 컨테이너 포트)는 쓰지 않는다 |
+| `health_path` | `application.health_path`, 없으면 `/health` |
+| `ready` | `proceed` ∧ status READY ∧ 목적지 있음 ∧ `application.ready` ∧ HTTP·TLS 없음(P0). `TrafficHandoff.proceed`와 같다 |
+
+막힘 코드(`blocked_by`, 첫 값이 원인): `RESULT_NOT_FOUND`, `WORKLOADS_NOT_DEPLOYED`, `PROVISIONING_NOT_READY`, `DATABASE_NOT_READY`, `TUNNEL_DB_NOT_VERIFIED`, `APPLICATION_NOT_READY`, `EXTERNAL_ENDPOINT_UNAVAILABLE`, `TUNNEL_STATUS_STALE`. 조회 자체가 실패하면 Workflow가 `HANDOFF_UNAVAILABLE`로 기록한다. 데이터 이전이 읽는 DATA_MIGRATION 필드는 `proceed`, `blocked_by`, `common.namespace`, `common.cluster.{kind,name,location,account_id}`, `database.{release,name,tunnel_endpoint}`이며 이 티켓에서 바꾸지 않았다. AWS/GCP DB 외부 주소는 두지 않는다(CDC는 `kubectl exec`, 클러스터 사이 주소는 WireGuard `peer_host` 입력). 상세는 [50 H1~H8](../../tickets/provisioning/50-handoff-contract.md#착수-결정-2026-11-06).
 
 ## 터널 설정 교환 (16)
 
@@ -161,8 +182,16 @@ API 설정(`cmp_api.config`):
 - `connection_platform_aws_profile`: verify가 쓰는 플랫폼 주체 프로필이자 `source_profile`
 - `connection_platform_principal_arn`: 템플릿 신뢰 대상
 - `connection_template_base_url`: S3 템플릿 접두어
-- `connection_aws_config_file`, `connection_aws_base_config_file`
+- `connection_aws_config_file`, `connection_aws_base_config_file`: API가 시작·역할 등록·삭제 때 다시 쓴다(46)
 - `connection_gcp_project_id`
+- `platform_ecr_aws_profile`(46): Agent ECR 토큰 발급 주체. 없으면 `connection_platform_aws_profile`(41 동작)
+
+**Provisioning의 연결 사용 (46):** AWS Plan 입력 `credential_ref`(`VersionRef`)의 `id`가 연결 프로필 이름 `cmp-conn-<12 hex>`(44의 시작 요청이 `PlanningSettings.target.settings.credential_ref`에 넣는 값) 또는 연결 ID `conn-<12 hex>`면 대상 연결이고, `version`은 `"1"`이다(Role ARN은 한 번만 등록). 새 계약 필드는 없다. 두 접두어로 시작하지만 형식이 틀리면 `INVALID_CREDENTIAL_REF`, 그 밖의 값이면 worker 고정 프로필(이전 동작).
+- `cmp_providers.aws_credentials`: `connection_profile(id)`, `connection_id_of(ref)`, `resolve_aws_profiles(ref, *, platform_profile) -> AwsProfiles(provider, state, connection_id)`. `plan_aws_infrastructure`·`apply_aws_infrastructure`의 `aws_profile`은 플랫폼 프로필(State backend·기본값) 뜻이다. S3 backend `init`에 `-backend-config=profile=<state>`가 항상 붙는다.
+- `cmp_api.connections.check_target_connection(session, id, *, account_id)`: Plan 게시 전 검사. 실패 `PLAN_FAILED` + `TARGET_CONNECTION_NOT_FOUND`·`TARGET_CONNECTION_KIND_MISMATCH`·`TARGET_CONNECTION_NOT_VERIFIED`·`TARGET_CONNECTION_ACCOUNT_MISMATCH`.
+- 연결 경로 Plan: `cluster_name`이 `cmp-`로 시작해야 한다(`INVALID_CLUSTER_NAME`).
+- AWS Plan 명령 실패 issues: 첫 코드(계정 확인 단계는 `AWS_IDENTITY_UNAVAILABLE`, 그 밖은 `PLAN_COMMAND_FAILED`) + 단계 코드 `PLAN_STEP_IDENTITY|INIT|VALIDATE|PLAN|SHOW`(경로 `terraform.<단계>`).
+- AWS 워크로드: `ApprovedWorkloads.runtime_for(approved)` 훅, `Approved.spec`(승인된 SPEC 문서), `CliRuntime.with_profile`. 응답 추가: `POST /connections`·`GET /connections/{id}`의 `platform_principal_arn`(AWS만, 설정 없으면 `null`).
 
 ## 이전 이벤트 저장소·SSE (24)
 
@@ -177,7 +206,7 @@ API 설정(`cmp_api.config`):
 | `POST /env-files` | 본문 = `.env` 원본 바이트(`application/octet-stream` 또는 `text/plain`, UTF-8, 64 KiB 이하) | 201 `{env_file_ref: {id: "envf-<32 hex>", version: "1", sha256}, keys: [이름], warnings: [{code: "ENV_KEY_DUPLICATED", key}]}`. `sha256`은 원본 바이트 기준 |
 | `POST /env-files/{id}` | 같은 본문 | 201, 같은 `id`의 다음 `version`. 이전 버전은 보관 기간까지 읽을 수 있다 |
 | `DELETE /env-files/{id}` | — | 204. 모든 버전 삭제, 반복 호출도 204 |
-| `POST /migrations` | 선택 `env_file_ref: ContentRef` | 없으면 지금과 같다. 있으면 저장소에 같은 `version`·`sha256`이 있어야 하고, 아니면 422 `ENV_FILE_NOT_FOUND`·`ENV_FILE_DIGEST_MISMATCH`·`ENV_FILE_EXPIRED`(시작하지 않음) |
+| `POST /migrations` | 선택 `env_file_ref: ContentRef` 또는 `envf-<32 hex>`(44) | 없으면 지금과 같다. 있으면 저장소에 같은 `version`·`sha256`이 있어야 하고, 아니면 422 `ENV_FILE_NOT_FOUND`·`ENV_FILE_DIGEST_MISMATCH`·`ENV_FILE_EXPIRED`(시작하지 않음). 문자열 id는 시작 순간 최신 버전으로 고정한다. `target`이 있는 웹 시작에서는 필수다(아래 44) |
 
 오류 코드: `ENV_FILE_NOT_FOUND` 404, `ENV_FILE_EXPIRED` 410(삭제·보관 만료), `ENV_FILE_TOO_LARGE` 413, `ENV_FILE_NOT_UTF8` 422, `ENV_FILE_STORE_UNCONFIGURED`·`ENV_FILE_KEY_INVALID` 503.
 
@@ -193,6 +222,35 @@ API 설정(`cmp_api.config`): `env_file_store_dir`(`ENV_FILE_STORE_DIR`), `env_f
 
 Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`를 분석 자식 입력 `AnalysisInput.env_file_ref`(추가 선택 필드), Sandbox `SandboxSettings`·`SandboxInput.env_file_ref`(추가 선택 필드), Planning 인계 설정 `PlanningSettings.env_file_ref`(시작 요청 값이 우선)로 복사한다. `status` 쿼리에 `env_file_ref`가 추가됐다. API의 scaffold 시작(`analysis` 없음)은 `{project_id, env_file_ref}` dict로 시작하며 분석·Sandbox 자식은 여전히 scaffold 문자열 입력이다.
 
+## 웹 시작 요청 → 실제 시작 입력 (44)
+
+[44 티켓](../../tickets/provisioning/44-web-start-to-planning.md#착수-결정-2026-11-06). `cmp_contracts.migration.MigrationRequest`는 웹 `cloud-migration-web` `contract/rest.schema.json` `StartRequest`와 같은 모양이고 모르는 필드는 422다(`extra="forbid"`).
+
+| 필드 | 형식 | 비고 |
+| --- | --- | --- |
+| `project_id` | 문자열(필수) | |
+| `source_provider` | `AWS` | |
+| `target_provider` | `AWS`·`GCP`·`ON_PREM`(선택) | `target.provider`와 다르면 422 `TARGET_PROVIDER_MISMATCH` |
+| `target` | `{provider, profile, region?, agent_id?, credential_ref?}` | 없으면 scaffold 시작(입력 바이트 동일). 있으면 실제 시작 |
+| `source` | `{kind: GITHUB_PUBLIC, repository_id, full_name, commit_sha}` | 실제 시작에 필수(`SOURCE_REQUIRED`) |
+| `env_file_ref` | `ContentRef` 또는 `envf-<32 hex>` | 실제 시작에 필수(`ENV_FILE_REF_REQUIRED`) |
+
+실제 시작 입력은 CLI `build_start_input`과 같은 `{project_id, analysis: AnalysisInput{repository: https://github.com/<full_name>.git, requested_commit}, sandbox: null, planning: PlanningSettings(env_file_ref null), env_file_ref}`이고 `MigrationWorkflow`는 바뀌지 않았다. `PlanningSettings`는 `cmp_api.start_request.planning_settings`가 만든다.
+
+- 대상 Profile 카탈로그(API 설정 `planning_target_profiles_file`, `PLANNING_TARGET_PROFILES_FILE`): `{"profiles": {<profile>: 항목}}`. 항목은 AWS·GCP `{provider, settings: Plan 입력에서 migration_id·plan을 뺀 필드, workloads?}`, ON_PREM `{provider, environment_id?, namespace, storage_class, database_image}`. 예시는 `infra/demo/target-profiles.example.json`. 코드 기본값은 없다. 없으면 503 `TARGET_PROFILES_UNCONFIGURED`.
+- 요청이 바꿀 수 있는 값: 클라우드 `region`(→ `settings.region`·`location`), 대상 연결 `credential_ref`(`conn-<hex>` 또는 `cmp-conn-<hex>`, `AWS_TARGET`·`GCP_TARGET`·`CONNECTED`; → `settings.credential_ref = {id: AWS는 cmp-conn-<hex>·GCP는 conn-<hex>, version: "1"}`, AWS `account_id`·GCP `project_id`도 연결 값), ON_PREM `agent_id`(→ `cluster_uid`는 등록 값, `environment_id`는 항목 값 또는 `agent_id`). 나머지는 카탈로그 값 그대로다.
+- `TargetSelectionV2`: `ref {id: target-<profile>, version: 대상 설정 sha256 앞 16자}`, `access_ref`(클라우드 `credential_ref`, ON_PREM `{id: agent_id, version: cluster_uid}`), `capabilities_ref {id: profile-<profile>, version: 항목 sha256 앞 16자}`, `profile`.
+- 거절 코드(`{"detail": {"code"}}`, 시작하지 않음): 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`, ENV-02 코드, `TARGET_PROVIDER_MISMATCH`, `TARGET_PROFILE_NOT_FOUND`, `TARGET_PROFILE_PROVIDER_MISMATCH`, `TARGET_FIELD_NOT_APPLICABLE`, `TARGET_REGION_REQUIRED`, `TARGET_AGENT_REQUIRED`, `TARGET_AGENT_NOT_FOUND`(없음·폐기), `TARGET_CONNECTION_NOT_FOUND`, `TARGET_CONNECTION_KIND_MISMATCH`, `TARGET_CONNECTION_NOT_READY`, `TARGET_SETTINGS_INVALID`(`TargetSettings`·05/06 입력 검증 실패); 503 `TARGET_PROFILES_UNCONFIGURED`, `.env` 저장소 코드.
+- 추가 공개 함수: `EncryptedEnvFileStore.latest(file_id) -> ContentRef`.
+
+## 샌드박스 결과 → Planning 인계 (55)
+
+[55 티켓](../../tickets/provisioning/55-sandbox-results-into-plan.md#착수-결정-2026-11-06). 받는 쪽만 바꿨고 샌드박스 결과·분석 `assembly` 형식은 그대로다. `MigrationWorkflow`는 바뀌지 않았다(patch 없음).
+- 추가 공개 함수: `cmp_worker.sandbox_handoff.sandbox_outcome(result: dict) -> SandboxOutcome{cleanup_status, verified_target_ref}`. 정리 상태는 결과의 `cleanup_status` → `cleanup_failed`(bool) → `CLEANED` 순으로 읽는다. 검증 대상은 결과의 `target_selection_ref`(`VersionRef`)가 있을 때만 읽는다. 있는데 형식이 틀리면 `HandoffError("SANDBOX_RESULT_INVALID")`.
+- `assemble_registration(..., cleanup_status="CLEANED")` 선택 인자 추가(기본값이면 이전 바이트 그대로). `sbx_plan_assemble`은 어댑터 값을 `cleanup_status`와 `expected_target_ref`(입력 `target_selection_ref`가 없을 때)로 넘긴다.
+- 결과: 정리 상태가 `CLEANED`가 아니면 Plan Revision에 `CLEANUP_POLICY_REQUIRED`(승인 불가), 기록된 대상이 Planning 대상과 다르면 인계 거절 `TARGET_SELECTION_CHANGED`, 형식 오류는 `SANDBOX_RESULT_INVALID`(인계 `REFUSED` → Migration `failed`).
+- EnvPlan은 #197 경로(`assembly.env_plan_ref` → `assemble_registration(env_plan=...)`) 그대로이고, `PlanningSettings`에는 싣지 않는다(44 S12).
+
 ## 구축 env 렌더 (ENV-04)
 
 [ENV-04](../../tickets/env-file-ref/04-provisioning-render-env.md#착수-결정-2026-11-06). 추가 공개 함수: `cmp_providers.env_file.preview_env`·`database_outputs`·`deployment_secrets`, 저장소 연결 `cmp_api.env_store.configured_env_file_store`·`optional_env_file_store`. 계약 추가(모두 선택, 없으면 이전 바이트 그대로): `PlanningInputRegistration.env_plan: EnvPlan`, `RolloutApplication.env_secrets: [RolloutEnvSecret{name, keys}]`. SPEC 산출물 JSON에 `env_plan`이 생긴다(있을 때만). `onprem_preview(..., platform_secrets=...)` 선택 인자. HTTP: `GET /agents/{agent_id}/jobs/{job_id}/env-secrets` → `{secrets: [{name, data}]}`(Agent 인증, 자기 RUNNING 작업, `no-store`; 404 `ENV_SECRETS_NOT_FOUND`, 409 승인·저장소·결정 코드, 503 저장소 미설정). `GkeKubectlSession.apply_secret`는 공통 3인자 형태도 받는다.
@@ -200,3 +258,7 @@ Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`�
 ## 이미지 pull 자격 (29)
 
 [티켓 29](../../tickets/provisioning/29-image-pull-strategy.md#착수-결정-2026-11-06). 공개 모듈: `cmp_providers.ecr_pull`(`PlatformRegistry.parse/require`, `EcrTokenMinter.mint → PullCredential`, `boto3_minter`, `dockerconfigjson`, `PULL_SECRET="cmp-ecr-pull"`), `cmp_providers.agent_image_pull`(`PullSecretRefresher`, `image_pull_failed`). 계약 추가(선택, 없으면 이전 바이트 그대로): `ProductionRolloutJob.image_pull: RolloutImagePull{secret, registry}`. 이전 Agent는 이 필드가 있는 작업을 `UNSUPPORTED_JOB`으로 거절한다. HTTP: `GET /agents/{agent_id}/jobs/{job_id}/image-pull` → `{registry, username, password, expires_at}`(Agent 인증, 자기 RUNNING 작업 또는 아직 최신 승인 Revision인 SUCCEEDED 작업, `no-store`; 404 `IMAGE_PULL_NOT_FOUND`, 409 `IMAGE_REGISTRY_NOT_ALLOWED`, 503 `PLATFORM_REGISTRY_INVALID`·`ECR_TOKEN_UNAVAILABLE`·`ECR_ACCOUNT_MISMATCH`). API 설정: `platform_ecr_registry`(`PLATFORM_ECR_REGISTRY`), `platform_ecr_repositories`(`PLATFORM_ECR_REPOSITORIES`, 기본 `cmp-platform-builds`). `build_rollout_job(..., registry=None)` 선택 인자. Activity `refresh_gcp_pull_secrets` → `{refreshed, skipped, failed, codes}`, Workflow `GcpPullSecretRefreshWorkflow`(입력 없음). Agent 실패 코드: `SECRET_NAME_CONFLICT`, `IMAGE_PULL_NOT_CONFIGURED`, `IMAGE_PULL_CREDENTIALS_UNAVAILABLE`(UNKNOWN), `IMAGE_PULL_CREDENTIALS_INVALID`, `IMAGE_PULL_FAILED`.
+
+## GCP 주체 확인과 연결 확인 (48)
+
+[티켓 48](../../tickets/provisioning/48-gcp-target-principal.md#착수-결정-2026-11-06). 공개 모듈: `cmp_providers.gcp_adc`(`read_adc_source → AdcSource(kind, declared)`, `token_command`, `adc_principal(env, cwd=) → str | None`). `gcp_preview.verify_adc_principal`·`_verify_adc`와 `gcp_apply.default_adc_email`이 이 함수를 쓴다. 코드는 그대로 `ADC_PRINCIPAL_MISMATCH`·`ADC_UNAVAILABLE`(토큰 명령 실패 포함, 이전 Plan은 `PLAN_COMMAND_FAILED`)·`ADC_CHECK_FAILED`·`ADC_SOURCE_UNSUPPORTED`. Temporal: 상수 `cmp_contracts.queues.GCP_CONNECTION_CHECK_WORKFLOW_NAME = "GcpConnectionCheckWorkflow"`(`migration` 큐, 입력 예상 주체 이메일 문자열)와 `GCP_CONNECTION_CHECK_ACTIVITY = "verify_gcp_connection"`(`provisioning` 큐) → `{code: "OK" | ADC_*, principal: str | None}`. API: `cmp_api.gcp_connection_check.TemporalGcpChecker`(연결 확인 실패 코드 추가 `GCP_CHECK_UNAVAILABLE`·`GCP_CHECK_FAILED`). HTTP 경로·응답 모양은 바뀌지 않았다.

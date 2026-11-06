@@ -32,11 +32,19 @@ class Settings(BaseSettings):
     # The key is a base64url 32-byte value from the server's own `.env`, never the repository.
     env_file_store_dir: str | None = None
     env_file_encryption_key: SecretStr | None = None
+    # Ticket 44 (S6): operator-managed target profile catalog (JSON). The web start request's
+    # `target.profile` selects an entry; its values are the target settings defaults. Without it
+    # a real (`target`) start is 503 `TARGET_PROFILES_UNCONFIGURED`.
+    planning_target_profiles_file: str | None = None
     # Ticket 29 (I1): the platform's own ECR registry host and the repositories approved images
     # may come from (ticket 28 builds into `cmp-platform-builds`). The platform principal
     # (`connection_platform_aws_profile`, the instance role on the demo host) mints pull tokens.
     platform_ecr_registry: str | None = None
     platform_ecr_repositories: str = "cmp-platform-builds"
+    # Ticket 46: the principal that mints those pull tokens, kept apart from the connection
+    # principal so either can change alone (demo: both `cmp-demo-build`, the instance role with
+    # the ticket-28 ECR policy). Unset: `connection_platform_aws_profile` (ticket-41 behavior).
+    platform_ecr_aws_profile: str | None = None
 
 
 settings = Settings()

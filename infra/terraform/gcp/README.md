@@ -58,9 +58,13 @@ For a real target, provide an input JSON with the reviewed project, existing
 node service account and S3 bucket/account/region. Use
 `--gcloud-configuration cmp-gcp-prod --expected-adc-email <ADC principal>
 --aws-profile cmp-aws-prod` with the default `S3` mode. The runner checks the
-gcloud project, AWS State account and ADC principal before backend init. ADC
-must include the email scope to expose its identity in Google tokeninfo; an
-absent or different identity fails closed. S3 bucket access needs the State key
+gcloud project, AWS State account and ADC principal before backend init. The
+principal comes from the ADC well-known file (`cmp_providers.gcp_adc`, ticket
+48): a service-account key is checked with an email-scoped token whose
+tokeninfo `email` must equal the key's `client_email`; a Workload Identity
+Federation config (`external_account`) or impersonated ADC uses the
+impersonated service account; user ADC uses the tokeninfo `email`. An absent or
+different identity fails closed. S3 bucket access needs the State key
 and `.tflock` permissions. A real S3-backed Plan and project permission check
 must be reviewed before any operational approval. Ticket 06 never runs Apply.
 
@@ -85,7 +89,8 @@ It then applies only the saved Plan with no re-plan, destroy or retry, and recor
 outputs plus `gcloud container clusters/node-pools describe` status.
 
 One-time project prerequisites outside Terraform (ticket 10 G6): enable `container.googleapis.com`
-and create the node service account `cmp-gke-nodes`. Granting it
+and create the node service account `cmp-gke-nodes`. Ticket 48 scripts this together with the
+platform principal `cmp-provisioning` (`infra/demo/gcp-platform-identity.sh`, dry run by default). Granting it
 `roles/container.defaultNodeServiceAccount` (node log/metric writes) is recommended but was
 deferred for the P0 demo project because the operator account has only `roles/editor` and cannot
 change project IAM; nodes run and workloads deploy without it, but Cloud Logging/Monitoring stay

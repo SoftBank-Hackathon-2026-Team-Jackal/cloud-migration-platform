@@ -4,6 +4,10 @@
 
 사용자가 올린 `.env`는 플랫폼이 암호화해 한 번만 저장하고(ENV-01), 모든 단계는 참조 `env_file_ref: ContentRef{id, version, sha256}`만 주고받는다. 값을 읽는 함수는 `render_env` 하나뿐이다.
 
+## 시작 요청에서 (Provisioning 44)
+
+웹 시작 요청 `POST /migrations`(`target` 있음)는 `env_file_ref`가 필수다. 값은 `POST /env-files` 응답의 `env_file_ref.id`(`envf-<32 hex>`) 문자열이면 되고, API가 그 파일의 최신 버전으로 `{id, version, sha256}`를 고정한다(정확한 버전을 쓰려면 객체를 보낸다). 없으면 422 `ENV_FILE_REF_REQUIRED`, 없는·지운 파일은 `ENV_FILE_NOT_FOUND`·`ENV_FILE_EXPIRED`다. 환경변수가 없는 앱은 빈 `.env`를 올린다. 이후 단계는 아래처럼 고정된 참조만 받는다.
+
 ## 무엇을 어디서 부르나
 
 | 누가 | 부를 것 | 위치 | 값을 읽나 |

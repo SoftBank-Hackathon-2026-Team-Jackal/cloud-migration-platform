@@ -9,7 +9,6 @@ import re
 from collections.abc import Callable
 from typing import Annotated, Literal
 
-from cmp_contracts.provisioning import ProvisioningInputError
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -27,6 +26,7 @@ from cmp_api.connections import (
     ConnectionFailure,
     EnvironmentConnection,
 )
+from cmp_api.gcp_connection_check import TemporalGcpChecker
 from cmp_api.routes.agents import SessionDep, require_admin
 
 
@@ -105,6 +105,8 @@ class CreateConnectionResponse(BaseModel):
     status: Status
     external_id: str | None = None
     launch_stack_url: str | None = None
+    # Ticket 46: the `PlatformPrincipalArn` stack parameter (AWS only; null when unconfigured).
+    platform_principal_arn: str | None = None
 
 
 class RoleRequest(Strict):
@@ -125,6 +127,7 @@ class ConnectionDetail(BaseModel):
     principal: str | None = None
     credential_ref: str | None = None
     launch_stack_url: str | None = None
+    platform_principal_arn: str | None = None  # ticket 46
     stack_name: str | None = None
     last_code: str | None = None
     last_checked_at: int | None = None
@@ -210,17 +213,9 @@ def get_aws_connector() -> AwsConnector:
     return AwsConnector(settings.connection_platform_aws_profile)
 
 
-def _adc_checker(expected_principal: str) -> str:
-    from cmp_providers.gcp_preview import verify_adc_principal
-
-    try:
-        return verify_adc_principal(expected_principal)
-    except ProvisioningInputError as exc:
-        raise ConnectionFailure(exc.issues[0].code) from None
-
-
 def get_gcp_checker() -> Callable[[str], str]:
-    return _adc_checker
+    # Ticket 48 G7: the GCP identity lives in the provisioning worker; the API asks it.
+    return TemporalGcpChecker()
 
 
 AwsDep = Annotated[AwsConnector, Depends(get_aws_connector)]
@@ -264,6 +259,7 @@ def _detail(connection: EnvironmentConnection) -> dict:
         "principal": connection.principal,
         "credential_ref": svc.credential_ref(connection),
         "launch_stack_url": _launch_url(connection) if aws else None,
+        "platform_principal_arn": settings.connection_platform_principal_arn if aws else None,
         "stack_name": svc.stack_name(connection) if aws else None,
         "last_code": connection.last_code,
         "last_checked_at": connection.last_checked_at,
@@ -305,6 +301,9 @@ def create(request: CreateConnectionRequest, session: SessionDep):
         "status": connection.status,
         "external_id": connection.external_id,
         "launch_stack_url": _launch_url(connection),
+        "platform_principal_arn": settings.connection_platform_principal_arn
+        if connection.kind in AWS_KINDS
+        else None,
     }
 
 

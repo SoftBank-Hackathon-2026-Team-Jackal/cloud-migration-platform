@@ -24,6 +24,7 @@ from cmp_contracts.onprem_rollout import (
     RolloutImagePull,
     rollout_job_id,
 )
+from cmp_contracts.onprem_teardown import TEARDOWN_MODE
 from cmp_contracts.plan import PlanManifest
 from cmp_contracts.provisioning import ContentRef
 from cmp_contracts.shared_deployment_v2 import ApplicationValuesV2, SecretRefV2
@@ -42,13 +43,14 @@ from cmp_providers.env_file import (
 )
 from cmp_providers.plans import manifest_digest
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from cmp_api.agent_registry import AgentJob, RegisteredAgent
 from cmp_api.approvals import PlanApproval, PlanRevision, latest_revision
 
-TERMINAL = {"SUCCEEDED", "FAILED", "UNKNOWN"}
+TERMINAL = {"SUCCEEDED", "FAILED", "UNKNOWN", "EXPIRED", "CANCELLED"}  # 52: last two never ran
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 
 
@@ -111,9 +113,16 @@ class LocalArtifactStore:
 
 
 def _approved_revision(
-    session: Session, *, approval_id: str, plan_id: str, revision: int, digest: str
+    session: Session,
+    *,
+    approval_id: str,
+    plan_id: str,
+    revision: int,
+    digest: str,
+    allow_superseded: bool = False,
 ) -> PlanManifest:
-    """Business-DB approval gate shared by dispatch and the Agent claim/download path."""
+    """Business-DB approval gate shared by dispatch and the Agent claim/download path.
+    `allow_superseded`: ticket 52 (D17) keeps a deployed older Revision's approval valid."""
     record = session.get(PlanApproval, approval_id)
     if (
         record is None
@@ -122,7 +131,7 @@ def _approved_revision(
         or record.revision != revision
     ):
         raise RolloutError("PLAN_NOT_APPROVED")
-    if revision != latest_revision(session, plan_id):
+    if not allow_superseded and revision != latest_revision(session, plan_id):
         raise RolloutError("STALE_REVISION")
     row = session.get(PlanRevision, (plan_id, revision))
     manifest = PlanManifest.model_validate(row.manifest)
@@ -248,6 +257,10 @@ def build_rollout_job(
     agent = session.get(RegisteredAgent, target.agent_id)
     if agent is None or agent.cluster_uid != target.cluster_ref.id:
         raise RolloutError("AGENT_TARGET_MISMATCH")
+    from cmp_api.agent_jobs import active_in_namespace  # avoid import cycle
+
+    if active_in_namespace(session, agent.id, target.namespace, TEARDOWN_MODE):
+        raise RolloutError("TEARDOWN_IN_PROGRESS")  # ticket 52 (D10)
     url_secret = (connection_url_secret_name(database.release_name), URL_SECRET_KEY)
     secret_sources = {
         (env.source.name, env.source.key) for env in application.env if env.source.kind == "SECRET"
@@ -309,8 +322,11 @@ def build_rollout_job(
     return job, agent.owner_id
 
 
-def dispatch(session: Session, job: ProductionRolloutJob, owner_id: str) -> AgentJob:
-    """Queue the Revision's job once; an existing job is reused only if it is identical."""
+def dispatch(
+    session: Session, job: ProductionRolloutJob, owner_id: str, *, deadline_at: int | None = None
+) -> AgentJob:
+    """Queue the Revision's job once; an existing job is reused only if it is identical.
+    `deadline_at` (ticket 52, D2): last epoch second the Agent may start it; kept on reuse."""
     payload = job.model_dump(mode="json")
     existing = session.get(AgentJob, job.job_id)
     if existing is None:
@@ -321,6 +337,7 @@ def dispatch(session: Session, job: ProductionRolloutJob, owner_id: str) -> Agen
                 agent_id=job.agent_id,
                 payload=payload,
                 status="QUEUED",
+                deadline_at=deadline_at,
             )
         )
         try:
@@ -351,6 +368,48 @@ def check_dispatchable(session: Session, payload: dict) -> str | None:
     return None
 
 
+def _not_cancelled(job: AgentJob) -> None:
+    """Ticket 52 (D5): a cancel requested before the Agent's first change stops it there."""
+    from cmp_api.agent_jobs import running_block  # avoid import cycle
+
+    if job.status == "RUNNING" and running_block(job):
+        raise RolloutError("JOB_CANCELLED")
+
+
+def _deployed_older_revision(
+    session: Session, job: AgentJob, rollout: ProductionRolloutJob
+) -> bool:
+    """Ticket 52 (D17, C-14): a READY job of a superseded Revision is still what runs in the
+    cluster when no newer Revision of the Plan became READY (51 restored it after a failure)
+    and its own approval record is intact."""
+    if job.status != "SUCCEEDED" or (job.result or {}).get("code") != "READY":
+        return False
+    try:
+        _approved_revision(
+            session,
+            approval_id=rollout.approval_id,
+            plan_id=rollout.plan_id,
+            revision=rollout.revision,
+            digest=rollout.manifest_digest,
+            allow_superseded=True,
+        )
+    except RolloutError:
+        return False
+    for other in session.scalars(
+        select(AgentJob).where(AgentJob.agent_id == job.agent_id, AgentJob.status == "SUCCEEDED")
+    ):
+        payload = other.payload if isinstance(other.payload, dict) else {}
+        if (
+            payload.get("mode") == ROLLOUT_MODE
+            and payload.get("plan_id") == rollout.plan_id
+            and isinstance(payload.get("revision"), int)
+            and payload["revision"] > rollout.revision
+            and (other.result or {}).get("code") == "READY"
+        ):
+            return False
+    return True
+
+
 def is_rollout(payload: dict) -> bool:
     return isinstance(payload, dict) and payload.get("mode") == ROLLOUT_MODE
 
@@ -363,6 +422,7 @@ def job_artifact(session: Session, job: AgentJob, sha256: str, store: ArtifactSt
     refs = [ref for ref in rollout.artifact_refs() if ref.sha256 == sha256]
     if not refs:
         raise RolloutError("ARTIFACT_NOT_FOUND")
+    _not_cancelled(job)
     if check_dispatchable(session, job.payload) is not None:
         raise RolloutError("ARTIFACT_NOT_FOUND")
     return store.read(refs[0])
@@ -379,6 +439,7 @@ def job_env_secrets(
     rollout = ProductionRolloutJob.model_validate(job.payload)
     if not rollout.application.env_secrets:
         raise RolloutError("ENV_SECRETS_NOT_FOUND")
+    _not_cancelled(job)
     if check_dispatchable(session, job.payload) is not None:
         raise RolloutError("ENV_SECRETS_NOT_FOUND")
     manifest = PlanManifest.model_validate(
@@ -439,8 +500,12 @@ def job_image_pull(
     rollout). The registry is re-derived from the approved Values, never taken from the body."""
     if job.status not in {"RUNNING", "SUCCEEDED"} or not is_rollout(job.payload):
         raise RolloutError("IMAGE_PULL_NOT_FOUND")
+    _not_cancelled(job)
     rollout = ProductionRolloutJob.model_validate(job.payload)
-    if rollout.image_pull is None or check_dispatchable(session, job.payload) is not None:
+    if rollout.image_pull is None or (
+        check_dispatchable(session, job.payload) is not None
+        and not _deployed_older_revision(session, job, rollout)
+    ):
         raise RolloutError("IMAGE_PULL_NOT_FOUND")
     manifest = PlanManifest.model_validate(
         session.get(PlanRevision, (rollout.plan_id, rollout.revision)).manifest
@@ -456,6 +521,8 @@ _STATE = {
     "RUNNING": "RUNNING",
     "FAILED": "FAILED",
     "UNKNOWN": "UNKNOWN",
+    "EXPIRED": "EXPIRED",  # ticket 52: never started
+    "CANCELLED": "CANCELLED",
 }
 
 
@@ -526,6 +593,8 @@ def outcome(job: AgentJob) -> dict | None:
     code = (job.result or {}).get("code", "AGENT_RESULT_MISSING")
     ready = job.status == "SUCCEEDED" and code == "READY"
     status = job.status if job.status != "SUCCEEDED" or ready else "UNKNOWN"
+    if job.status in {"EXPIRED", "CANCELLED"}:
+        status = "FAILED"  # ticket 52 (D6): definitively nothing ran on the target
     refs = resource_refs(rollout, ready=ready)
     replication = (job.result or {}).get("replication")
     if ready and isinstance(replication, dict):  # ticket 27; absent from older Agents

@@ -12,7 +12,7 @@ from cmp_api.approvals import publish_plan_revision, register_approver
 from cmp_api.config import settings
 from cmp_api.db import Base
 from cmp_api.main import app
-from cmp_api.onprem_rollout import LocalArtifactStore, rollout_status
+from cmp_api.onprem_rollout import LocalArtifactStore, build_rollout_job, dispatch, rollout_status
 from cmp_api.routes.agents import get_artifact_store
 from cmp_api.routes.agents import get_session as agent_session
 from cmp_api.routes.onprem_rollout import get_session as rollout_session
@@ -82,6 +82,13 @@ def jobs(db):
         return list(session.scalars(select(AgentJob)))
 
 
+def queue(db, store, request):
+    """Queue the Revision's job as dispatch does, without the Activity's start deadline (52)."""
+    with db() as session:
+        job, owner = build_rollout_job(session, request, store)
+        dispatch(session, job, owner)
+
+
 async def run(db, store, request, wait=0.5):
     return await ActivityEnvironment().run(
         activities(db, store, wait).execute_on_prem_plan, request
@@ -120,9 +127,19 @@ async def test_agent_target_must_match_registered_agent_and_cluster(db, store, a
     assert jobs(db) == []
 
 
-async def test_offline_agent_keeps_job_then_reconnect_reports_ready(db, store, setup):
+async def test_offline_agent_job_expires_then_reconnect_within_the_wait_reports_ready(
+    db, store, setup
+):
+    # Ticket 52 (D3): a job nobody claimed before the wait ended never runs later.
     first = await run(db, store, setup["request"], wait=0.1)
-    assert first["status"] == "UNKNOWN" and first["code"] == "AGENT_OFFLINE"
+    assert (first["status"], first["code"]) == ("FAILED", "AGENT_OFFLINE")
+    [job] = jobs(db)
+    assert (job.status, job.result) == ("EXPIRED", {"code": "AGENT_OFFLINE"})
+    with db() as session:
+        assert poll_job(session, agent_id="agent-a", credential=setup["credential"]) is None
+        session.delete(session.get(AgentJob, job.id))  # start over as a fresh dispatch
+        session.commit()
+    queue(db, store, setup["request"])
     [job] = jobs(db)
     assert job.status == "QUEUED"
     payload = ProductionRolloutJob.model_validate(job.payload)
@@ -169,7 +186,7 @@ async def test_offline_agent_keeps_job_then_reconnect_reports_ready(db, store, s
 
 
 async def test_failed_agent_check_is_not_ready(db, store, setup):
-    await run(db, store, setup["request"], wait=0.05)
+    queue(db, store, setup["request"])
     with db() as session:
         claimed = poll_job(session, agent_id="agent-a", credential=setup["credential"])
         report_job(
@@ -193,7 +210,7 @@ async def test_failed_agent_check_is_not_ready(db, store, setup):
 
 
 async def test_claim_rejects_queued_job_after_new_revision(db, store, artifacts, setup):
-    await run(db, store, setup["request"], wait=0.05)
+    queue(db, store, setup["request"])
     with db() as session:
         newer = plan(artifacts, revision=2)
         publish_plan_revision(session, newer, preview(newer))
@@ -217,7 +234,7 @@ def client(db, store, monkeypatch):
 
 
 async def test_agent_downloads_only_its_job_artifacts(db, store, artifacts, setup, client):
-    await run(db, store, setup["request"], wait=0.05)
+    queue(db, store, setup["request"])
     headers = {"Authorization": f"Bearer {setup['credential']}"}
     claim = client.post("/agents/agent-a/jobs/claim", headers=headers)
     assert claim.status_code == 200
@@ -240,7 +257,7 @@ async def test_agent_downloads_only_its_job_artifacts(db, store, artifacts, setu
 
 
 async def test_rollout_status_route_requires_approver_grant(db, store, setup, client):
-    await run(db, store, setup["request"], wait=0.05)
+    queue(db, store, setup["request"])
     path = "/provisioning/plans/plan-k3s/revisions/1/rollout"
     with db() as session:
         allowed = register_approver(session, approver_id="viewer", migration_ids=["migration-001"])
@@ -328,7 +345,7 @@ async def test_agent_replication_check_becomes_handoff_refs(
     db, store, setup, replication, capable, code
 ):
     """Ticket 27: the Agent reports its replication check with READY; refs carry it."""
-    await run(db, store, setup["request"], wait=0.05)
+    queue(db, store, setup["request"])
     with db() as session:
         claimed = poll_job(session, agent_id="agent-a", credential=setup["credential"])
         report_job(
@@ -349,7 +366,7 @@ async def test_agent_replication_check_becomes_handoff_refs(
 async def test_replication_is_accepted_only_with_a_ready_report(db, store, setup):
     from cmp_api.agent_registry import AgentRegistrationError
 
-    await run(db, store, setup["request"], wait=0.05)
+    queue(db, store, setup["request"])
     with db() as session:
         claimed = poll_job(session, agent_id="agent-a", credential=setup["credential"])
         with pytest.raises(AgentRegistrationError, match="INVALID_JOB_RESULT"):

@@ -3,8 +3,9 @@
 Reports the Agent job state of one Plan Revision. It never starts, retries or cancels work.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated
 
+from cmp_contracts.onprem_rollout import RolloutState
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
@@ -26,7 +27,7 @@ class RolloutStatusResponse(BaseModel):
 
     plan_id: str
     revision: int
-    state: Literal["NOT_DISPATCHED", "WAITING_AGENT", "RUNNING", "READY", "FAILED", "UNKNOWN"]
+    state: RolloutState
     code: str | None
     job_id: str | None
     agent_id: str | None

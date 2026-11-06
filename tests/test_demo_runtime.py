@@ -79,7 +79,8 @@ def test_cloud_credentials_are_mounted_read_only_not_set_as_values():
     worker = services["worker"]
     assert "/opt/cmp/secrets/aws:/run/cmp/aws:ro" in worker["volumes"]
     assert "/opt/cmp/secrets/gcp:/run/cmp/gcp:ro" in worker["volumes"]
-    assert worker["environment"]["AWS_CONFIG_FILE"] == "/run/cmp/aws/config"
+    # Ticket 46: the worker reads the API-generated config (base profiles + `cmp-conn-*`).
+    assert worker["environment"]["AWS_CONFIG_FILE"] == "/run/cmp/aws-connections/config"
     assert "/root/.config/gcloud:mode=0700" in worker["tmpfs"]
     forbidden = {
         "AWS_ACCESS_KEY_ID",
@@ -144,6 +145,13 @@ def test_edge_sends_only_agent_and_relay_routes_to_the_api():
     # Everything that is not the Agent API or the relay polling API is the web front end; the
     # operator, approval and tunnel-admin routes and /docs never get a route to the API.
     assert code == [
+        "@temporal {",
+        "path /temporal.api.* /grpc.health.v1.Health/*",
+        "remote_ip {$CMP_TEMPORAL_ALLOWED_IP}",
+        "}",
+        "handle @temporal {",
+        "reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}",
+        "}",
         "@backend path /agents/* /relays/*",
         "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
@@ -159,6 +167,9 @@ def test_edge_sends_only_agent_and_relay_routes_to_the_api():
     edge = _env("edge")
     assert edge["CMP_API_UPSTREAM"] == "api:8000"
     assert edge["CMP_WEB_UPSTREAM"] == "web:3000"
+    assert edge["CMP_TEMPORAL_UPSTREAM"] == "temporal:7233"
+    # Nobody may reach Temporal through the edge unless the operator sets an address.
+    assert edge["CMP_TEMPORAL_ALLOWED_IP"].endswith("192.0.2.1/32}")
 
 
 def test_web_is_internal_only_and_reaches_the_api_over_the_compose_network():
@@ -337,8 +348,9 @@ def test_api_uses_the_instance_role_build_profile_without_gcp_credentials():
     assert "/opt/cmp/secrets/aws:/run/cmp/aws:ro" in api["volumes"]
     # Same profile the worker's Build module uses; ensure-secrets.sh writes it as the instance
     # role itself (never PROVISIONING_AWS_ROLE_ARN).
+    # Ticket 23b·46: the connection principal stays this profile; ECR tokens have their own.
     assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
-    assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
+    assert env["PLATFORM_ECR_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
     assert "PROVISIONING_AWS_PROFILE" not in env
     # The API never gets the GCP key or a gcloud configuration.
     assert not [m for m in api["volumes"] if "/secrets/gcp" in m or "/run/cmp/gcp" in m]

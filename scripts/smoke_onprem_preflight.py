@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 import httpx
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -111,8 +112,21 @@ def main():
     parser.add_argument("--context", required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--agent-image", required=True, help="imported local tag, e.g. x:dev")
-    parser.add_argument("--probe-image", required=True, help="digest-pinned, e.g. postgres@sha256:")
+    parser.add_argument(
+        "--probe-image",
+        help="digest-pinned, e.g. postgres@sha256:; omitted: the Chart default (ticket 52, D12)",
+    )
+    parser.add_argument(
+        "--observe-revocation",
+        type=int,
+        default=0,
+        help="ticket 52 (C-09): revoke at the end and watch the Agent Pod for N seconds",
+    )
     args = parser.parse_args()
+    chart_default = yaml.safe_load((ROOT / "infra/helm/onprem-agent/values.yaml").read_text())[
+        "networkPreflight"
+    ]["image"]
+    probe_image = args.probe_image or chart_default
     if args.kubeconfig.resolve() == (Path.home() / ".kube/config").resolve():
         raise ValueError("Dedicated kubeconfig required")
     if not args.context.startswith("k3d-cmp-"):
@@ -230,7 +244,7 @@ def main():
     evidence = {"cluster": {"context": args.context, "node": node}, "scenarios": {}}
     scenarios = evidence["scenarios"]
     try:
-        for document in manifests(args.probe_image, password):
+        for document in manifests(probe_image, password):
             kubectl("apply", "-f", "-", content=json.dumps(document))
         for secret, value in (("source-db-auth", password), ("source-db-bad", "wrong-" + password)):
             kubectl("create", "secret", "generic", secret, "-n", PROBE_NS,
@@ -252,14 +266,18 @@ def main():
             "image": {"repository": repository, "tag": tag, "digest": "", "pullPolicy": "Never"},
             "idleSeconds": 2,
             "tunnel": {"enabled": False},
-            "networkPreflight": {"image": args.probe_image},
         }  # fmt: skip
+        if args.probe_image:  # ticket 52: without it the install relies on the Chart default
+            values["networkPreflight"] = {"image": args.probe_image}
+        evidence["probe_image"] = {"value": probe_image, "chart_default": not args.probe_image}
         values_file = args.state_dir / "agent-values.json"
         values_file.write_text(json.dumps(values))
         values_file.chmod(0o600)
         run("helm", *helm_kube, "install", RELEASE, str(ROOT / "infra/helm/onprem-agent"),
-            "-n", AGENT_NS, "--create-namespace", "-f", str(values_file), "--wait",
-            "--timeout", "180s", timeout=240)  # fmt: skip
+            "-n", AGENT_NS, "--create-namespace", "-f", str(values_file),
+            timeout=240)  # fmt: skip
+        # No `--wait`: Helm 4 also waits on the enrollment Secret, which the Agent deletes as
+        # soon as it registers (race seen on 2026-11-06); registration is awaited below.
         values_file.unlink()
         wait_for(
             lambda: (
@@ -287,6 +305,8 @@ def main():
             for e in emitter.events
         ]  # fmt: skip
         evidence["probe_pods_left"] = probe_pods()
+        if args.observe_revocation:
+            evidence["revoked_idle"] = observe_revocation(api, kubectl, args.observe_revocation)
         dumped = json.dumps([evidence, logs, [e.data for e in emitter.events]])
         evidence["password_absent_from_evidence_logs_events"] = password not in dumped
         with db() as session:
@@ -318,6 +338,30 @@ def main():
         platform.stop()
         (args.state_dir / "evidence.json").write_text(json.dumps(evidence, indent=1, default=str))
         print(json.dumps(evidence, indent=1, default=str))
+
+
+def observe_revocation(api, kubectl, seconds: int) -> dict:
+    """Ticket 52 (D14): after revocation both containers stay up (no restart loop)."""
+    api.post(f"/agent-admin/agents/{AGENT_ID}/revoke").raise_for_status()
+    time.sleep(seconds)
+    [pod] = json.loads(
+        kubectl("get", "pods", "-n", AGENT_NS, "-l", "app.kubernetes.io/name=cmp-onprem-agent",
+                "-o", "json")
+    )["items"]  # fmt: skip
+    statuses = pod["status"].get("containerStatuses", [])
+    logs = kubectl("logs", "-n", AGENT_NS, pod["metadata"]["name"], "-c", "agent", check=False)
+    stopped = [
+        json.loads(line)
+        for line in logs.splitlines()
+        if line.startswith("{") and json.loads(line).get("event") == "stopped"
+    ]
+    return {
+        "seconds": seconds,
+        "phase": pod["status"].get("phase"),
+        "restarts": {c["name"]: c.get("restartCount", 0) for c in statuses},
+        "running": {c["name"]: "running" in (c.get("state") or {}) for c in statuses},
+        "agent_stopped_events": stopped,
+    }
 
 
 def subprocess_ok(argv) -> bool:
