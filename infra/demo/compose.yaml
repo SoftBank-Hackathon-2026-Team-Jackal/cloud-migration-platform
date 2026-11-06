@@ -102,6 +102,10 @@ services:
       # (a new key makes every stored upload unreadable). Same store/key as the worker.
       ENV_FILE_STORE_DIR: /opt/cmp/env-files
       ENV_FILE_ENCRYPTION_KEY: ${ENV_FILE_ENCRYPTION_KEY:?set ENV_FILE_ENCRYPTION_KEY}
+      # Ticket 57 (#228): the rehearsal's standard write -> read shape for web starts, a
+      # SandboxSettings JSON object in /opt/cmp/.env (demo-app line: runtime.env.example). Empty:
+      # the rehearsal runs the health test only (today's behavior).
+      WEB_START_SANDBOX_SETTINGS: ${WEB_START_SANDBOX_SETTINGS:-}
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
@@ -111,7 +115,8 @@ services:
       - /opt/cmp/data/aws-connections:/run/cmp/aws-connections
       - /opt/cmp/config:/opt/cmp/config:ro
     command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    # Loopback only; the public edge forwards /agents/* and /relays/* on the internal network.
+    # Loopback only; the public edge forwards /agents/*, /relays/*, /migrations[/*] and
+    # /provisioning/* on the internal network (ticket 57).
     ports:
       - "127.0.0.1:8000:8000"
 
@@ -194,8 +199,8 @@ services:
       - /root/.aws:mode=0700
       - /root/.kube:mode=0700
 
-  # Web front end (cloud-migration-web). Internal only: the edge forwards every path except /agents/* and
-  # /relays/* here, and its server code reaches the API at http://api:8000. Opt-in like the edge. Built on
+  # Web front end (cloud-migration-web). Internal only: the edge forwards every path except /agents/*,
+  # /relays/*, /migrations[/*] and /provisioning/* here, and its server code reaches the API at http://api:8000. Opt-in like the edge. Built on
   # the host from /opt/cmp/web/current, which infra/demo/release-web.sh uploads and extracts. Operator-only
   # values (GitHub OAuth app id/secret, optional GEMINI_API_KEY) go in /opt/cmp/web.env (0600). The web does
   # NOT get AGENT_ENROLLMENT_ADMIN_KEY: its /api/agents routes have no user login yet, so a public web holding
@@ -233,7 +238,8 @@ services:
       - "3000"
 
   # Public HTTPS entry (ticket 21). Opt-in: start.sh starts it only when CMP_PUBLIC_HOST is set.
-  # /agents/* and /relays/* go to the API; everything else goes to the web front end.
+  # /agents/*, /relays/*, /migrations[/*] and /provisioning/* go to the API (ticket 57: the web real mode);
+  # everything else goes to the web front end.
   edge:
     image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     restart: unless-stopped

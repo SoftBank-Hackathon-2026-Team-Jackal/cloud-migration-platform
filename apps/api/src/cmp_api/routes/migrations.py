@@ -31,6 +31,7 @@ from cmp_api.start_request import (
     find_connection,
     load_target_profiles,
     planning_settings,
+    sandbox_settings,
     start_input,
 )
 from cmp_api.temporal_client import get_temporal_client
@@ -98,10 +99,11 @@ def _real_start_input(
                 if target.credential_ref is not None:
                     connection = find_connection(session, target.credential_ref, target.provider)
         planning = planning_settings(target, entry, connection=connection, agent=agent)
+        sandbox = sandbox_settings(settings.web_start_sandbox_settings)
     except StartRefused as exc:
         raise _refused(exc.code, exc.status) from None
     store, env_ref = _env_ref(request, env_store)
-    return start_input(request, source, planning, env_ref), store, env_ref
+    return start_input(request, source, planning, env_ref, sandbox), store, env_ref
 
 
 @router.post("", response_model=MigrationCreated, status_code=202)
@@ -116,7 +118,8 @@ async def start_migration(
     required and the target profile catalog supplies the target settings. Refusals are
     `{"detail": {"code": ...}}`: 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`,
     `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`; 503
-    `TARGET_PROFILES_UNCONFIGURED` or the `.env` store codes. Nothing starts on a refusal."""
+    `TARGET_PROFILES_UNCONFIGURED`, `SANDBOX_SETTINGS_INVALID` (the server's rehearsal shape is
+    not a JSON object) or the `.env` store codes. Nothing starts on a refusal."""
     store = env_ref = None
     if request.target is not None:
         data, store, env_ref = _real_start_input(request, env_store, sessions)

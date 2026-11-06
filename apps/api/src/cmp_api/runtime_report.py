@@ -9,7 +9,7 @@ from cmp_providers.env_file import EnvFileError
 
 from cmp_api.config import settings
 from cmp_api.env_store import configured_env_file_store
-from cmp_api.start_request import StartRefused, load_target_profiles
+from cmp_api.start_request import StartRefused, load_target_profiles, sandbox_settings
 
 
 def report() -> dict[str, str]:
@@ -27,6 +27,11 @@ def report() -> dict[str, str]:
     link = settings.connection_platform_principal_arn and settings.connection_template_base_url
     result["connection_link"] = "on" if link else "off"
     result["platform_ecr_registry"] = "on" if settings.platform_ecr_registry else "off"
+    try:  # ticket 57: the web start's rehearsal shape
+        on = sandbox_settings(settings.web_start_sandbox_settings) is not None
+        result["web_start_sandbox"] = "on" if on else "off"
+    except StartRefused as exc:
+        result["web_start_sandbox"] = f"error:{exc.code}"
     return result
 
 

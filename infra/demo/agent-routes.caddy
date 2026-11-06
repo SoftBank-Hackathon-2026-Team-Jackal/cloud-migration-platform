@@ -1,7 +1,11 @@
-# Public routes. Only the Agent API (/agents/*) and the relay polling API (/relays/*) reach the backend;
-# every other path is the web front end. Operator, approval and tunnel-admin routes, /docs and
-# /openapi.json stay on the loopback-bound API (SSM port forwarding) and still require keys: the web
-# container calls the API on the internal network and never forwards raw request paths.
+# Public routes. The Agent API (/agents/*), the relay polling API (/relays/*) and, for the web real
+# (SSE) mode (ticket 57, #228), /migrations, /migrations/* (start, status, events SSE, logs) and
+# /provisioning/* (Plan approvals; approver credential or admin key still required there) reach the
+# backend. /migrations has no login: a demo-only exposure accepted in ticket 57 (flow check N11).
+# Every other path is the web front end. Operator routes (/agent-admin, /provisioning-admin), tunnel
+# admin, /connections, /env-files, /agent-enrollments, /docs and /openapi.json stay on the
+# loopback-bound API (SSM port forwarding); the web container calls those on the internal network.
+# flush_interval -1: every proxied chunk is sent at once, so the SSE stream is never buffered.
 # Relay-host worker (cmp-demo-relay): Temporal gRPC over TLS, only from the allowed address. The
 # default is a documentation address (RFC 5737), so nothing passes unless the operator sets it.
 @temporal {
@@ -11,9 +15,11 @@
 handle @temporal {
 	reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}
 }
-@backend path /agents/* /relays/*
+@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*
 handle @backend {
-	reverse_proxy {$CMP_API_UPSTREAM}
+	reverse_proxy {$CMP_API_UPSTREAM} {
+		flush_interval -1
+	}
 }
 handle {
 	reverse_proxy {$CMP_WEB_UPSTREAM}
