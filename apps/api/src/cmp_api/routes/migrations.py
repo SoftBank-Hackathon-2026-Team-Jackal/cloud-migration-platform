@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from temporalio.client import WorkflowHandle, WorkflowQueryFailedError, WorkflowQueryRejectedError
 from temporalio.service import RPCError, RPCStatusCode
 
+from cmp_api.approvals import ApprovalError, grant_approver_migrations
 from cmp_api.config import settings
 from cmp_api.connections import credential_ref
 from cmp_api.db import SessionLocal
@@ -62,6 +64,25 @@ def get_session_factory():
 
 
 SessionFactoryDep = Annotated[Callable, Depends(get_session_factory)]
+
+
+logger = logging.getLogger(__name__)
+
+
+def _grant_demo_approver(sessions: Callable, migration_id: str) -> None:
+    """Ticket 60 A12: the web BFF holds one approver token, and each start mints a new Migration
+    ID, so a configured demo approver gets this Migration (same grant as the operator API). A
+    failure never blocks the start; the operator can still grant by hand."""
+    approver_id = settings.demo_approver_id
+    if not approver_id:
+        return
+    try:
+        with sessions() as session:
+            grant_approver_migrations(session, approver_id, [migration_id])
+    except ApprovalError as exc:
+        logger.warning("DEMO_APPROVER_GRANT_FAILED %s %s", exc.code, migration_id)
+    except Exception:  # noqa: BLE001 — business DB unavailable: the start still proceeds
+        logger.warning("DEMO_APPROVER_GRANT_FAILED DB_UNAVAILABLE %s", migration_id)
 
 
 def _refused(code: str, status: int = 422) -> HTTPException:
@@ -138,6 +159,7 @@ async def start_migration(
         data = request.project_id  # the scaffold string input, as before
     client = await get_temporal_client()
     workflow_id = f"migration-{uuid4()}"
+    _grant_demo_approver(sessions, workflow_id)  # before planning can ask for approval
     handle = await client.start_workflow(
         WORKFLOW_NAME,
         data,
