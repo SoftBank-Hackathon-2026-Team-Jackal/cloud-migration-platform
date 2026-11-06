@@ -1,0 +1,142 @@
+"""원본·대상 클러스터 사이 WireGuard 복제 경로를 만드는 Activity(DM-011, ticket 10).
+
+`cmp_data.tunnel`이 만든 매니페스트를 두 클러스터에 적용한다. 순서: 키(각 클러스터 Secret) → 대상
+게이트웨이·UDP LB·DB 허용 정책 → LB 주소 대기 → 원본 게이트웨이(그 주소로 접속) → handshake 확인.
+같은 입력으로 다시 실행해도 된다(키는 Secret에 있으면 그대로 쓴다).
+
+WireGuard 비밀키는 Worker 메모리에서 만들어 `kubectl create -f -`(stdin)로 Secret에만 넣는다. 결과·로그·
+Workflow 이력에는 LB 주소와 handshake 여부만 남긴다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from cmp_data import DataMigrationRequest, DbEndpoint
+from cmp_data import tunnel as wg
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
+
+from cmp_worker.activities import data_migration as dm
+from cmp_worker.activities.data_cutover import KubectlCluster
+from cmp_worker.activities.k8s_workloads_cli import CommandError
+
+
+class TunnelCluster(KubectlCluster):
+    def lb_address(self, namespace: str, service: str) -> str | None:
+        item = self._s._get("service", service, namespace) or {}
+        ingress = (item.get("status", {}).get("loadBalancer", {}).get("ingress")) or []
+        return (ingress[0].get("ip") or ingress[0].get("hostname")) if ingress else None
+
+    def latest_handshake(self, namespace: str, selector: str) -> int:
+        pod = self.pod_for(namespace, selector)
+        out = self._s._kubectl(
+            "exec", "-n", namespace, pod, "-c", "wg", "--", "wg", "show", "wg0", "latest-handshakes"
+        ).decode()  # fmt: skip
+        stamps = [int(line.split()[-1]) for line in out.splitlines() if line.strip()]
+        return max(stamps, default=0)
+
+
+@contextmanager
+def open_cluster(endpoint: DbEndpoint) -> Iterator[TunnelCluster]:
+    with dm._runtime_for(endpoint) as session:
+        yield TunnelCluster(session)
+
+
+OPEN_CLUSTER = open_cluster  # 시험에서 가짜로 바꾼다
+SLEEP = time.sleep
+
+
+def _beat(detail: str) -> None:
+    try:
+        activity.heartbeat(detail)
+    except RuntimeError:  # 시험처럼 Activity 밖에서 부를 때
+        pass
+
+
+def _fail(code: str, *, retryable: bool = False) -> ApplicationError:
+    return ApplicationError(code, type=code, non_retryable=not retryable)
+
+
+def _key(cluster: TunnelCluster, secret: str) -> str:
+    """클러스터 Secret의 비밀키에서 공개키를 구한다. 없으면 만들어 넣는다. 비밀키는 반환하지 않는다."""
+    # Agent 터널 모듈은 무거운 의존성을 끌고 온다(Workflow 샌드박스 검사 경로에서 import되지 않게 여기서)
+    from cmp_providers.agent_tunnel import generate_private_key, public_key
+
+    data = cluster.secret_data(wg.NAMESPACE, secret)
+    private = (data or {}).get(wg.SECRET_KEY)
+    if not private:
+        raw = generate_private_key()
+        private = base64.b64encode(raw).decode()
+        cluster.put_secret(wg.NAMESPACE, secret, {wg.SECRET_KEY: private}, replace=data is not None)
+    return base64.b64encode(public_key(base64.b64decode(private))).decode()
+
+
+def _release(target: DbEndpoint) -> str:
+    return target.pod.rsplit("-", 1)[0]  # StatefulSet Pod `<release>-0`
+
+
+def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
+    base = wg.name(req.migration_id)
+    selector = f"cmp.dev/data-tunnel={base}"
+    if not req.source.local_host or not req.target.local_host:
+        raise _fail("TUNNEL_DB_ADDRESS_MISSING")
+    with OPEN_CLUSTER(req.target) as target, OPEN_CLUSTER(req.source) as source:
+        for cluster in (target, source):
+            cluster.apply([wg.namespace_manifest()])
+        target_pub, source_pub = _key(target, base), _key(source, base)
+
+        target.apply([
+            *wg.gateway_manifests(req.migration_id, "target", image=tunnel.image,
+                                  local_db=req.target.local_host, peer_public_key=source_pub,
+                                  peer_endpoint=None),
+            wg.endpoint_manifest(req.migration_id, tunnel.source_egress_cidrs),
+            wg.db_ingress_policy(req.migration_id, req.target.namespace, _release(req.target)),
+        ])  # fmt: skip
+        deadline = time.monotonic() + tunnel.endpoint_timeout_s
+        address = None
+        while not (address := target.lb_address(wg.NAMESPACE, f"{base}-endpoint")):
+            if time.monotonic() > deadline:
+                raise _fail("TUNNEL_ENDPOINT_TIMEOUT", retryable=True)
+            _beat("waiting for the target UDP load balancer")
+            SLEEP(5)
+
+        source.apply(
+            wg.gateway_manifests(req.migration_id, "source", image=tunnel.image,
+                                 local_db=req.source.local_host, peer_public_key=target_pub,
+                                 peer_endpoint=f"{address}:{wg.WG_PORT}")
+        )  # fmt: skip
+        for cluster in (target, source):
+            cluster.rollout_wait(wg.NAMESPACE, base)
+
+        deadline = time.monotonic() + tunnel.handshake_timeout_s
+        while True:
+            try:
+                if source.latest_handshake(wg.NAMESPACE, selector) > 0:
+                    break
+            except CommandError:
+                pass  # 게이트웨이가 아직 wg0를 만들지 않았다
+            if time.monotonic() > deadline:
+                raise _fail("TUNNEL_HANDSHAKE_TIMEOUT", retryable=True)
+            _beat("waiting for the WireGuard handshake")
+            SLEEP(3)
+    return {"name": base, "endpoint": address, "handshake": True,
+            "peer_host": wg.peer_host(req.migration_id)}  # fmt: skip
+
+
+@activity.defn
+async def dm_tunnel(payload: dict) -> dict:
+    """payload: {request: DataMigrationRequest, tunnel: WireGuardTunnel}"""
+    req = DataMigrationRequest.model_validate(payload["request"])
+    tunnel = wg.WireGuardTunnel.model_validate(payload["tunnel"])
+    try:
+        return await asyncio.to_thread(establish, req, tunnel)
+    except CommandError as exc:
+        raise ApplicationError("TUNNEL_COMMAND_FAILED", type="TUNNEL_COMMAND_FAILED") from exc
+
+
+__all__ = ["dm_tunnel", "establish"]

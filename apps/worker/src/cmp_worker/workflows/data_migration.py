@@ -1,6 +1,6 @@
 """데이터 이전 자식 Workflow(specs/data-migration, ticket 05). 외부 호출은 Activity만 한다.
 
-흐름: 사전 점검 → 준비 → 스키마 → 구독 → streaming까지 감시 → PgBouncer 설치·앱 연결 →
+흐름: (입력에 `tunnel`이 있으면) WireGuard 복제 경로 → 사전 점검 → 준비 → 스키마 → 구독 → streaming까지 감시 → PgBouncer 설치·앱 연결 →
 (감시하며 신호 대기) → `switchover` 신호로 DB 전환 → `rollback` 신호로 되돌리기 / `finish` 신호로 끝.
 `cancel` 신호는 전환 전이면 구독·발행을 지우고 끝낸다(원본 슬롯이 WAL을 붙잡지 않게).
 
@@ -25,10 +25,12 @@ with workflow.unsafe.imports_passed_through():
 
     from cmp_worker.activities import data_cutover as dc
     from cmp_worker.activities import data_migration as dm
+    from cmp_worker.activities import data_tunnel as dt
 
 MONITOR_ROUNDS_BEFORE_CONTINUE = 200
 PARENT_SIGNAL = "data_migration_state"
 ANNOUNCE_PATCH = "data-cutover-announce-v1"
+TUNNEL_PATCH = "data-tunnel-v1"
 SWITCH_FROM = {"switchover": "source", "rollback": "target"}
 
 
@@ -49,6 +51,7 @@ class DataMigrationWorkflow:
         self.requested: str | None = None  # switchover | rollback | finish | cancel
         self.last_steps: list[dict] | None = None  # 지난 전환의 단계별 시간(계획 화면에 보인다)
         self.announced: list | None = None  # 마지막으로 알린 [복제 준비됨, 전환 시도 수]
+        self.tunnel: dict | None = None  # ticket 10: {name, endpoint, handshake, peer_host}
 
     # ---- 신호·조회 ----
 
@@ -77,6 +80,7 @@ class DataMigrationWorkflow:
             "last_readiness": self.last_readiness,
             "switches": self.switches,
             "failure_code": self.failure_code,
+            "tunnel": self.tunnel,
         }
 
     @workflow.query
@@ -123,6 +127,12 @@ class DataMigrationWorkflow:
 
     async def _replicate(self, args: dict) -> str | None:
         req = self._req(args)
+        if args.get("tunnel") and workflow.patched(TUNNEL_PATCH):
+            # ticket 10: 두 클러스터 사이 WireGuard 게이트웨이. LB 주소·handshake를 기다린다.
+            self.phase = "tunnel"
+            self.tunnel = await self._call(
+                dt.dm_tunnel, {"request": req, "tunnel": args["tunnel"]}, timeout_s=1800, attempts=2
+            )
         self.phase = "precheck"
         pre = await self._call(dm.dm_precheck, req, timeout_s=120)
         if not pre["ok"]:
