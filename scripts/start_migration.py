@@ -29,6 +29,7 @@ async def main(args: argparse.Namespace) -> int:
             credential_ref=args.credential_ref, source_access=args.source_access,
             sandbox_json=args.sandbox, planning_json=args.planning,
             env_file_ref_json=args.env_file_ref, data_migration_json=args.data_migration,
+            traffic_json=args.traffic,
         )  # fmt: skip
     except (ValidationError, ValueError) as exc:
         print(f"Input is invalid: {type(exc).__name__}")
@@ -70,6 +71,11 @@ if __name__ == "__main__":
         "--data-migration",
         help="DataMigrationInput as JSON (specs/data-migration): source DbEndpoint, app, settings, "
         "target_peer_host",
+    )
+    parser.add_argument(
+        "--traffic",
+        help='TrafficShiftInput as JSON (#128): {"relay_queue": "relay-1", "policy": {...}}. '
+        "Without it the traffic step stays a scaffold.",
     )
     parser.add_argument("--workflow-id")
     sys.exit(asyncio.run(main(parser.parse_args())))

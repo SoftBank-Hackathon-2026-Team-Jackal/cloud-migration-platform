@@ -5,6 +5,7 @@ from .contracts import (
     ShiftResult,
     StepOutcome,
     TrafficPolicy,
+    TrafficShiftInput,
 )
 from .handover import handover_from_result
 from .shifter import (
@@ -26,6 +27,7 @@ __all__ = [
     "ShiftResult",
     "StepOutcome",
     "TrafficPolicy",
+    "TrafficShiftInput",
     "TrafficShifter",
     "check_handover",
     "evaluate_step",

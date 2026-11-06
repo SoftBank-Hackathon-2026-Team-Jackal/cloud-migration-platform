@@ -16,6 +16,7 @@ with workflow.unsafe.imports_passed_through():
         HANDOFF_UNAVAILABLE,
         TRAFFIC_HANDOFF_PATCH,
         TRAFFIC_HANDOVER_ACTIVITY,
+        TRAFFIC_SHIFT_PATCH,
     )
     from cmp_contracts.migration import FAILURE_OUTCOMES, OUTCOME_PHASE, WEB_PHASE
     from cmp_contracts.plan_publish import (
@@ -34,6 +35,7 @@ with workflow.unsafe.imports_passed_through():
         approval_workflow_id,
     )
     from cmp_data.handoff import DataMigrationInput, target_endpoint
+    from cmp_traffic import TrafficShiftInput
 
     from cmp_worker.activities.analysis import analyze_project
     from cmp_worker.activities.build import prepare_image
@@ -42,6 +44,7 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.workflows.analysis import AnalysisWorkflow
     from cmp_worker.workflows.data_migration import DataMigrationWorkflow
     from cmp_worker.workflows.sandbox import SandboxVerificationWorkflow
+    from cmp_worker.workflows.traffic import TrafficShiftWorkflow
 
 # ENV-02: the start input may carry `env_file_ref`; it is copied into the analysis, Sandbox and
 # Planning inputs. Only the reference travels; values stay in the encrypted store.
@@ -58,6 +61,13 @@ REPORT_ACTIVITY = {
 }
 DATA_PATCH = "data-migration-v1"
 # 데이터 이전 자식이 이 상태가 되면 부모가 다음 단계(트래픽)로 간다. DB를 먼저 전환한다(DM-007).
+# #128: TrafficShiftWorkflow result status -> MigrationWorkflow outcome (None: go on to verification).
+TRAFFIC_DONE = {
+    "DONE": None,
+    "ROLLED_BACK": ("traffic_rolled_back", "TRAFFIC_ROLLED_BACK"),
+    "BLOCKED": ("traffic_blocked", "TRAFFIC_BLOCKED"),
+    "FAILED": ("traffic_failed", "TRAFFIC_FAILED"),
+}
 DATA_DONE = {"switched": None, "blocked": "data_blocked", "failed": "data_failed",
              "cancelled": "cancelled", "done": None}  # fmt: skip
 
@@ -89,6 +99,8 @@ class MigrationWorkflow:
         # Ticket 50 H5: `TrafficHandoff` read after a successful execution, for the traffic step
         # (#128 passes `handover` to TrafficShiftWorkflow as is). No secret values.
         self.traffic_handoff: dict | None = None
+        # #128: TrafficShiftWorkflow outcome {status, final_weights}. Codes and numbers only.
+        self.traffic_shift: dict | None = None
 
     @property
     def phase(self) -> str:
@@ -144,6 +156,7 @@ class MigrationWorkflow:
             "env_file_ref": self.env_file_ref,
             "data_migration": self.data_migration,
             "traffic_handoff": self.traffic_handoff,
+            "traffic_shift": self.traffic_shift,
         }
 
     async def _hand_off(
@@ -348,6 +361,55 @@ class MigrationWorkflow:
         blocked = list(got.get("blocked_by") or []) or [HANDOFF_UNAVAILABLE]
         self.failure_code, self.failure_issues = blocked[0], blocked
         return "traffic_blocked"
+
+    async def _shift_traffic(self, given: dict) -> str | None:
+        """#128: 인계값으로 TrafficShiftWorkflow(자식)를 시작해 전환이 끝나거나 되돌아갈 때까지 기다린다.
+
+        None이면 전환이 끝나 검증 단계로 간다. 되돌아갔거나(롤백)·막혔거나·실패하면 그 결과가 이 실행의
+        종료 상태가 된다. 취소하면 자식에게 취소를 보내 원본으로 되돌린 뒤 끝난다.
+        """
+        self.phase = "traffic"
+        parsed = TrafficShiftInput.model_validate(given)
+        handoff = self.traffic_handoff or {}
+        child = await workflow.start_child_workflow(
+            TrafficShiftWorkflow.run,
+            {
+                "handover": handoff.get("handover") or {},
+                "policy": parsed.policy.model_dump(mode="json"),
+                "relay_queue": parsed.relay_queue,
+                # 입력으로 정하지 않았으면 이 실행의 데이터 이전 상태(DM-007)로 판단한다.
+                "db_gate_ok": parsed.db_gate_ok if parsed.db_gate_ok is not None else self.db_gate_ok(),
+            },
+            id=f"traffic-{workflow.info().workflow_id}",
+            task_queue=WORKFLOW_QUEUE,
+            parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+        )
+        waiting = asyncio.create_task(workflow.wait_condition(lambda: self.cancel_requested))
+        try:
+            await workflow.wait([child, waiting], return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            waiting.cancel()
+        if self.cancel_requested and not child.done():
+            await child.signal(
+                TrafficShiftWorkflow.request_cancel
+            )  # the child rolls back to the source
+            try:
+                self.traffic_shift = {k: v for k, v in (await child).items() if k != "events"}
+            except ChildWorkflowError:
+                pass
+            return "cancelled"
+        try:
+            result = await child
+        except ChildWorkflowError:
+            self.failure_code = "TRAFFIC_SHIFT_FAILED"
+            return "traffic_failed"
+        self.traffic_shift = {k: v for k, v in result.items() if k != "events"}
+        mapped = TRAFFIC_DONE.get(str(result.get("status")), ("traffic_failed", "TRAFFIC_FAILED"))
+        if mapped is None:
+            return None
+        outcome, code = mapped
+        self.failure_code = code
+        return outcome
 
     async def _step(self, name: str, fn: object, project_id: str, queue: str) -> None:
         if self.cancel_requested:
@@ -619,6 +681,17 @@ class MigrationWorkflow:
                 if stopped:
                     self.phase = stopped
                     return stopped
+                if (
+                    pipeline_input is not None
+                    and pipeline_input.get("traffic")
+                    and workflow.patched(TRAFFIC_SHIFT_PATCH)
+                ):
+                    # #128: the real shift replaces the scaffold `shift_traffic` step.
+                    stopped = await self._shift_traffic(pipeline_input["traffic"])
+                    if stopped:
+                        self.phase = stopped
+                        return stopped
+                    continue
             await self._step(name, fn, project_id, queue)
             if self.cancel_requested:
                 return "cancelled"

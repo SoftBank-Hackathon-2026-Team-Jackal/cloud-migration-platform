@@ -23,6 +23,9 @@ MIGRATION_HANDOFF_ACTIVITY = "get_migration_handoff"
 TRAFFIC_HANDOVER_ACTIVITY = "get_traffic_handover"
 # `MigrationWorkflow` reads the traffic handover after a successful execution under this patch.
 TRAFFIC_HANDOFF_PATCH = "traffic-handoff-v1"
+# `MigrationWorkflow` runs the real `TrafficShiftWorkflow` child (#128) under this patch when the
+# start input carries `traffic`; without it the scaffold `shift_traffic` step stays.
+TRAFFIC_SHIFT_PATCH = "traffic-shift-v1"
 
 # Why a view does not proceed (ticket 13 R7, 16 T2/T7/T11, 25 F3). The first code is the cause.
 BlockCode = Literal[
