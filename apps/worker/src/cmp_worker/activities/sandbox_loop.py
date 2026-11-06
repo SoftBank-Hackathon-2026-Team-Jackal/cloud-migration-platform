@@ -18,9 +18,12 @@ from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, p
 from cmp_agents.llm import LLMClient
 from cmp_agents.tester import SuiteRequest, generate_tests
 from cmp_contracts.analysis import AnalysisReport, EnvExceptions, ReviewRecord
+from cmp_contracts.env_plan import EnvPlan
 from cmp_contracts.provisioning import ContentRef, Image, VersionRef
 from cmp_contracts.provisioning_v2 import RequirementsV2, S3ArchiveRef
 from cmp_contracts.verification import BuildAttempt, canonical_requirements
+from cmp_providers.ecr_pull import EcrTokenMinter, PlatformRegistry
+from cmp_providers.env_file import EnvFileStore
 from cmp_scanners.masking import mask_text
 from cmp_testsuite import SuiteResult, load_bundle, run_suite
 from cmp_testsuite.model import HttpStep
@@ -90,7 +93,8 @@ class SandboxInput(BaseModel):
     storage_class: str = "local-path"
     env_names: list[str] = []
     env_file: str | None = None
-    env_file_ref: ContentRef | None = None  # ENV-02: passed through; ENV-06 renders from it
+    env_file_ref: ContentRef | None = None  # ENV-02: the uploaded `.env` (reference only)
+    env_plan_ref: ArtifactRef | None = None  # ENV-05: the per-key plan the analysis stored
     keep_hosts: list[dict[str, Any]] = []
     source_hosts: list[str] = []
     ai_tests: bool = (
@@ -158,7 +162,13 @@ class SandboxLoopActivities:
         origin_case_runner: Callable[[], AbstractContextManager[CaseRunner]] | None = None,
         cut_dependency: Callable[[SandboxPlan], AbstractContextManager[None]] | None = None,
         suite_uploader: Callable[[bytes], S3ArchiveRef] | None = None,
+        env_store: EnvFileStore | None = None,
+        pull_registry: PlatformRegistry | None = None,
+        token_minter: EcrTokenMinter | None = None,
     ) -> None:
+        self.pull_registry = pull_registry  # ticket 26: private platform ECR images
+        self.token_minter = token_minter
+        self.env_store = env_store  # ENV-06: key names and PASS values by reference
         self.suite_uploader = suite_uploader
         # The origin test resource (D-09) has no default: without it AI tests are never requested.
         self.origin_case_runner = origin_case_runner
@@ -240,6 +250,11 @@ class SandboxLoopActivities:
     async def sbx_prepare(self, payload: dict) -> dict:
         inp = SandboxInput.model_validate(payload["input"])
         requirements = self._requirements(payload["requirements_ref"])
+        env_plan = (
+            EnvPlan.model_validate_json(self.store.get(inp.env_plan_ref))
+            if inp.env_plan_ref is not None
+            else None
+        )
         images = SandboxImages(
             database=inp.database_image,
             applications={k: Image.model_validate(v) for k, v in payload["images"].items()},
@@ -253,6 +268,9 @@ class SandboxLoopActivities:
                 capabilities=SandboxCapabilities(storage_class=inp.storage_class),
                 env_names=inp.env_names,
                 env_file=Path(inp.env_file) if inp.env_file else None,
+                env_plan=env_plan,
+                env_file_ref=inp.env_file_ref,
+                env_store=self.env_store,
                 update_env=payload.get("previous_plan") is not None,
                 network=True,
             )
@@ -268,6 +286,7 @@ class SandboxLoopActivities:
         previous = payload.get("previous_plan")
         result: dict[str, Any] = {"sandbox_error": None, "baseline": None, "actions": {}}
         try:
+            self.service.apply_pull_secret(plan, self.pull_registry, self.token_minter)
             if previous is None:
                 self.service.apply_sandbox(plan)
                 self.service.apply_network(plan, inp.keep_hosts)
@@ -627,6 +646,12 @@ class SandboxLoopActivities:
         suite_bundle = self.store.get(ArtifactRef.model_validate(payload["suite_ref"]))
         assembly = json.loads(self.store.get(ArtifactRef.model_validate(analysis["assembly_ref"])))
         exceptions = EnvExceptions.model_validate(assembly["env_exceptions"])
+        plan_ref = assembly.get("env_plan_ref")  # ENV-05: the approved per-key plan, names only
+        env_plan = (
+            EnvPlan.model_validate_json(self.store.get(ArtifactRef.model_validate(plan_ref)))
+            if plan_ref
+            else None
+        )
         mapping = self.store.put_json(
             exceptions, ref_id=f"env-exceptions-{report.migration_id}", kind="env-exceptions"
         )
@@ -639,6 +664,7 @@ class SandboxLoopActivities:
             suite_ref=self.suite_uploader(suite_bundle),
             mapping_ref=content(mapping.model_dump()),
             settings=settings,
+            env_plan=env_plan,
             expected_target_ref=(
                 VersionRef.model_validate(payload["target_selection_ref"])
                 if payload.get("target_selection_ref")

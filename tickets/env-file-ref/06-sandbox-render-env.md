@@ -4,7 +4,7 @@
 샌드박스 담당
 
 ## 상태
-DRAFT — 담당자 검토 전.
+DONE — Issue #197 (ENV-05·분석 26과 한 PR). 구현 완료, 리뷰 후 병합
 
 ## 목적
 샌드박스가 워커 로컬 파일(`SandboxSettings.env_file`) 대신 구축과 같은 `env_file_ref`·EnvPlan·`render_env`로 앱 env를 만든다. 샌드박스와 구축의 차이를 DB 출력 하나로 줄인다.
@@ -26,9 +26,9 @@ ENV-03(`render_env`), ENV-05(EnvPlan).
 - 제외: 공통 함수 구현(ENV-03), 구축(ENV-04)
 
 ## 수용 기준
-- [ ] 샌드박스가 `env_file_ref`로 앱 env를 만들고 워커 로컬 파일이 필요 없다.
-- [ ] 같은 입력에서 구축(ENV-04)과 `PASS`·`EXCLUDED` 결과가 같고 DB 출력만 다르다.
-- [ ] 원문 값이 Sandbox 로그·이벤트·Temporal 이력에 없다.
+- [x] 샌드박스가 `env_file_ref`로 앱 env를 만들고 워커 로컬 파일이 필요 없다.
+- [x] 같은 입력에서 구축(ENV-04)과 `PASS`·`EXCLUDED` 결과가 같고 DB 출력만 다르다.
+- [x] 원문 값이 Sandbox 로그·이벤트·Temporal 이력에 없다.
 
 ## Test Seam
 기존 샌드박스 테스트 + InMemory `.env` 저장소.

@@ -95,7 +95,11 @@ uv run python scripts/sandbox_ctl.py cleanup --all --confirm DELETE-ALL  # 전�
 ## 8. Sandbox 앱에 들어가는 값
 
 - DB 연결 변수(`DB_HOST`·`DB_PORT`·`DB_NAME`·`DB_USER`·`DB_PASSWORD`·`DATABASE_URL` 등 이름 패턴)는 분석이 대상 DB 출력에 묶고, Sandbox가 새로 띄운 DB 값으로 채운다. 비밀번호는 실행마다 새로 만든 Secret 참조이고 원본 값은 복사하지 않는다.
-- `AWS_*`는 복사하지 않는다. 그 밖의 변수(`APP_PORT`, 토큰 등)는 시작할 때 `--sandbox`의 `env_names`와 `env_file`로 이름과 값을 줘야 앱에 들어간다. `.env` 단일 참조 전환(`specs/env-file-ref`) 전까지의 임시 경로다.
+- `AWS_*`는 복사하지 않는다. 나머지 변수는 사용자가 올린 `.env`의 참조(`env_file_ref`)로 처리한다(ENV-05·06).
+  - 시작할 때 `--env-file-ref '{"id": "...", "version": "1", "sha256": "..."}'`(`POST /env-files`가 돌려준 값)를 주면 분석은 키 이름만 읽어 키마다 처리 규칙(`EnvPlan`: `PASS`·`EXCLUDED`·`REPLACED`·`UNREPRESENTABLE`·`MISSING`)을 정하고, Sandbox는 같은 `render_env`로 앱 Secret(`<앱>-env`)과 DB 연결 Secret(`<DB>-conn`)을 만든다. 값은 `PASS` 키만 읽고 그것도 클러스터에 적용하는 순간뿐이다.
+  - `UNREPRESENTABLE`(예: `DB_DSN`)이나 코드는 읽는데 선언되지 않은 `MISSING` 키가 있으면 Sandbox를 만들기 전에 `NEEDS_REVIEW`로 멈춘다(이유 `SANDBOX:ENV_UNREPRESENTABLE`, `SANDBOX:ENV_MISSING`).
+  - 분석과 Sandbox 워커에 플랫폼의 `.env` 저장소 설정(`ENV_FILE_STORE_DIR`, `ENV_FILE_ENCRYPTION_KEY`)이 있어야 한다. 없으면 `ENV_FILE_STORE_UNCONFIGURED`, 보관 기간이 지났으면 `ENV_FILE_EXPIRED`로 재시도 없이 실패한다.
+  - `env_file_ref`를 주지 않으면 예전 방식 그대로다: 분석은 저장소의 `.env*` 파일에서 이름을 읽고, Sandbox는 `--sandbox`의 `env_names`와 `env_file`(워커 로컬 파일)로 값을 받는다.
 - 코드에 직접 적힌 주소는 바꿀 수 없다. 이 경우 실패로 분류되어 Fixer가 코드를 고친다(파일 20개·파일당 200KB 이하, 테스트·`.env`·`.git`은 수정 불가, 최대 3회).
 
 ### 실제 빌드 켜기 (티켓 25)
@@ -113,9 +117,17 @@ BUILD_AWS_PROFILE=<이름 있는 프로필, 승인된 것만>   # 선택
 - 실제 AWS 호출이므로 버킷·ECR·프로필 사용 승인과 D-06·D-12 결정이 먼저다. 사전 점검(`scripts/preflight.py`)은 설정 유무만 보고 계정을 호출하지 않는다.
 - 빌드가 이미지를 못 만들면 Sandbox 없이 `NEEDS_REVIEW`(이유 `BUILD:<코드>`)로 사람에게 넘어간다.
 
+### 비공개 ECR 이미지 pull (티켓 26)
+
+실제 빌드가 올린 이미지는 플랫폼 ECR에 있어 비공개다. `BUILD_ECR_REPOSITORY`가 있으면 Sandbox를 적용할 때마다(갱신 포함) `BUILD_AWS_PROFILE`의 신원으로 ECR 토큰을 새로 받아 네임스페이스에 `cmp-ecr-pull` Secret을 만들고 `default` ServiceAccount가 쓰게 한다. 토큰은 표준 입력으로만 전달하고 어디에도 남기지 않는다.
+
+- 공개 이미지(`PrebuiltImages`)만 쓰면 아무것도 만들지 않는다.
+- 플랫폼 레지스트리와 저장소 밖의 ECR 이미지는 `IMAGE_REGISTRY_NOT_ALLOWED`, 토큰 실패는 `ECR_TOKEN_UNAVAILABLE`·`ECR_ACCOUNT_MISMATCH`로 멈춘다.
+- 실제 토큰 발급은 AWS 호출이므로 프로필 사용 승인이 필요하다.
+
 ### Planning 인계 (티켓 15)
 
-시작할 때 `--planning`에 대상 선택, 대상 설정, `.env` 참조를 JSON으로 주면, Sandbox가 통과한 직후 Planning 입력을 조립해 등록한 뒤 계획 단계로 간다.
+시작할 때 `--planning`에 대상 선택과 대상 설정을 JSON으로 주면(`.env` 참조는 시작 요청의 `--env-file-ref`를 쓰며, `--planning` 안에 따로 줘도 된다), Sandbox가 통과한 직후 Planning 입력을 조립해 등록한 뒤 계획 단계로 간다.
 
 ```bash
 uv run python scripts/start_migration.py ... --planning '{"target_selection": {...}, "target": {...}, "env_file_ref": {"id": "...", "version": "1", "sha256": "..."}}'
@@ -123,7 +135,7 @@ uv run python scripts/start_migration.py ... --planning '{"target_selection": {.
 
 - 등록은 민서님의 Planning 입력 등록 함수를 워커가 호출하는 방식이다(관리자 토큰 불필요). 분석 저장소와 Planning 저장소(`ARTIFACT_STORE_DIR`)는 같은 디렉터리여야 한다.
 - 거절은 부모 `failed`와 `failure_code`로 나온다: `BUILD_EVIDENCE_MISSING`(빌드 증거 없음 — 미리 빌드한 이미지 경로), `TEST_SUITE_UPLOAD_NOT_CONFIGURED`, `SANDBOX_NOT_PASSED`, `PROJECTION_REJECTED`, `PLANNING_INPUT_INVALID`, `TARGET_SELECTION_CHANGED`, 등록 쪽 코드(`MIGRATION_MISMATCH` 등).
-- `.env` 참조는 플랫폼이 `.env`를 저장하고 시작 요청에 참조를 넣는 작업(`specs/env-file-ref`의 ENV-02)이 끝나면 그쪽 값으로 바뀐다.
+- 분석이 만든 `EnvPlan`(키 이름과 처리 결과만)을 등록에 함께 넣는다. 참조가 없으면 `ENV_FILE_REF_MISSING`, 계획이 다른 `.env`의 것이면 `ENV_PLAN_REF_MISMATCH`로 멈춘다.
 
 ### 같은 테스트 묶음을 Production에서 다시 돌리기
 

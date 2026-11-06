@@ -28,6 +28,8 @@ from cmp_contracts.analysis import (
 )
 from cmp_contracts.provisioning import VersionRef
 from cmp_contracts.provisioning_v2 import RequirementsV2
+from cmp_providers.env_file import EnvFileError, EnvFileStore, resolve_env_names
+from cmp_providers.env_plan_builder import build_env_plan
 from cmp_scanners.assembly import (
     build_requirements as assemble_requirements,
 )
@@ -69,7 +71,9 @@ class AnalysisPipeline:
         aws_clients_factory: Callable[[AnalysisInput], AwsClients] | None = None,
         allow_local_repositories: bool = False,
         source_resolver: SourceTokenResolver | None = None,
+        env_store: EnvFileStore | None = None,
     ) -> None:
+        self.env_store = env_store
         self.source_resolver = source_resolver or NoSourceTokenResolver()
         self.store = store
         self.workspace_root = Path(workspace_root)
@@ -114,11 +118,17 @@ class AnalysisPipeline:
             token=token,
             allow_local=self.allow_local,
         )
+        env_names = snapshot.env_names
+        if data.env_file_ref is not None:
+            # ENV-05: the uploaded `.env` replaces the repository's `.env*` files. Names only.
+            if self.env_store is None:
+                raise EnvFileError("ENV_FILE_STORE_UNCONFIGURED")
+            env_names = {"env_file_ref": resolve_env_names(self.env_store, data.env_file_ref)}
         return {
             "workspace": snapshot.workspace,
             "commit": snapshot.commit,
             "commit_verified": snapshot.commit_verified,
-            "env_names": snapshot.env_names,
+            "env_names": env_names,
         }
 
     def scan_code(self, inp: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +195,9 @@ class AnalysisPipeline:
             requirements_ref = self.store.put(
                 payload, ref_id=f"requirements-{data.migration_id}", kind="requirements"
             ).model_dump()
+        env_plan_ref = None
+        if data.env_file_ref is not None and requirements is not None:
+            env_plan_ref = self._env_plan(data, source, code, manifests, requirements)
         assembly = {
             "env_exceptions": built.env_exceptions.model_dump(mode="json"),
             "blocks": [b.model_dump(mode="json") for b in built.blocks],
@@ -193,6 +206,7 @@ class AnalysisPipeline:
             "dockerfile": check_dockerfile(source["workspace"]).model_dump(mode="json"),
             "network": network.model_dump(mode="json") if network else None,
             "database_images": database_images,
+            **({"env_plan_ref": env_plan_ref} if env_plan_ref is not None else {}),
         }
         return {
             "requirements_ref": requirements_ref,
@@ -202,6 +216,31 @@ class AnalysisPipeline:
             "code_ref": code_ref,
             "manifests_ref": manifests_ref,
         }
+
+    def _env_plan(
+        self,
+        data: AnalysisInput,
+        source: dict[str, Any],
+        code: CodeScan,
+        manifests: ManifestScan,
+        requirements: RequirementsV2,
+    ) -> dict[str, Any]:
+        """ENV-05: one disposition per key, from names only (the same rules as the exceptions)."""
+        postgres = {p.resource for p in manifests.postgres_images}
+        declared = {n for names in source["env_names"].values() for n in names} | {
+            n
+            for w in manifests.workloads
+            if w.kind in {"Deployment", "StatefulSet"} and f"{w.kind}/{w.name}" not in postgres
+            for n in w.env_names
+        }
+        reads = {s.target for s in code.call_sites if s.kind == "ENV_READ"}
+        plan = build_env_plan(
+            data.env_file_ref,
+            declared,
+            reads,
+            has_database=any(r.kind == "POSTGRESQL" for r in requirements.resources),
+        )
+        return self._put(plan, data.migration_id, "env-plan")
 
     def precheck(
         self,
