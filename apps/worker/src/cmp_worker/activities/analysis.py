@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -6,12 +7,17 @@ from typing import Any
 from cmp_contracts.analysis import AnalysisReport, ReviewRecord
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_providers.env_file import EnvFileError
+from cmp_scanners.aws_infra import AwsInfraScan
+from cmp_scanners.code import CodeScan
+from cmp_scanners.manifests import ManifestScan
 from cmp_scanners.source import SourceFetchError
 from pydantic import ValidationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from cmp_worker import analysis_events
 from cmp_worker.analysis_pipeline import AnalysisPipeline
+from cmp_worker.artifact_store import ArtifactRef
 from cmp_worker.sandbox_input import SandboxSettings, assemble_sandbox_input
 from cmp_worker.source_access import SourceAccessError
 
@@ -139,25 +145,57 @@ class AnalysisActivities:
     def __init__(self, pipeline: AnalysisPipeline) -> None:
         self.pipeline = pipeline
 
+    # Ticket 58: each step reports what it found (`analysis.finding`) only after it succeeds;
+    # `check_evidence` ends the screen with `analysis.done`. `migration_id` is the parent
+    # MigrationWorkflow ID (the parent puts it into `AnalysisInput`).
+
+    def _get(self, ref: dict) -> Any:
+        return self.pipeline.store.get_json(ArtifactRef.model_validate(ref))
+
     @activity.defn(name="fetch_source")
     async def fetch_source(self, inp: dict) -> dict:
-        return await _run(self.pipeline.fetch_source, inp)
+        source = await _run(self.pipeline.fetch_source, inp)
+        await analysis_events.report(
+            inp["migration_id"], "fetch_source", lambda: analysis_events.source_findings(source)
+        )
+        return source
 
     @activity.defn(name="scan_code")
     async def scan_code(self, payload: dict) -> dict:
-        return await _run(self.pipeline.scan_code, payload["input"], payload["source"])
+        ref = await _run(self.pipeline.scan_code, payload["input"], payload["source"])
+        await analysis_events.report(
+            payload["input"]["migration_id"],
+            "scan_code",
+            lambda: analysis_events.code_findings(CodeScan.model_validate(self._get(ref))),
+        )
+        return ref
 
     @activity.defn(name="scan_manifests")
     async def scan_manifests(self, payload: dict) -> dict:
-        return await _run(self.pipeline.scan_manifests, payload["input"], payload["source"])
+        ref = await _run(self.pipeline.scan_manifests, payload["input"], payload["source"])
+        await analysis_events.report(
+            payload["input"]["migration_id"],
+            "scan_manifests",
+            lambda: analysis_events.manifest_findings(ManifestScan.model_validate(self._get(ref))),
+        )
+        return ref
 
     @activity.defn(name="scan_aws_infra")
     async def scan_aws_infra(self, inp: dict) -> dict:
-        return await _run(self.pipeline.scan_aws_infra, inp)
+        infra = await _run(self.pipeline.scan_aws_infra, inp)
+        if infra.get("status") == "COLLECTED":
+            await analysis_events.report(
+                inp["migration_id"],
+                "scan_aws_infra",
+                lambda: analysis_events.infra_findings(
+                    AwsInfraScan.model_validate(self._get(infra["ref"]))
+                ),
+            )
+        return infra
 
     @activity.defn(name="build_requirements")
     async def build_requirements(self, payload: dict) -> dict:
-        return await _run(
+        built = await _run(
             self.pipeline.build_requirements,
             payload["input"],
             payload["source"],
@@ -165,6 +203,19 @@ class AnalysisActivities:
             payload["manifests_ref"],
             payload["infra"],
         )
+        if built["requirements_ref"] is not None:
+            await analysis_events.report(
+                payload["input"]["migration_id"],
+                "build_requirements",
+                lambda: analysis_events.requirements_findings(
+                    json.loads(
+                        self.pipeline.store.get(
+                            ArtifactRef.model_validate(built["requirements_ref"])
+                        )
+                    )
+                ),
+            )
+        return built
 
     @activity.defn(name="precheck")
     async def precheck(self, payload: dict) -> dict:
@@ -190,7 +241,7 @@ class AnalysisActivities:
 
     @activity.defn(name="check_evidence")
     async def check_evidence(self, payload: dict) -> dict:
-        return await _run(
+        report = await _run(
             self.pipeline.check_evidence,
             payload["input"],
             payload["source"],
@@ -199,6 +250,9 @@ class AnalysisActivities:
             payload["precheck"],
             payload["mapped"],
         )
+        # The analysis report exists: the screen's two streams end and "next" is enabled.
+        await analysis_events.emit_done(payload["input"]["migration_id"])
+        return report
 
     @activity.defn(name="record_review")
     async def record_review(self, payload: dict) -> dict:

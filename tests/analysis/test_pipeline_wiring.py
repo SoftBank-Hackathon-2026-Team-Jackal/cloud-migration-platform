@@ -183,6 +183,25 @@ async def test_the_history_holds_references_and_paths_only(repo):
 
 
 @pytest.mark.asyncio
+async def test_analysis_events_use_the_parent_migration_id_and_done_is_sent_once(repo):
+    """Ticket 58: findings and one `analysis.done` are stored under the MigrationWorkflow ID."""
+    from cmp_api.migration_events import InMemoryEmitter
+    from cmp_worker.events import configure_emitter
+
+    stored = InMemoryEmitter()
+    previous = configure_emitter(stored)
+    try:
+        await run_pipeline(repo, Script([None]), name="e")
+    finally:
+        configure_emitter(previous)
+    analysis = [e for e in stored.events if e.phase == "analysis"]
+    assert analysis and {e.migration_id for e in analysis} == {"migration-w"}
+    assert [e.type for e in analysis].count("analysis.done") == 1
+    finding_ids = [e.data["id"] for e in analysis if e.type == "analysis.finding"]
+    assert len(finding_ids) == len(set(finding_ids))
+
+
+@pytest.mark.asyncio
 async def test_a_string_start_still_runs_the_scaffold_and_never_asks_for_a_sandbox_input():
     async with await WorkflowEnvironment.start_time_skipping(
         test_server_existing_path=os.environ.get("CMP_TEST_SERVER_PATH")

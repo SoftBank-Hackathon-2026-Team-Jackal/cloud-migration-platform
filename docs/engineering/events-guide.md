@@ -49,12 +49,15 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 
 표의 "기존 값"은 지금 코드에 있는 모델·반환값이다. `[없음]`은 아직 값을 만드는 코드가 없다는 뜻이다(§5).
 
-### 분석 (승철님) — `phase: analysis`
+### 분석 (승철님, **연결 완료** — 티켓 58 대행) — `phase: analysis`
+
+티켓 58(분석 범위 대행)에서 실제 분석 `AnalysisActivities`가 낸다(`cmp_worker.analysis_events`). `fetch_source`·`scan_manifests`·`scan_code`·`scan_aws_infra`·`build_requirements`가 **성공한 뒤** 찾은 것을 key마다 `analysis.finding` 한 건으로 낸다(`id`=`<stream>-<key>`, `message` `""`, `detail`은 개수와 비밀 아닌 식별자 하나). 값이 없는 key는 내지 않는다(`node`·`nat_gateway`·`ebs_gb`는 AWS 스캔에 값이 없다). `check_evidence`가 성공하면 종료 표시 `infrastructure-done`·`code-done`(progress 100, 웹이 열에서 뺀다)과 `analysis.done` 1건을 낸다. 웹 "다음"은 두 흐름이 100일 때 켜지므로 그 전 finding은 90을 넘지 않는다. 멱등 키 `ana:{activity}:{key}`. key별 위치·progress 구간은 [티켓 58](../../tickets/provisioning/58-analysis-events.md). 아래 표는 처음 안내안이다(`analysis.done`은 `build_requirements`가 아니라 `check_evidence` 뒤에 낸다).
+
 
 | 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
 | --- | --- | --- | --- |
 | `analysis.finding` | `scan_code`·`scan_manifests`·`scan_aws_infra`·`scan_network`이 **끝날 때마다**(항목 단위 진행은 불가: 스캔 안에 진행 신호가 없다) | 스캔 결과 항목 → `id`(항목 ID), `stream`(`code`/`infrastructure`), `key`(능력 이름, 예 `s3`), `via`(근거 출처, §2 주의), `progress`(끝난 스캔 수 / 전체 스캔 수 ×100), `message`·`detail`은 `""` | `{"id":"f-s3-1","stream":"code","key":"s3","via":["code"],"progress":50,"message":"","detail":""}` |
-| `analysis.done` | `build_requirements` 성공 직후 | 없음(`{}`) | `{}` (status `done`) |
+| `analysis.done` | `check_evidence` 성공 직후(티켓 58) | 없음(`{}`) | `{}` (status `done`) |
 
 주의: 백엔드 `Evidence.kind`는 `CODE/MANIFEST/CLOUD_RESOURCE/IAM_POLICY/CLOUDTRAIL/CONFIG`인데 웹 `via`는 `code/iam/trail/config`뿐이다. **결정 필요**(§5): 웹이 6개 값을 그대로 받게 할지, 백엔드가 `CODE→code, IAM_POLICY→iam, CLOUDTRAIL→trail, MANIFEST·CLOUD_RESOURCE·CONFIG→config`로 줄여 보낼지. 결정 전에는 줄인 값을 쓰면 검증을 통과한다.
 
