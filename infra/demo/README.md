@@ -52,13 +52,22 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 
 `edge`(Caddy)는 443에서만 듣고 ACME TLS-ALPN-01로 인증서를 받아 `/opt/cmp/data/caddy`에 보관한다. 경로는 둘로 나뉜다.
 
-- `/agents/*`, `/relays/*` → API(`api:8000`). Agent API와 중계 서버가 읽는 `GET /relays/{relay_id}/agents`다.
-- 그 밖의 모든 경로 → 웹 화면(`web:3000`).
+| 경로 | 보내는 곳 | 쓰는 쪽 · 보호 |
+| --- | --- | --- |
+| `/agents/*` | API(`api:8000`) | 온프레미스 Agent. Agent 자격 증명 |
+| `/relays/*` | API | 중계 서버가 읽는 `GET /relays/{relay_id}/agents`. 중계 서버 자격 증명 |
+| `/migrations`, `/migrations/*` | API. `/migrations/*/events`(SSE)는 버퍼링 없이(`flush_interval -1`) | 브라우저(웹 실제 모드). **인증 없음**(#225: 대회 데모라 공개를 감수, 후속: 인증) |
+| `/provisioning/*` | API | 브라우저의 Plan 미리보기·승인. 승인자 Bearer, 승인자 등록·Plan 입력은 `APPROVAL_ADMIN_KEY` |
+| 그 밖의 모든 경로 | 웹 화면(`web:3000`) | `/`, `/settings`, `/api/*`(웹 서버 경로) 등 |
+
+`/migrations`에서 누구나 이전을 시작할 수 있다(실제 시작은 대상 프로필·업로드한 `.env`가 있어야 하고, 없으면 422/503으로 거절된다). `/migrations/{id}/approve`(scaffold Signal)는 실제 경로의 Plan 승인을 대신하지 못하지만, `/migrations/{id}/cancel`·조회·로그는 Workflow ID(UUID)를 아는 사람이면 부를 수 있다. 데모가 끝나면 인증을 붙이거나 이 경로를 다시 닫는다.
 - Temporal gRPC(`/temporal.api.*`, `/grpc.health.v1.Health/*`) → `temporal:7233`. **`CMP_TEMPORAL_ALLOWED_IP`(`/opt/cmp/.env`)에 적은 주소에서 온 요청만** 통과한다(중계 서버 `cmp-demo-relay`의 워커용). 설정하지 않으면 사용할 수 없는 문서용 주소(`192.0.2.1/32`)라 아무도 못 붙는다. 중계 서버 워커는 `TEMPORAL_ADDRESS=<CMP_PUBLIC_HOST>:443`, `TEMPORAL_TLS=true`로 접속한다.
 
-승인·운영자·터널 관리 API와 `/docs`, `/openapi.json`은 에지가 API로 넘기지 않으므로 계속 SSM 포트 포워딩으로만 쓴다(웹 서버 코드가 내부망에서 `http://api:8000`을 부를 뿐, 받은 경로를 그대로 전달하지 않는다). `/agent-enrollments`, `/docs` 같은 경로를 인터넷에서 열면 API가 아니라 웹이 404를 돌려준다. Traffic 중계 서버(별도 호스트, DNS 전환 P0 제외)와 포트·도메인을 공유하지 않는다.
+운영자·Agent 등록·터널 관리 API(`/agent-admin/*`, `/agent-enrollments`, `/tunnel-admin/*`, `/provisioning-admin/*`, `/connections`, `/env-files`)와 `/docs`, `/openapi.json`은 에지가 API로 넘기지 않으므로 계속 SSM 포트 포워딩으로만 쓴다(웹 서버 코드가 내부망에서 `http://api:8000`을 부를 뿐, 받은 경로를 그대로 전달하지 않는다). `/agent-enrollments`, `/docs` 같은 경로를 인터넷에서 열면 API가 아니라 웹이 404를 돌려준다. Traffic 중계 서버(별도 호스트, DNS 전환 P0 제외)와 포트·도메인을 공유하지 않는다.
 
 웹 컨테이너(`web`)는 포트를 열지 않고(`expose: 3000`) 에지 뒤에서만 받는다. 웹은 **`AGENT_ENROLLMENT_ADMIN_KEY`를 받지 않는다**: 웹의 `/api/agents` 경로는 아직 사용자 로그인이 없어서, 공개 웹이 이 키를 가지면 누구나 Agent 등록을 만들 수 있다. 키 없이는 연결 관리 화면이 목업 데이터로 동작한다. 로그인 확인이 생기면 운영자가 `/opt/cmp/web.env`에 넣는다.
+
+웹은 **실제 모드로 빌드**된다(#225). `NEXT_PUBLIC_*`는 빌드 때 화면 코드에 들어가므로 compose `web.build.args`에 둔다: `NEXT_PUBLIC_API_MODE=sse`, `NEXT_PUBLIC_SSE_START=source`(고른 저장소가 있을 때만 `POST /migrations`), `NEXT_PUBLIC_API_BASE=https://<CMP_PUBLIC_HOST>`(같은 출처). sse 빌드는 웹의 연결·Agent 화면 기본값도 실제 API로 바꾸므로, compose가 `PLATFORM_CONNECTIONS=${WEB_PLATFORM_CONNECTIONS:-mock}`으로 지금의 목업 화면을 유지한다. 실제 연결 화면을 쓰려면 `/opt/cmp/.env`에 `WEB_PLATFORM_CONNECTIONS=real`, `/opt/cmp/web.env`에 운영자 키를 둔다(위 주의 참고). 빌드 인자는 활성 플랫폼 릴리스의 compose에서 오므로 **플랫폼 배포(Deploy demo·`release.sh`)를 먼저 하고 `release-web.sh`로 웹을 다시 빌드**한다.
 
 웹 화면은 이 저장소가 아니라 `cloud-migration-web`에서 온다. 노트북에서 `bash infra/demo/release-web.sh <웹 저장소 경로>`로 올리면 `releases/web-<sha>.tar.gz`로 올라가고(인스턴스 역할은 `releases/*`만 읽을 수 있다), 서버에서 `/opt/cmp/web/<sha>`로 풀려 `/opt/cmp/web/current`가 가리키며 `web` 서비스가 다시 만들어진다. 이후 플랫폼 릴리스(`start.sh`)도 `/opt/cmp/web/current/Dockerfile`이 있으면 웹을 함께 올린다.
 
@@ -80,6 +89,9 @@ docker exec cmp-demo-worker-1 gcloud config get-value project --configuration cm
 # 노트북에서 (공개 경로만 열려 있는지)
 curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/agents/x        # 401/404 (API 응답)
 curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/relays/x/agents     # 401 (API: 중계 서버 자격증명 필요)
+curl -sI https://<CMP_PUBLIC_HOST>/migrations/does-not-exist                    # 405, allow: GET, content-type: application/json (API 응답, #225. 웹이면 text/html)
+curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/provisioning/plans/p/revisions/1/preview  # 401 APPROVER_AUTH_REQUIRED (API, Bearer 보호 유지)
+curl -sN -m 5 https://<CMP_PUBLIC_HOST>/migrations/<workflow_id>/events          # 이벤트가 끊김 없이 바로 흘러나온다(SSE)
 curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/                  # 200 (웹 화면)
 curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/agent-enrollments  # 404 (웹이 답한다. API로는 안 간다)
 curl -s -o /dev/null -w '%{http_code}\n' https://<CMP_PUBLIC_HOST>/docs              # 404 (웹이 답한다. API로는 안 간다)
@@ -240,7 +252,7 @@ sudo bash /opt/cmp/releases/$(cat /opt/cmp/current-revision)/infra/demo/runtime-
 
 ## 접속과 확인
 
-SSM Session Manager의 포트 포워딩으로 로컬 `8000`을 EC2 `8000`에 연결하면 `/health`와 `/docs`를 볼 수 있다. Temporal UI는 같은 방식으로 `8080`에 접속한다. API/Temporal UI는 EC2의 loopback에만 바인딩된다. 공개 URL은 Agent 경로(`/agents/*`)만 전달하는 에지뿐이다.
+SSM Session Manager의 포트 포워딩으로 로컬 `8000`을 EC2 `8000`에 연결하면 `/health`와 `/docs`를 볼 수 있다. Temporal UI는 같은 방식으로 `8080`에 접속한다. API/Temporal UI는 EC2의 loopback에만 바인딩된다. 공개 URL은 Agent·중계·이전·Plan 승인 경로(`/agents/*`, `/relays/*`, `/migrations[/*]`, `/provisioning/*`)만 API로 전달하는 에지뿐이다.
 
 ```sh
 aws ssm start-session --profile cmp-aws-prod --region ap-northeast-2 \

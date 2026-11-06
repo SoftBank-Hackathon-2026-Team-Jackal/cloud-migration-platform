@@ -135,15 +135,17 @@ def test_compose_targets_slim_api_and_tool_worker():
     assert services["worker"]["build"]["target"] == "worker"
 
 
-def test_edge_sends_only_agent_and_relay_routes_to_the_api():
+def test_edge_sends_agent_relay_and_migration_routes_to_the_api():
     routes = (DEMO / "agent-routes.caddy").read_text()
     code = [
         line.strip()
         for line in routes.splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
-    # Everything that is not the Agent API or the relay polling API is the web front end; the
-    # operator, approval and tunnel-admin routes and /docs never get a route to the API.
+    # #225: the browser (same origin) starts and follows migrations at /migrations and approves
+    # Plans at /provisioning/*; the SSE stream is passed through unbuffered. Operator, Agent
+    # enrollment and tunnel-admin routes (/agent-admin/*, /agent-enrollments, /tunnel-admin/*,
+    # /provisioning-admin/*, /connections, /env-files) and /docs still never reach the API.
     assert code == [
         "@temporal {",
         "path /temporal.api.* /grpc.health.v1.Health/*",
@@ -152,7 +154,13 @@ def test_edge_sends_only_agent_and_relay_routes_to_the_api():
         "handle @temporal {",
         "reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}",
         "}",
-        "@backend path /agents/* /relays/*",
+        "@migration_events path /migrations/*/events",
+        "handle @migration_events {",
+        "reverse_proxy {$CMP_API_UPSTREAM} {",
+        "flush_interval -1",
+        "}",
+        "}",
+        "@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*",
         "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
         "}",
@@ -201,11 +209,30 @@ def test_web_is_internal_only_and_reaches_the_api_over_the_compose_network():
     assert {"path": "/opt/cmp/web.env", "required": False} in web["env_file"]
 
 
+def test_web_is_built_in_real_sse_mode_against_the_public_origin():
+    # NEXT_PUBLIC_* values are compiled into the browser bundle, so they are build args, not
+    # runtime environment. cloud-migration-web's Dockerfile declares these three ARGs (default
+    # mock/wait/empty). The browser calls the same origin, which the edge sends to the API.
+    web = _compose()["services"]["web"]
+    assert web["build"]["args"] == {
+        "NEXT_PUBLIC_API_MODE": "sse",
+        "NEXT_PUBLIC_SSE_START": "source",
+        "NEXT_PUBLIC_API_BASE": "https://${CMP_PUBLIC_HOST:-localhost}",
+    }
+    for name in web["build"]["args"]:
+        assert name not in web["environment"], name
+    # An sse build would otherwise switch the web's connection screens to the real API, which
+    # needs the operator key the public web does not hold; keep today's mock default.
+    assert web["environment"]["PLATFORM_CONNECTIONS"] == "${WEB_PLATFORM_CONNECTIONS:-mock}"
+
+
 def test_release_web_script_uploads_only_under_releases_and_checks_the_account():
     script = (DEMO / "release-web.sh").read_text()
     assert "714066696240" in script
     assert "releases/web-" in script
     assert "ln -sfn" in script and "/opt/cmp/web/current" in script
+    # The web is rebuilt with the active release's compose file, so its build args apply.
+    assert "-f infra/demo/compose.yaml --profile public up -d --build web" in script
     syntax = subprocess.run(["bash", "-n", str(DEMO / "release-web.sh")], check=False)
     assert syntax.returncode == 0
 
