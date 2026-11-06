@@ -53,7 +53,7 @@ def read_wake(path) -> str | None:
 
 
 def write_wake(path) -> None:
-    """Agent side (ticket 65): a new token tells the tunnel to re-check soon. Atomic replace."""
+    """Agent side (ticket 66): a new token tells the tunnel to re-check soon. Atomic replace."""
     temporary = f"{path}.tmp"
     with open(temporary, "w", encoding="utf-8") as handle:
         handle.write(f"{time.time_ns()}-{secrets.token_hex(4)}")
@@ -183,7 +183,7 @@ class AgentDaemon:
         self.wait, self.log = wait, log
         self.idle_seconds, self.max_backoff = idle_seconds, max_backoff
         self.should_stop: Callable[[], bool] = lambda: False
-        # Ticket 65 (#283): called after each processed job so the tunnel re-checks soon.
+        # Ticket 66 (#283): called after each processed job so the tunnel re-checks soon.
         self.wake: Callable[[dict], None] | None = None
         self._failures = 0
 
@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("CMP_PREFLIGHT_ALLOWED_IMAGES", ""),
         help="comma-separated digest-pinned images",
     )
-    parser.add_argument("--tunnel-wake-file", help="signal file read by the tunnel (ticket 65)")
+    parser.add_argument("--tunnel-wake-file", help="signal file read by the tunnel (ticket 66)")
     args = parser.parse_args(argv)
     try:
         client = AgentControlClient(args.platform_url)

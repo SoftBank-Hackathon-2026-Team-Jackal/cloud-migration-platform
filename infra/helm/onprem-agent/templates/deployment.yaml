@@ -55,7 +55,7 @@ spec:
             - {{ join "," ($.Values.networkPreflight.allowedImages | default (list .)) | quote }}
             {{- end }}
             {{- if .Values.tunnel.enabled }}
-            # Ticket 65 (#283): a finished job tells the tunnel to re-check right away.
+            # Ticket 66 (#283): a finished job tells the tunnel to re-check right away.
             - --tunnel-wake-file
             - /var/run/cmp-wake/job
             {{- end }}
@@ -151,7 +151,7 @@ spec:
           emptyDir: {}
         - name: wireguard-run
           emptyDir: {}
-        # Ticket 65: signal file written by the agent container, read by the tunnel container.
+        # Ticket 66: signal file written by the agent container, read by the tunnel container.
         - name: tunnel-wake
           emptyDir:
             medium: Memory

@@ -1,7 +1,9 @@
-# Ticket 65 — Agent 터널이 앱 포트 배정 즉시 헬스 확인·보고
+# Ticket 66 — Agent 터널이 앱 포트 배정 즉시 헬스 확인·보고
 
 ## 상태
-IN_PROGRESS (로컬 완료, 리뷰·Agent 릴리스 `agent-v0.4.1` 승인 대기) — [Issue #283](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/283). 2026-11-07 데모 실행에서 발견했다. 15·17·25·52 후속. 플랫폼 쪽 인계 대기는 티켓 64가 따로 고친다.
+IN_PROGRESS (로컬 완료, 리뷰·Agent 릴리스 `agent-v0.4.1` 승인 대기) — [Issue #283](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/283). 2026-11-07 데모 실행에서 발견했다. 15·17·25·52 후속. 플랫폼 쪽 인계 대기는 다른 세션(`64-handover-tunnel-wait`)이 따로 고친다.
+
+번호 메모: 처음에는 65로 착수했으나 main에 `65-onprem-provision-events.md`(#281)가 먼저 들어와 66으로 바꿨다. 첫 커밋 메시지와 원격 브랜치 이름(`provisioning/feat/65-tunnel-immediate-report`)에는 65가 남아 있다.
 
 ## 배경 (2026-11-07 실측, 로컬 k3d, Agent `cmp-kms-k3s-01` v0.4.0)
 - 롤아웃 `SUCCEEDED READY`(약 19:37Z) 뒤 tunnel 컨테이너는 `APP_PORT_NOT_ASSIGNED`를 보고했고, 다음 바뀐 보고(`code: null`, `app_health_ok: true`)는 19:38:41Z였다.
@@ -12,7 +14,7 @@ IN_PROGRESS (로컬 완료, 리뷰·Agent 릴리스 `agent-v0.4.1` 승인 대기
 PROV-009, PROV-019, PROV-020, PROV-021
 
 ## 선행 작업
-Blocked by: 15, 17, 25, 52 (완료). 64(플랫폼 쪽 인계 대기)와 파일이 겹치지 않는다.
+Blocked by: 15, 17, 25, 52 (완료). 플랫폼 쪽 인계 대기 작업과 파일이 겹치지 않는다.
 
 ## 작업 범위
 - 포함: tunnel 컨테이너 확인 주기(빠른 재확인 창), agent 컨테이너의 작업 완료 신호, Chart 공유 볼륨, 문서

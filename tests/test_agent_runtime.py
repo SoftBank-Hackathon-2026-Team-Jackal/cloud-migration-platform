@@ -386,7 +386,7 @@ def test_client_other_http_errors_stay_generic():
 
 
 def test_finished_jobs_wake_the_tunnel_and_a_wake_failure_never_stops_the_agent():
-    """Ticket 65 (#283): a processed job (not RUNNING, not idle) signals the tunnel container."""
+    """Ticket 66 (#283): a processed job (not RUNNING, not idle) signals the tunnel container."""
     clock = Clock(stop_after=2)
     poll = scripted(
         {"job_id": "job-a", "status": "SUCCEEDED", "code": "READY"},

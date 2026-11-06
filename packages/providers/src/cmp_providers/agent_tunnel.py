@@ -46,7 +46,7 @@ DB_PORT = 5432
 STALE_AFTER = 180  # WireGuard Reject-After-Time: no handshake for this long means no session
 UNAUTHORIZED_EXIT = 2
 KEY_SECRET = "cmp-agent-wireguard"
-# Ticket 65 (#283): after a wake-up (start, Agent job signal, exposed-port change) an unhealthy
+# Ticket 66 (#283): after a wake-up (start, Agent job signal, exposed-port change) an unhealthy
 # tunnel re-checks every FAST_INTERVAL seconds for at most FAST_WINDOW seconds.
 FAST_INTERVAL = 2.0
 FAST_WINDOW = 120.0
@@ -666,7 +666,7 @@ def run_tunnel(
     """`wait(seconds)` returns True when a stop was requested. On revocation (W9) the tunnel is
     taken down and the loop idles until a stop (ticket 52, D14), then exits with code 2.
 
-    Ticket 65 (#283): start-up, a new `wake()` token (the `agent` container finished a job) and
+    Ticket 66 (#283): start-up, a new `wake()` token (the `agent` container finished a job) and
     an exposed-port change open a fast window. Inside it an unhealthy report is followed by the
     next check after `fast_interval`; a healthy report, or the end of the window, returns to
     `interval`. Checks are never closer than `fast_interval`, so one window costs at most
@@ -731,7 +731,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--namespace", default="cmp-system")
     parser.add_argument("--mode", choices=["auto", "kernel", "userspace"], default="auto")
     parser.add_argument("--interval-seconds", type=float, default=15)
-    parser.add_argument("--wake-file", help="signal file the agent container writes (ticket 65)")
+    parser.add_argument("--wake-file", help="signal file the agent container writes (ticket 66)")
     args = parser.parse_args(argv)
 
     stop = threading.Event()

@@ -242,7 +242,7 @@ def test_tunnel_container_has_only_network_admin_and_no_host_network(tmp_path):
 
 
 def test_agent_wakes_the_tunnel_through_a_shared_memory_volume(tmp_path):
-    """Ticket 65 (#283): the agent container writes the signal file the tunnel container reads."""
+    """Ticket 66 (#283): the agent container writes the signal file the tunnel container reads."""
     pod = deployment(documents(tmp_path, values()))["spec"]["template"]["spec"]
     agent, tunnel = container(pod), container(pod, "tunnel")
     assert agent["args"][-2:] == ["--tunnel-wake-file", "/var/run/cmp-wake/job"]

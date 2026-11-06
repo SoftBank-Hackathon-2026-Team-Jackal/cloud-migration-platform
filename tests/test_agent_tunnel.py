@@ -671,7 +671,7 @@ def test_client_tunnel_calls_use_the_credential_header_and_methods():
         client.tunnel_config(agent_id="../x", credential="secret")
 
 
-# --- ticket 65 (#283): report right after an app port is assigned ------------------------------
+# --- ticket 66 (#283): report right after an app port is assigned ------------------------------
 
 
 class Timeline:
