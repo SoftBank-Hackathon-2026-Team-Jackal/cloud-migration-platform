@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 990 410" width="990" height="410" role="img" aria-label="이전 한 건의 흐름: 분석, 이미지 빌드, 샌드박스 검증, 이전 계획, 승인, 구축, 데이터 복제, DB 전환, 트래픽 전환, 완료">
+  <style>
+    .card { fill: #7c6ff0; fill-opacity: 0.07; stroke: #7c6ff0; stroke-opacity: 0.5; stroke-width: 1.5; }
+    .gate { stroke-dasharray: 6 4; }
+    .num { fill: #7c6ff0; }
+    .numt { font: 700 10.5px -apple-system, "Segoe UI", sans-serif; fill: #fff; text-anchor: middle; }
+    .title { font: 700 15px -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", sans-serif; fill: #7c6ff0; }
+    .desc { font: 12px -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", sans-serif; fill: #8b8fa3; }
+    .q { font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #8b8fa3; fill-opacity: 0.85; }
+    .chip { font: 700 10px -apple-system, "Segoe UI", "Apple SD Gothic Neo", sans-serif; text-anchor: middle; }
+    .ai rect { fill: #e8875b; fill-opacity: 0.18; } .ai text { fill: #e8875b; }
+    .hu rect { fill: #2ea6a0; fill-opacity: 0.18; } .hu text { fill: #2ea6a0; }
+    .tick line { stroke: #8b8fa3; stroke-opacity: 0.45; stroke-width: 1.5; }
+    .wire { fill: none; stroke: #8b8fa3; stroke-opacity: 0.45; stroke-width: 1.5; stroke-dasharray: 4 6; animation: flow 1.2s linear infinite; }
+    .head { font: 700 14px -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", sans-serif; fill: #8b8fa3; }
+    .legend { font: 11px -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", sans-serif; fill: #8b8fa3; }
+    .band rect { fill: #8b8fa3; fill-opacity: 0.08; stroke: #8b8fa3; stroke-opacity: 0.25; }
+    .bt { font: 700 12.5px -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", sans-serif; fill: #2ea6a0; }
+    .bd { font: 12px -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Hiragino Sans", "Noto Sans JP", sans-serif; fill: #8b8fa3; }
+    .pulse { animation: pulse 14s ease-out infinite; }
+    @keyframes flow { to { stroke-dashoffset: -10; } }
+    @keyframes pulse {
+      0% { fill-opacity: 0.4; stroke-opacity: 1; stroke-width: 2.5; }
+      8% { fill-opacity: 0.07; stroke-opacity: 0.5; stroke-width: 1.5; }
+      100% { fill-opacity: 0.07; stroke-opacity: 0.5; stroke-width: 1.5; }
+    }
+    @media (prefers-reduced-motion: reduce) { .wire, .pulse { animation: none; } #dot { display: none; } }
+  </style>
+
+  <text class="head" x="22" y="36">이전 한 건 = Temporal 워크플로우 MigrationWorkflow 하나</text>
+
+  <!-- 트랙 길이 1994: 윗줄 864 + 세로 266 + 아랫줄 864 (카드 위·아래를 지나 글자를 가리지 않음) -->
+  <path class="wire" d="M106,62 H970 V328 H106"/>
+  <!-- 카드와 트랙을 잇는 짧은 선 -->
+  <g class="tick"><line x1="106" y1="62" x2="106" y2="70"/><line x1="298" y1="62" x2="298" y2="70"/><line x1="490" y1="62" x2="490" y2="70"/><line x1="682" y1="62" x2="682" y2="70"/><line x1="874" y1="62" x2="874" y2="70"/><line x1="106" y1="316" x2="106" y2="328"/><line x1="298" y1="316" x2="298" y2="328"/><line x1="490" y1="316" x2="490" y2="328"/><line x1="682" y1="316" x2="682" y2="328"/><line x1="874" y1="316" x2="874" y2="328"/></g>
+
+  <!-- 1 -->
+  <rect class="card pulse" style="animation-delay:0s" x="22" y="70" width="168" height="86" rx="12"/>
+  <circle class="num" cx="40" cy="88" r="10"/><text class="numt" x="40" y="92">1</text>
+  <text class="title" x="56" y="93">분석</text>
+  <g class="ai"><rect x="146" y="80" width="30" height="16" rx="8"/><text class="chip" x="161" y="92">AI</text></g>
+  <text class="desc" x="36" y="120">코드·매니페스트·AWS 읽기</text>
+  <text class="q" x="36" y="142">analysis</text>
+  <!-- 2 -->
+  <rect class="card pulse" style="animation-delay:1.348s" x="214" y="70" width="168" height="86" rx="12"/>
+  <circle class="num" cx="232" cy="88" r="10"/><text class="numt" x="232" y="92">2</text>
+  <text class="title" x="248" y="93">이미지 빌드</text>
+  <text class="desc" x="228" y="120">buildx → ECR digest 고정</text>
+  <text class="q" x="228" y="142">build</text>
+  <!-- 3 -->
+  <rect class="card pulse" style="animation-delay:2.696s" x="406" y="70" width="168" height="86" rx="12"/>
+  <circle class="num" cx="424" cy="88" r="10"/><text class="numt" x="424" y="92">3</text>
+  <text class="title" x="440" y="93">샌드박스 검증</text>
+  <g class="ai"><rect x="530" y="80" width="30" height="16" rx="8"/><text class="chip" x="545" y="92">AI</text></g>
+  <text class="desc" x="420" y="120">띄워서 테스트 · 자동 수정</text>
+  <text class="q" x="420" y="142">sandbox</text>
+  <!-- 4 -->
+  <rect class="card pulse" style="animation-delay:4.044s" x="598" y="70" width="168" height="86" rx="12"/>
+  <circle class="num" cx="616" cy="88" r="10"/><text class="numt" x="616" y="92">4</text>
+  <text class="title" x="632" y="93">이전 계획</text>
+  <text class="desc" x="612" y="120">대상 환경 리소스로 해석</text>
+  <text class="q" x="612" y="142">provisioning</text>
+  <!-- 5 -->
+  <rect class="card gate pulse" style="animation-delay:5.392s" x="790" y="70" width="168" height="86" rx="12"/>
+  <circle class="num" cx="808" cy="88" r="10"/><text class="numt" x="808" y="92">5</text>
+  <text class="title" x="824" y="93">승인</text>
+  <g class="hu"><rect x="908" y="80" width="38" height="16" rx="8"/><text class="chip" x="927" y="92">사람</text></g>
+  <text class="desc" x="804" y="120">Revision 단위로 승인</text>
+  <text class="q" x="804" y="142">Signal · approve</text>
+
+  <!-- 6 (아랫줄은 오른쪽에서 왼쪽으로) -->
+  <rect class="card pulse" style="animation-delay:8.608s" x="790" y="230" width="168" height="86" rx="12"/>
+  <circle class="num" cx="808" cy="248" r="10"/><text class="numt" x="808" y="252">6</text>
+  <text class="title" x="824" y="253">구축</text>
+  <text class="desc" x="804" y="280">Agent가 받아서 배포</text>
+  <text class="q" x="804" y="302">provisioning · Agent</text>
+  <!-- 7 -->
+  <rect class="card pulse" style="animation-delay:9.956s" x="598" y="230" width="168" height="86" rx="12"/>
+  <circle class="num" cx="616" cy="248" r="10"/><text class="numt" x="616" y="252">7</text>
+  <text class="title" x="632" y="253">데이터 복제</text>
+  <text class="desc" x="612" y="280">논리 복제로 따라잡기</text>
+  <text class="q" x="612" y="302">migration-activities</text>
+  <!-- 8 -->
+  <rect class="card gate pulse" style="animation-delay:11.304s" x="406" y="230" width="168" height="86" rx="12"/>
+  <circle class="num" cx="424" cy="248" r="10"/><text class="numt" x="424" y="252">8</text>
+  <text class="title" x="440" y="253">DB 전환</text>
+  <g class="hu"><rect x="524" y="240" width="38" height="16" rx="8"/><text class="chip" x="543" y="252">사람</text></g>
+  <text class="desc" x="420" y="280">쓰기 중단 ms 단위</text>
+  <text class="q" x="420" y="302">Signal · switchover</text>
+  <!-- 9 -->
+  <rect class="card pulse" style="animation-delay:12.652s" x="214" y="230" width="168" height="86" rx="12"/>
+  <circle class="num" cx="232" cy="248" r="10"/><text class="numt" x="232" y="252">9</text>
+  <text class="title" x="248" y="253">트래픽 전환</text>
+  <text class="desc" x="228" y="280">10→50→100%, 이상 시 롤백</text>
+  <text class="q" x="228" y="302">relay-1</text>
+  <!-- 10 -->
+  <rect class="card pulse" style="animation-delay:14s" x="22" y="230" width="168" height="86" rx="12"/>
+  <circle class="num" cx="40" cy="248" r="10"/><text class="numt" x="40" y="252">10</text>
+  <text class="title" x="56" y="253">완료 · 보고</text>
+  <text class="desc" x="36" y="280">단계별 결과 정리</text>
+  <text class="q" x="36" y="302">GET /report</text>
+
+  <!-- 두 줄 사이: 이 흐름이 지키는 네 가지 -->
+  <g class="band">
+    <rect x="22" y="166" width="222" height="52" rx="12"/>
+    <text class="bt" x="38" y="187">✓ 같은 이미지</text>
+    <text class="bd" x="38" y="206">digest 하나로 검증부터 배포까지</text>
+    <rect x="260" y="166" width="222" height="52" rx="12"/>
+    <text class="bt" x="276" y="187">✓ 같은 렌더러</text>
+    <text class="bd" x="276" y="206">샌드박스에서 본 구성 = 실제 구축</text>
+    <rect x="498" y="166" width="222" height="52" rx="12"/>
+    <text class="bt" x="514" y="187">✓ 승인한 것만 배포</text>
+    <text class="bd" x="514" y="206">실행 시 승인된 digest 재대조</text>
+    <rect x="736" y="166" width="222" height="52" rx="12"/>
+    <text class="bt" x="752" y="187">✓ 이상하면 되돌림</text>
+    <text class="bd" x="752" y="206">단계마다 관찰, 실패 시 자동 롤백</text>
+  </g>
+
+  <circle id="dot" r="6" fill="#7c6ff0">
+    <animateMotion dur="14s" repeatCount="indefinite" path="M106,62 H970 V328 H106"/>
+  </circle>
+
+  <text class="legend" x="22" y="372">점선 상자 = 사람 승인 대기 · AI = Claude 사용 · 고정폭 글씨 = 그 일을 맡는 Temporal 작업 큐·Signal</text>
+  <text class="legend" x="22" y="392">각 단계는 실패하면 Temporal이 자동으로 다시 시도하고, 서버가 재시작돼도 멈춘 곳부터 이어간다</text>
+</svg>
