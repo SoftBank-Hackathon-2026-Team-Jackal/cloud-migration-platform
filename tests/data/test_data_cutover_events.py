@@ -239,3 +239,21 @@ def test_plain_approval_still_signals_the_migration(handles) -> None:
     response = TestClient(app).post("/migrations/migration-1/approve")
     assert response.status_code == 202 and parent.signals == ["approve"]
     assert TestClient(app).post("/migrations/migration-1/approve?gate=other").status_code == 422
+
+
+def test_verify_connections_pin_the_text_format_before_the_pause() -> None:
+    """Provisioning 72 (#298): md5(t::text)는 timestamptz 글자가 세션 TimeZone에 따라 달라진다.
+    두 DB 검증 접속을 같은 UTC·ISO 표기로 맞춘다. PAUSE 안 왕복을 늘리지 않게 접속 직후에 한다."""
+    runner = runner_module()
+    executed = []
+
+    class Conn:
+        def execute(self, query, params=None):
+            executed.append(query)
+
+    runner.pin_text_format(Conn())
+    assert executed == ["SET TIME ZONE 'UTC'", "SET DateStyle = 'ISO, YMD'"]
+    source = RUNNER.read_text()
+    opened = source.index('old_v, new_v = connect(cfg["old_url"]), connect(cfg["new_url"])')
+    pinned = source.index("pin_text_format(conn)", opened)
+    assert pinned < source.index("PAUSE", pinned) < source.index("begin_snapshot, old_v")

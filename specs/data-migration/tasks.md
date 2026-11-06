@@ -14,6 +14,6 @@
 | [10](../../tickets/data-migration/10-wireguard-tunnel.md) | 플랫폼이 만드는 WireGuard 복제 경로(EKS ↔ GKE) | DONE(PR #258 병합), 정리 단계 남음 | 06, 08 | #137 |
 | [11](../../tickets/data-migration/11-tunnel-cloud-check.md) | WireGuard 복제 경로 클라우드 검증(EKS ↔ GKE)과 게이트웨이 포트·GKE DNS 정책 수정 | DONE(클라우드 검증) | 10 | #137 |
 | 12 | ON_PREM 복제 경로 2안: 게이트웨이 입구를 원본 쪽에 두는 옵션([ADR-007](../../docs/decisions/ADR-007.md) 단계 3, 티켓 67) | TODO | 10, 11 | #288 |
-| 13 | 원본 쪽 수정 5개(compose `DATA_MIGRATION_AWS_PROFILE`, marker 표 비교 제외, cutover 이미지 빌드, 실패 시 슬롯 정리, 체크섬 UTC, ADR-007 단계 6) | TODO(데이터 담당 확인) | 12 | #288 |
+| 13 | 원본 쪽 수정 5개(compose `DATA_MIGRATION_AWS_PROFILE`, marker 표 비교 제외, cutover 이미지 빌드, 실패 시 슬롯 정리, 체크섬 UTC, ADR-007 단계 6) | IN_PROGRESS(로컬 완료, [Provisioning 72](../../tickets/provisioning/72-data-source-fixes.md) 대행, PR 리뷰·데이터 담당 확인 대기) | 12 | #288, #298 |
 
 Q1~Q5는 [spec.md](spec.md#open-questions)의 미결 항목이다.

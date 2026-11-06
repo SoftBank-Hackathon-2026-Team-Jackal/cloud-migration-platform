@@ -15,7 +15,7 @@ from typing import Any
 
 from .contracts import DataMigrationRequest, DbEndpoint, ReadinessPolicy
 from .cutover import CutoverSettings, SourceApp
-from .sql import MARKER_TABLE
+from .sql import INTERNAL_TABLES as INTERNAL_QUALIFIED
 
 METHOD = "fast"
 # 실습에서 잰 쓰기 중단 시간(infra/data-migration/crosscloud-lab/README.md): k3d 4~7ms, EKS 안 21ms,
@@ -41,7 +41,8 @@ PLAN_STEPS = [
     ("resume", "pause"),
 ]
 # 전환 도구가 만든 내부 테이블. 사용자 테이블 비교(cutover.verify·data.verify rows)에는 보이지 않는다.
-INTERNAL_TABLES = {MARKER_TABLE, MARKER_TABLE.rpartition(".")[2]}
+# 실행기는 public 표 이름만 쓰므로 schema 없는 이름도 넣는다(정의는 sql.INTERNAL_TABLES 한 곳).
+INTERNAL_TABLES = set(INTERNAL_QUALIFIED) | {t.rpartition(".")[2] for t in INTERNAL_QUALIFIED}
 CUTOVER_APPROVAL = {"excluded": [], "rollback_policy": "reverse_replication", "gate": "cutover"}
 
 

@@ -22,16 +22,29 @@ ARGS = {
 
 
 class Fakes:
-    def __init__(self, *, precheck_ok=True, phases=("copy", "catchup", "streaming"), refuse=False):
+    def __init__(
+        self,
+        *,
+        precheck_ok=True,
+        phases=("copy", "catchup", "streaming"),
+        refuse=False,
+        fail: str | None = None,
+        cleanup_fails=False,
+    ):
         self.calls: list[str] = []
         self.phases = list(phases)
         self.precheck_ok, self.refuse = precheck_ok, refuse
+        self.fail, self.cleanup_fails = fail, cleanup_fails
 
     def activities(self):
         def simple(name, result):
             @activity.defn(name=name)
             async def fn(payload: dict) -> dict:
                 self.calls.append(name)
+                if name == self.fail:
+                    raise ApplicationError(name, type="DB_COMMAND_FAILED", non_retryable=True)
+                if name == "dm_cleanup" and self.cleanup_fails:
+                    raise ApplicationError(name, type="DbAccessNotConfigured", non_retryable=True)
                 return result
 
             return fn
@@ -168,3 +181,48 @@ async def test_refused_switchover_keeps_the_source_as_writer() -> None:
     assert "dm_cleanup" in fakes.calls
     # 거부 뒤에는 새 시도이므로 승인 요청을 다시 보낸다
     assert fakes.calls.count("dm_announce_cutover:True") == 2
+
+
+async def run_to_end(fakes, args=None):
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        workers = [
+            Worker(env.client, task_queue=WORKFLOW_QUEUE, workflows=[DataMigrationWorkflow]),
+            Worker(env.client, task_queue=MIGRATION_QUEUE, activities=fakes.activities()),
+        ]
+        async with workers[0], workers[1]:
+            return await env.client.execute_workflow(
+                DataMigrationWorkflow.run,
+                args or ARGS,
+                id=f"data-{uuid.uuid4()}",
+                task_queue=WORKFLOW_QUEUE,
+            )
+
+
+async def test_failed_replication_cleans_up_the_slot_and_keeps_the_failure_code() -> None:
+    """Provisioning 72 (#298): 구독을 만든 뒤 실패하면 원본 슬롯이 WAL을 붙잡지 않게 정리한다."""
+    fakes = Fakes(fail="dm_install_cutover")
+    result = await run_to_end(fakes)
+    assert result["status"] == "failed" and result["failure_code"] == "DB_COMMAND_FAILED"
+    assert fakes.calls[-1] == "dm_cleanup"
+    assert result["cleanup_code"] is None
+
+
+async def test_failed_cleanup_is_reported_without_hiding_the_original_failure() -> None:
+    fakes = Fakes(fail="dm_subscribe", cleanup_fails=True)
+    result = await run_to_end(fakes)
+    assert result["failure_code"] == "DB_COMMAND_FAILED"
+    assert result["cleanup_code"] == "DbAccessNotConfigured"
+    assert fakes.calls.count("dm_cleanup") == 1  # 재시도하지 않는 오류는 한 번만
+
+
+async def test_sync_timeout_cleans_up_too() -> None:
+    fakes = Fakes(phases=("copy",))
+    result = await run_to_end(fakes, ARGS | {"sync_timeout_s": 3})
+    assert result["failure_code"] == "SYNC_TIMEOUT" and "dm_cleanup" in fakes.calls
+
+
+async def test_failure_before_subscribe_creates_nothing_to_clean() -> None:
+    fakes = Fakes(fail="dm_copy_schema")
+    result = await run_to_end(fakes)
+    assert result["failure_code"] == "DB_COMMAND_FAILED"
+    assert "dm_cleanup" not in fakes.calls and result["cleanup_code"] is None
