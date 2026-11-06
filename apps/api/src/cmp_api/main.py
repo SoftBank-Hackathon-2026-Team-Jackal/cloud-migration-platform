@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from cmp_api.config import settings
 from cmp_api.routes.agent_jobs import router as agent_job_router
 from cmp_api.routes.agents import router as agent_router
+from cmp_api.routes.analysis_review import router as analysis_review_router
 from cmp_api.routes.approvals import router as approval_router
 from cmp_api.routes.cloud_teardown import router as cloud_teardown_router
 from cmp_api.routes.connections import router as connection_router
@@ -66,6 +67,7 @@ app.include_router(plan_input_router)
 app.include_router(connection_router)
 app.include_router(env_file_router)
 app.include_router(traffic_action_router)  # #234
+app.include_router(analysis_review_router)  # analysis review gate (confirm / approve)
 
 
 @app.get("/health")

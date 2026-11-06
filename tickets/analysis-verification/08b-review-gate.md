@@ -68,3 +68,14 @@ PARTIAL 선택 기능이 있는 fixture가 승인 전에는 멈춰 있고, CLI�
 - [x] 설계 변경 여부 확인 및 필요한 SDD·ADR·티켓 반영
 - [x] 구현·계약 정합성 및 최종 리뷰
 - [x] 미검증 항목과 결과 증거 기록
+
+## 웹 연결 API (후속)
+검토 게이트를 웹에서 통과시키는 API를 추가했다(`apps/api/src/cmp_api/routes/analysis_review.py`). 분석 자식(`analysis-<migration_id>`)의
+Query·Signal을 그대로 전달하고, 판단과 검증은 `ReviewGate`가 한다. CLI(`scripts/review_signal.py`)와 같은 규칙이다.
+- `GET /migrations/{id}/analysis/review`: `ReviewGate.view()`(`pending`, 기능 항목, 보안 항목). 기다리지 않으면 `pending`은 null.
+- `POST /migrations/{id}/analysis/review/confirm`: 모든 행의 필수 여부. 보낸 뒤 Workflow가 거절하면 422(거절 코드), 받아들이면 202.
+- `POST /migrations/{id}/analysis/review/approve`: 승인이 필요한 모든 항목(행 ID·`security:<기준>`)의 승인·거절.
+- 지금 그 결정을 기다릴 때만 Signal을 보낸다(아니면 409 `REVIEW_NOT_PENDING`). 분석 버전이 다르면 409 `ANALYSIS_REF_MISMATCH`.
+- 데모는 `/migrations`가 무인증이다(데모 결정). 행위자는 요청의 `actor`, 없으면 `web-user`로 기록한다.
+- 시험: `tests/analysis/test_review_api.py`(가짜 제어 18, 진짜 AnalysisWorkflow로 확정→승인→분석 끝까지 1).
+- 미구현: 웹 화면(필수 확정 → 손실·보안 승인), 게이트가 멈췄을 때 SSE 이벤트(지금은 웹이 `GET`을 읽어 확인한다).
