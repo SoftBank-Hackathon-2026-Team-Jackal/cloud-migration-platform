@@ -62,13 +62,20 @@ if rendered.decisions:
     raise SandboxError(rendered.decisions[0].code)  # 기존 실패 분류 규칙대로
 for secret in rendered.secrets:  # `<app release>-env`
     app_env_values[secret.name] = {**secret.reveal(), **extra}
+replaced = {e.key: e.binding for e in env_plan.entries if e.disposition == "REPLACED"}
 for item in rendered.env:
-    bindings[item.name] = {"secret_ref": item.secret_ref.model_dump(mode="json")}
+    if replaced.get(item.name) in {"password_secret_ref", "connection_url_secret_ref"}:
+        # E4: 비밀번호·URL 키는 DB 출력 바인딩(구축의 `plan_publish._env_binding`과 같다)
+        bindings[item.name] = {"resource_id": db.id, "output": replaced[item.name]}
+    else:  # PASS(`-env`)와 host·port·name·username(`-conn`)
+        bindings[item.name] = {"secret_ref": item.secret_ref.model_dump(mode="json")}
 ```
+
+- 비밀번호·URL 키를 `{"secret_ref": ...}`로 넘기면 안 된다. 공통 렌더러가 플랫폼 관리 `<db>-url` Secret을 직접 참조하는 바인딩을 `SECRET_NAME_CONFLICT`로 막는다(티켓 19 U2). DB 출력 바인딩으로 넘겨도 최종 `secretKeyRef`는 같다(`DATABASE_URL` → `<db>-url`/`url`, `DB_PASSWORD` → `<db>-auth`/`password`).
 
 - `db_output_refs(db_release)`는 샌드박스 표준 이름을 쓴다: `-conn`(host·port·name·username), `-auth`/`password`, `-url`/`url`.
 - 새로 만들 Secret: `<db release>-conn`. 데이터는 `connection_secret_data(outputs)`(DB 출력 `host`·`port`·`name`·`username`)로 만든다. `-auth`·`-url`은 지금처럼 만든다.
-- `REPLACED` 키는 이제 `ResourceOutputBinding`(평문 LITERAL) 대신 `-conn` Secret 키를 참조한다.
+- `REPLACED` `host`·`port`·`name`·`username` 키는 `ResourceOutputBinding`(평문 LITERAL) 대신 `-conn` Secret 키를 참조한다. `password_secret_ref`·`connection_url_secret_ref`는 DB 출력 바인딩 그대로다.
 
 ## 구축 (ENV-04)
 
@@ -77,7 +84,7 @@ for item in rendered.env:
 - EnvPlan 입력: ENV-05 전까지 Planning 입력 등록 `PUT /provisioning/migrations/{id}/planning-input`의 선택 필드 `env_plan`(키 이름·처리 결과만). `env_plan.env_file_ref`는 `planning_request.environment.env_file_ref`와 같아야 한다. 없으면 지금처럼 사람이 만든 ConfigMap·Secret을 참조한다.
 - Plan 게시: `preview_env(store, plan, ref, db_outputs, app_release=...)`로 키 이름만 읽어 `render_env`와 같은 `env`·`decisions`를 얻는다. `decisions`는 Preview `pending_decisions`(승인 불가)가 된다. EnvPlan은 SPEC 산출물에 들어가 Digest로 고정된다.
 - 실행: 대상 DB 출력 `database_outputs(release, namespace, name, username, password_secret_ref)` → `DbOutputRefs.from_outputs(outputs, database_release=release)` → `render_env` → `deployment_secrets(rendered, outputs, database_release=release)`(`<app>-env`, 참조될 때 `<db>-conn`). AWS/GCP는 배포 Activity가 stdin으로, ON_PREM은 Agent가 `GET /agents/{agent_id}/jobs/{job_id}/env-secrets`로 받아 클러스터 안에서 적용한다. 둘 다 플랫폼 관리 라벨이 없는 같은 이름 Secret은 덮어쓰지 않는다(`SECRET_NAME_CONFLICT`).
-- 샌드박스와 구축의 `render_env` 결과는 `REPLACED` 참조만 다르다(테스트로 확인). `-auth`·`-url`은 기존 단계가 그대로 만든다.
+- 샌드박스와 구축의 `render_env` 결과는 `REPLACED` 참조만 다르다(테스트로 확인). `-auth`·`-url`은 기존 단계가 그대로 만든다. 같은 EnvPlan이면 두 경로의 비밀번호·URL 최종 `secretKeyRef`도 같다(`tests/sandbox/test_env_render.py`).
 
 | 코드(구축) | 뜻 |
 | --- | --- |
