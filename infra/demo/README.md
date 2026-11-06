@@ -89,7 +89,9 @@ export "$(grep '^APPROVAL_ADMIN_KEY=' /opt/cmp/.env)"
 python3 infra/demo/approver-token.py create demo-approver --migration demo-placeholder --env-file /opt/cmp/web.env
 "${compose[@]}" up -d --force-recreate web    # 웹이 web.env를 다시 읽는다(이미지 재빌드 불필요)
 
-# 2. 이전마다 권한 추가(grant): 웹에서 시작한 뒤 Plan이 게시되면 가장 최근 Migration ID를 추가한다.
+# 2. 이전마다 권한 추가(grant). /opt/cmp/.env에 DEMO_APPROVER_ID=demo-approver를 두면(api 재생성) 시작 때
+#    자동으로 추가된다(티켓 60 A12). 비어 있거나 로그에 DEMO_APPROVER_GRANT_FAILED가 있으면 아래처럼 손으로 한다:
+#    웹에서 시작한 뒤 Plan이 게시되면 가장 최근 Migration ID를 추가한다.
 mid="$("${compose[@]}" exec -T platform-db psql -U platform -d platform -Atc \
   "select migration_id from provisioning_plan_revisions order by published_at desc limit 1")"
 python3 infra/demo/approver-token.py grant demo-approver --migration "$mid"

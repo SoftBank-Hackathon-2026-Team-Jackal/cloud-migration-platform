@@ -8,7 +8,7 @@
 - 저장: 업무 PostgreSQL `migration_events`(append-only), `migration_logs`.
 - 발행: `cmp_worker.events.emit_event`·`log_event`(Activity 전용), `EventEmitter`·`InMemoryEmitter`·`DbEventEmitter`.
 - 읽기: `GET /migrations/{id}/events` SSE(snapshot·`Last-Event-ID`·하트비트·종료)와 JSON 읽기(`?after=`), `GET /migrations/{id}/logs?after=`.
-- Provisioning 이벤트 연결: `approval.decision`, `plan.ready`, `provision.resource`, `provision.check`.
+- Provisioning 이벤트 연결: `approval.decision`, `plan.ready`, `provision.resource`, `provision.check`. 티켓 60: `plan.step`(분석 매핑 행), `plan.preview`(백엔드 Preview 모양), `approval.required`.
 - PoC 브리지: Finals `poc/demo` 패널 값을 이벤트로 바꾸는 어댑터(`cmp_worker.poc_bridge`).
 
 제외: 다른 담당자의 도메인 로직 수정(분석·샌드박스·데이터·트래픽). 각자 안내서를 보고 자기 Activity에 붙인다.

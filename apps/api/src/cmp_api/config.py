@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://platform:platform@localhost:5433/platform"
     agent_enrollment_admin_key: str | None = None
     approval_admin_key: str | None = None
+    # Ticket 60 A12 (demo): an existing approver that `POST /migrations` grants each new Migration
+    # (ticket 07 operator grant, per-Migration scope kept). Unset: starts grant nothing.
+    demo_approver_id: str | None = None
     # P0 platform artifact store for approved ON_PREM rollout bytes (digest filenames; S3 later).
     artifact_store_dir: str | None = None
     # Ticket 23 (ADR-005): environment connections. The platform principal (demo: EC2 instance

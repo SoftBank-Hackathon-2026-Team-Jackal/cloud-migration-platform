@@ -67,6 +67,9 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       AGENT_ENROLLMENT_ADMIN_KEY: ${AGENT_ENROLLMENT_ADMIN_KEY:?set AGENT_ENROLLMENT_ADMIN_KEY}
       APPROVAL_ADMIN_KEY: ${APPROVAL_ADMIN_KEY:?set APPROVAL_ADMIN_KEY}
+      # Ticket 60 A12: an existing approver that each new Migration is granted to at start
+      # (web PLATFORM_APPROVER_TOKEN). Empty: no automatic grant; use approver-token.py grant.
+      DEMO_APPROVER_ID: ${DEMO_APPROVER_ID:-}
       # Shared with the worker at the same paths (ticket 21): digest-named rollout bytes and Plan
       # Revision directories `<plan_id>-r<revision>/`.
       ARTIFACT_STORE_DIR: /opt/cmp/artifact-store

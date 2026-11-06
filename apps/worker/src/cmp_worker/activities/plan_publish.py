@@ -58,10 +58,10 @@ def build_plan_publish_activities(session_factory) -> PlanPublishActivities:
     if not api_settings.artifact_store_dir:
         return PlanPublishActivities(None)
     root = settings.provisioning_artifact_root
-    from cmp_worker.provisioning_events import PlanReadyEvents
+    from cmp_worker.provisioning_events import PlanEvents
 
     return PlanPublishActivities(
-        PlanReadyEvents(  # ticket 24: `plan.ready` after each successful publication
+        PlanEvents(  # tickets 24/60: planning + approval events after each publication
             PlanPublisher(
                 session_factory,
                 LocalArtifactStore(Path(api_settings.artifact_store_dir)),

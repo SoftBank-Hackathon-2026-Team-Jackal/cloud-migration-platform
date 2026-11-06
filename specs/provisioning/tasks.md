@@ -62,6 +62,7 @@
 | [62 이전 결과 보고 API (GET /migrations/{id}/report)](../../tickets/provisioning/62-migration-report.md) | IN_PROGRESS (로컬 완료, 리뷰 대기. sandbox/retry는 구현하지 않음·웹에서 숨김) | 24 | PROV-021 | [#235](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/235) | ☐ |
 | [61 실제 모드 트래픽 이벤트(traffic.prepare·ready)와 rollback·retry API — 트래픽 범위 대행](../../tickets/provisioning/61-traffic-events-actions.md) | IN_PROGRESS (로컬 완료, 리뷰·데모 서버 확인 대기) | 63, 128, 129 | PROV-021 | [#234](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/234) | ☐ |
 | [59 실제 모드 샌드박스 이벤트 발행 (build.*·sandbox.*, 샌드박스 범위 대행)](../../tickets/provisioning/59-sandbox-events.md) | IN_PROGRESS (로컬 완료, 리뷰 대기) | 14, 21, 24 | PROV-021 | [#230](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/230) | ☐ |
+| [60 실제 모드 계획·승인 이벤트(plan.step·plan.preview·approval.required)와 데모 승인자 발급](../../tickets/provisioning/60-plan-approval-events.md) | IN_PROGRESS (로컬 완료, 리뷰 대기. 웹 BFF 승인 중계는 웹 작업) | 07, 18, 22, 24, 49, 55 | PROV-014, 015, 021 | [#233](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/233) | ☐ |
 
 ## 선행 관계
 

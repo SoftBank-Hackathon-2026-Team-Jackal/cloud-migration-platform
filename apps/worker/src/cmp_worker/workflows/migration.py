@@ -71,6 +71,11 @@ TRAFFIC_DONE = {
 DATA_DONE = {"switched": None, "blocked": "data_blocked", "failed": "data_failed",
              "cancelled": "cancelled", "done": None}  # fmt: skip
 
+# Ticket 60: the web's "request a plan change" is a REJECT; the Migration republishes (the
+# publisher never reuses a REJECTed Revision) and waits for the new Revision's approval.
+REJECT_REPUBLISH_PATCH = "plan-reject-republish-v1"
+MAX_REJECTED_REVISIONS = 3  # the third REJECT ends the Migration `plan_rejected` as before
+
 PUBLISH_ACTIVITY = {
     "task_queue": PROVISIONING_QUEUE,
     "start_to_close_timeout": timedelta(hours=1),
@@ -202,14 +207,13 @@ class MigrationWorkflow:
         infrastructure execution, the WORKLOADS Plan for 09/11 goes through the same approval.
         """
         self.phase = "planning"
+        request = {"migration_id": workflow.info().workflow_id}
         published = await workflow.execute_activity(
-            "publish_migration_plan",
-            {"migration_id": workflow.info().workflow_id},
-            **PUBLISH_ACTIVITY,
+            "publish_migration_plan", request, **PUBLISH_ACTIVITY
         )
         if published["status"] == "SCAFFOLD":
             return None
-        outcome = await self._approve_and_execute(published)
+        outcome = await self._approve_revisions(published, "publish_migration_plan", request)
         cloud_infra = published.get("provider") in ("AWS", "GCP") and (
             published.get("scope") == "INFRASTRUCTURE"
         )
@@ -219,12 +223,36 @@ class MigrationWorkflow:
             return "cancelled"
         self.infrastructure_plan = self.plan
         self.phase = "workload_planning"
+        request = {"migration_id": workflow.info().workflow_id, "infrastructure": self.plan}
         workloads = await workflow.execute_activity(
-            "publish_workload_plan",
-            {"migration_id": workflow.info().workflow_id, "infrastructure": self.plan},
-            **PUBLISH_ACTIVITY,
+            "publish_workload_plan", request, **PUBLISH_ACTIVITY
         )
-        return await self._approve_and_execute(workloads)
+        return await self._approve_revisions(workloads, "publish_workload_plan", request)
+
+    async def _approve_revisions(self, published: dict, activity_name: str, request: dict) -> str:
+        """Ticket 60: after a REJECT, publish again and wait for the new Revision's approval.
+
+        Ends `plan_rejected` as before when the republish returns the rejected Revision (policy
+        reused it), after MAX_REJECTED_REVISIONS, on cancel, or for histories before the patch."""
+        phase, rejections = self.phase, 0
+        while True:
+            outcome = await self._approve_and_execute(published)
+            if outcome != "plan_rejected" or self.cancel_requested:
+                return outcome
+            if not workflow.patched(REJECT_REPUBLISH_PATCH):
+                return outcome
+            rejections += 1
+            if rejections >= MAX_REJECTED_REVISIONS:
+                return outcome
+            rejected = (self.plan["plan_id"], self.plan["revision"])
+            self.phase = phase
+            published = await workflow.execute_activity(activity_name, request, **PUBLISH_ACTIVITY)
+            if published.get("status") == "PUBLISHED" and rejected == (
+                published.get("plan_id"),
+                published.get("revision"),
+            ):
+                self.plan_code = "PLAN_REJECTED"  # the rejected Revision came back: stop
+                return "plan_rejected"
 
     async def _approve_and_execute(self, published: dict) -> str:
         """Wait for the published Revision's approval child; return a terminal phase/"executed"."""
