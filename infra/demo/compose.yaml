@@ -181,10 +181,14 @@ services:
     profiles: ["public"]
     depends_on:
       - api
+      - temporal
     environment:
       CMP_PUBLIC_HOST: ${CMP_PUBLIC_HOST:-}
       CMP_API_UPSTREAM: api:8000
       CMP_WEB_UPSTREAM: web:3000
+      CMP_TEMPORAL_UPSTREAM: temporal:7233
+      # Relay host address allowed to reach Temporal through the edge (default: nobody).
+      CMP_TEMPORAL_ALLOWED_IP: ${CMP_TEMPORAL_ALLOWED_IP:-192.0.2.1/32}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./agent-routes.caddy:/etc/caddy/agent-routes.caddy:ro
