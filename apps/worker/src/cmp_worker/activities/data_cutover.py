@@ -18,13 +18,13 @@ from typing import Protocol
 
 from cmp_data import DataMigrationRequest, DbEndpoint, replication_names
 from cmp_data import cutover as co
+from cmp_data import cutover_events as ce
 from cmp_data import sql as q
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from cmp_worker.activities import data_migration as dm
 from cmp_worker.activities.k8s_workloads_cli import CommandError, KubectlSession
-from cmp_worker.poc_bridge import switchover_events
 
 
 # cmp_worker.events는 cmp_api 설정을 읽으므로 import 시점이 아니라 호출할 때 불러온다
@@ -301,20 +301,54 @@ async def dm_route_app(payload: dict) -> dict:
     return await _run(route_app, app, req.source)
 
 
+async def _emit(migration_id: str, drafts: list[ce.Draft], run: str) -> None:
+    for draft in drafts:
+        phase = "data_copy" if draft.type.startswith("data.") else PHASE
+        await emit_event_async(
+            migration_id, draft.type, phase, draft.status, draft.data,
+            progress=draft.progress, idempotency_key=f"{run}:{draft.key}",
+        )  # fmt: skip
+
+
+@activity.defn
+async def dm_announce_cutover(payload: dict) -> dict:
+    """두 번째 승인 화면용 전환 계획(cutover.plan)과, 요청하면 승인 요청(approval.required gate=cutover).
+
+    payload: request, app, settings, sample, readiness, last_steps?, approval(bool)."""
+    req, app, settings = _parse(payload)
+    sample, readiness = payload.get("sample") or {}, payload.get("readiness") or {}
+    plan = ce.plan_data(req, app, settings, sample=sample, readiness=readiness,
+                        last_steps=payload.get("last_steps"))  # fmt: skip
+    run = f"{time.time()}"
+    await emit_event_async(req.migration_id, "cutover.plan", PHASE, "waiting", plan,
+                           idempotency_key=f"{run}:plan")  # fmt: skip
+    if payload.get("approval"):
+        await emit_event_async(req.migration_id, "approval.required", PHASE, "waiting",
+                               ce.CUTOVER_APPROVAL, idempotency_key=f"{run}:approval")  # fmt: skip
+    return {"ready": ce.plan_ready(sample, req.policy)}
+
+
 @activity.defn
 async def dm_switchover(payload: dict) -> dict:
-    """DB 전환(또는 롤백). 결과를 cutover.* 이벤트로 내고, 전환하지 않았으면 실패로 끝낸다."""
+    """DB 전환(또는 롤백). 결과를 cutover.* 이벤트로 내고, 전환하지 않았으면 실패로 끝낸다.
+
+    payload에 attempt(몇 번째 시도)와 readiness(마지막 준비도 표본)가 있으면 이벤트에 쓴다."""
     req, app, settings = _parse(payload)
     started = time.time()
-    rc, result = await _run(switch, req, app, settings)
     names = ("source", "target") if req.direction == "forward" else ("target", "source")
-    if result.get("switched"):
-        bridge_view = {"from": names[0], "to": names[1], **result}
-        for draft in switchover_events(bridge_view):
-            await emit_event_async(
-                req.migration_id, draft.type, PHASE, draft.status, draft.data,
-                progress=draft.progress, idempotency_key=f"{started}:{draft.key}",
-            )  # fmt: skip
+    try:
+        rc, result = await _run(switch, req, app, settings)
+    except ApplicationError as exc:
+        # 실행기를 부르지 못했다(kubectl 실패 등). Workflow는 쓰기 주체를 그대로 두므로 화면에도 거부로 알린다.
+        result = {"switched": False, "code": exc.type, "detail": "runner not reached"}
+        drafts = ce.run_events(result, attempt=int(payload.get("attempt") or 1),
+                               came_from=names[0], going_to=names[1], policy=req.policy)  # fmt: skip
+        await _emit(req.migration_id, drafts, f"{started}")
+        raise
+    commits = (payload.get("readiness") or {}).get("commits_per_sec") or 0
+    drafts = ce.run_events(result, attempt=int(payload.get("attempt") or 1), came_from=names[0],
+                           going_to=names[1], policy=req.policy, commits_per_sec=commits)  # fmt: skip
+    await _emit(req.migration_id, drafts, f"{started}")
     summary = {
         "switched": bool(result.get("switched")),
         "active": names[1] if result.get("switched") else names[0],
@@ -322,6 +356,7 @@ async def dm_switchover(payload: dict) -> dict:
         "verify_ok": result.get("verify_ok"),
         "mismatched_tables": result.get("mismatched_tables", []),
         "steps_ms": result.get("steps_ms", {}),
+        "steps": result.get("steps", []),
         "rc": rc,
     }
     if not result.get("switched"):

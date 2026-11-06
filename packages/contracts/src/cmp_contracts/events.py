@@ -574,9 +574,128 @@ class TrafficPrepareData(WebModel):
     policy: TrafficPreparePolicy | None = Field(default=None)
 
 
+CutoverMethod = Literal["fast", "classic"]
+CutoverWindow = Literal["pre", "pause"]
+
+
+class CutoverStepPlan(WebModel):
+    id: str
+    ms: float = Field(ge=0)
+    start_ms: float | None = Field(default=None, ge=0)
+    window: CutoverWindow | None = Field(default=None)
+
+
+class CutoverPlanExpectedPause(WebModel):
+    min: float = Field(ge=0)
+    max: float = Field(ge=0)
+
+
+class CutoverPlanRehearsalMethod(WebModel):
+    method: CutoverMethod
+    pause_ms: float = Field(ge=0)
+
+
+class CutoverPlanRehearsal(WebModel):
+    source: str
+    runs: int = Field(ge=0)
+    methods: list[CutoverPlanRehearsalMethod]
+
+
+class CutoverPlanPrecondition(WebModel):
+    id: str
+    state: Literal["pass", "wait", "fail"]
+    value: str | None = Field(default=None)
+    evidence: str | None = Field(default=None)
+    proposal: bool | None = Field(default=None)
+
+
+class CutoverPlanRollback(WebModel):
+    standby_hours: float = Field(ge=0)
+
+
+class CutoverPlanTopology(WebModel):
+    app: str
+    pooler: str
+    source_db: str
+    target_db: str
+    source_where: str
+    target_where: str
+    writes_per_sec: float = Field(ge=0)
+
+
+class CutoverPlanHandover(WebModel):
+    item: Literal["dns", "origin", "access"]
+    detail: str | None = Field(default=None)
+
+
+class CutoverPlanData(WebModel):
+    """[가정] 두 번째 승인 전 전환 계획"""
+
+    method: CutoverMethod
+    expected_pause_ms: CutoverPlanExpectedPause
+    rehearsal: CutoverPlanRehearsal
+    preconditions: list[CutoverPlanPrecondition]
+    steps: list[CutoverStepPlan]
+    rollback: CutoverPlanRollback
+    topology: CutoverPlanTopology
+    handover: list[CutoverPlanHandover]
+
+
+class CutoverReadyLimits(WebModel):
+    longest_tx_ms: float = Field(ge=0)
+    lock_waits: int = Field(ge=0)
+
+
+class CutoverReadyData(WebModel):
+    """[가정] 전환 가능 시점 대기"""
+
+    attempt: int = Field(ge=1)
+    longest_tx_ms: float = Field(ge=0)
+    lock_waits: int = Field(ge=0)
+    commits_per_sec: float = Field(ge=0)
+    ready: bool
+    limits: CutoverReadyLimits
+    waiting_on: str | None = Field(default=None)
+    waited_ms: float | None = Field(default=None, ge=0)
+
+
 class CutoverStepData(WebModel):
-    n: int = Field(ge=1, le=6)
+    n: int = Field(ge=1, le=32)
     state: Literal["running", "done", "verify"]
+    id: str | None = Field(default=None)
+    ms: float | None = Field(default=None, ge=0)
+    method: CutoverMethod | None = Field(default=None)
+    of: int | None = Field(default=None, ge=1, le=32)
+    result: Literal["ok", "fail", "revert"] | None = Field(default=None)
+    window: CutoverWindow | None = Field(default=None)
+
+
+class CutoverOutcomeReplication(WebModel):
+    direction: Literal["reverse", "forward"]
+    lag_ms: float | None = Field(ge=0)
+
+
+class CutoverOutcomeData(WebModel):
+    """[가정] 전환 결과(통과·거부)"""
+
+    result: Literal["switched", "refused"]
+    active: Literal["source", "target"]
+    pause_ms: float | None = Field(ge=0)
+    replication: CutoverOutcomeReplication
+    reason: str | None = Field(default=None)
+    message: str | None = Field(default=None)
+    steps: list[CutoverStepPlan] | None = Field(default=None)
+    held_requests: int | None = Field(default=None, ge=0)
+    failed_requests: int | None = Field(default=None, ge=0)
+
+
+class CutoverVerifyData(WebModel):
+    """[가정] 전환 순간 스냅샷 기준 테이블별 검증"""
+
+    table: str
+    source_rows: int = Field(ge=0)
+    target_rows: int | None = Field(ge=0)
+    checksum: Literal["match", "mismatch", "pending", "skipped"]
 
 
 class CutoverResultData(WebModel):
@@ -588,7 +707,8 @@ class CutoverResultData(WebModel):
 
 class CutoverHandoverData(WebModel):
     item: Literal["dns", "origin", "access"]
-    state: Literal["running", "done"]
+    state: Literal["running", "done", "held"]
+    detail: str | None = Field(default=None)
 
 
 class ErrorData(WebModel):
@@ -685,7 +805,11 @@ DATA_MODELS: dict[str, type[WebModel]] = {
     "traffic.ready": TrafficReadyData,
     "traffic.snapshot": TrafficSnapshotData,
     "traffic.prepare": TrafficPrepareData,
+    "cutover.plan": CutoverPlanData,
+    "cutover.ready": CutoverReadyData,
     "cutover.step": CutoverStepData,
+    "cutover.outcome": CutoverOutcomeData,
+    "cutover.verify": CutoverVerifyData,
     "cutover.result": CutoverResultData,
     "cutover.handover": CutoverHandoverData,
     "error": ErrorData,

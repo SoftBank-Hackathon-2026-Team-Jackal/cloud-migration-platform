@@ -9,6 +9,43 @@ from cmp_contracts.provisioning import ContentRef, Contract, Text, VersionRef
 from cmp_contracts.provisioning_v2 import ResourceId, TargetSelectionV2
 
 
+class ScopeSelection(Contract):
+    """What the user picked in the web scope selection (ticket 56): where the app runs."""
+
+    connection_id: Text
+    region: Text
+    cluster: Text
+    namespace: Text
+    workload: Text
+    workload_kind: Text
+
+
+class ScopeEvidence(Contract):
+    kind: Text
+    location: Text
+
+
+class ScopeCandidate(Contract):
+    """One resource the platform found from the selected app (ticket 56), with its evidence."""
+
+    candidate_id: Text
+    resource_type: Text
+    name: Text
+    arn: Text | None = None
+    evidence: list[ScopeEvidence] = Field(default_factory=list)
+    suggested: bool = False
+
+
+class ConfirmedScope(Contract):
+    """The user's confirmed analysis scope (ticket 06B). Built by the API from its stored
+    records, never from values the web sends. Names and ARNs only, no credentials."""
+
+    scope_id: Text
+    selection: ScopeSelection
+    included: list[ScopeCandidate]
+    excluded: list[Text] = Field(default_factory=list)
+
+
 class AnalysisInput(Contract):
     """Input of the analysis child Workflow. Only `migration_id` is required so a scaffold run
     (no source yet) keeps working; everything else describes where the real analysis reads from.
@@ -24,6 +61,10 @@ class AnalysisInput(Contract):
     # the worker resolves it only when it clones (ticket 23).
     source_access_ref: VersionRef | None = None
     role_arns: list[Text] = Field(default_factory=list)
+    # Ticket 06B: the region of the source cluster (the worker setting is the fallback) and the
+    # scope the user confirmed, filled by the API from stored records.
+    region: Text | None = None
+    scope: ConfirmedScope | None = None
     # ENV-02: the uploaded `.env` (POST /env-files). Passed through only; ENV-05 reads key names
     # from it instead of the repository's `.env*` files.
     env_file_ref: ContentRef | None = None
@@ -120,6 +161,7 @@ class AnalysisReport(Contract):
     source_db_images: dict[ResourceId, str]
     unmapped_items: list[str]
     unverified_risks: list[str]
+    scope: ConfirmedScope | None = None  # ticket 06B: what the user confirmed to analyze
 
     @model_validator(mode="after")
     def unique_mapping_ids(self):

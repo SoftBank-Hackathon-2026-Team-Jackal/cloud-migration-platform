@@ -185,7 +185,7 @@ def register_approver(session: Session, *, approver_id: str, migration_ids: list
     """Operator-only registration. Returns the credential once; only its digest is stored."""
     if session.get(Approver, approver_id) is not None:
         raise ApprovalError("APPROVER_EXISTS")
-    credential = "cmp_approver_" + secrets.token_urlsafe(32)
+    credential = _new_credential()
     session.add(
         Approver(
             id=approver_id,
@@ -197,16 +197,43 @@ def register_approver(session: Session, *, approver_id: str, migration_ids: list
     return credential
 
 
-def grant_migrations(session: Session, *, approver_id: str, migration_ids: list[str]) -> list[str]:
-    """Operator-only (ticket 60): let an existing approver decide more Migrations.
+def _new_credential() -> str:
+    return "cmp_approver_" + secrets.token_urlsafe(32)
 
-    The credential is unchanged and never returned; scoping per Migration stays."""
+
+def _replace_credential(session: Session, approver_id: str) -> str:
+    approver = session.get(Approver, approver_id)
+    if approver is None:
+        raise ApprovalError("APPROVER_NOT_FOUND")
+    credential = _new_credential()
+    approver.credential_digest = _digest(credential)
+    session.commit()
+    return credential
+
+
+def rotate_approver_credential(session: Session, approver_id: str) -> str:
+    """Operator-only: issue a new credential once; the previous one stops working immediately.
+
+    The Approver row stays (recorded decisions reference it), so traceability is kept.
+    """
+    return _replace_credential(session, approver_id)
+
+
+def grant_approver_migrations(
+    session: Session, approver_id: str, migration_ids: list[str]
+) -> list[str]:
+    """Operator-only: add Migration grants to an existing approver (same grant rule as D2)."""
     approver = session.get(Approver, approver_id)
     if approver is None:
         raise ApprovalError("APPROVER_NOT_FOUND")
     approver.migration_ids = sorted(set(approver.migration_ids) | set(migration_ids))
     session.commit()
     return list(approver.migration_ids)
+
+
+def revoke_approver_credential(session: Session, approver_id: str) -> None:
+    """Operator-only: replace the digest with one whose credential is never returned."""
+    _replace_credential(session, approver_id)
 
 
 def authenticate_approver(session: Session, credential: str) -> Approver:

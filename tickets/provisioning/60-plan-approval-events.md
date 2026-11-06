@@ -13,7 +13,7 @@ PROV-014(Preview), PROV-015(승인), PROV-021(비밀값 없음). 계약: [migrat
 07(승인), 18(게시·P3 재사용), 22(워크로드 Plan), 24(이벤트), 49(실패 이벤트), 55(샌드박스 결과).
 
 ## 작업 범위
-- 포함: 계약 사본 동기화(`plan.preview` 백엔드 Preview 모양·`approval.required.pending_decisions`), 게시 Activity의 4종 이벤트, REJECT 뒤 새 Revision 게시와 Workflow 재대기, 승인자 Migration 추가 API, 데모 승인자 스크립트.
+- 포함: 계약 사본 동기화(`plan.preview` 백엔드 Preview 모양·`approval.required.pending_decisions`), 게시 Activity의 4종 이벤트, REJECT 뒤 새 Revision 게시와 Workflow 재대기, 데모 승인자 절차 정리(#215 스크립트 사용).
 - 제외: 웹 BFF 중계(웹 작업), 분석·샌드박스 Activity, 데이터 전환 승인(`gate: cutover`, 63), `/plan/revise` API.
 
 ## 착수 결정 (2026-11-06)
@@ -29,24 +29,16 @@ PROV-014(Preview), PROV-015(승인), PROV-021(비밀값 없음). 계약: [migrat
 | A7 재사용 Revision | `PLAN_REUSED`(같은 입력 재게시, Activity 재시도 포함)도 같은 값을 다시 낸다 | 첫 시도가 게시 후 이벤트 전에 끊긴 경우에도 화면이 채워진다. 웹은 같은 id·같은 Revision을 덮어쓴다 |
 | A8 REJECT 뒤 새 Revision (N8) | 18 P3를 한 줄 보탠다: **최신 Revision에 REJECT 결정이 있으면 같은 입력이어도 재사용하지 않고 최신+1을 게시**한다. 거절된 Revision은 다시 승인할 수 없으므로(`ALREADY_DECIDED`) 재사용할 이유가 없다. "승인은 최신 Revision만"(P3 근거)과 맞고, 새 Revision 뒤 같은 입력은 다시 `PLAN_REUSED` | 최소 변경. 클라우드 대상은 새 Revision 디렉터리로 Terraform Plan을 다시 만든다(저장 Plan 재사용 아님) |
 | A9 Workflow | `workflow.patched("plan-reject-republish-v1")` 아래 `_approve_revisions`가 결과 `plan_rejected`이면 같은 게시 Activity를 다시 부르고 새 Revision 승인을 기다린다. 재게시가 거절된 Revision을 그대로 돌려주면(정책상 새 Revision 불가) `plan_code=PLAN_REJECTED`·`plan_rejected`로 끝나고 49의 `error` 이벤트(`PLAN_REJECTED`)가 나간다. 세 번째 REJECT도 `plan_rejected`(무한 반복 방지). 취소 요청 중이면 재게시하지 않는다. 인프라·워크로드 Plan 모두 같은 규칙. patch 이전 이력은 기존대로 끝난다 | 거절을 "수정 요청"으로 받으면서 거절의 원래 의미(실행하지 않음)를 지킨다 |
-| A10 데모 승인자 | 승인자 범위(Migration ID 목록)는 그대로 둔다. 운영자 전용 `POST /provisioning/approvers/{approver_id}/migrations`(`X-Approval-Admin-Key`, 본문 `{migration_ids}`, 응답 `{approver_id, migration_ids}`, 자격 증명 반환 없음, 없으면 404 `APPROVER_NOT_FOUND`)를 더해 **고정 토큰 1개**가 새로 시작한 Migration을 승인할 수 있게 한다. 스크립트 `scripts/demo_approver.py issue|grant` | 대안: Migration마다 새 승인자(웹 BFF가 토큰 파일을 다시 읽어야 함), 전체 Migration 와일드카드(권한 확대라 하지 않음). 조율 세션에 확인 요청을 보냈고 답이 오기 전 데모에 맞는 이 안으로 진행했다 |
-| A11 토큰 취급 | `issue`는 자격 증명을 `--out`(기본 `~/.cmp/demo-approver.token`) 0600 파일로만 쓴다(O_EXCL, 있으면 덮어쓰지 않음, 부모 0700). 표준 출력·오류에는 승인자 id·파일 경로·HTTP 코드만. 운영자 키는 환경 변수 `APPROVAL_ADMIN_KEY`로만 받는다(명령줄 인자 아님) | 이슈 범위 |
+| A10 데모 승인자 | 승인자 범위(Migration ID 목록)는 그대로 둔다. 고정 토큰 1개가 새로 시작한 Migration을 승인하도록 07의 운영자 API `POST /provisioning/approvers/{approver_id}/migrations`로 실행마다 Migration을 더한다. 발급·추가·교체·폐기 스크립트와 절차는 origin/main에 먼저 병합된 [`infra/demo/approver-token.py`](../../infra/demo/approver-token.py)·[infra/demo README](../../infra/demo/README.md#데모-승인자-토큰-웹-platform_approver_token)(#215)를 그대로 쓴다. 이 티켓은 같은 일을 하는 `scripts/` 스크립트와 grant API를 만들었다가 origin/main 병합 때 중복이라 지웠다 | 같은 일을 하는 스크립트가 둘이면 운영자가 헷갈린다. 대안(Migration마다 새 승인자, 전체 Migration 와일드카드)은 하지 않았다(와일드카드는 권한 확대) |
+| A11 토큰 취급 | 토큰을 표준 출력에 내지 않으려면 `create`·`rotate`에 **반드시 `--env-file /opt/cmp/web.env`**를 붙인다(0600 파일에 `PLATFORM_APPROVER_TOKEN`으로만 쓰고 출력하지 않는다). 운영자 키는 환경 변수 `APPROVAL_ADMIN_KEY` 또는 숨김 프롬프트로만 받는다 | 이슈 범위. `--env-file` 없이 실행하면 토큰이 표준 출력에 한 번 나온다(#215 동작, `infra/demo/*`는 이 티켓에서 수정하지 않음) |
 
 ## 데모 승인자 절차
-1. 플랫폼 서버(또는 API에 닿는 운영자 단말)에서, `/opt/cmp/.env`의 `APPROVAL_ADMIN_KEY`를 환경 변수로만 넘긴다(파일 내용을 출력하지 않는다).
-   ```bash
-   APPROVAL_ADMIN_KEY="$(sudo sed -n 's/^APPROVAL_ADMIN_KEY=//p' /opt/cmp/.env)" \
-     uv run python scripts/demo_approver.py issue --api http://127.0.0.1:8000 \
-     --migration-id <첫 migration-id> --out /opt/cmp/secrets/demo-approver.token
-   ```
-   승인자 id 기본값은 `demo-approver`. 자격 증명은 파일에만 남는다.
-2. 웹 서버 env(웹 작업, BFF 중계): `PLATFORM_APPROVER_TOKEN`(= 위 파일 내용). 브라우저에 내려보내지 않는다. 웹 BFF는 `POST /provisioning/plans/{plan_id}/revisions/{revision}/approvals`에 `Authorization: Bearer <토큰>`을 붙여 중계한다.
-3. 데모 실행마다 새 Migration을 시작하면 승인 전에 권한을 더한다(토큰은 그대로):
-   ```bash
-   APPROVAL_ADMIN_KEY=... uv run python scripts/demo_approver.py grant --api http://127.0.0.1:8000 \
-     --migration-id <새 migration-id>
-   ```
-4. 교체: 새 `--approver-id`·새 `--out`으로 `issue`하고 웹 env를 바꾼다. 같은 id는 409 `APPROVER_EXISTS`.
+[infra/demo README "데모 승인자 토큰"](../../infra/demo/README.md#데모-승인자-토큰-웹-platform_approver_token) 그대로(요약):
+1. SSM 세션에서 `export "$(grep '^APPROVAL_ADMIN_KEY=' /opt/cmp/.env)"`로 운영자 키를 환경 변수로만 둔다.
+2. 한 번: `python3 infra/demo/approver-token.py create demo-approver --migration demo-placeholder --env-file /opt/cmp/web.env` → 웹 재생성(`up -d --force-recreate web`). 토큰은 `web.env`(0600)의 `PLATFORM_APPROVER_TOKEN`에만 있다.
+3. 데모 실행마다 Plan이 게시되면 `approver-token.py grant demo-approver --migration <migration-id>`.
+4. 웹 BFF(웹 작업)가 `PLATFORM_APPROVER_TOKEN`으로 `POST /provisioning/plans/{plan_id}/revisions/{revision}/approvals`를 중계한다. 계획 수정 요청은 같은 경로에 `decision: REJECT`.
+5. 데모가 끝나면 `revoke`.
 
 ## 수용 기준 (Issue #233)
 - [x] 새 이벤트 계약 모델 검증 — `plan.preview`(백엔드 모양 `data:plan.preview.backend`, oneOf)·`approval.required.pending_decisions`를 웹 `contract/events.schema.json`(`main` `4b96eba`)과 같게 맞추고 `tests/test_event_contract.py`가 정의별로 비교.
@@ -57,16 +49,16 @@ PROV-014(Preview), PROV-015(승인), PROV-021(비밀값 없음). 계약: [migrat
 
 ## Test Seam
 - `tests/test_plan_approval_events.py`: 순수 `plan_step` 변환. 실제 `PlanPublisher`(ON_PREM, SQLite·로컬 ArtifactStore·Helm 렌더) + `PlanEvents` → 이벤트 순서·값, 보고서 없음, 게시 실패, 재사용, REJECT 뒤 Revision 2. Temporal time-skipping 실제 `MigrationWorkflow`·`ProvisioningApprovalWorkflow` + 가짜 Provisioning Activity: REJECT → 재게시 → 새 Revision 승인 → 실행, 재게시가 같은 Revision → `plan_rejected`, 세 번째 REJECT → `plan_rejected`, Replayer.
-- `tests/test_demo_approver.py`: 승인자 Migration 추가 API(운영자 키·404·422·자격 증명 미반환), 스크립트 `issue`(0600 파일·출력에 토큰·키 없음·덮어쓰지 않음)·`grant`·키 없음·API 거절.
+- 데모 승인자: #215의 `tests/test_demo_approver_token.py`·`tests/test_approval_gate.py`가 스크립트·grant API를 확인한다(이 티켓 변경 없음).
 
 ## 검증
-- RED: 새 테스트 파일이 `PlanEvents`·`plan_step` 없음, 승인자 추가 API·스크립트 없음으로 실패.
-- GREEN: `uv run pytest tests/test_plan_approval_events.py tests/test_demo_approver.py tests/test_event_contract.py tests/test_migration_plan_workflow.py tests/test_cloud_workload_workflow.py tests/test_provisioning_events.py tests/test_approval_gate.py`
+- RED: 새 테스트 파일이 `PlanEvents`·`plan_step` 없음으로 실패.
+- GREEN: `uv run pytest tests/test_plan_approval_events.py tests/test_event_contract.py tests/test_migration_plan_workflow.py tests/test_cloud_workload_workflow.py tests/test_provisioning_events.py tests/test_approval_gate.py`
 - `make check`, alembic(SQLite) check, `make openapi`: PR 본문에 결과를 적는다.
 
 ## 남은 일
 - 웹 BFF 승인 중계와 `PLATFORM_APPROVER_TOKEN`(웹 작업).
-- 데모 실행마다 `grant`가 필요하다(A10). 시작 API가 승인자를 자동으로 묶게 할지는 정책 결정이 필요하다.
+- 데모 실행마다 `grant`가 필요하다(A10). `--env-file` 없는 `create`·`rotate`는 토큰을 출력한다(#215, `infra/demo` 범위). 시작 API가 승인자를 자동으로 묶게 할지는 정책 결정이 필요하다.
 - `plan.step`의 `after`(대상 서비스)·`kind`는 매핑 행에 값이 없다(events-guide §5, 분석 담당).
 - `plan.preview.source`·`env_remap`은 백엔드 값이 없다. 보고서가 플랫폼 저장소에 없는 배치에서는 `plan.step`이 나오지 않는다(A2).
 - 데이터 전환 승인 `approval.required gate: cutover`는 63.

@@ -15,6 +15,7 @@ from cmp_data import DataMigrationRequest, ReadinessPolicy, replication_names
 from cmp_data import cutover as co
 from cmp_worker.activities import data_cutover as dc
 from cmp_worker.activities import data_migration as dm
+from cmp_worker.activities.k8s_workloads_cli import CommandError
 from cmp_worker.events import configure_emitter
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
@@ -110,6 +111,8 @@ class FakeCluster:
 
     def run_runner(self, namespace, pod, config):
         self.runner_configs.append(config)
+        if isinstance(self.runner_result, Exception):
+            raise self.runner_result
         return self.runner_result
 
 
@@ -182,13 +185,20 @@ async def test_switchover_emits_web_cutover_events_and_moves_the_saved_route(
 ) -> None:
     cluster, dbs = fakes
     await run(dc.dm_install_cutover, PAYLOAD)
-    steps = {"pause_wait_inflight": 1, "marker_wait": 2, "snapshot_seq_check": 3,
-             "switch_subscriptions": 1, "retarget_resume": 0}  # fmt: skip
+    steps = [{"id": "seq_raise", "ms": 1.2, "window": "pre"},
+             {"id": "pause", "ms": 0.6, "start_ms": 0, "window": "pause"},
+             {"id": "resume", "ms": 0.3, "start_ms": 6.7, "window": "pause"}]  # fmt: skip
+    tables = [{"table": "messages", "source_rows": 10, "target_rows": 10, "match": True}]
+    ready = {"longest_xact_ms": 3, "lock_waiters": 0, "lag_bytes": 0, "ready": True,
+             "reasons": [], "waited_ms": 12.5}  # fmt: skip
     cluster.runner_result = (
         0,
-        {"switched": True, "write_pause_ms": 7, "verify_ok": True, "steps_ms": steps},
+        {"switched": True, "write_pause_ms": 7, "verify_ok": True, "steps_ms": {},
+         "steps": steps, "tables": tables, "ready": ready},
+    )  # fmt: skip
+    result = await run(
+        dc.dm_switchover, PAYLOAD | {"attempt": 2, "readiness": {"commits_per_sec": 50}}
     )
-    result = await run(dc.dm_switchover, PAYLOAD)
     assert result["switched"] and result["active"] == "target" and result["write_pause_ms"] == 7
     assert cluster.secrets[("chat", co.SECRET)]["route"].startswith("chat = host='10.9.0.2'")
     # 역방향 구독자(원본) 쪽 Secret에 비밀번호를 두고, 새 주(대상)에 같은 역할을 맞춘다
@@ -198,7 +208,16 @@ async def test_switchover_emits_web_cutover_events_and_moves_the_saved_route(
     assert "cmp_repl" in dbs["dst"].executed[0]
     assert all(pw not in json.dumps(result) for pw in dbs["src"].secrets.values())
     types = [e.type for e in emitter.events]
-    assert "cutover.step" in types and "cutover.result" in types
+    assert types == ["cutover.ready", *["cutover.step"] * 3, "cutover.outcome", "cutover.step",
+                     "cutover.verify", "data.verify", "data.verify"]  # fmt: skip
+    by_type = {e.type: e for e in emitter.events}
+    assert by_type["cutover.ready"].data["attempt"] == 2
+    assert by_type["cutover.ready"].data["commits_per_sec"] == 50
+    outcome = by_type["cutover.outcome"].data
+    assert outcome["result"] == "switched" and outcome["active"] == "target"
+    assert outcome["pause_ms"] == 7 and outcome["replication"]["direction"] == "reverse"
+    assert by_type["cutover.verify"].data["checksum"] == "match"
+    assert result["steps"] == steps
     for event in emitter.events:
         validate_data(event.type, event.data)
 
@@ -207,15 +226,64 @@ async def test_refused_switchover_fails_without_moving_the_route(fakes, emitter)
     cluster, _ = fakes
     await run(dc.dm_install_cutover, PAYLOAD)
     before = dict(cluster.secrets[("chat", co.SECRET)])
+    steps = [{"id": "pause", "ms": 0.6, "start_ms": 0, "window": "pause"},
+             {"id": "marker", "ms": 10000, "start_ms": 0.6, "window": "pause"}]  # fmt: skip
     cluster.runner_result = (
         4,
-        {"switched": False, "code": "NOT_READY", "detail": "LONG_TRANSACTION"},
-    )
+        {"switched": False, "code": "MARKER_TIMEOUT", "detail": "", "paused": True,
+         "steps": steps, "ready": None},
+    )  # fmt: skip
     with pytest.raises(ApplicationError) as err:
         await run(dc.dm_switchover, PAYLOAD)
-    assert err.value.type == "NOT_READY" and err.value.non_retryable
+    assert err.value.type == "MARKER_TIMEOUT" and err.value.non_retryable
     assert cluster.secrets[("chat", co.SECRET)] == before
-    assert not [e for e in emitter.events if e.type.startswith("cutover.")]
+    # 거부도 웹에 알린다: 실패한 단계, 원본으로 재개(revert), 거부 결과. 검증은 하지 않는다.
+    events = [(e.type, e.data) for e in emitter.events]
+    marks = [d for t, d in events if t == "cutover.step"]
+    assert [(m["id"], m["result"]) for m in marks] == [
+        ("pause", "ok"),
+        ("marker", "fail"),
+        ("resume_source", "revert"),
+    ]
+    outcome = next(d for t, d in events if t == "cutover.outcome")
+    assert outcome["result"] == "refused" and outcome["reason"] == "MARKER_TIMEOUT"
+    assert outcome["active"] == "source" and outcome["pause_ms"] is None
+    assert not [t for t, _ in events if t in ("cutover.verify", "data.verify")]
+    for event in emitter.events:
+        validate_data(event.type, event.data)
+
+
+async def test_announce_publishes_plan_and_cutover_approval(fakes, emitter) -> None:
+    sample = {"phase": "streaming", "lag_bytes": 0}
+    payload = PAYLOAD | {"sample": sample, "readiness": {"commits_per_sec": 40}, "approval": True}
+    result = await run(dc.dm_announce_cutover, payload)
+    assert result == {"ready": True}
+    plan, approval = emitter.events
+    assert plan.type == "cutover.plan" and plan.status == "waiting"
+    assert {p["id"]: p["state"] for p in plan.data["preconditions"]} == {
+        "lag": "pass",
+        "pooler": "pass",
+        "reverse_sub": "pass",
+    }
+    assert plan.data["topology"]["writes_per_sec"] == 40
+    assert approval.type == "approval.required" and approval.data["gate"] == "cutover"
+    for event in emitter.events:
+        validate_data(event.type, event.data)
+    lagging = PAYLOAD | {"sample": {"phase": "catchup", "lag_bytes": 9 << 20}, "approval": False}
+    assert await run(dc.dm_announce_cutover, lagging) == {"ready": False}
+    assert emitter.events[-1].type == "cutover.plan"
+
+
+async def test_unreachable_runner_is_reported_as_refused(fakes, emitter) -> None:
+    cluster, _ = fakes
+    await run(dc.dm_install_cutover, PAYLOAD)
+    cluster.runner_result = CommandError("kubectl")
+    with pytest.raises(ApplicationError) as err:
+        await run(dc.dm_switchover, PAYLOAD)
+    assert err.value.type == "DB_COMMAND_FAILED"
+    outcome = next(e for e in emitter.events if e.type == "cutover.outcome")
+    assert outcome.data["result"] == "refused" and outcome.data["active"] == "source"
+    assert outcome.data["reason"] == "DB_COMMAND_FAILED"
 
 
 async def test_rollback_runs_the_same_runner_in_the_reverse_direction(fakes) -> None:

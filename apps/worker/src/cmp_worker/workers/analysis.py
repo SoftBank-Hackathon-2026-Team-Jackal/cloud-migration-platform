@@ -49,7 +49,7 @@ def build_pipeline(config: Settings = default_settings) -> AnalysisPipeline | No
         env_store=optional_env_file_store(),  # ENV-05: None until the platform store is set
         llm_factory=build_llm_factory(config),  # None unless Claude is switched on (ADR-004)
         aws_clients_factory=lambda inp: make_clients(
-            get_session(inp.credential_ref or "", region=region)
+            get_session(inp.credential_ref or "", region=inp.region or region)
         ),
     )
 
