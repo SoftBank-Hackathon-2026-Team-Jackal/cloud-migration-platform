@@ -2,7 +2,7 @@
 
 워커와 Envoy가 같은 호스트에 있으면 라우트 파일 교체와 관리 API 확인이 모두 로컬이다.
 컨트롤러는 TrafficShiftWorkflow 요청의 `relay_queue`로 이 큐를 지정한다.
-환경변수: TRAFFIC_RDS_PATH(필수), TRAFFIC_ENVOY_ADMIN, TRAFFIC_TARGET_HOST, TEMPORAL_ADDRESS.
+환경변수: TRAFFIC_RDS_PATH(필수), TRAFFIC_ENVOY_ADMIN, TRAFFIC_TARGET_HOST, TEMPORAL_ADDRESS, TEMPORAL_TLS.
 """
 
 import argparse
@@ -29,7 +29,9 @@ def create_relay_worker(client: Client, queue: str) -> Worker:
 
 
 async def main(queue: str) -> None:
-    client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
+    client = await Client.connect(
+        settings.temporal_address, namespace=settings.temporal_namespace, tls=settings.temporal_tls
+    )
     await create_relay_worker(client, queue).run()
 
 
