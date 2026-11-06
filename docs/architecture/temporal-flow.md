@@ -64,7 +64,7 @@ flowchart TD
 
 Production Provisioning 직후의 **Ready**는 인프라·워크로드의 준비 상태이며 데이터 이전 완료 상태가 아니다. 대상 PostgreSQL의 스키마·데이터가 아직 준비되지 않은 시점에는 가능한 준비 검사와 데이터 이전 후의 전체 기능 검증을 구분한다. 필요한 검증이 끝나기 전에 트래픽 전환으로 진행하지 않는다.
 
-AWS→온프레미스 K3s 데이터 이전에서는 Data Migration이 초기 복사·CDC 시작 직전에 [Migration Network Preflight](../../specs/migration-network-preflight/spec.md)를 호출한다. 검사는 실제 복제 작업과 같은 네트워크 경로에서 수행하고 `PASS` 외 결과는 시작을 막는다. 터널·라우트·원본 DB Endpoint가 바뀐 뒤 다시 시작할 때는 재검사한다. 복제 시작 후의 연결·지연·WAL 감시는 Data Migration의 지속 책임이다.
+AWS→온프레미스 K3s 데이터 이전에서는 Data Migration이 초기 복사·CDC 시작 직전에 [Migration Network Preflight](../../specs/migration-network-preflight/spec.md)를 호출한다. 검사는 실제 복제 작업과 같은 네트워크 경로에서 수행하고 `PASS` 외 결과는 시작을 막는다. 터널·라우트·원본 DB Endpoint가 바뀐 뒤 다시 시작할 때는 재검사한다. 복제 시작 후의 연결·지연·WAL 감시는 Data Migration의 지속 책임이다. 구현([Provisioning 76](../../tickets/provisioning/76-onprem-data-wiring.md)): `DataMigrationWorkflow`는 `network_preflight` 입력이 있으면 `dm_tunnel` → `run_network_preflight` → `may_start_data_migration` 순으로 막고(`blocked`, `NETWORK_PREFLIGHT_<status>`·`PREFLIGHT_INPUT_CHANGED`), 터널을 만든 실행은 끝(done·failed·cancelled·blocked)에서 슬롯 정리 뒤 `dm_tunnel_cleanup`을 부른다(패치 `data-network-preflight-v1`·`data-tunnel-cleanup-v1`).
 
 ## 5. Workflow·Activity·Worker별 실행 책임
 

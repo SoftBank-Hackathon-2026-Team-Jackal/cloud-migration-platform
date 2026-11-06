@@ -37,7 +37,7 @@ with workflow.unsafe.imports_passed_through():
         WORKFLOW_QUEUE,
         approval_workflow_id,
     )
-    from cmp_data.handoff import DataMigrationInput, endpoints
+    from cmp_data.handoff import DataMigrationInput, endpoints, preflight_request
     from cmp_traffic import TrafficShiftInput
 
     from cmp_worker.activities.analysis import analyze_project
@@ -339,6 +339,14 @@ class MigrationWorkflow:
         }
         if parsed.tunnel is not None:
             child_args["tunnel"] = parsed.tunnel.model_dump(mode="json")
+        # Provisioning 76: 설정이 있으면 자식이 터널 뒤·복제 전에 MNP 검사를 한다
+        preflight, code = preflight_request(view, parsed, migration_id, target)
+        if code:
+            self.failure_code = code
+            self.data_migration = {"phase": "blocked", "failure_code": code}
+            return "data_blocked"
+        if preflight is not None:
+            child_args["network_preflight"] = preflight
         child = await workflow.start_child_workflow(
             DataMigrationWorkflow.run,
             child_args,

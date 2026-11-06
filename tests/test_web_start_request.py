@@ -722,6 +722,47 @@ def test_unusable_server_data_migration_refuses_the_start(api, env_ref, agent, m
     assert "never-shown" not in response.text
 
 
+# Provisioning 76 (ADR-007 2안): ON_PREM 데이터 입력. 원본 EKS NLB 입구 + 맥 공인 IP + k3d kubeconfig + MNP.
+ONPREM_DATA_MIGRATION = {
+    **{k: v for k, v in DATA_MIGRATION.items() if k != "target_peer_host"},
+    "source": {k: v for k, v in DATA_MIGRATION["source"].items() if k != "peer_host"},
+    "target_kubeconfig_ref": "onprem-k3d",
+    "tunnel": {"ingress": "source", "target_egress_cidrs": ["203.0.113.7/32"]},
+    "network_preflight": {
+        "aws_vpc_cidrs": ["10.0.0.0/16"],
+        "db_auth_ref": {"secret_name": "cmp-preflight-db", "username_key": "username",
+                        "password_key": "password"},
+    },
+}  # fmt: skip
+
+
+def test_on_prem_data_migration_carries_tunnel_kubeconfig_and_preflight(
+    api, env_ref, agent, monkeypatch
+):
+    from cmp_data.handoff import DataMigrationInput
+
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(ONPREM_DATA_MIGRATION))
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    given = DataMigrationInput.model_validate(temporal.started[0]["data"]["data_migration"])
+    assert (given.tunnel.ingress, given.tunnel.target_egress_cidrs) == (
+        "source", ["203.0.113.7/32"])  # fmt: skip
+    assert given.target_kubeconfig_ref == "onprem-k3d"
+    assert given.network_preflight.aws_vpc_cidrs == ["10.0.0.0/16"]
+    assert given.network_preflight.allowed_private_destination_cidrs == ["10.43.0.0/16"]
+
+
+def test_on_prem_reverse_tunnel_without_preflight_refuses_the_start(
+    api, env_ref, agent, monkeypatch
+):
+    value = {k: v for k, v in ONPREM_DATA_MIGRATION.items() if k != "network_preflight"}
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(value))
+    client, temporal = api
+    response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
+    assert (response.status_code, code_of(response)) == (503, "DATA_MIGRATION_PREFLIGHT_REQUIRED")
+    assert temporal.started == []
+
+
 TRAFFIC = {"relay_queue": "relay-1", "policy": {"observe_seconds": 20, "min_requests": 10}}
 
 

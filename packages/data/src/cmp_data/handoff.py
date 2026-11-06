@@ -6,16 +6,50 @@ ON_PREM은 ADR-007에 따라 `tunnel.ingress="source"`와 `target_kubeconfig_ref
 명시적 데이터 게이트웨이 입력이 없는 기존 경로는 `tunnel_endpoint`를 기본 `peer_host`로 읽는다.
 `tunnel`(ticket 10)이 있으면 플랫폼이 두 클러스터 사이에 WireGuard 게이트웨이를 두므로 양쪽 `peer_host`를
 게이트웨이 Service 주소로 정한다(입력의 `peer_host`·`target_peer_host`는 쓰지 않는다).
+`network_preflight`(Provisioning 76)가 있으면 `preflight_request`가 MNP `NetworkPreflightRequest`를 만들고
+데이터 Workflow가 복제 전에 검사한다.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import ipaddress
+from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from cmp_contracts.network_preflight import NetworkPreflightRequest, SecretRef
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 from . import tunnel as wg
 from .contracts import DbEndpoint, Strict
+
+# k3s 기본 대역. 대상 쪽에서 원본 DB는 게이트웨이 Service(ClusterIP, 10.43/16)로 보인다.
+K3S_POD_CIDR, K3S_SERVICE_CIDR = "10.42.0.0/16", "10.43.0.0/16"
+TUNNEL_CIDR = "10.210.0.0/24"  # tunnel.ADDRESSES(게이트웨이 WireGuard 주소)
+
+
+class NetworkPreflightSettings(Strict):
+    """`data_migration.network_preflight`(Provisioning 76, 운영자 값, 비밀값 없음). 있으면 복제 전에
+    MNP 검사를 하고 같은 입력의 PASS만 통과한다. 주소·검사 위치는 인계값과 `tunnel`에서 정한다."""
+
+    aws_vpc_cidrs: list[str] = Field(min_length=1)  # 원본 EKS VPC
+    onprem_routed_cidrs: list[str] = Field(default=[K3S_POD_CIDR, K3S_SERVICE_CIDR], min_length=1)
+    tunnel_cidrs: list[str] = Field(default=[TUNNEL_CIDR])
+    allowed_private_destination_cidrs: list[str] = Field(default=[K3S_SERVICE_CIDR], min_length=1)
+    # WireGuard가 이미 암호화하고, 복제 구독도 sslmode를 정하지 않는다(원본 기본 PostgreSQL은 TLS 없음)
+    tls_mode: Literal["disable", "require", "verify-full"] = "disable"
+    # 검사 Pod가 읽는 Secret(검사 Namespace에 운영자가 둔다). 복제 역할 Secret은 구독 단계에서야 생겨 못 쓴다
+    db_auth_ref: SecretRef
+    probe_namespace: str | None = None  # 기본: 대상 DB Namespace(복제가 도는 곳)
+    node_name: str | None = None  # 기본: 지정 안 함(단일 노드 k3d)
+    transfer_bytes: int | None = None
+    timeout_seconds: int | None = None
+
+    @field_validator(
+        "aws_vpc_cidrs", "onprem_routed_cidrs", "tunnel_cidrs", "allowed_private_destination_cidrs"
+    )
+    @classmethod
+    def _cidrs(cls, values: list[str]) -> list[str]:
+        # 시작 때 거른다(MNP 요청과 같은 규칙: IPv4, 호스트 비트 없음)
+        return [str(ipaddress.IPv4Network(value, strict=True)) for value in values]
 
 
 class DataMigrationInput(Strict):
@@ -32,6 +66,8 @@ class DataMigrationInput(Strict):
     monitor_interval_s: float = Field(default=5, gt=0)
     # ticket 10: 플랫폼이 두 클러스터 사이 WireGuard 경로를 만든다
     tunnel: wg.WireGuardTunnel | None = None
+    # Provisioning 76: 복제 전 네트워크 사전 점검(MNP). `tunnel`이 있어야 한다(검사 주소가 게이트웨이다)
+    network_preflight: NetworkPreflightSettings | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -48,7 +84,50 @@ class DataMigrationInput(Strict):
     def _tunnel_local(self) -> DataMigrationInput:
         if self.tunnel and not self.source.local_host:
             raise ValueError("tunnel needs source.local_host (the source DB Service address)")
+        if self.network_preflight and not self.tunnel:
+            raise ValueError("network_preflight needs tunnel (it probes the gateway address)")
         return self
+
+
+def preflight_request(
+    view: dict[str, Any], given: DataMigrationInput, migration_id: str, target: DbEndpoint
+) -> tuple[dict[str, Any] | None, str | None]:
+    """(MNP 요청 JSON, None), 설정이 없으면 (None, None), 만들 수 없으면 (None, 막힌 이유 코드).
+
+    원본 주소는 대상 쪽에서 본 게이트웨이 Service다. 검사 위치는 인계값의 Agent·클러스터와 대상 DB
+    Namespace다. 실행기 선택은 `run_network_preflight`가 한다(Agent 경로 또는 Worker kubeconfig)."""
+    settings = given.network_preflight
+    if settings is None:
+        return None, None
+    cluster = (view.get("common") or {}).get("cluster") or {}
+    if not cluster.get("agent_id") or not cluster.get("cluster_uid"):
+        return None, "NETWORK_PREFLIGHT_TARGET_MISSING"
+    probe = {"agent_id": cluster["agent_id"], "cluster_uid": cluster["cluster_uid"],
+             "namespace": settings.probe_namespace or target.namespace}  # fmt: skip
+    if settings.node_name:
+        probe["node_name"] = settings.node_name
+    limits = {k: v for k, v in (("transfer_bytes", settings.transfer_bytes),
+                                ("timeout_seconds", settings.timeout_seconds)) if v is not None}  # fmt: skip
+    try:
+        request = NetworkPreflightRequest(
+            migration_id=migration_id,
+            source_db_host=wg.peer_host(migration_id),
+            source_db_port=wg.DB_PORT,
+            tls_mode=settings.tls_mode,
+            database=given.source.dbname,
+            db_auth_ref=settings.db_auth_ref,
+            aws_vpc_cidrs=settings.aws_vpc_cidrs,
+            onprem_routed_cidrs=settings.onprem_routed_cidrs,
+            tunnel_cidrs=settings.tunnel_cidrs,
+            expected_network_path={
+                "allowed_private_destination_cidrs": settings.allowed_private_destination_cidrs
+            },
+            probe_target=probe,
+            **limits,
+        )
+    except ValidationError:
+        return None, "NETWORK_PREFLIGHT_INPUT_INVALID"
+    return request.model_dump(mode="json"), None
 
 
 def endpoints(

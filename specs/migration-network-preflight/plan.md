@@ -25,4 +25,4 @@ Provisioning 결과의 네트워크·Endpoint 참조 연결은 [Provisioning 13]
 
 ## 구현 현황 (2026-11-05)
 
-구현 단위 1~5 중 1(계약)·2(CIDR 순수 함수)·3(현장 실행기, Kubernetes Pod 방식, 온프레미스는 Agent `NETWORK_PREFLIGHT` 작업으로 실행·작업 ID를 `migration_id`+입력 Fingerprint에 묶음)·4(MTU는 미시도로 기록)·5의 시작 판정 함수와 Activity(`data.preflight` 이벤트 포함)를 구현했다. 5의 Data Migration Workflow 연결(데이터 담당)과 실제 AWS↔온프레미스 경로 검증은 남아 있다. 결정과 증거는 [티켓 01](../../tickets/migration-network-preflight/01-onprem-data-path.md)에 있다.
+구현 단위 1~5 중 1(계약)·2(CIDR 순수 함수)·3(현장 실행기, Kubernetes Pod 방식, 온프레미스는 Agent `NETWORK_PREFLIGHT` 작업으로 실행·작업 ID를 `migration_id`+입력 Fingerprint에 묶음)·4(MTU는 미시도로 기록)·5의 시작 판정 함수와 Activity(`data.preflight` 이벤트 포함)를 구현했다. 5의 Data Migration Workflow 연결은 [Provisioning 76](../../tickets/provisioning/76-onprem-data-wiring.md)이 했다(요청은 `cmp_data.handoff.preflight_request`가 인계값·`tunnel`·설정으로 만든다). 실제 AWS↔온프레미스 경로 검증은 남아 있다. 결정과 증거는 [티켓 01](../../tickets/migration-network-preflight/01-onprem-data-path.md)에 있다.

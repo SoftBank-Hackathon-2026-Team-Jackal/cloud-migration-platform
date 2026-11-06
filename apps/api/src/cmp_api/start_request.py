@@ -266,12 +266,16 @@ def sandbox_settings(value: str | None) -> dict | None:
     return parsed or None
 
 
-def data_migration_settings(value: str | None) -> dict | None:
+def data_migration_settings(value: str | None, provider: str | None = None) -> dict | None:
     """Data-migration ticket 08: the server's `DataMigrationInput` JSON or None when unset.
 
     Same value as the CLI's `--data-migration` (source DB, source app, cutover settings, target
     tunnel address). Checked here, nested `app`/`settings` included, so a bad value refuses the
-    start instead of failing after provisioning. The value is never echoed in the refusal."""
+    start instead of failing after provisioning. The value is never echoed in the refusal.
+
+    Provisioning 76 (ADR-007 2안): an ON_PREM start whose tunnel ingress is the source EKS runs
+    the network preflight by default, so it needs `network_preflight`; without it the start is
+    refused instead of replicating over an unchecked path."""
     if not value:
         return None
     try:
@@ -280,6 +284,9 @@ def data_migration_settings(value: str | None) -> dict | None:
         CutoverSettings.model_validate(parsed.settings)
     except (ValidationError, ValueError):
         raise StartRefused("DATA_MIGRATION_SETTINGS_INVALID", 503) from None
+    reverse = parsed.tunnel is not None and parsed.tunnel.ingress == "source"
+    if provider == "ON_PREM" and reverse and parsed.network_preflight is None:
+        raise StartRefused("DATA_MIGRATION_PREFLIGHT_REQUIRED", 503)
     return parsed.model_dump(mode="json")
 
 

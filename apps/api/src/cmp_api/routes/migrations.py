@@ -131,7 +131,7 @@ def _real_start_input(
                 scope, source_connection = load_scope(session, request.scope_id)
                 scope_fields = scope_analysis_fields(scope, credential_ref(source_connection))
         sandbox = sandbox_settings(settings.web_start_sandbox_settings)
-        data_migration = data_migration_settings(settings.web_start_data_migration)
+        data_migration = data_migration_settings(settings.web_start_data_migration, target.provider)
         traffic = traffic_settings(settings.web_start_traffic)
     except StartRefused as exc:
         raise _refused(exc.code, exc.status) from None
