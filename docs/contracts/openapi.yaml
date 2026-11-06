@@ -95,6 +95,13 @@ paths:
       tags:
       - migration scaffold
       summary: Approve Migration
+      description: 'Without `gate`: the scaffold approval Signal. `gate=cutover` (web
+        second approval): switch
+
+        the database of this migration (child `data-<id>`, specs/data-migration).
+        Accepted only while
+
+        the source is the writer and replication is streaming; otherwise 409 `CUTOVER_NOT_READY`.'
       operationId: approve_migration_migrations__workflow_id__approve_post
       parameters:
       - name: workflow_id
@@ -103,6 +110,15 @@ paths:
         schema:
           type: string
           title: Workflow Id
+      - name: gate
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - const: cutover
+            type: string
+          - type: 'null'
+          title: Gate
       responses:
         '202':
           description: Successful Response
@@ -114,6 +130,8 @@ paths:
                   type: string
                 title: Response Approve Migration Migrations  Workflow Id  Approve
                   Post
+        '409':
+          description: '`gate=cutover`: DB is not ready to switch (`CUTOVER_NOT_READY`)'
         '422':
           description: Validation Error
           content:
@@ -3553,6 +3571,12 @@ components:
             pattern: ^envf-[a-f0-9]{32}$
           - type: 'null'
           title: Env File Ref
+        scope_id:
+          anyOf:
+          - type: string
+            pattern: ^scope-[a-f0-9]{16}$
+          - type: 'null'
+          title: Scope Id
       additionalProperties: false
       type: object
       required:
