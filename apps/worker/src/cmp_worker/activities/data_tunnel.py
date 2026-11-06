@@ -1,7 +1,8 @@
 """원본·대상 클러스터 사이 WireGuard 복제 경로를 만드는 Activity(DM-011, ticket 10).
 
-`cmp_data.tunnel`이 만든 매니페스트를 두 클러스터에 적용한다. 순서: 키(각 클러스터 Secret) → 대상
-게이트웨이·UDP LB·DB 허용 정책 → LB 주소 대기 → 원본 게이트웨이(그 주소로 접속) → handshake 확인.
+`cmp_data.tunnel`이 만든 매니페스트를 두 클러스터에 적용한다. 순서: 키(각 클러스터 Secret) → 입구
+게이트웨이·UDP LB → LB 주소 대기 → 반대편 게이트웨이(그 주소로 접속) → handshake 확인.
+대상 DB 허용 정책은 입구 방향과 관계없이 대상 클러스터에 둔다.
 같은 입력으로 다시 실행해도 된다(키는 Secret에 있으면 그대로 쓴다).
 
 WireGuard 비밀키는 Worker 메모리에서 만들어 `kubectl create -f -`(stdin)로 Secret에만 넣는다. 결과·로그·
@@ -27,6 +28,20 @@ from cmp_worker.activities.k8s_workloads_cli import CommandError
 
 
 class TunnelCluster(KubectlCluster):
+    def delete(self, namespace: str, kind: str, name: str) -> None:
+        # Service finalizer가 LBC 자원을 정리할 때까지 기다린다. 재시도 시 없는 자원은 성공이다.
+        self._s._kubectl(
+            "delete",
+            kind,
+            name,
+            "-n",
+            namespace,
+            "--ignore-not-found",
+            "--wait=true",
+            "--timeout=300s",
+            timeout=330,
+        )
+
     def lb_address(self, namespace: str, service: str) -> str | None:
         item = self._s._get("service", service, namespace) or {}
         ingress = (item.get("status", {}).get("loadBalancer", {}).get("ingress")) or []
@@ -90,33 +105,62 @@ def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
             cluster.apply([wg.namespace_manifest()])
         target_pub, source_pub = _key(target, base), _key(source, base)
 
-        target.apply([
-            *wg.gateway_manifests(req.migration_id, "target", image=tunnel.image,
-                                  local_db=req.target.local_host, peer_public_key=source_pub,
-                                  peer_endpoint=None),
-            wg.endpoint_manifest(req.migration_id, tunnel.source_egress_cidrs),
-            wg.db_ingress_policy(req.migration_id, req.target.namespace, _release(req.target)),
-        ])  # fmt: skip
-        deadline = time.monotonic() + tunnel.endpoint_timeout_s
+        clusters = {"target": target, "source": source}
+        endpoints = {"target": req.target, "source": req.source}
+        public_keys = {"target": target_pub, "source": source_pub}
+        ingress = tunnel.ingress
+        caller: wg.Side = "target" if ingress == "source" else "source"
+
+        def gateway(side: wg.Side, endpoint: str | None) -> list[dict]:
+            other: wg.Side = "target" if side == "source" else "source"
+            manifests = wg.gateway_manifests(
+                req.migration_id,
+                side,
+                image=tunnel.image,
+                local_db=endpoints[side].local_host,
+                peer_public_key=public_keys[other],
+                peer_endpoint=endpoint,
+                ingress=ingress,
+            )
+            if side == ingress:
+                manifests.append(
+                    wg.endpoint_manifest(
+                        req.migration_id,
+                        tunnel.egress_cidrs,
+                        ingress=ingress,
+                    )
+                )
+            if side == "target":
+                manifests.append(
+                    wg.db_ingress_policy(
+                        req.migration_id,
+                        req.target.namespace,
+                        _release(req.target),
+                    )
+                )
+            return manifests
+
+        clusters[ingress].apply(gateway(ingress, None))
+        endpoint_deadline = time.monotonic() + tunnel.endpoint_timeout_s
         address = None
-        while not (address := target.lb_address(wg.NAMESPACE, f"{base}-endpoint")):
-            if time.monotonic() > deadline:
+        while not (address := clusters[ingress].lb_address(wg.NAMESPACE, f"{base}-endpoint")):
+            if time.monotonic() > endpoint_deadline:
                 raise _fail("TUNNEL_ENDPOINT_TIMEOUT", retryable=True)
-            _beat("waiting for the target UDP load balancer")
+            _beat(f"waiting for the {ingress} UDP load balancer")
             SLEEP(5)
 
-        source.apply(
-            wg.gateway_manifests(req.migration_id, "source", image=tunnel.image,
-                                 local_db=req.source.local_host, peer_public_key=target_pub,
-                                 peer_endpoint=f"{address}:{wg.WG_PORT}")
-        )  # fmt: skip
+        clusters[caller].apply(gateway(caller, f"{address}:{wg.WG_PORT}"))
         for cluster in (target, source):
             cluster.rollout_wait(wg.NAMESPACE, base)
 
         deadline = time.monotonic() + tunnel.handshake_timeout_s
+        if ingress == "source":
+            # NLB DNS는 즉시 나와도 IP 대상의 TCP health는 약 150초 뒤 통과한다(PoC 69).
+            # AWS 조회 권한을 추가하지 않고 실제 handshake로 통신 준비까지 확인한다.
+            deadline = max(deadline, endpoint_deadline)
         while True:
             try:
-                if source.latest_handshake(wg.NAMESPACE, selector) > 0:
+                if clusters[caller].latest_handshake(wg.NAMESPACE, selector) > 0:
                     break
             except CommandError:
                 pass  # 게이트웨이가 아직 wg0를 만들지 않았다
@@ -126,6 +170,40 @@ def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
             SLEEP(3)
     return {"name": base, "endpoint": address, "handshake": True,
             "peer_host": wg.peer_host(req.migration_id)}  # fmt: skip
+
+
+def cleanup(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
+    """복제·롤백·PgBouncer가 터널을 더 이상 쓰지 않을 때 명시적으로 호출한다.
+
+    입구 Service 삭제가 실패하면 나머지 리소스를 보존한다. 공유 Namespace는 삭제하지 않는다.
+    """
+    base = wg.name(req.migration_id)
+    with OPEN_CLUSTER(req.source) as source, OPEN_CLUSTER(req.target) as target:
+        ingress = source if tunnel.ingress == "source" else target
+        _beat("deleting the UDP load balancer Service")
+        ingress.delete(wg.NAMESPACE, "service", f"{base}-endpoint")
+        for cluster in (source, target):
+            for kind, resource in (
+                ("deployment", base),
+                ("service", f"{base}-peer-db"),
+                ("configmap", base),
+                ("secret", base),
+            ):
+                _beat("deleting data tunnel resources")
+                cluster.delete(wg.NAMESPACE, kind, resource)
+        target.delete(req.target.namespace, "networkpolicy", f"{base}-db-in")
+    return {"name": base, "cleaned": True}
+
+
+@activity.defn
+async def dm_tunnel_cleanup(payload: dict) -> dict:
+    """payload는 dm_tunnel과 같다. Workflow 종료 시 자동으로 부르지 않는다."""
+    req = DataMigrationRequest.model_validate(payload["request"])
+    tunnel = wg.WireGuardTunnel.model_validate(payload["tunnel"])
+    try:
+        return await asyncio.to_thread(cleanup, req, tunnel)
+    except CommandError as exc:
+        raise _fail("TUNNEL_CLEANUP_FAILED", retryable=True) from exc
 
 
 @activity.defn
@@ -139,4 +217,4 @@ async def dm_tunnel(payload: dict) -> dict:
         raise ApplicationError("TUNNEL_COMMAND_FAILED", type="TUNNEL_COMMAND_FAILED") from exc
 
 
-__all__ = ["dm_tunnel", "establish"]
+__all__ = ["cleanup", "dm_tunnel", "dm_tunnel_cleanup", "establish"]

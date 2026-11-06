@@ -23,6 +23,7 @@ from .test_data_workflow import ARGS, Fakes, wait_phase
 
 MID = "migration-1"
 TUNNEL = {"source_egress_cidrs": ["43.200.165.233/32"]}
+REVERSE_TUNNEL = {"ingress": "source", "target_egress_cidrs": ["203.0.113.7/32"]}
 SOURCE = {"access": "AWS_EKS", "cluster_name": "cmp-demo-source", "region": "ap-northeast-2",
           "namespace": "chat-source", "pod": "chat-db-0",
           "local_host": "chat-db.chat-source.svc.cluster.local", "dbname": "chat"}  # fmt: skip
@@ -121,6 +122,7 @@ class FakeCluster:
     def __init__(self, name: str, log: list, *, lb_after: int = 0, handshake_after: int = 0):
         self.name, self.log, self.secrets, self.applied = name, log, {}, []
         self.lb_after, self.handshake_after = lb_after, handshake_after
+        self.address = "34.64.1.2"
 
     def apply(self, manifests):
         self.applied += manifests
@@ -134,13 +136,15 @@ class FakeCluster:
         self.log.append((self.name, "secret", name))
 
     def lb_address(self, namespace, service):
+        self.log.append((self.name, "lb", service))
         self.lb_after -= 1
-        return "34.64.1.2" if self.lb_after < 0 else None
+        return self.address if self.lb_after < 0 else None
 
     def rollout_wait(self, namespace, deployment, timeout=300):
         self.log.append((self.name, "rollout", deployment))
 
     def latest_handshake(self, namespace, selector):
+        self.log.append((self.name, "handshake", selector))
         self.handshake_after -= 1
         return 1730900000 if self.handshake_after < 0 else 0
 
@@ -191,9 +195,10 @@ def test_establish_waits_for_the_target_lb_then_points_the_source_at_it(clusters
     assert made["source"].secrets[(wg.NAMESPACE, wg.name(MID))]["private"] not in dumped
 
 
-def test_establish_again_reuses_the_keys(clusters) -> None:
+@pytest.mark.parametrize("config", [TUNNEL, REVERSE_TUNNEL])
+def test_establish_again_reuses_the_keys(clusters, config) -> None:
     made, log = clusters
-    tunnel = wg.WireGuardTunnel.model_validate(TUNNEL)
+    tunnel = wg.WireGuardTunnel.model_validate(config)
     dt.establish(request(), tunnel)
     keys = {k: dict(v) for k, v in made["target"].secrets.items()}
     made["target"].lb_after = 0
@@ -216,13 +221,15 @@ def test_no_lb_address_is_a_retryable_timeout(clusters, monkeypatch) -> None:
 # ---- Workflow: 터널이 사전 점검보다 먼저 ----
 
 
-async def test_workflow_builds_the_tunnel_before_the_precheck() -> None:
+@pytest.mark.parametrize("config,timeout_s", [(TUNNEL, 1800), (REVERSE_TUNNEL, 3600)])
+async def test_workflow_builds_the_tunnel_before_the_precheck(config, timeout_s) -> None:
     fakes = Fakes()
 
     @activity.defn(name="dm_tunnel")
     async def tunnel(payload: dict) -> dict:
         fakes.calls.append("dm_tunnel")
-        assert payload["tunnel"] == TUNNEL
+        assert payload["tunnel"] == config
+        assert activity.info().start_to_close_timeout.total_seconds() == timeout_s
         return {"name": "cmp-wg-x", "endpoint": "34.64.1.2", "handshake": True}
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
@@ -233,7 +240,7 @@ async def test_workflow_builds_the_tunnel_before_the_precheck() -> None:
         ]  # fmt: skip
         async with workers[0], workers[1]:
             handle = await env.client.start_workflow(
-                DataMigrationWorkflow.run, {**ARGS, "tunnel": TUNNEL},
+                DataMigrationWorkflow.run, {**ARGS, "tunnel": config},
                 id=f"data-{uuid.uuid4()}", task_queue=WORKFLOW_QUEUE,
             )  # fmt: skip
             await wait_phase(handle, "streaming")
@@ -260,3 +267,329 @@ async def test_workflow_without_tunnel_input_does_not_call_it() -> None:
             await handle.signal(DataMigrationWorkflow.finish)
             await handle.result()
     assert fakes.calls[0] == "dm_precheck"
+
+
+# ---- 입구 방향 계약(Provisioning 67, #297) ----
+
+
+def test_ingress_contract_defaults_and_round_trips() -> None:
+    legacy = wg.WireGuardTunnel.model_validate(TUNNEL)
+    assert legacy.ingress == "target"
+    reverse = wg.WireGuardTunnel.model_validate(REVERSE_TUNNEL)
+    assert reverse.source_egress_cidrs is None
+    assert reverse.target_egress_cidrs == ["203.0.113.7/32"]
+    assert wg.WireGuardTunnel.model_validate(reverse.model_dump()) == reverse
+    assert wg.WireGuardTunnel.model_validate(legacy.model_dump()) == legacy
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {},
+        {"ingress": "source"},
+        {"ingress": "unknown", **TUNNEL},
+        {"ingress": "source", **TUNNEL},
+        {"target_egress_cidrs": ["203.0.113.7/32"]},
+        {**REVERSE_TUNNEL, **TUNNEL},
+        {**TUNNEL, "target_egress_cidrs": ["203.0.113.7/32"]},
+    ],
+)
+def test_ingress_rejects_missing_or_mixed_egress_cidrs(value) -> None:
+    with pytest.raises(ValidationError):
+        wg.WireGuardTunnel.model_validate(value)
+
+
+@pytest.mark.parametrize(
+    "cidrs",
+    [
+        [],
+        ["0.0.0.0/0"],
+        ["10.0.0.0/15"],
+        ["1.2.3.4/24"],
+        ["::1/128"],
+        ["not-a-cidr"],
+        ["203.0.113.7/32"] * 9,
+    ],
+)
+def test_target_egress_cidrs_must_be_narrow_ipv4(cidrs) -> None:
+    with pytest.raises(ValidationError):
+        wg.WireGuardTunnel.model_validate({**REVERSE_TUNNEL, "target_egress_cidrs": cidrs})
+
+
+@pytest.mark.parametrize(
+    "ingress,field", [("target", "source_egress_cidrs"), ("source", "target_egress_cidrs")]
+)
+def test_egress_accepts_the_16_boundary(ingress, field) -> None:
+    assert wg.WireGuardTunnel.model_validate({"ingress": ingress, field: ["203.0.0.0/16"]})
+
+
+def test_source_endpoint_uses_public_lbc_nlb_with_cross_zone_and_tcp_health() -> None:
+    lb = wg.endpoint_manifest(MID, ["203.0.113.7/32"], ingress="source")
+    assert lb["spec"]["loadBalancerClass"] == "service.k8s.aws/nlb"
+    assert lb["spec"]["loadBalancerSourceRanges"] == ["203.0.113.7/32"]
+    assert lb["spec"]["ports"] == [
+        {"name": "wg", "port": 51820, "targetPort": 51820, "protocol": "UDP"}
+    ]
+    prefix = "service.beta.kubernetes.io/aws-load-balancer-"
+    assert lb["metadata"]["annotations"] == {
+        f"{prefix}scheme": "internet-facing",
+        f"{prefix}nlb-target-type": "ip",
+        f"{prefix}attributes": "load_balancing.cross_zone.enabled=true",
+        f"{prefix}healthcheck-protocol": "tcp",
+        f"{prefix}healthcheck-port": "8080",
+    }
+    legacy = wg.endpoint_manifest(MID, TUNNEL["source_egress_cidrs"])
+    assert "loadBalancerClass" not in legacy["spec"]
+    assert "annotations" not in legacy["metadata"]
+
+
+@pytest.mark.parametrize("side", ["source", "target"])
+def test_reverse_gateways_keep_db_routes_and_add_health_only_at_the_ingress(side) -> None:
+    items = wg.gateway_manifests(
+        MID,
+        side,
+        image="alpine:3.22",
+        local_db="db.ns.svc",
+        peer_public_key="PUBLIC",
+        peer_endpoint="nlb.example.com:51820" if side == "target" else None,
+        ingress="source",
+    )
+    container = items[1]["spec"]["template"]["spec"]["containers"][0]
+    env = {e["name"]: e["value"] for e in container["env"] if "value" in e}
+    assert env["KEEPALIVE"] == "25"
+    assert env["PEER_ENDPOINT"] == ("nlb.example.com:51820" if side == "target" else "")
+    assert (env.get("HEALTH_PORT") == "8080") == (side == "source")
+    assert ({"name": "health", "containerPort": 8080} in container["ports"]) == (side == "source")
+    script = items[0]["data"]["start.sh"]
+    assert 'persistent-keepalive "${KEEPALIVE:-15}"' in script
+    assert 'TCP-LISTEN:"$HEALTH_PORT"' in script
+    assert 'TCP-LISTEN:5432,bind="$WG_IP"' in script
+    assert 'TCP-LISTEN:5432,bind="$POD_IP"' in script
+    assert container["readinessProbe"]["exec"]["command"] == ["test", "-f", "/tmp/started"]
+    assert items[2]["metadata"]["name"] == f"{wg.name(MID)}-peer-db"
+    assert items[2]["spec"]["ports"][0]["targetPort"] == 5432
+
+
+@pytest.mark.parametrize(
+    "ingress,caller,config",
+    [
+        ("target", "source", TUNNEL),
+        ("source", "target", REVERSE_TUNNEL),
+    ],
+)
+def test_establish_uses_only_the_selected_ingress_and_connects_the_other_side(
+    clusters,
+    ingress,
+    caller,
+    config,
+) -> None:
+    made, log = clusters
+    made[ingress].address = "nlb.example.com"
+    made[ingress].lb_after = 2
+    made[caller].handshake_after = 2
+    result = dt.establish(request(), wg.WireGuardTunnel.model_validate(config))
+    assert result == {
+        "name": wg.name(MID),
+        "endpoint": "nlb.example.com",
+        "handshake": True,
+        "peer_host": wg.peer_host(MID),
+    }
+    for side in ("source", "target"):
+        lbs = [
+            m
+            for m in made[side].applied
+            if m["kind"] == "Service" and m["spec"].get("type") == "LoadBalancer"
+        ]
+        assert len(lbs) == (1 if side == ingress else 0)
+        if lbs:
+            assert lbs[0]["spec"]["loadBalancerSourceRanges"] == config[f"{caller}_egress_cidrs"]
+        deployment = next(m for m in made[side].applied if m["kind"] == "Deployment")
+        env = {
+            e["name"]: e["value"]
+            for e in deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+            if "value" in e
+        }
+        assert env["PEER_ENDPOINT"] == ("nlb.example.com:51820" if side == caller else "")
+        policies = [m for m in made[side].applied if m["kind"] == "NetworkPolicy"]
+        assert policies == (
+            [wg.db_ingress_policy(MID, "cmp-app", "chat-db")] if side == "target" else []
+        )
+    assert {side for side, verb, _ in log if verb == "lb"} == {ingress}
+    assert {side for side, verb, _ in log if verb == "handshake"} == {caller}
+    lb_index = next(i for i, (_, verb, _) in enumerate(log) if verb == "lb")
+    ingress_apply = next(
+        i
+        for i, (side, verb, kinds) in enumerate(log)
+        if side == ingress and verb == "apply" and "Deployment" in kinds
+    )
+    caller_apply = next(
+        i
+        for i, (side, verb, kinds) in enumerate(log)
+        if side == caller and verb == "apply" and "Deployment" in kinds
+    )
+    assert ingress_apply < lb_index < caller_apply
+    dumped = json.dumps([made["source"].applied, made["target"].applied, result, log])
+    # 실제 생성한 비밀키를 assertion diff에 넣지 않는다.
+    assert all(
+        data["private"] not in dumped
+        for cluster in made.values()
+        for data in cluster.secrets.values()
+    )
+
+
+def test_reverse_establish_allows_nlb_health_to_lag_the_dns_address(clusters, monkeypatch) -> None:
+    made, _ = clusters
+    clock = [0.0]
+    made["source"].address = "nlb.example.com"
+    monkeypatch.setattr(dt.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(dt, "SLEEP", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    # DNS is immediate. Model 210 seconds until UDP reaches the healthy NLB target.
+    monkeypatch.setattr(made["target"], "latest_handshake", lambda *_: int(clock[0] >= 210))
+    assert dt.establish(request(), wg.WireGuardTunnel.model_validate(REVERSE_TUNNEL))["handshake"]
+    assert 210 <= clock[0] < 600
+
+
+@pytest.mark.parametrize("ingress,config", [("source", REVERSE_TUNNEL), ("target", TUNNEL)])
+@pytest.mark.parametrize("stage", ["endpoint", "handshake"])
+def test_establish_timeouts_remain_retryable_for_both_directions(
+    clusters,
+    monkeypatch,
+    ingress,
+    config,
+    stage,
+) -> None:
+    made, _ = clusters
+    caller = "target" if ingress == "source" else "source"
+    setattr(
+        made[ingress if stage == "endpoint" else caller],
+        "lb_after" if stage == "endpoint" else "handshake_after",
+        10**9,
+    )
+    ticks = iter(range(0, 10**6, 10))
+    monkeypatch.setattr(dt.time, "monotonic", lambda: next(ticks))
+    tunnel = wg.WireGuardTunnel.model_validate(
+        {**config, "endpoint_timeout_s": 30, "handshake_timeout_s": 10}
+    )
+    with pytest.raises(ApplicationError) as exc:
+        dt.establish(request(), tunnel)
+    assert exc.value.type == f"TUNNEL_{stage.upper()}_TIMEOUT"
+    assert not exc.value.non_retryable
+
+
+def test_reverse_onprem_handoff_keeps_peer_hosts_and_kubeconfig_access() -> None:
+    view = {
+        **GKE_VIEW,
+        "common": {"provider": "ON_PREM", "namespace": "cmp-app", "cluster": {"kind": "K3S"}},
+    }
+    given = DataMigrationInput.model_validate(
+        {**GIVEN, "tunnel": REVERSE_TUNNEL, "target_kubeconfig_ref": "k3d-demo"}
+    )
+    source, target, code = endpoints(view, given, MID)
+    assert code is None
+    assert source.peer_host == target.peer_host == wg.peer_host(MID)
+    assert target.access == "KUBECONFIG" and target.kubeconfig_ref == "k3d-demo"
+    assert target.local_host == "chat-db.cmp-app.svc.cluster.local"
+
+
+@pytest.mark.parametrize("ingress,config", [("target", TUNNEL), ("source", REVERSE_TUNNEL)])
+def test_cleanup_deletes_ingress_service_before_gateways_and_preserves_shared_resources(
+    clusters,
+    monkeypatch,
+    ingress,
+    config,
+) -> None:
+    made, log = clusters
+    for side, cluster in made.items():
+        monkeypatch.setattr(
+            cluster,
+            "delete",
+            lambda ns, kind, name, side=side: log.append((side, "delete", (ns, kind, name))),
+            raising=False,
+        )
+    tunnel = wg.WireGuardTunnel.model_validate(config)
+    dt.establish(request(), tunnel)
+    log.clear()
+    assert dt.cleanup(request(), tunnel) == {"name": wg.name(MID), "cleaned": True}
+    expected_lb = (ingress, "delete", (wg.NAMESPACE, "service", f"{wg.name(MID)}-endpoint"))
+    assert log[0] == expected_lb
+    for side in ("source", "target"):
+        for kind, name in [
+            ("deployment", wg.name(MID)),
+            ("configmap", wg.name(MID)),
+            ("secret", wg.name(MID)),
+            ("service", f"{wg.name(MID)}-peer-db"),
+        ]:
+            assert (side, "delete", (wg.NAMESPACE, kind, name)) in log
+    assert ("target", "delete", ("cmp-app", "networkpolicy", f"{wg.name(MID)}-db-in")) in log
+    assert len(log) == 10  # no Namespace, unrelated migration, DB, or source DB policy deletion
+    first = list(log)
+    log.clear()
+    dt.cleanup(request(), tunnel)
+    assert log == first  # missing resources are ignored by the cluster adapter
+
+
+def test_cleanup_stops_on_lb_deletion_failure_and_can_be_retried(clusters, monkeypatch) -> None:
+    made, log = clusters
+    fail = [True]
+
+    def delete(ns, kind, name):
+        log.append(("source", "delete", (ns, kind, name)))
+        if fail[0]:
+            raise dt.CommandError("kubectl")
+
+    monkeypatch.setattr(made["source"], "delete", delete, raising=False)
+    monkeypatch.setattr(
+        made["target"],
+        "delete",
+        lambda *args: log.append(("target", "delete", args)),
+        raising=False,
+    )
+    tunnel = wg.WireGuardTunnel.model_validate(REVERSE_TUNNEL)
+    with pytest.raises(dt.CommandError):
+        dt.cleanup(request(), tunnel)
+    assert log == [("source", "delete", (wg.NAMESPACE, "service", f"{wg.name(MID)}-endpoint"))]
+    fail[0] = False
+    assert dt.cleanup(request(), tunnel)["cleaned"]
+
+
+def test_cluster_delete_waits_for_finalizers_and_ignores_missing_resources() -> None:
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def _kubectl(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return b""
+
+    session = Session()
+    dt.TunnelCluster(session).delete(wg.NAMESPACE, "service", f"{wg.name(MID)}-endpoint")
+    args, kwargs = session.calls[0]
+    assert args == (
+        "delete",
+        "service",
+        f"{wg.name(MID)}-endpoint",
+        "-n",
+        wg.NAMESPACE,
+        "--ignore-not-found",
+        "--wait=true",
+        "--timeout=300s",
+    )
+    assert kwargs == {"timeout": 330}
+
+
+async def test_cleanup_activity_exposes_only_result_or_safe_retryable_error(
+    clusters, monkeypatch
+) -> None:
+    payload = {"request": request().model_dump(), "tunnel": REVERSE_TUNNEL}
+    made, _ = clusters
+    for cluster in made.values():
+        monkeypatch.setattr(cluster, "delete", lambda *args: None, raising=False)
+    assert await dt.dm_tunnel_cleanup(payload) == {"name": wg.name(MID), "cleaned": True}
+
+    def fail(*args):
+        raise dt.CommandError("kubectl")
+
+    monkeypatch.setattr(made["source"], "delete", fail)
+    with pytest.raises(ApplicationError) as exc:
+        await dt.dm_tunnel_cleanup(payload)
+    assert exc.value.type == "TUNNEL_CLEANUP_FAILED" and not exc.value.non_retryable
