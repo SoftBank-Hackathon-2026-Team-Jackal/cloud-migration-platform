@@ -102,6 +102,10 @@ services:
       # (a new key makes every stored upload unreadable). Same store/key as the worker.
       ENV_FILE_STORE_DIR: /opt/cmp/env-files
       ENV_FILE_ENCRYPTION_KEY: ${ENV_FILE_ENCRYPTION_KEY:?set ENV_FILE_ENCRYPTION_KEY}
+      # Ticket 57 (#228): the rehearsal's standard write -> read shape for web starts, a
+      # SandboxSettings JSON object in /opt/cmp/.env (demo-app line: runtime.env.example). Empty:
+      # the rehearsal runs the health test only (today's behavior).
+      WEB_START_SANDBOX_SETTINGS: ${WEB_START_SANDBOX_SETTINGS:-}
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
