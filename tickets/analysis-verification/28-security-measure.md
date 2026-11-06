@@ -1,7 +1,7 @@
 # Ticket 28 — 보안 측정 모델과 원본 측정 (데모 4행)
 
 ## 상태
-IN_PROGRESS — **28-A**(AWS 스캔에 앞단 보호 정보 추가)는 구현·자동 테스트 완료(2026-11-06, 실제 계정 확인과 역할 템플릿 반영 남음). **28-B**(측정 모델과 원본 측정)는 DRAFT, 사용자 검토 전. Issue 미생성.
+IN_PROGRESS — **28-A**(AWS 스캔에 앞단 보호 정보 추가)와 **28-B**(측정 모델과 원본 측정)는 구현·자동 테스트 완료(2026-11-06). 실제 계정·클러스터 확인, 역할 템플릿 반영, 사용자 검토가 남음. 28-A·28-B는 한 Issue로 다룬다. Issue 번호는 사용자가 발행한 뒤 기록한다.
 
 ## 목적
 원본의 보안 상태를 기준별로 측정해 근거와 함께 `AnalysisReport`에 싣는다. 이후 판정(29)과 Sandbox 증명(30)의 입력이다.
@@ -25,31 +25,38 @@ Blocked by: 04, 06, 07, 19 (모두 병합됨). 결정 필요: 보안 동등성 �
 - 이미 만든 연결의 CloudFormation 스택은 권한이 갱신되기 전까지 `cloudfront:ListDistributions`가 없어 `DENIED`가 된다. 사용자가 스택을 새 템플릿으로 갱신해야 한다.
 - ADR-005의 원본 역할 권한 표(분석 스캔이 부르는 API)에 `cloudfront:ListDistributions`가 아직 없다. ADR은 이 작업 범위 밖이라 고치지 않았다(문서 반영 필요).
 
-## 작업 범위 (28-B)
+## 작업 범위 (28-B, 구현 완료)
 - 포함
-  - 계약: `SecurityMeasure`(기준 ID, 상태 값, `Evidence` 목록)와 `AnalysisReport.security`. 기준은 `EXTERNAL_HTTPS`, `DB_ACCESS_SCOPE`, `DB_TRANSPORT_ENCRYPTION`, `ADMIN_API_EXPOSURE`. 근거가 없으면 `UNKNOWN`.
-  - 측정 규칙(순수 함수, 입력은 이미 만든 `ManifestScan`·`AwsInfraScan`·코드 스캔·`.env` 키 이름):
-    - 외부 HTTPS: ALB 리스너 프로토콜·CloudFront 여부(`elbv2:DescribeListeners`는 허용 목록에 이미 있음), Ingress TLS.
-    - DB 접근 범위: NetworkPolicy 유무와 보안 그룹 규칙(클러스터 안 모든 Pod가 DB에 닿는가).
-    - DB 전송 암호화: 연결 설정의 `sslmode` 키·값(키 이름과 값 중 모드만 보고 비밀번호는 읽지 않음).
-    - 운영용 API 노출: Ingress·ALB 라우트에 운영용 경로가 외부로 열려 있는가. 운영용 경로의 판별 기준(경로 패턴 vs 코드 라우트 스캐너 `http_routes`)은 구현 전에 정한다.
-  - `AnalysisReport` 변경은 필드 추가만(기존 직렬화 호환).
-- 제외: 판정·승인 연결(29), 프로브(30), 감사 로그·백업·저장 암호화·권한·시크릿 항목, 대상 구성 반영.
+  - 계약: `SecurityMeasure`(기준, 상태 `PROTECTED` / `PARTIAL` / `UNPROTECTED` / `UNKNOWN` / `NOT_APPLICABLE`, 사유 코드, `Evidence`)와 `AnalysisReport.security`(선택 필드). 기준은 `EXTERNAL_HTTPS`, `DB_ACCESS_SCOPE`, `DB_TRANSPORT_ENCRYPTION`, `ADMIN_API_EXPOSURE`. 근거가 없으면 `UNKNOWN`이고 통과로 취급하지 않는다. 사유는 코드이고 값(연결 문자열, 주소, 비밀)은 담지 않는다.
+  - 스캔 확장(새 필드는 모두 기본값이 있어 이전 산출물이 그대로 읽힌다): 매니페스트 스캔에 `Ingress`(경로, TLS), Ingress NetworkPolicy(`IngressPolicy`: 선택 Pod, 허용 출발지, 전체 허용 여부), ConfigMap·환경변수 리터럴의 `sslmode`(`SslModeFinding`). 코드 스캔에 `sslmode` 리터럴(`SslModeSite`, 언어 무관, `.env` 제외). `sslmode`는 **모드 값만** 저장한다(`cmp_scanners/sslmode.py`).
+  - 측정 규칙(`cmp_scanners/security.py`의 순수 함수 `measure_security`, 앱 전용 경로·포트·이름 없음):
+    - 외부 HTTPS: 인터넷 쪽 로드밸런서 리스너(HTTPS이거나 HTTPS로 리다이렉트), CloudFront 배포(뷰어 정책이 `redirect-to-https`/`https-only`만), AWS 정보가 없으면 Ingress TLS. 진입점이 모두 보호되면 `PROTECTED`, 일부만이면 `PARTIAL`, 없으면 `UNPROTECTED`, 진입점이 안 보이면 `UNKNOWN`.
+    - DB 접근 범위: DB 워크로드를 선택하는 Ingress NetworkPolicy가 허용 출발지를 제한하는가(없거나 전체 허용이면 `UNPROTECTED`), 보안 그룹의 5432가 인터넷에 열려 있는가. DB가 매니페스트에 없으면 `UNKNOWN`.
+    - DB 전송 암호화: `disable`·`allow`·`prefer`는 평문으로 떨어질 수 있어 약함, `require`·`verify-ca`·`verify-full`은 보호. 모드가 안 보이면 `UNKNOWN`(`.env`·Secret의 값은 읽지 않는다, AV-020).
+    - 운영용 API 노출: 라우트 스캔의 경로에서 관례적 운영 경로(`admin`, `internal`, `debug`, `pprof`, `actuator`, `metrics`, `management`, `manage`)를 **후보**로 올리고, 외부 진입점이 있고 Ingress 경로가 막지 않으면 `UNPROTECTED`(`ADMIN_PATH_UNCONFIRMED`). 후보가 없으면 `NOT_APPLICABLE`, 외부 도달을 알 수 없으면 `UNKNOWN`.
+  - 파이프라인: 근거 존재 검사 단계에서 측정해 보고서에 싣는다(새 AWS 호출·Activity 없음).
+- 제외: 판정·승인 연결(29), 프로브(30), 감사 로그·백업·저장 암호화·권한·시크릿 항목, 대상 구성 반영, 후보가 실제 운영용인지의 확정(29), `.env`·Secret 값 읽기, Go 외 언어의 라우트 스캔(라우트가 안 보이면 `UNKNOWN`).
 
 ## 수용 기준
-- [ ] 데모 앱 모양의 고정 입력에서 4개 기준이 각각 기대한 상태와 근거를 낸다.
-- [ ] 근거가 없거나 스캔 결과가 없으면 `UNKNOWN`이고 통과로 취급되지 않는다.
-- [ ] 같은 입력이면 같은 결과가 나온다.
-- [ ] 비밀 값(비밀번호, 토큰)이 측정 결과·로그에 나타나지 않는다(AV-020).
-- [ ] 보안 필드가 없는 기존 `AnalysisReport`가 그대로 읽히고, 기존 테스트가 통과한다.
+- [x] 4개 기준이 입력별로 기대한 상태와 근거를 낸다(기준당 표 형태 테스트).
+- [x] 근거가 없거나 스캔 결과가 없으면 `UNKNOWN`이고 통과로 취급되지 않는다.
+- [x] 같은 입력이면 같은 결과가 나온다(사유·근거는 정렬).
+- [x] 비밀 값(비밀번호, 연결 문자열)이 측정 결과·보고서에 나타나지 않는다. `sslmode`는 모드 값만 저장한다.
+- [x] 보안 필드가 없는 기존 스캔·`AnalysisReport`가 그대로 읽히고, 기존 테스트가 통과한다.
+- [x] 보고서에 4개 측정이 고정 순서로 실리고 근거(`파일:줄`, 매니페스트 위치)가 소스를 가리킨다.
+- [ ] 실제 계정·클러스터에서 1회 확인한다(승인 후, 06과 함께).
 
 ## 테스트 전략
-- 제안 Test Seam: 순수 함수 `measure_security(manifest_scan, aws_scan, code_scan, env_keys)`와 고정 픽스처(`tests/fixtures/analysis/`). 잡는 것: 기준별 판정, `UNKNOWN` 처리, 마스킹. 못 잡는 것: 실제 AWS 설정(06의 실제 계정 실행으로 1회 확인).
-- 실행: `uv run pytest tests/analysis/test_security_measure.py -q`
+- Test Seam: 순수 함수 `measure_security(manifests, infra, code, routes)`를 작은 객체로 기준별 표 테스트(`tests/analysis/test_security_measure.py`), 스캔 확장은 `tmp_path`의 작은 파일(`tests/analysis/test_security_signals.py`), AWS 앞단은 `Stubber`(`tests/analysis/test_aws_edge.py`). 잡는 것: 기준별 판정, `UNKNOWN` 처리, 모드 값만 저장, `.env` 비접근. 못 잡는 것: 실제 AWS 설정과 실제 앱의 Ingress·정책 모양(실제 1회 확인).
+- 실행: `uv run pytest tests/analysis -q`, 이후 `make check`
 
 ## 문서
 spec AV-023, plan(계약 초안에 `security` 추가), tasks.md를 같은 PR에서 갱신한다.
 
+## 결정 (2026-11-06)
+- 운영용 API 판별: 앱 전용 경로 목록을 코드에 두지 않고, 관례적 경로를 후보로 올려 근거(`파일:줄`)를 붙인다. 후보가 실제 운영용인지는 사용자가 승인 단계(29)에서 확정한다. Skill 기반 후보 제안은 티켓 30.
+- `sslmode`는 모드 값만 저장한다. 비밀이 아닌 출처(소스 코드, 매니페스트 리터럴, ConfigMap)에서만 읽고, `.env`·Secret에만 있으면 `UNKNOWN`이다.
+- DB 접근 범위는 첫 사이클 기준으로 클러스터 안 PostgreSQL(Pod)과 보안 그룹의 5432를 본다. RDS 등 관리형 DB의 접근 제한은 후속이다.
+
 ## 결정 대기
-- 운영용 API의 판별 기준: 앱 전용 경로 목록을 코드에 두지 않는다. 라우트 스캐너(`http_routes`)와 Ingress에서 외부로 열린 경로를 근거와 함께 후보로 올리고, 운영용 여부는 사용자가 확정하는 방식(AV-022과 같은 흐름)을 제안한다. 28은 `security-posture` Skill 없이 결정적 후보(Ingress로 외부에 열린 경로)만 쓰고, Skill 기반 후보 제안은 티켓 30에서 더한다.
-- `DB_TRANSPORT_ENCRYPTION`을 `.env` 값에서 읽는 범위(키 이름이 `sslmode`인 값의 모드만)
+- `UNKNOWN`·후보의 처리(사람 검토 항목으로 올리는 방식)는 티켓 29에서 정한다.

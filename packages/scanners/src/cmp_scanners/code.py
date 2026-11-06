@@ -12,6 +12,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from cmp_scanners.envfile import is_env_file
+from cmp_scanners.sslmode import mode_lines
 
 MAX_FILE_BYTES = 1_000_000
 _SKIP_DIRS = {".git", "node_modules", "vendor", ".venv", "__pycache__", "dist"}
@@ -58,11 +59,20 @@ class EnvComparison(_Model):
     partial: bool
 
 
+class SslModeSite(_Model):
+    """A `sslmode` mode word in source code (ticket 28-B). Only the mode, never the string."""
+
+    mode: str
+    file: str
+    line: int
+
+
 class CodeScan(_Model):
     call_sites: list[CallSite]
     unscannable: list[Unscannable]
     extension_creations: list[ExtensionCreation]
     env_comparison: EnvComparison
+    ssl_modes: list[SslModeSite] = []  # older stored scans have none
 
     @property
     def creates_extensions(self) -> bool:
@@ -124,6 +134,7 @@ def scan_code(
     sites: list[CallSite] = []
     unscannable: list[Unscannable] = []
     extensions: list[ExtensionCreation] = []
+    ssl_modes: list[SslModeSite] = []
 
     for path, relative in _files(root):
         suffix = path.suffix.lower()
@@ -136,6 +147,9 @@ def scan_code(
             unscannable.append(Unscannable(file=relative, language=language, reason=problem))
             continue
         extensions.extend(_extension_creations(text, relative))
+        ssl_modes.extend(
+            SslModeSite(mode=mode, file=relative, line=number) for number, mode in mode_lines(text)
+        )
         if adapter is None:
             if language is not None:
                 unscannable.append(
@@ -155,6 +169,7 @@ def scan_code(
         call_sites=sites,
         unscannable=unscannable,
         extension_creations=extensions,
+        ssl_modes=ssl_modes,
         env_comparison=EnvComparison(
             only_in_env=sorted(declared - read),
             missing_from_env=sorted(read - declared),
