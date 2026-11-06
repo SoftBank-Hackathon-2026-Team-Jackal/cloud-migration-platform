@@ -34,6 +34,8 @@ Blocked by: 14A, 20 (병합됨)
 - [x] 실제로 들어 있는 규칙 파일은 실제 Skill만 가리키고 정규식이 유효하다.
 - [x] 규칙에 `targets`를 두면 그 대상일 때만 선택되고, 대상을 모르면 선택되지 않는다. `targets`가 없는 규칙은 모든 대상에서 선택된다. 알 수 없는 대상 값이 든 규칙 파일은 깨진 것으로 보고 아무것도 주지 않는다.
 - [x] 한 실패에서 Skill이 둘 이상 선택될 수 있다(원본 서비스용과 특정 대상용).
+- [x] 대상 Provider가 `AnalysisInput.target_provider`와 `AnalysisReport.target_provider`로 전달된다. API 시작은 요청의 `target.provider`, CLI 시작은 `--planning`의 대상 선택에서 채우고 두 시작 입력은 같다. 알 수 없는 값은 거절되고 없으면 `None`이다.
+- [x] `sbx_fix`가 분석 결과에서 대상 Provider를 읽어 Skill 선택에 넘긴다. 대상 한정 규칙은 그 대상일 때만 선택되고, 다른 대상이거나 Provider를 모르면 선택되지 않는다.
 - [x] 쓰기 가능 경로, 파일 크기·개수 제한, 테스트·`.env` 금지는 그대로다.
 
 ## 테스트 전략
@@ -43,11 +45,10 @@ Blocked by: 14A, 20 (병합됨)
 ## 문서
 plan §2.11(Fixer와 Skill), tasks.md를 같은 PR에서 갱신한다.
 
-## 알아본 것: 대상 Provider가 `sbx_fix`에서 쓰이는가 (2026-11-06)
-- 지금 `sbx_fix`가 받는 payload에는 대상 Provider가 없다. `TargetSelectionV2.provider`는 `PlanningSettings`(시작 입력의 `planning`)에 있고 Sandbox 입력으로는 전달되지 않는다. Sandbox가 아는 대상 정보는 `capabilities`(StorageClass)뿐이다.
-- 그래서 `targets` 규칙은 구현했지만 `sbx_fix`는 아직 `target_provider`를 넘기지 않는다(대상 한정 규칙은 맞지 않음, 대상 무관 규칙은 정상 동작).
-- 전달 방법 후보(후속): `AnalysisInput.target_provider`(API `start_input`이 요청의 `target.provider`로 채움) → `AnalysisReport.target_provider` → `sbx_fix`가 이미 payload로 받는 `analysis_report_ref`에서 읽는다. 계약에 선택 필드만 더하고 **Workflow 변경이 없다**(부모 Workflow의 `assemble_sandbox_input` 입력을 바꾸는 방법은 `workflow.patched`가 필요해 피한다).
+## 대상 Provider 전달 (구현 완료)
+- 조사 결과(2026-11-06): `TargetSelectionV2.provider`는 `PlanningSettings`(시작 입력의 `planning`)에 있고 Sandbox 입력과 `sbx_fix` payload에는 없었다. Sandbox가 아는 대상 정보는 `capabilities`(StorageClass)뿐이다.
+- 전달 경로: `AnalysisInput.target_provider` → `AnalysisReport.target_provider` → `sbx_fix`가 이미 받는 `analysis_report_ref`에서 읽어 `select_skills(..., target_provider)`에 넘긴다. API 시작은 요청의 `target.provider`, CLI 시작(`build_start_input`)은 `--planning`의 `target_selection.provider`로 채워 두 시작 입력이 계속 같다(기존 동등성 테스트). 값이 없으면 `None`이고, 그러면 대상 한정 규칙은 맞지 않는다.
+- **Workflow 변경 없음**: 부모 Workflow의 `assemble_sandbox_input` 입력을 바꾸지 않았다(`workflow.patched` 불필요). 계약에는 선택 필드만 더했다.
 
 ## 결정 대기
-- 대상 Provider 전달(위 후속)의 시점. 대상 한정 Skill을 실제로 만들 때 함께 한다.
 - 실제 Claude에서 Skill 사용 여부 확인(비용 승인 후, 예상 호출 수를 말씀드리고 진행).

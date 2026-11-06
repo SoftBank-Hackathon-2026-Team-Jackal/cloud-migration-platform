@@ -280,6 +280,7 @@ def start_input(
         migration_id=request.project_id,
         repository=f"https://github.com/{source.full_name}.git",
         requested_commit=source.commit_sha,
+        target_provider=request.target.provider if request.target else None,
         **(scope_fields or {}),
     )
     return {

@@ -259,3 +259,12 @@ def test_a_report_without_scope_still_reads_and_leaves_no_trace_when_dumped_with
     assert AnalysisReport.model_fields["scope"].default is None
     assert AnalysisInput.model_fields["scope"].default is None
     assert AnalysisInput.model_fields["region"].default is None
+
+
+# --- ticket 31: the target provider reaches the analysis (for the Fixer's skills) --------------
+
+
+def test_the_start_input_carries_the_target_provider_of_the_request(api, env_ref, agent):
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    assert temporal.started[0]["data"]["analysis"]["target_provider"] == "ON_PREM"

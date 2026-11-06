@@ -26,7 +26,7 @@ class Recorder:
         return {"status": "PREPARED", "branch": artifact.branch}
 
 
-def world(tmp_path, *, with_analysis=True, llm=None):
+def world(tmp_path, *, with_analysis=True, llm=None, target_provider=None):
     store = LocalArtifactStore(tmp_path / "store")
     base = tmp_path / "base"
     base.mkdir()
@@ -41,6 +41,7 @@ def world(tmp_path, *, with_analysis=True, llm=None):
             migration_id="mig-1", ref=REF, base_commit="c" * 40, commit_verified=False,
             usage_profile={"usages": []}, mapping=rows(), precheck={"findings": []},
             external_entries=[], source_cidrs=[], source_db_images={}, unmapped_items=[], unverified_risks=[],
+            target_provider=target_provider,
         )  # fmt: skip
         record = ReviewRecord(
             analysis_ref=REF,
@@ -255,3 +256,48 @@ async def test_a_failure_no_rule_fits_gets_no_skill_tool(tmp_path):
     result = await activities.sbx_fix(fix_payload(payload, store, classification=other))
     assert result["status"] == "PROPOSED"
     assert "load_skill" not in {tool.name for tool in llm.calls[0].tools}
+
+
+def split_skills_dir(tmp_path):
+    root = tmp_path / "skills"
+    for name in ("storage-s3", "storage-gcs"):
+        (root / name).mkdir(parents=True)
+        (root / name / "SKILL.md").write_text(f"{name.upper()}-BODY")
+    (root / "fixer-triggers.yaml").write_text(
+        "triggers:\n"
+        "  - skill: storage-s3\n    reason_patterns: ['^EGRESS_BLOCKED:']\n"
+        "  - skill: storage-gcs\n    targets: [GCP]\n    reason_patterns: ['^EGRESS_BLOCKED:']\n"
+    )
+    return root
+
+
+async def offered_tools(tmp_path, target_provider):
+    keep = {"row_changes": [{"row_id": "r2", "disposition": "KEEP"}]}
+    llm = FakeLLMClient(
+        [
+            LLMResponse(tool_calls=[call("load_skill", name="storage-gcs")]),
+            LLMResponse(tool_calls=[call("submit_requirements_fix", reason="r", **keep)]),
+        ]
+    )
+    activities, store, payload, _, _ = world(tmp_path, llm=llm, target_provider=target_provider)
+    activities.skills_root = split_skills_dir(tmp_path)
+    result = await activities.sbx_fix(fix_payload(payload, store))
+    assert result["status"] == "PROPOSED"
+    return llm
+
+
+@pytest.mark.asyncio
+async def test_a_skill_for_the_target_is_offered_when_the_report_names_that_target(tmp_path):
+    llm = await offered_tools(tmp_path, "GCP")
+    sent = llm.calls[0].messages[0].content
+    assert "storage-s3" in sent and "storage-gcs" in sent
+    assert "STORAGE-GCS-BODY" in llm.calls[1].messages[-1].content  # the model asked for it
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["ON_PREM", "AWS", None])
+async def test_a_skill_for_another_target_or_an_unknown_one_is_not_offered(tmp_path, provider):
+    llm = await offered_tools(tmp_path, provider)
+    sent = llm.calls[0].messages[0].content
+    assert "storage-s3" in sent and "storage-gcs" not in sent
+    assert "STORAGE-GCS-BODY" not in llm.calls[1].messages[-1].content

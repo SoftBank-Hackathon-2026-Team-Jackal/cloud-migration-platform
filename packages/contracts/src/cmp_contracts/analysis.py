@@ -66,6 +66,9 @@ class AnalysisInput(Contract):
     # scope the user confirmed, filled by the API from stored records.
     region: Text | None = None
     scope: ConfirmedScope | None = None
+    # Ticket 31: the target the user chose (the API fills it from the start request), carried on
+    # to the report so the Sandbox loop can offer the Fixer a skill for that target.
+    target_provider: Literal["AWS", "GCP", "ON_PREM"] | None = None
     # ENV-02: the uploaded `.env` (POST /env-files). Passed through only; ENV-05 reads key names
     # from it instead of the repository's `.env*` files.
     env_file_ref: ContentRef | None = None
@@ -214,6 +217,7 @@ class AnalysisReport(Contract):
     scope: ConfirmedScope | None = None  # ticket 06B: what the user confirmed to analyze
     aws_usage: AwsUsage | None = None  # ticket 06C: IAM and CloudTrail evidence of resource use
     security: list[SecurityMeasure] | None = None  # ticket 28-B: None before it was measured
+    target_provider: Literal["AWS", "GCP", "ON_PREM"] | None = None  # ticket 31
 
     @model_validator(mode="after")
     def unique_mapping_ids(self):

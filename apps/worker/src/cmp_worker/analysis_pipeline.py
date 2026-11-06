@@ -429,6 +429,7 @@ class AnalysisPipeline:
             unmapped_items=unmapped,
             unverified_risks=risks,
             scope=data.scope,
+            target_provider=data.target_provider,
             aws_usage=aws_usage,
             security=measure_security(
                 manifests,
