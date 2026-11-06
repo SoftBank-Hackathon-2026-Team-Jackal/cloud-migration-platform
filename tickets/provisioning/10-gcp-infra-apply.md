@@ -55,7 +55,7 @@ GKE 기반 준비와 재시도 가능한 상태를 조회할 수 있다.
 | --- | --- | --- |
 | G1 실행 분기 | 08의 `execution_steps`에 (GCP, INFRASTRUCTURE)→`execute_gcp_plan`, (GCP, WORKLOADS)→`execute_gcp_workloads`(11), (GCP, FULL)→둘 다 순서대로를 추가한다. Workflow·claim/complete는 바꾸지 않는다. | 08 E1 |
 | G2 Apply 입력 | 08 E2와 같다: 저장된 Plan만 Apply, Spec·Plan 바이트 Digest, 프로젝트·리전·State 식별·key(`cmp/gcp/<environment_id>/terraform.tfstate`)·State 계정, `S3` 모드 Plan만 허용(`LOCAL_TEST`/`LOCAL_PROJECT` 거절), 템플릿·lockfile 지문, ADC 주체(Worker 설정 `PROVISIONING_GCP_ADC_EMAIL`)와 S3 Backend용 AWS 계정(STS)을 확인한다. | ADR-002 #7·#10, 06 README |
-| G3 중복·복구 | 08 E4와 같다. 재시도 없음, stale·중단은 `UNKNOWN`, State 자원 수만 기록, 자동 destroy 없음. | plan.md §8 |
+| G3 중복·복구 | 08 E4와 같다. 재시도 없음, stale·중단은 `UNKNOWN`, State 자원 수만 기록, 자동 destroy 없음. 53 후속: 시한·취소는 SIGTERM → 유예 → SIGKILL로 끝내고 lock·`errored.tfstate`를 보고하며, 정리는 운영자 검토 destroy(53)로 한다. | plan.md §8 |
 | G4 결과 | Output(비밀 아님)과 `gcloud container clusters/node-pools describe` 상태를 `resource_refs`로 남긴다: `gcp_project_id`, `gke_cluster_name`, `gke_location`, `vpc_network`, `subnetwork`, `node_pool_name`, `gke_cluster_status`, `node_pool_status`. 둘 다 `RUNNING`이어야 SUCCEEDED. | PROV-016·021 |
 | G5 템플릿 `gcp-gke-v2` | 비밀이 아닌 Output을 추가한다. `deletion_protection`을 변수(기본 `true`)로 바꿔, 나중에 정리할 때 검토된 Plan으로만 해제할 수 있게 한다. GKE는 GCE Ingress와 Persistent Disk CSI가 기본 제공되므로 08과 달리 Controller IAM이 필요 없다. | 10 범위 "GKE 권한/StorageClass 준비" |
 | G6 프로젝트 선행 조건 | Terraform 밖의 일회성 준비로 `container.googleapis.com`을 활성화하고, 노드 서비스 계정 `cmp-gke-nodes`를 만들어 `roles/container.defaultNodeServiceAccount`만 부여한다(06 README의 "기존 노드 SA" 전제). 실행 명령과 결과를 검증 기록에 남긴다. 2026-11-05: IAM 바인딩은 권한 부족으로 후속 처리(아래 "G6 변경"). | 06 설계 유지, 최소 권한 |

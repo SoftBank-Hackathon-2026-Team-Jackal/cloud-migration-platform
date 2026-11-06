@@ -17,6 +17,8 @@
 | `sha256_bytes`, `canonical_json_bytes`, `sha256_json`, `verify_artifact_bytes` | `cmp_providers.artifacts` | 순수 바이트/정규화 JSON Digest 및 조회한 실제 바이트 검증 |
 | `approval_issues`, `approval_target`, `verify_approval_target` | `cmp_providers.plans` | 계획 완전성·Preview 일치·기록된 승인 대상 및 요청 실행 범위 비교 |
 | `bind_values`, `verify_bound_values` | `cmp_providers.bindings` | 승인된 동적 자리만 채우고 나머지 Values 변경 거절 |
+| `run_graceful`, `CommandResult.stopped`, `failed_apply_refs` | `cmp_providers.terraform_process` | Terraform 명령 시한·취소 시 SIGTERM → 유예 → SIGKILL, 중단 뒤 lock·보존 State 보고(53). `aws_apply.CommandResult`는 같은 클래스 |
+| `plan_destroy`, `apply_destroy`, `destroy_addresses`, `review_digest` | `cmp_providers.cloud_destroy` | 실행된 Revision의 Spec으로 검토된 destroy. 검토 Digest = 환경·삭제 주소·GKE 보호 해제 여부(53) |
 
 `cmp_*`는 기존 packages/contracts 또는 packages/providers의 Python 패키지다. 새 하위 패키지·런타임 의존성은 추가하지 않았다. 엄격한 Pydantic 모델로 알 수 없는 필드와 암묵적 타입 변환을 거절한다.
 

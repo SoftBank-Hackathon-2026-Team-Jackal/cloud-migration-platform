@@ -10,9 +10,7 @@ After Apply, only non-sensitive Terraform outputs and EKS status are returned. C
 import json
 import os
 import shutil
-import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -25,6 +23,7 @@ from cmp_providers.aws_credentials import resolve_aws_profiles
 from cmp_providers.aws_preview import AwsPlanInput
 from cmp_providers.resources import resource_root
 from cmp_providers.terraform_events import apply_runner, is_stale
+from cmp_providers.terraform_process import CommandResult, failed_apply_refs, run_graceful
 
 TEMPLATE_ROOT = resource_root() / "infra/terraform/aws"
 APPLY_TIMEOUT_SECONDS = 90 * 60
@@ -44,24 +43,12 @@ OUTPUT_REFS = {
 }
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    returncode: int
-    stdout: bytes
-    stderr: bytes
-
-
 Runner = Callable[[list[str], Path, dict[str, str], int], CommandResult]
 
 
 def subprocess_runner(args: list[str], cwd: Path, env: dict[str, str], timeout: int):
-    try:
-        done = subprocess.run(
-            args, cwd=cwd, env=env, capture_output=True, check=False, timeout=timeout
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return CommandResult(-1, b"", b"")
-    return CommandResult(done.returncode, done.stdout, done.stderr)
+    """Ticket 53 (D8): SIGTERM → grace → SIGKILL at the deadline or on a stop request."""
+    return run_graceful(args, cwd, env, timeout)
 
 
 def template_evidence(root: Path = TEMPLATE_ROOT) -> dict[str, str]:
@@ -246,6 +233,21 @@ def apply_aws_infrastructure(
         )
         if applied.returncode != 0:
             refs = _state_count(lambda args, t: terraform(args, t))
+            # Ticket 53 (D10): keep a State Terraform could not upload; report the S3 lock.
+            refs |= failed_apply_refs(
+                applied,
+                runner=runner,
+                work=work,
+                keep_dir=artifact_dir.parent / "state-recovery",
+                label=artifact_dir.name,
+                lock={
+                    "bucket": spec.state_bucket,
+                    "key": spec.state_key,
+                    "region": spec.region,
+                    "profile": profiles.state,
+                },
+                env=env,
+            )
             if is_stale(applied, progress):
                 # The State changed since Planning (possibly our own lost Apply). Inspect only.
                 return _result("UNKNOWN", "SAVED_PLAN_STALE", refs)

@@ -143,7 +143,7 @@ Temporal은 Workflow 이력을 보존하고 Worker 재시작 후 처리를 이�
 **Workflow 취소와 실제 인프라 삭제는 별개**다. 취소 요청 시 현재 단계, 이미 적용된 외부 변경과 데이터 위치를 먼저 확인해야 한다.
 
 - **Sandbox:** 성공·실패·취소 후 임시 자원을 정리한다. 강제 종료로 남은 Namespace·리소스를 나중에 찾고 정리할 수 있는 기준이 필요하다.
-- **Production Provisioning:** 취소만으로 클라우드 리소스를 무조건 삭제하지 않는다. 부분 생성 자원과 Terraform·Kubernetes 상태, 이미 저장된 데이터에 따라 유지·정리 방침을 정한다.
+- **Production Provisioning:** 취소만으로 클라우드 리소스를 무조건 삭제하지 않는다. 부분 생성 자원과 Terraform·Kubernetes 상태, 이미 저장된 데이터에 따라 유지·정리 방침을 정한다. 클라우드 대상 정리는 운영자가 시작하는 별도 Workflow(`CloudTeardownWorkflow`)가 워크로드·LB·PVC 정책 → 검토된 destroy Plan → 운영자 확인 Signal → destroy 순서로 한다(티켓 53). ON_PREM은 Agent 정리 작업이다(52). 실행 중 Terraform을 끊을 때(시한·Activity 취소)는 SIGTERM으로 먼저 끝내 lock·State를 남기지 않게 한다.
 - **Data Migration:** 동기화 중단, DB Cutover, 역방향 복제는 서로 다른 작업이다. 정확한 쓰기 제어·복구·자동 롤백 범위는 미정이다.
 - **Traffic Migration:** 전환 중지·가중치 복귀가 DB의 데이터 복구를 의미하지 않는다. Cutover 전후의 롤백 가능 범위를 별도로 정해야 한다.
 

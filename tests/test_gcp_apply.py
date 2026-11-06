@@ -267,3 +267,34 @@ def test_workspace_is_removed(tmp_path):
     manifest, preview, directory = artifacts(tmp_path)
     run(manifest, preview, directory, FakeRunner())
     assert not any(p.name.startswith("gcp-apply-") for p in Path(directory.parent).iterdir())
+
+
+class InterruptedRunner(FakeRunner):
+    """Ticket 53: Apply stopped at the deadline; Terraform left `errored.tfstate` behind."""
+
+    def __call__(self, args, cwd, env, timeout):
+        if args[:3] == ["aws", "s3api", "head-object"]:
+            self.commands.append(list(args))
+            return CommandResult(0, b'{"ContentLength": 1}', b"")
+        if args[1:2] == ["apply"]:
+            self.commands.append(list(args))
+            (Path(cwd) / "errored.tfstate").write_bytes(b'{"version": 4}')
+            return CommandResult(-1, b"", b"", "TERMINATED")
+        return super().__call__(args, cwd, env, timeout)
+
+
+def test_interrupted_apply_reports_lock_and_preserves_errored_state(tmp_path):
+    manifest, preview, directory = artifacts(tmp_path)
+    runner = InterruptedRunner()
+    result = run(manifest, preview, directory, runner)
+    assert (result["status"], result["code"]) == ("UNKNOWN", "TERRAFORM_APPLY_INTERRUPTED")
+    refs = result["resource_refs"]
+    assert (refs["stopped"], refs["state_lock"], refs["state_recovery"]) == (
+        "TERMINATED",
+        "HELD",
+        "PRESERVED",
+    )
+    assert len(list((tmp_path / "state-recovery").iterdir())) == 1
+    lock = next(c for c in runner.commands if c[:3] == ["aws", "s3api", "head-object"])
+    assert lock[lock.index("--profile") + 1] == "cmp-aws-prod"
+    assert lock[lock.index("--region") + 1] == "ap-northeast-2"  # State bucket region
