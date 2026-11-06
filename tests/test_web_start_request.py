@@ -139,7 +139,7 @@ def env_ref(env_store) -> ContentRef:
 @pytest.fixture
 def agent(db):
     with db() as session:
-        register_agent(session, agent_id="office-seoul-01", cluster_uid="cluster-seoul")
+        return register_agent(session, agent_id="office-seoul-01", cluster_uid="cluster-seoul")
 
 
 def add_connection(db, kind, *, status="CONNECTED", **fields) -> str:
@@ -497,3 +497,102 @@ def test_the_demo_example_catalog_is_valid():
         target = StartTarget(provider=entry["provider"], profile=name)
         planning = planning_settings(target, entry, agent=agent)
         assert PlanningSettings.model_validate(planning).target.provider == entry["provider"]
+
+
+# --- finals demo: ON_PREM is the default and only real build target -------------------------
+
+DEMO_CATALOG = ROOT / "infra/demo/target-profiles.demo.json"
+
+
+def test_the_finals_demo_catalog_is_the_onprem_example_entry_only():
+    """The finals catalog is the example's `onprem-k3s-basic` entry, unchanged (one source)."""
+    demo = json.loads(DEMO_CATALOG.read_text(encoding="utf-8"))["profiles"]
+    example = json.loads(
+        (ROOT / "infra/demo/target-profiles.example.json").read_text(encoding="utf-8")
+    )["profiles"]
+    assert demo == {"onprem-k3s-basic": example["onprem-k3s-basic"]}
+
+
+def test_finals_onprem_start_is_planned_approved_and_handed_to_the_agent(
+    api, db, env_ref, agent, tmp_path, platform_registry, monkeypatch
+):
+    """Web start (demo catalog) → Plan publish → web plan read → APPROVE → claim → Agent job."""
+    from cmp_api.agent_registry import poll_job
+    from cmp_api.approvals import claim_execution
+    from cmp_api.onprem_rollout import build_rollout_job, dispatch
+    from cmp_api.routes import approvals as approval_routes
+    from cmp_api.routes import plan_inputs as plan_routes
+    from test_approval_gate import FakeDelivery
+
+    monkeypatch.setattr(settings, "planning_target_profiles_file", str(DEMO_CATALOG))
+    monkeypatch.setattr(settings, "approval_admin_key", "admin-key-for-tests")
+    client, temporal = api
+    gcp = {"provider": "GCP", "profile": "gcp-vm-basic", "region": "asia-northeast3"}
+    refused = client.post("/migrations", json=web_request(gcp, env_ref.id))
+    assert refused.json()["detail"]["code"] == "TARGET_PROFILE_NOT_FOUND"  # fails fast
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    [started] = temporal.started
+
+    migration_id, registration = registration_for(started["data"]["planning"], env_ref)
+    store = LocalArtifactStore(tmp_path / "store")
+    with db() as session:
+        register_planning_input(session, migration_id, registration, store)
+    published = PlanPublisher(db, store, cloud_artifact_root=tmp_path / "plans").publish(
+        migration_id
+    )
+    assert published["status"] == "PUBLISHED", published
+
+    def session():
+        with db() as s:
+            yield s
+
+    delivery = FakeDelivery()
+    app.dependency_overrides[approval_routes.get_session] = session
+    app.dependency_overrides[plan_routes.get_session] = session
+    app.dependency_overrides[plan_routes.get_artifact_store] = lambda: store
+    app.dependency_overrides[approval_routes.get_approval_delivery] = lambda: delivery
+    credential = client.post(
+        "/provisioning/approvers",
+        json={"approver_id": "presenter", "migration_ids": [migration_id]},
+        headers={"X-Approval-Admin-Key": "admin-key-for-tests"},
+    ).json()["credential"]
+    headers = {"Authorization": f"Bearer {credential}"}
+
+    view = client.get(f"/provisioning/migrations/{migration_id}/plan", headers=headers).json()
+    assert (view["plan_id"], view["revision"], view["approvable"]) == (
+        published["plan_id"],
+        1,
+        True,
+    )
+    decision = client.post(  # the body `sseProvider.decide('APPROVE')` sends
+        f"/provisioning/plans/{view['plan_id']}/revisions/1/approvals",
+        json={
+            "decision": "APPROVE",
+            "scope": view["scope"],
+            "manifest_digest": view["manifest_digest"],
+            "preview_digest": view["preview_digest"],
+        },
+        headers=headers,
+    )
+    assert decision.status_code == 201, decision.text
+    assert decision.json()["delivery_status"] == "DELIVERED"
+    assert delivery.delivered == [decision.json()["approval_id"]]
+
+    with db() as session:
+        claim = claim_execution(session, decision.json()["approval_id"])
+        assert (claim["status"], claim["provider"]) == ("CLAIMED", "ON_PREM")
+        job, owner = build_rollout_job(session, claim, store)  # what execute_on_prem_plan queues
+        dispatch(session, job, owner)
+        polled = poll_job(session, agent_id="office-seoul-01", credential=agent)
+    profile = json.loads(DEMO_CATALOG.read_text(encoding="utf-8"))["profiles"]["onprem-k3s-basic"]
+    job = polled["payload"]
+    assert (polled["status"], job["mode"], job["plan_id"]) == (
+        "RUNNING",
+        "PRODUCTION_ROLLOUT",
+        view["plan_id"],
+    )
+    assert (job["agent_id"], job["cluster_uid"]) == ("office-seoul-01", "cluster-seoul")
+    assert (job["namespace"], job["storage_class"]) == (
+        profile["namespace"],
+        profile["storage_class"],
+    )
