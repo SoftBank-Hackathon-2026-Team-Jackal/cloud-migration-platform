@@ -115,7 +115,13 @@ BUILD_AWS_PROFILE=<이름 있는 프로필, 승인된 것만>   # 선택
 ```
 
 - 실제 AWS 호출이므로 버킷·ECR·프로필 사용 승인과 D-06·D-12 결정이 먼저다. 사전 점검(`scripts/preflight.py`)은 설정 유무만 보고 계정을 호출하지 않는다.
-- 빌드가 이미지를 못 만들면 Sandbox 없이 `NEEDS_REVIEW`(이유 `BUILD:<코드>`)로 사람에게 넘어간다.
+- 빌드가 이미지를 못 만들면 Sandbox 없이 `NEEDS_REVIEW`(이유 `BUILD:<코드>`)로 사람에게 넘어간다. 빌드 모듈은 보안상 원본 오류를 숨기므로 `EXTERNAL_COMMAND_FAILED`만 보이면 아래 항목을 먼저 본다.
+- 이 컴퓨터(Mac, Colima)에서 처음 돌릴 때 확인한 것(2026-11-06, 개인 계정으로 S3 업로드 → 빌드 → ECR push → Digest 조회 → 재사용까지 성공):
+  - 필요한 도구는 `aws` CLI와 `docker buildx`다. Homebrew로 설치한 buildx는 `~/.docker/cli-plugins`에 링크해야 Docker가 찾는다.
+  - 빌드 모듈은 로그인 정보를 격리하려고 `DOCKER_CONFIG`를 임시 폴더로 바꿔 쓴다. 그러면 Docker가 **플러그인(buildx)과 현재 컨텍스트(Colima)를 둘 다 못 찾는다**. 서버는 시스템 경로의 buildx와 기본 소켓이 있어 문제가 없다. 이 컴퓨터에서는 워커 환경에 `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`을 주고, buildx를 시스템 플러그인 폴더(`/usr/local/lib/docker/cli-plugins`)에 두거나 임시 `DOCKER_CONFIG`에 링크해 주는 `docker` 래퍼를 PATH 앞에 둔다.
+  - 빌드 모듈은 `AWS_PROFILE`(환경변수)로 `aws`를 부른다. `BUILD_AWS_PROFILE`은 소스 업로드용이므로 같은 프로필을 `AWS_PROFILE`로도 내보낸다.
+  - ECR은 **레이어가 0개인 이미지를 거절**한다(`FROM scratch`만 있는 Dockerfile). 시험용 소스에도 파일 하나를 `COPY`해야 한다.
+  - ECR 저장소는 태그 변경 불가라 같은 태그를 다시 올릴 수 없다. 시도 ID(`<run>-b<n>`)가 태그에 들어가므로 시험은 실행 ID를 새로 만든다.
 
 ### 비공개 ECR 이미지 pull (티켓 26)
 
