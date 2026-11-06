@@ -4,7 +4,7 @@
 샌드박스 담당
 
 ## 상태
-DONE — Issue #197 (ENV-05·분석 26과 한 PR). 구현 완료, 리뷰 후 병합
+DONE — PR #198 병합, Issue #197 (ENV-05·분석 26과 한 PR)
 
 ## 목적
 샌드박스가 워커 로컬 파일(`SandboxSettings.env_file`) 대신 구축과 같은 `env_file_ref`·EnvPlan·`render_env`로 앱 env를 만든다. 샌드박스와 구축의 차이를 DB 출력 하나로 줄인다.

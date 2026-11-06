@@ -1,7 +1,7 @@
 # Ticket 31 — Fixer가 상황에 맞는 Skill을 필요할 때 불러 쓰게 연결
 
 ## 상태
-IN_PROGRESS — 구현·자동 테스트 완료(2026-11-06). 실제 Claude 호출 확인은 비용 승인 후 1회. Issue 번호는 사용자가 발행한 뒤 기록한다.
+DONE — PR #252·#253 병합, Issue #251 (2026-11-06). 미확인: 실제 Claude 호출로 Skill 사용 확인 1회(비용 승인 후)
 
 ## 목적
 Fixer는 Skill 도구(`load_skill`)가 없어서, 클라우드 종속 코드를 대상에 맞게 고치는 방법 같은 지침을 줄 수 없었다(Mapper·Tester는 이미 쓴다). Fixer가 **특정 상황에서만, 그 상황에 맞는 Skill만** 불러 읽게 한다. 이번 범위는 연결뿐이고 새 Skill 내용(예: `storage-s3`)은 다루지 않는다.

@@ -13,7 +13,7 @@
 | [05 코드 스캔과 `.env` 대조](../../tickets/analysis-verification/05-code-scan.md) | DONE (PR #58 병합) | 03, D-07(언어별 어댑터만) | AV-003 | #57 | ☑ |
 | [06 AWS 인프라·네트워크 스캔과 통신 의도](../../tickets/analysis-verification/06-aws-infra-scan.md) | IN_PROGRESS (PR #90 병합, 실제 계정 실행 남음) | 01, AWS 테스트 계정(외부) | AV-005, AV-020 | #89 | ☐ |
 | [06B 확정된 분석 범위를 분석 입력으로 연결](../../tickets/analysis-verification/06b-scope-input.md) | DONE (PR #237 병합, 미확인: 실제 클러스터 후보 실행, 웹 `scope_id` 계약 합의) | 06, 티켓 56(병합) | AV-001, AV-005, AV-020 | #232 | ☑ |
-| [06C 앱의 AWS 리소스 사용 추적(선택·비선택 후보 대조, CloudTrail 근거)](../../tickets/analysis-verification/06c-usage-tracing.md) | IN_PROGRESS (구현·자동 테스트 완료, 실제 계정 확인 남음) | 06, 06B (병합됨) | AV-003, AV-005, AV-007, AV-017, AV-020 | 미발행(사용자 발행 후 기록) | ☐ |
+| [06C 앱의 AWS 리소스 사용 추적(선택·비선택 후보 대조, CloudTrail 근거)](../../tickets/analysis-verification/06c-usage-tracing.md) | DONE (PR #248 병합, 미확인: 실제 계정·클러스터 후보로 IAM·CloudTrail 근거 확인) | 06, 06B (병합됨) | AV-003, AV-005, AV-007, AV-017, AV-020 | #247 | ☑ |
 | [07 요구사항·사용 프로필·사전 점검 조립](../../tickets/analysis-verification/07-profile-precheck.md) | DONE (PR #64, #77, #86 병합) | 04, 05 (06 결과가 없으면 인프라 항목을 "미수집"으로 표시) | AV-006, AV-017 | #59 | ☑ |
 | [08A 에이전트 실행 기반과 Skill 형식](../../tickets/analysis-verification/08a-agent-runtime.md) | DONE (PR #68 병합) | 01 | AV-007, AV-020 | #67 | ☑ |
 | [08 카탈로그·Skill v1과 매핑](../../tickets/analysis-verification/08-mapping.md) | DONE (PR #73 병합) | 07, 08A, D-01(실제 LLM 연결 시) | AV-007, AV-008, AV-020 | #72 | ☑ |
@@ -30,23 +30,23 @@
 | [15 Planning 인계(입력 v2)](../../tickets/analysis-verification/15-planning-handoff.md) | DONE (PR #142 병합, 미확인: 등록 후 실제 계획 게시) | 14C, 21, 22, 25 | AV-018 | #141 | ☑ |
 | [16 데모 앱 통합 검증](../../tickets/analysis-verification/16-demo-e2e.md) | DRAFT | 06, 15, 데모 앱 준비 | AV-001~AV-022, spec §7 | 미생성 | ☐ |
 | [17 코드 색인과 에이전트 조회 도구](../../tickets/analysis-verification/17-code-index.md) | DRAFT(후순위) | 05, 08 | AV-003, AV-007, AV-020 | 미생성 | ☐ |
-| [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | TODO (담당자 계약 조율 전) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
+| [18 공개 GitHub 저장소 선택 결과의 분석 입력 연결](../../tickets/analysis-verification/18-public-github-source.md) | IN_PROGRESS (연결은 Provisioning 44 PR #206으로 완료, API의 공개 여부·커밋 재확인은 미구현) | 02, 03, #56 병합 | AV-001, AV-002, AV-020 | #60 | ☐ |
 | [19 분석 Activity 통합](../../tickets/analysis-verification/19-analysis-integration.md) | DONE (PR #92 병합) | 03~08B, 06 | AV-001~AV-008, AV-017, AV-020, AV-021 | #91 | ☑ |
 | [20 Claude 클라이언트와 비용 상한](../../tickets/analysis-verification/20-claude-client.md) | DONE (PR #114 병합) | 08A, 08, 12, 14A, ADR-004 | AV-007, AV-012, AV-015, AV-020 | #113 | ☑ |
 | [21 분석 → Sandbox 루프 → 발행 연결과 통합 테스트](../../tickets/analysis-verification/21-pipeline-wiring.md) | DONE (PR #119 병합) | 14C, 19, 20 | AV-001, AV-015, AV-017, AV-018 | #115 | ☑ |
 | [22 Sandbox 워커 실제 조립과 실행 준비](../../tickets/analysis-verification/22-worker-wiring.md) | DONE (PR #121 병합) | 14B, 20, 21 | AV-001, AV-015, AV-021 | #120 | ☑ |
 | [23 비공개 소스 접근(토큰 참조·교체 가능한 해석기)](../../tickets/analysis-verification/23-source-access.md) | DONE (PR #132 병합) | 03, 19, 21 | AV-001, AV-002, AV-020 | #131 | ☑ |
-| [24 실행 도구·입력 검증·만료 Sandbox 정리·Tester 연결](../../tickets/analysis-verification/24-ops-and-tester.md) | DONE | 12, 14B, 22 (D-09는 인터페이스만) | AV-011, AV-012, AV-020 | #136 | ☑ |
+| [24 실행 도구·입력 검증·만료 Sandbox 정리·Tester 연결](../../tickets/analysis-verification/24-ops-and-tester.md) | DONE (PR #139 병합) | 12, 14B, 22 (D-09는 인터페이스만) | AV-011, AV-012, AV-020 | #136 | ☑ |
 | [25 빌드 연결(소스 S3 업로드 → Build 모듈 → 빌드 증거)](../../tickets/analysis-verification/25-build-wiring.md) | DONE (PR #142 병합, 미확인: 실제 AWS 실행) | 09, 10, 22 (실제 AWS는 D-06·D-12·승인) | AV-009, AV-010, AV-018 | #140 | ☑ |
-| 분석 웹 이벤트 연결(데모, Provisioning 쪽 작업) — 티켓 파일 없음, 상세는 [이벤트 안내서 §2 분석](../../docs/engineering/events-guide.md) | IN_REVIEW (PR 대기, 박승철님 확인 필요) | 19, Provisioning 24(이벤트 저장소) | AV-001, AV-020 | #226 | ☐ |
-| [ENV-05 분석: env_file_ref에서 키 읽기·EnvPlan 출력](../../tickets/env-file-ref/05-analysis-env-plan.md) | DONE (구현 완료, PR 대기) | ENV-02, ENV-03 (병합됨) | AV-001, AV-020 | #197 | ☐ |
-| [ENV-06 Sandbox: render_env로 앱 Secret 만들기](../../tickets/env-file-ref/06-sandbox-render-env.md) | DONE (구현 완료, PR 대기) | ENV-03, ENV-05 | AV-011, AV-020 | #197 | ☐ |
-| [26 Sandbox의 비공개 ECR 이미지 pull](../../tickets/analysis-verification/26-sandbox-ecr-pull.md) | DONE (구현 완료, PR 대기, 실제 토큰은 승인 후) | 25, Provisioning 29 (실제 토큰은 승인 필요) | AV-010, AV-011, AV-020 | #197 | ☐ |
-| [27 표준 테스트를 앱 API 모양에 맞추기](../../tickets/analysis-verification/27-standard-test-shapes.md) | IN_PROGRESS (27-A 구현·k3d 확인 완료, 27-B 구현 완료·실제 Claude와 k3d 확인 대기) | 12, 22, 24 (D-09 재정의 결정됨) | AV-012 | #199 | ☐ |
-| [28 보안 측정 모델과 원본 측정(데모 4행)](../../tickets/analysis-verification/28-security-measure.md) | IN_PROGRESS (28-A·28-B 구현·자동 테스트 완료, 실제 계정 확인·템플릿 반영 남음) | 04, 06, 07, 19 (병합됨) | AV-023 | 미생성 | ☐ |
-| [29 보안 동등 판정·약점 표시·승인 게이트 연결](../../tickets/analysis-verification/29-security-judge.md) | IN_PROGRESS (29-A·29-B 구현·자동 테스트 완료, 상헌 승인 화면·API 합의와 정책 P-12 검토 남음) | 28, 08B, D-17(정책) | AV-023, AV-022 | 미생성 | ☐ |
-| [30 Sandbox 보안 프로브](../../tickets/analysis-verification/30-security-probes.md) | DONE (구현 완료, PR 대기. DB 접근 프로브는 실제 k3d 확인 완료. 평문 DB·운영 경로 프로브와 Skill은 후속) | 12, 13, 24, 28, D-18 | AV-023, AV-012, AV-013 | 미생성 | ☑ |
-| [31 Fixer가 상황에 맞는 Skill을 필요할 때 불러 쓰게 연결](../../tickets/analysis-verification/31-fixer-skills.md) | IN_PROGRESS (구현·자동 테스트 완료, 실제 Claude 확인 남음) | 14A, 20 (병합됨) | AV-007, AV-015, AV-020 | 미발행(사용자 발행 후 기록) | ☐ |
+| 분석 웹 이벤트 연결(데모, Provisioning 쪽 작업) — 티켓 파일 없음, 상세는 [이벤트 안내서 §2 분석](../../docs/engineering/events-guide.md) | DONE (PR #231 분석 이벤트·PR #241 Sandbox 이벤트 병합, 민서님 작업) | 19, Provisioning 24(이벤트 저장소) | AV-001, AV-020 | #226 | ☐ |
+| [ENV-05 분석: env_file_ref에서 키 읽기·EnvPlan 출력](../../tickets/env-file-ref/05-analysis-env-plan.md) | DONE (PR #198 병합) | ENV-02, ENV-03 (병합됨) | AV-001, AV-020 | #197 | ☑ |
+| [ENV-06 Sandbox: render_env로 앱 Secret 만들기](../../tickets/env-file-ref/06-sandbox-render-env.md) | DONE (PR #198 병합) | ENV-03, ENV-05 | AV-011, AV-020 | #197 | ☑ |
+| [26 Sandbox의 비공개 ECR 이미지 pull](../../tickets/analysis-verification/26-sandbox-ecr-pull.md) | DONE (PR #198 병합, 실제 ECR 토큰·k3d pull은 2026-11-06 개인 계정으로 확인) | 25, Provisioning 29 (실제 토큰은 승인 필요) | AV-010, AV-011, AV-020 | #197 | ☑ |
+| [27 표준 테스트를 앱 API 모양에 맞추기](../../tickets/analysis-verification/27-standard-test-shapes.md) | DONE (PR #218 병합, 미확인: 27-B 실제 Claude와 k3d 1회) | 12, 22, 24 (D-09 재정의 결정됨) | AV-012 | #199 | ☑ |
+| [28 보안 측정 모델과 원본 측정(데모 4행)](../../tickets/analysis-verification/28-security-measure.md) | DONE (PR #250 병합, 미확인: 실제 계정 스캔 1회, 역할 템플릿 v3 반영) | 04, 06, 07, 19 (병합됨) | AV-023 | #249 | ☑ |
+| [29 보안 동등 판정·약점 표시·승인 게이트 연결](../../tickets/analysis-verification/29-security-judge.md) | DONE (PR #257·#261 병합, 남음: 상헌 승인 화면·API 합의, 정책 P-12 사용자 검토) | 28, 08B, D-17(정책) | AV-023, AV-022 | #256 | ☑ |
+| [30 Sandbox 보안 프로브](../../tickets/analysis-verification/30-security-probes.md) | DONE (PR #260 병합, 실제 k3d 확인은 PR #263. 평문 DB·운영 경로 프로브와 Skill은 후속) | 12, 13, 24, 28, D-18 | AV-023, AV-012, AV-013 | #259 | ☑ |
+| [31 Fixer가 상황에 맞는 Skill을 필요할 때 불러 쓰게 연결](../../tickets/analysis-verification/31-fixer-skills.md) | DONE (PR #252·#253 병합, 미확인: 실제 Claude 1회) | 14A, 20 (병합됨) | AV-007, AV-015, AV-020 | #251 | ☑ |
 
 ## 선행 관계
 
@@ -94,7 +94,7 @@ Q-01 ────┴→ 02B ─┐
 | D-14 | PostgreSQL 확장 지원 시점과 `CREATE EXTENSION` 실행 주체(현재 확장 요구는 Planning이 거절) | 07 | 민서 |
 | D-15 | 외부 진입(인터넷 → 앱)을 `network_intent`로 표현하는 방법(그 전까지 `AnalysisReport`에 기록) | 01, 06, 13 | 민서 |
 | D-16 | 결정됨, V2·렌더러 구현 완료(#79, #81), 07 바인딩 반영 — DB 연결을 단일 URL 변수로 받는 앱은 `env_bindings`에 `connection_url_secret_ref` 출력으로 바인딩. Sandbox와 운영이 각각 URL을 만들어 Secret에 저장하고 앱에는 Secret 이름·키만 주입. 형식(URL 인코딩, Secret 키 이름)은 민서님과 확정 | 07, 11 | 민서(V2·공통 렌더러·Secret 주입)·승철(07 바인딩, 11 검증) |
-| D-17 | 보안 동등성 정책: "원본 약점을 승인하면 대상에서 고쳐서 배포"를 제품 정책으로 인정할지(`policies.md` 변경 필요), 보강의 대상 구성 반영 방법(Provisioning 계약) | 29, 후속 | 사용자·민서
+| D-17 | **결정됨(2026-11-06):** 제품 정책 P-12(보안 수준의 동등성)로 올렸다. 낮아지는 항목은 승인(거절하면 이전 차단), 약점은 표시와 승인 기록까지다. 보강을 대상 구성에 **반영하는 방법**은 Provisioning 계약 뒤 후속 | 29, 후속 | 사용자·민서 |
 | D-18 | DB SSL 강제를 Sandbox·대상에서 구현하는 방식(이미지 인증서·설정 공급 주체)과 운영용 API 판별 기준 | 28, 30 | 승철·민서
 
 ## 변경 기록

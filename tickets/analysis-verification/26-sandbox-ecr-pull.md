@@ -1,7 +1,7 @@
 # Ticket 26 — Sandbox의 비공개 ECR 이미지 pull
 
 ## 상태
-DONE — Issue #197 (ENV-05·06과 한 PR). 구현 완료. 실제 ECR 토큰과 k3d pull은 2026-11-06 개인 계정으로 확인(Secret 있으면 pull 성공, 없으면 ErrImagePull)
+DONE — PR #198 병합, Issue #197 (ENV-05·06과 한 PR). 실제 ECR 토큰과 k3d pull은 2026-11-06 개인 계정으로 확인(Secret 있으면 pull 성공, 없으면 ErrImagePull)
 
 ## 목적
 실제 빌드 경로(티켓 25)는 이미지를 플랫폼 ECR에 올린다. 로컬 k3d의 Sandbox는 인증 없이 비공개 ECR 이미지를 받을 수 없어 `ImagePullBackOff`가 난다. 민서님의 공용 모듈 `cmp_providers.ecr_pull`(Provisioning 29)로 단기 토큰을 만들어 Sandbox 네임스페이스에 pull Secret을 둔다.

@@ -1,7 +1,7 @@
 # Ticket 30 — Sandbox 보안 프로브
 
 ## 상태
-DONE (구현 완료, PR 대기) — DB 접근 프로브는 자동 테스트와 **실제 k3d(`cmp-sandbox`) 확인까지 완료**(2026-11-06). 평문 DB 거절·운영용 경로 차단 프로브와 `security-posture` Skill은 대상이 없어 후속. Issue 번호는 사용자가 발행한 뒤 기록한다.
+DONE — PR #260 병합, Issue #259. DB 접근 프로브는 자동 테스트와 실제 k3d(`cmp-sandbox`) 확인까지 완료(2026-11-06, k3d 확인은 PR #263). 평문 DB 거절·운영용 경로 프로브와 `security-posture` Skill은 대상이 없어 후속
 
 ## 목적
 승인된 통신 의도와 기본 차단 NetworkPolicy가 Sandbox에서 실제로 동작하는지 시험 Pod로 증명한다. 원본에서는 클러스터 안 모든 Pod가 DB에 닿았는데 대상에서는 앱만 닿는다는 것을 "표시"가 아니라 "시험 결과"로 보여 준다.
