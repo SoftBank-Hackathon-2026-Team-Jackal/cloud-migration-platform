@@ -221,6 +221,8 @@ def test_tunnel_container_has_only_network_admin_and_no_host_network(tmp_path):
         "auto",
         "--interval-seconds",
         "15",
+        "--wake-file",
+        "/var/run/cmp-wake/job",
     ]
     context = tunnel["securityContext"]
     assert context["capabilities"] == {"drop": ["ALL"], "add": ["NET_ADMIN", "NET_BIND_SERVICE"]}
@@ -237,6 +239,24 @@ def test_tunnel_container_has_only_network_admin_and_no_host_network(tmp_path):
     agent_tmp = next(m for m in container(pod)["volumeMounts"] if m["mountPath"] == "/tmp")
     tunnel_tmp = next(m for m in tunnel["volumeMounts"] if m["mountPath"] == "/tmp")
     assert agent_tmp["name"] != tunnel_tmp["name"]
+
+
+def test_agent_wakes_the_tunnel_through_a_shared_memory_volume(tmp_path):
+    """Ticket 65 (#283): the agent container writes the signal file the tunnel container reads."""
+    pod = deployment(documents(tmp_path, values()))["spec"]["template"]["spec"]
+    agent, tunnel = container(pod), container(pod, "tunnel")
+    assert agent["args"][-2:] == ["--tunnel-wake-file", "/var/run/cmp-wake/job"]
+    for item in (agent, tunnel):
+        mount = next(m for m in item["volumeMounts"] if m["mountPath"] == "/var/run/cmp-wake")
+        assert mount["name"] == "tunnel-wake" and not mount.get("readOnly")
+    volume = next(v for v in pod["volumes"] if v["name"] == "tunnel-wake")
+    assert volume["emptyDir"] == {"medium": "Memory", "sizeLimit": "1Mi"}
+
+
+def test_disabled_tunnel_has_no_wake_signal(tmp_path):
+    pod = deployment(documents(tmp_path, values(tunnel={"enabled": False})))["spec"]["template"]
+    assert "--tunnel-wake-file" not in container(pod["spec"])["args"]
+    assert all(v["name"] != "tunnel-wake" for v in pod["spec"]["volumes"])
 
 
 def test_kernel_mode_does_not_mount_the_tun_device(tmp_path):

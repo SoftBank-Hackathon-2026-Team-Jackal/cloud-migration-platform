@@ -10,9 +10,11 @@ import argparse
 import base64
 import json
 import os
+import secrets
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -39,6 +41,23 @@ def halt(wait: Callable[[float], bool]) -> int:
     while not wait(HALT_SECONDS):
         pass
     return UNAUTHORIZED_EXIT
+
+
+def read_wake(path) -> str | None:
+    """Token the `agent` container last wrote to the shared signal file (None if absent)."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read(64).strip() or None
+    except OSError:
+        return None
+
+
+def write_wake(path) -> None:
+    """Agent side (ticket 65): a new token tells the tunnel to re-check soon. Atomic replace."""
+    temporary = f"{path}.tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        handle.write(f"{time.time_ns()}-{secrets.token_hex(4)}")
+    os.replace(temporary, path)
 
 
 class AgentRuntimeError(Exception):
@@ -164,6 +183,8 @@ class AgentDaemon:
         self.wait, self.log = wait, log
         self.idle_seconds, self.max_backoff = idle_seconds, max_backoff
         self.should_stop: Callable[[], bool] = lambda: False
+        # Ticket 65 (#283): called after each processed job so the tunnel re-checks soon.
+        self.wake: Callable[[dict], None] | None = None
         self._failures = 0
 
     def _backoff(self, code: str) -> bool:
@@ -251,6 +272,11 @@ class AgentDaemon:
                 if self._backoff(outcome.get("code", "KUBERNETES_UNAVAILABLE")):
                     return 0
                 continue
+            if self.wake is not None:
+                try:
+                    self.wake(outcome)
+                except OSError:
+                    self.log({"event": "tunnel_wake_failed"})  # the tunnel's cycle still runs
             self._failures = 0  # processed: poll again immediately
         return 0
 
@@ -279,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("CMP_PREFLIGHT_ALLOWED_IMAGES", ""),
         help="comma-separated digest-pinned images",
     )
+    parser.add_argument("--tunnel-wake-file", help="signal file read by the tunnel (ticket 65)")
     args = parser.parse_args(argv)
     try:
         client = AgentControlClient(args.platform_url)
@@ -331,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
         idle_seconds=args.idle_seconds,
     )
     daemon.should_stop = stop.is_set
+    if args.tunnel_wake_file:
+        daemon.wake = lambda outcome: write_wake(args.tunnel_wake_file)
     try:
         return daemon.run()
     except AgentRuntimeError as exc:
