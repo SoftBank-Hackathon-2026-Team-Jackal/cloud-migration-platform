@@ -61,6 +61,6 @@ PROV-014(Preview), PROV-015(승인), PROV-021(비밀값 없음). 계약: [migrat
 ## 남은 일
 - 웹 BFF 승인 중계와 `PLATFORM_APPROVER_TOKEN`(웹 작업).
 - 데모 compose의 `api` 환경에 `DEMO_APPROVER_ID: ${DEMO_APPROVER_ID:-}` 한 줄과 `/opt/cmp/.env` 값이 필요하다(`infra/demo/*`는 이 티켓 범위 밖이라 바꾸지 않았다). 그 전에는 수동 `grant`(A10). `--env-file` 없는 `create`·`rotate`는 토큰을 출력한다(#215, `infra/demo` 범위). 시작 API가 승인자를 자동으로 묶게 할지는 정책 결정이 필요하다.
-- `plan.step`의 `after`(대상 서비스)·`kind`는 매핑 행에 값이 없다(events-guide §5, 분석 담당).
+- ~~`plan.step`의 `after`·`kind`는 매핑 행에 값이 없다~~ → 후속: `kind`는 capability로, `after`는 같은 Revision Preview의 같은 kind 리소스 이름으로 채운다. 매핑이 돌지 않으면 `plan.preview.warnings`에 `MAPPING_NOT_RUN`(events-guide §2). 계약 변경 없음.
 - `plan.preview.source`·`env_remap`은 백엔드 값이 없다. 보고서가 플랫폼 저장소에 없는 배치에서는 `plan.step`이 나오지 않는다(A2).
 - 데이터 전환 승인 `approval.required gate: cutover`는 63.
