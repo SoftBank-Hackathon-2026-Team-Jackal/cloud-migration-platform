@@ -11,7 +11,7 @@ from .contracts import (
     SyncSample,
     TableSync,
 )
-from .events import TABLE_STATES, readiness_event, sync_events
+from .events import TABLE_STATES, progress_event, readiness_event, sync_events
 from .logic import evaluate_precheck, evaluate_readiness, replication_names, sync_phase
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "TableSync",
     "evaluate_precheck",
     "evaluate_readiness",
+    "progress_event",
     "readiness_event",
     "replication_names",
     "sync_events",

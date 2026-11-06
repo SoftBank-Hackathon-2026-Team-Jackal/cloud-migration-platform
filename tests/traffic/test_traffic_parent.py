@@ -162,6 +162,11 @@ async def fake_emit(request: dict) -> int:
     return len(EVENTS)
 
 
+@activity.defn(name="traffic_readiness")
+async def fake_readiness(payload: dict) -> dict:
+    return {}  # no data migration in this probe: no traffic.ready event
+
+
 async def run_probe(given=None, **kw):
     calls: list = []
     EVENTS.clear()
@@ -171,7 +176,7 @@ async def run_probe(given=None, **kw):
             env.client,
             task_queue=WORKFLOW_QUEUE,
             workflows=[TrafficStepProbe, TrafficShiftWorkflow],
-            activities=[fake_emit],
+            activities=[fake_emit, fake_readiness],
         ),
         relay_worker(env.client, calls, **kw),
     ):
@@ -213,9 +218,9 @@ async def test_an_apply_that_is_not_confirmed_rolls_back_too() -> None:
 async def test_every_snapshot_is_stored_as_a_valid_web_event_under_the_migration_id() -> None:
     _result, _status, _calls, pid = await run_probe()
     assert EVENTS and {event["migration_id"] for event in EVENTS} == {pid}
-    assert {(event["type"], event["phase"]) for event in EVENTS} == {
-        ("traffic.snapshot", "traffic")
-    }
+    assert [event["type"] for event in EVENTS[:2]] == ["traffic.prepare", "traffic.prepare"]
+    EVENTS[:] = [event for event in EVENTS if event["type"] == "traffic.snapshot"]
+    assert {event["phase"] for event in EVENTS} == {"traffic"}
     for event in EVENTS:
         TrafficSnapshotData.model_validate(event["data"])  # the web contract accepts every payload
     phases = [event["data"]["phase"] for event in EVENTS]

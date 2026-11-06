@@ -27,6 +27,7 @@ from cmp_data import (
     DbEndpoint,
     evaluate_precheck,
     evaluate_readiness,
+    progress_event,
     readiness_event,
     replication_names,
     sync_events,
@@ -370,14 +371,23 @@ async def dm_subscribe(payload: dict) -> dict:
 
 @activity.defn
 async def dm_sample(payload: dict) -> dict:
-    """복제 상태 한 번 읽기 → data.phase·data.lsn·data.table. 반복은 Workflow 타이머가 맡는다."""
+    """복제 상태 한 번 읽기 → data.phase·data.lsn·data.table·data.progress. 반복은 Workflow 타이머가
+    맡는다. data.progress는 같은 샘플로 계산한다(DB 조회를 늘리지 않는다)."""
     req = DataMigrationRequest.model_validate(payload)
     snap = await _run(sample, req)
     for event_type, data in sync_events(snap, req.policy):
         await emit_event_async(req.migration_id, event_type, PHASE, "running", data)
+    progress = progress_event(snap, req.policy)
+    # 샘플(Activity 실행)마다 한 줄. 같은 시도 안 재발행은 단계·행 수 키로 한 줄로 남는다.
+    await emit_event_async(
+        req.migration_id, "data.progress", PHASE,
+        "done" if progress["step"] == "ready" else "running", progress,
+        idempotency_key=f"progress:{progress['step']}:{progress['rows']}",
+    )  # fmt: skip
     return {
         "phase": sync_phase(snap, req.policy),
         "lag_bytes": snap.lag_bytes,
+        "lag_ms": snap.lag_ms,  # #234: traffic.ready reads it from the `status` Query
         "tables": len(snap.tables),
         "tables_ready": sum(1 for t in snap.tables if t.state == "r"),
     }

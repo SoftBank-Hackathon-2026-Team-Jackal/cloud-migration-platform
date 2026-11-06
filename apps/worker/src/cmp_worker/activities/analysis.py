@@ -6,12 +6,17 @@ from typing import Any
 from cmp_contracts.analysis import AnalysisReport, ReviewRecord
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_providers.env_file import EnvFileError
+from cmp_scanners.aws_infra import AwsInfraScan
+from cmp_scanners.code import CodeScan
+from cmp_scanners.manifests import ManifestScan
 from cmp_scanners.source import SourceFetchError
 from pydantic import ValidationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from cmp_worker import analysis_events
 from cmp_worker.analysis_pipeline import AnalysisPipeline
+from cmp_worker.artifact_store import ArtifactRef
 from cmp_worker.sandbox_input import SandboxSettings, assemble_sandbox_input
 from cmp_worker.source_access import SourceAccessError
 
@@ -139,25 +144,64 @@ class AnalysisActivities:
     def __init__(self, pipeline: AnalysisPipeline) -> None:
         self.pipeline = pipeline
 
+    # Issue #226: each scan also reports a count-only `analysis.scan` for the web analysis screen
+    # (`cmp_worker.analysis_events`); a failed emission never fails the scan.
+
+    def _get(self, ref: dict):
+        return self.pipeline.store.get_json(ArtifactRef.model_validate(ref))
+
+    def _infra_scan(self, infra: dict) -> AwsInfraScan | None:
+        if infra.get("status") != "COLLECTED":
+            return None
+        return AwsInfraScan.model_validate(self._get(infra["ref"]))
+
     @activity.defn(name="fetch_source")
     async def fetch_source(self, inp: dict) -> dict:
-        return await _run(self.pipeline.fetch_source, inp)
+        source = await _run(self.pipeline.fetch_source, inp)
+        await analysis_events.emit_scan(
+            inp["migration_id"],
+            "fetch_source",
+            analysis_events.summarize_source,
+            inp["repository"],
+            source,
+        )
+        return source
 
     @activity.defn(name="scan_code")
     async def scan_code(self, payload: dict) -> dict:
-        return await _run(self.pipeline.scan_code, payload["input"], payload["source"])
+        ref = await _run(self.pipeline.scan_code, payload["input"], payload["source"])
+        await analysis_events.emit_scan(
+            payload["input"]["migration_id"],
+            "scan_code",
+            lambda: analysis_events.summarize_code(CodeScan.model_validate(self._get(ref))),
+        )
+        return ref
 
     @activity.defn(name="scan_manifests")
     async def scan_manifests(self, payload: dict) -> dict:
-        return await _run(self.pipeline.scan_manifests, payload["input"], payload["source"])
+        ref = await _run(self.pipeline.scan_manifests, payload["input"], payload["source"])
+        await analysis_events.emit_scan(
+            payload["input"]["migration_id"],
+            "scan_manifests",
+            lambda: analysis_events.summarize_manifests(
+                ManifestScan.model_validate(self._get(ref))
+            ),
+        )
+        return ref
 
     @activity.defn(name="scan_aws_infra")
     async def scan_aws_infra(self, inp: dict) -> dict:
-        return await _run(self.pipeline.scan_aws_infra, inp)
+        infra = await _run(self.pipeline.scan_aws_infra, inp)
+        await analysis_events.emit_scan(
+            inp["migration_id"],
+            "scan_aws_infra",
+            lambda: analysis_events.summarize_aws(infra, self._infra_scan(infra)),
+        )
+        return infra
 
     @activity.defn(name="build_requirements")
     async def build_requirements(self, payload: dict) -> dict:
-        return await _run(
+        built = await _run(
             self.pipeline.build_requirements,
             payload["input"],
             payload["source"],
@@ -165,6 +209,18 @@ class AnalysisActivities:
             payload["manifests_ref"],
             payload["infra"],
         )
+        migration_id = payload["input"]["migration_id"]
+        await analysis_events.emit_scan(
+            migration_id,
+            "scan_network",
+            lambda: analysis_events.summarize_network(
+                self._infra_scan(payload["infra"]),
+                self._get(built["assembly_ref"]).get("network"),
+            ),
+        )
+        if built["requirements_ref"] is not None:  # blocked analyses end with ANALYSIS_BLOCKED
+            await analysis_events.emit_done(migration_id)
+        return built
 
     @activity.defn(name="precheck")
     async def precheck(self, payload: dict) -> dict:

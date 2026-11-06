@@ -9,7 +9,7 @@ DONE(로컬 검증). Q5를 웹이 이미 정한 방식(`approval.required gate: 
 - API `POST /migrations/{id}/approve?gate=cutover`: 자식 `data-<id>`의 `status`를 읽어 원본이 쓰기 주체이고 `streaming`일 때만 `switchover` 신호를 보낸다. 아니면 409 `CUTOVER_NOT_READY`(현재 `phase` 포함), 데이터 이전이 없는 실행이면 404. `gate` 없는 승인은 예전과 같다.
 - `DataMigrationWorkflow`(`data-cutover-announce-v1` patch): 원본이 쓰기 주체일 때 `dm_announce_cutover`로 `cutover.plan`을 낸다. 복제 준비 상태나 시도 수가 바뀔 때만 다시 내고, 새 시도(처음, 거부 뒤, 롤백 뒤)마다 `approval.required`(gate `cutover`)도 함께 낸다. 알림 실패는 이전을 막지 않는다.
 - 전환 실행기(`switchover.py`) 결과에 `steps`(단계별 ms, PAUSE 기준 시작 시각), `ready`(PAUSE 직전 준비도 표본, 기다린 시간), `tables`(테이블별 행 수·일치)를 더했다. 거부돼도 그때까지의 `steps`와 `ready`, PAUSE 여부를 낸다.
-- `cmp_data.cutover_events`: 결과 → `cutover.ready` → `cutover.step`(단계마다) → `cutover.outcome` → 통과면 `cutover.step`(verify), `cutover.verify`(테이블마다), `data.verify`(rows·checksum). 거부면 실패한 단계, `resume_source`(revert), `refused` 결과만 낸다. 실행기에 닿지 못해도(kubectl 실패) `refused`를 낸다.
+- `cmp_data.cutover_events`: 결과 → `cutover.ready` → `cutover.step`(단계마다) → `cutover.outcome` → 통과면 `cutover.step`(verify), `cutover.verify`(테이블마다), `data.verify`(rows·checksum, 웹 순서대로 각각 running → 결과; Provisioning 63). 거부면 실패한 단계, `resume_source`(revert), `refused` 결과만 낸다. 실행기에 닿지 못해도(kubectl 실패) `refused`를 낸다.
 - 계약: 웹 계약의 `cutover.plan`·`cutover.ready`·`cutover.outcome`·`cutover.verify`와 `cutover.step`(id·ms·method·of·result·window, n ≤ 32)·`cutover.handover`(held·detail) 확장을 `cmp_contracts.events`와 `docs/contracts/events.schema.json`에 반영했다. 다른 영역의 웹 계약 변경(analysis.scan, plan.preview.backend 등)은 넣지 않았다.
 - 예전 PoC 연결(`poc_bridge.switchover_events`, `cutover.result`)은 Activity에서 쓰지 않는다. `cutover.result`를 `done`으로 내면 웹이 이전 전체를 끝난 것으로 보기 때문이다(DB 전환 뒤에 트래픽 단계가 남아 있다).
 

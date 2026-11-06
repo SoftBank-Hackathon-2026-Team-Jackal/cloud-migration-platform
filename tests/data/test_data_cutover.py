@@ -209,7 +209,7 @@ async def test_switchover_emits_web_cutover_events_and_moves_the_saved_route(
     assert all(pw not in json.dumps(result) for pw in dbs["src"].secrets.values())
     types = [e.type for e in emitter.events]
     assert types == ["cutover.ready", *["cutover.step"] * 3, "cutover.outcome", "cutover.step",
-                     "cutover.verify", "data.verify", "data.verify"]  # fmt: skip
+                     "cutover.verify", *["data.verify"] * 4]  # fmt: skip
     by_type = {e.type: e for e in emitter.events}
     assert by_type["cutover.ready"].data["attempt"] == 2
     assert by_type["cutover.ready"].data["commits_per_sec"] == 50
