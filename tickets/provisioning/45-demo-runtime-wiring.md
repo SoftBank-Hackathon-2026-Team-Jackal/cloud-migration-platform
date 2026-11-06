@@ -85,8 +85,14 @@ Blocked by: 21, 41, 43, 44, 46, ENV-01 (main 반영). 동시 진행: 47(ECR 프�
 - 박승철님: (1) 데모에서 어느 분석 경로를 둘지(R1: scaffold 유지 또는 실제). 실제를 켜면 scaffold 시작이 분석에서 실패하므로, 두 경로를 같이 두려면 scaffold Activity가 dict도 받거나 실제 경로를 다른 이름으로 등록해야 한다(분석 코드). (2) 데모 서버용 Sandbox 클러스터를 둘지, 두면 kubeconfig 전달 방법(R2). 없으면 실제 시작은 `sbx_build`에서 멈춘다. (3) `SANDBOX_PREBUILT_IMAGES` 값 또는 `BUILD_*` 켜기 시점. (4) Claude 키 소유·한도(R3). (5) Sandbox가 없는 worker에서 실제 입력이 오면 시작 때 명확한 코드로 거절할지(D-08 수정 방향). (6) 서버 worker의 Helm 4로 Sandbox Chart 배포가 되는지(사전 점검은 Helm 3 요구).
 - 웹(김민서·웹 담당): 실제 모드에서 `/opt/cmp/web.env`에 `PLATFORM_ENROLLMENT_ADMIN_KEY`를 둘지와 그 전에 웹의 연결·`.env` 업로드·Agent 경로를 로그인으로 막는지(R7). 웹 main에는 아직 `/env-files` 호출이 없다(연결 관리만 실제 API).
 
+## 결선 데모 기본 대상 (2026-11-06, P2)
+- 결정: 결선 데모 카탈로그는 `infra/demo/target-profiles.demo.json`(`onprem-k3s-basic` 하나, 예시 항목과 같은 값)이다. 웹 기본 대상이 이미 `onprem`(`FlowApp`)이고, 데모 서버에서 실제로 구축할 수 있는 대상은 Agent가 연결된 K3s뿐이다(AWS_TARGET 연결·GCP 키 없음). 코드 기본값은 두지 않는다(44 S6 그대로). GCP·AWS 시작은 분석 뒤가 아니라 시작에서 422 `TARGET_PROFILE_NOT_FOUND`다. 클라우드 대상이 준비되면 예시 카탈로그로 바꾼다(재시작 불필요).
+- Agent ID·터널 주소(`10.200.0.2`)는 카탈로그 값이 아니라 Agent 등록·터널 배정 값이다(16 T4). 웹은 `GET /agent-admin/agents`의 `agent_id`를 보낸다.
+- 점검: `tests/test_web_start_request.py`의 결선 테스트가 데모 카탈로그로 웹 시작 → Plan 게시 → 웹 계획 조회 → APPROVE(웹 본문) → claim → Agent 작업(등록 Agent·`cluster_uid`·카탈로그 Namespace·StorageClass)까지 잇는다. 승인 Workflow → `execute_on_prem_plan` → Agent 보고는 `tests/test_onprem_rollout.py`가 덮는다.
+- 서버 반영 뒤 `runtime-check.sh`의 api 줄 기대값은 `target_profiles=onprem-k3s-basic`이다.
+
 ## 문서 변경
-- `infra/demo/README.md`: "분석·Sandbox·ENV 실행 설정 (티켓 45)" 절(설정 표, 반영 순서, 카탈로그 배치, 서버 점검 체크리스트), 설정 표에 ENV 행.
+- `infra/demo/README.md`: "분석·Sandbox·ENV 실행 설정 (티켓 45)" 절(설정 표, 반영 순서, 카탈로그 배치, 서버 점검 체크리스트), 설정 표에 ENV 행. 결선: 반영 2단계 카탈로그를 `target-profiles.demo.json`으로.
 - `specs/provisioning/tasks.md`: 45 행.
 - `specs/analysis-verification/runbook.md`: 배포된 플랫폼 절에 데모 서버 설정 이름과 경로 스위치 링크.
 - `docs/engineering/env-file-guide.md`: 데모 서버 저장소 위치·키 생성 한 줄.

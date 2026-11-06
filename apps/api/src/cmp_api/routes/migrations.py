@@ -33,6 +33,7 @@ from cmp_api.start_request import (
     load_scope,
     load_target_profiles,
     planning_settings,
+    sandbox_settings,
     scope_analysis_fields,
     start_input,
 )
@@ -106,10 +107,12 @@ def _real_start_input(
             with sessions() as session:
                 scope, source_connection = load_scope(session, request.scope_id)
                 scope_fields = scope_analysis_fields(scope, credential_ref(source_connection))
+        sandbox = sandbox_settings(settings.web_start_sandbox_settings)
     except StartRefused as exc:
         raise _refused(exc.code, exc.status) from None
     store, env_ref = _env_ref(request, env_store)
-    return start_input(request, source, planning, env_ref, scope_fields), store, env_ref
+    data = start_input(request, source, planning, env_ref, scope_fields, sandbox)
+    return data, store, env_ref
 
 
 @router.post("", response_model=MigrationCreated, status_code=202)
@@ -124,7 +127,8 @@ async def start_migration(
     required and the target profile catalog supplies the target settings. Refusals are
     `{"detail": {"code": ...}}`: 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`,
     `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`; 503
-    `TARGET_PROFILES_UNCONFIGURED` or the `.env` store codes. Nothing starts on a refusal."""
+    `TARGET_PROFILES_UNCONFIGURED`, `SANDBOX_SETTINGS_INVALID` (the server's rehearsal shape is
+    not a JSON object) or the `.env` store codes. Nothing starts on a refusal."""
     store = env_ref = None
     if request.scope_id is not None and request.target is None:
         raise _refused("SCOPE_NOT_APPLICABLE")  # 06B: a scope belongs to a real start

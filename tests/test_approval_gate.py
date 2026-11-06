@@ -301,3 +301,67 @@ def test_plan_revision_is_immutable_and_increasing(db):
     publish(db, plan, preview(plan))
     with db() as s, pytest.raises(ValueError, match="REVISION_NOT_INCREASING"):
         publish_plan_revision(s, plan, preview(plan))
+
+
+def admin(method, client, path):
+    return client.request(
+        method, f"/provisioning/approvers/{path}", headers={"X-Approval-Admin-Key": ADMIN_KEY}
+    )
+
+
+def test_demo_approver_token_lifecycle_grant_rotate_revoke(client, db, delivery):
+    """Demo runbook (infra/demo/README.md): one approver, grant per new Migration, rotate, revoke."""
+    plan = manifest()
+    display = preview(plan)
+    publish(db, plan, display)
+    old = approver(client, "demo-approver", migrations=["migration-earlier"])
+    response = client.post(f"{BASE}/1/approvals", json=body(plan, display), headers=old)
+    assert response.status_code == 403  # the new Migration is not granted yet
+
+    granted = client.post(
+        "/provisioning/approvers/demo-approver/migrations",
+        json={"migration_ids": ["migration-001"]},
+        headers={"X-Approval-Admin-Key": ADMIN_KEY},
+    )
+    assert granted.status_code == 200, granted.text
+    assert granted.json()["migration_ids"] == ["migration-001", "migration-earlier"]
+    response = client.post(f"{BASE}/1/approvals", json=body(plan, display), headers=old)
+    assert response.status_code == 201, response.text
+    approval_id = response.json()["approval_id"]
+    redeliver = f"{BASE}/1/approvals/{approval_id}/delivery"
+    assert client.post(redeliver, headers=old).status_code == 200
+
+    rotated = admin("POST", client, "demo-approver/credential")
+    assert rotated.status_code == 200, rotated.text
+    new = {"Authorization": f"Bearer {rotated.json()['credential']}"}
+    assert client.post(redeliver, headers=old).json()["detail"] == "APPROVER_AUTH_REQUIRED"
+    assert client.post(redeliver, headers=new).status_code == 200
+    again = client.post(f"{BASE}/1/approvals", json=body(plan, display), headers=new)
+    assert again.status_code == 200
+    assert again.json()["approver_id"] == "demo-approver"
+
+    assert admin("DELETE", client, "demo-approver/credential").status_code == 204
+    assert client.post(redeliver, headers=new).status_code == 401
+    assert client.post(redeliver).status_code == 401
+
+
+def test_credential_rotation_requires_operator_key_and_known_approver(client):
+    approver(client, "alice")
+    for method in ("POST", "DELETE"):
+        response = client.request(
+            method,
+            "/provisioning/approvers/alice/credential",
+            headers={"X-Approval-Admin-Key": "wrong"},
+        )
+        assert response.status_code == 403
+        missing = admin(method, client, "nobody/credential")
+        assert missing.status_code == 404
+        assert missing.json()["detail"] == "APPROVER_NOT_FOUND"
+    grant = {"migration_ids": ["migration-001"]}
+    path = "/provisioning/approvers/{}/migrations"
+    wrong = client.post(path.format("alice"), json=grant, headers={"X-Approval-Admin-Key": "x"})
+    assert wrong.status_code == 403
+    missing = client.post(
+        path.format("nobody"), json=grant, headers={"X-Approval-Admin-Key": ADMIN_KEY}
+    )
+    assert missing.status_code == 404
