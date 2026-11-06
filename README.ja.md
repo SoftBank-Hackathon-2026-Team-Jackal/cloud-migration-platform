@@ -1,12 +1,10 @@
-<div align="center">
-
 <p align="center"><a href="README.md">English</a> · <b>日本語</b> · <a href="README.ko.md">한국어</a></p>
+
+<div align="center">
 
 # Cloud Migration Platform
 
-### 稼働中の EKS アプリと DB を、止めずに、同じセキュリティ水準のまま移行する
-
-オンプレミス（K3s）や別のクラウドへ — AI が分析し、まずサンドボックスで動かして直し、人が承認した構成だけを配備します。
+AWS EKS で動いているアプリと PostgreSQL を、オンプレミスの K3s や別のクラウドへ移行するプラットフォームです。
 
 ![Python](https://img.shields.io/badge/Python_3.11-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -19,51 +17,40 @@
 
 </div>
 
-<!-- TODO: Web E2E の録画（GIF、または GitHub エディタにドロップした mp4） -->
-<p align="center"><i>デモ録画の場所 — Web で移行1件が分析からトラフィック切替まで進む様子</i></p>
+<!-- TODO: Web E2E の録画（GIF または mp4） -->
 
----
+## 概要
 
-## ひと目で
+ユーザーは Web 画面で GitHub リポジトリ、`.env` ファイル、AWS アカウントを接続し、移行する範囲を選びます。その後はプラットフォームが進めます。
 
-| 課題が問いかけたこと | 私たちの答え |
-| --- | --- |
-| 稼働中のアプリを**止めずに**別の環境へ移せるか？ | DB は論理レプリケーションで追いついた後、切替時の書き込み停止をミリ秒単位に抑えます。トラフィックは 10→50→100% と段階的に移し、異常があれば自動で戻します |
-| セキュリティとガバナンスを**すべての環境で同じ水準**に保てるか？ | 移行元のセキュリティグループとマニフェストから「誰が誰に接続するか」を抽出し、移行先では NetworkPolicy として作り直します。既定はすべて遮断し、使っていた経路だけを開けます |
-| オンプレミスで、**クラウドでは当たり前だった機能**をどう再現するか？ | ユーザーのクラスターにいる Agent が外向きの接続だけ（ポーリング + WireGuard）で配備するため、受信ポートを開ける必要がありません。LB やマネージド DB は標準構成に置き換えます |
-| 点検と修正を **AI にどこまで安全に**任せられるか？ | AI は外部通信を遮断したサンドボックスの中だけで試験・修正します。本番には人が承認した Revision だけを配備し、実行時に承認済みのイメージ・構成 digest を再照合します |
+1. ソースコード、EKS のマニフェスト、AWS リソースを読み、アプリが何を使っているかを整理します。
+2. イメージをビルドし、隔離されたサンドボックスで動かしてテストします。テストが失敗すると AI（Claude）が原因を直し、もう一度テストします。
+3. 移行先に合わせたデプロイ計画を作り、人が承認したらデプロイします。オンプレミスの場合は、ユーザーのクラスターに入れた Agent がデプロイします。
+4. DB は論理レプリケーションで移したあと、短時間だけ書き込みを止めて切り替えます。トラフィックは段階的に移します。
 
-## なぜ作ったのか
+移行の途中で移行元のセキュリティ設定が抜け落ちないことを重視しました。移行元のセキュリティグループとマニフェストからコンポーネント間の接続関係を取り出し、移行先では既定で遮断し必要な経路だけを開ける NetworkPolicy として作り直します。
 
-クラウドで問題なく動いていたアプリは、移した瞬間に**静かに弱くなります**。セキュリティグループが消え、マネージド DB とロードバランサーがなくなり、どのポートを開けておくべきだったか誰も覚えていません。そのため移行は人が一つずつ合わせ、サービスを止めて移すことが多いのです。
-
-私たちはこれを **分析 → 検証 → 承認 → 実行** の一つの流れにまとめました。人は判断だけを行い、確かめられることはすべてプラットフォームが確かめます。
-
----
-
-## 全体の流れ
+## 実行の流れ
 
 <p align="center">
   <img src="docs/readme/temporal-flow.ja.svg" alt="移行1件の流れ: 分析から完了までの10段階" width="100%">
 </p>
 
-移行1件は [Temporal](https://temporal.io) のワークフロー `MigrationWorkflow` 1つです。何日かかっても、サーバーが再起動しても、人の承認を待つ間も、状態を失わず止まった所から続けます。
+移行1件は [Temporal](https://temporal.io) のワークフロー `MigrationWorkflow` 1つとして実行されます。承認待ちのように時間のかかる段階があり、その間にサーバーが再起動することもあるため Temporal を選びました。ワークフローは履歴をもとに、止まったところから再開します。
 
-| 構成要素 | このプラットフォームでは |
+| 構成要素 | このリポジトリでは |
 | --- | --- |
-| **Workflow** — 順序と待機 | `MigrationWorkflow` が子 Workflow（分析・サンドボックス・承認・データ・トラフィック）を順に呼びます。再起動しても履歴をたどり直して続けます |
-| **Activity** — 外部との実作業 | clone、AWS 参照、buildx、kubectl・Helm、DB 書き込み。失敗すると自動で再試行されるため、2回実行しても結果が同じになるよう作ります |
-| **Worker** — キューをポーリングして実行 | プラットフォーム VM の `worker` が6つのキューを、中継サーバーの `relay-worker` が `relay-1` を担当します |
-| **Signal · Query** — 人とのつながり | 承認 `approve`、DB 切替 `switchover`、ロールバック・再試行 / 状態参照 `status` |
+| Workflow | `MigrationWorkflow` が分析、サンドボックス、承認、データ、トラフィックの各段階を子ワークフローとして順に実行 |
+| Activity | git clone、AWS の参照、buildx、kubectl・Helm、DB 操作など外部とやり取りする処理。失敗すると自動で再試行 |
+| Worker | プラットフォーム VM の `worker` コンテナが 6 つのタスクキューを、中継サーバーの `relay-worker` が `relay-1` を処理 |
+| Signal · Query | 承認（`approve`）、DB 切替（`switchover`）、トラフィックのロールバック・再試行 / 状態参照（`status`） |
 
-各段階は進行イベント（`analysis.*` `sandbox.*` `plan.*` `provision.*` `data.*` `traffic.*` `cutover.*`）を残し、Web は `GET /migrations/{id}/events`（SSE）でリアルタイムに受け取ります。
+各段階の進行イベント（`analysis.*`、`sandbox.*`、`plan.*`、`provision.*`、`data.*`、`traffic.*`、`cutover.*`）は保存され、Web は `GET /migrations/{id}/events`（SSE）で受け取って画面に表示します。
 
----
-
-## 機能ごとの流れ
+## 各段階の説明
 
 <details open>
-<summary><b>① 接続と分析</b> — 何を移すべきかを把握する</summary>
+<summary><b>1. 接続と分析</b></summary>
 
 ```mermaid
 flowchart TB
@@ -79,14 +66,14 @@ flowchart TB
   R --> AI[Claude マッピング<br/>標準リソースへの対応]
 ```
 
-- AWS アカウントは CloudFormation で作る**読み取り専用ロール**で接続し、移行範囲は EKS の Namespace・ワークロード単位で選びます。
-- `.env` の値は一度だけ暗号化して保存し、分析は**キー名だけ**を読みます。
-- 結果は、アプリが使うもの（DB、設定、公開、接続関係）と、それが標準リソースにどう対応するか（そのまま / 変更が必要）を表す**中間仕様**です。
+- AWS アカウントは CloudFormation で作成した読み取り専用ロールで接続します。移行範囲は EKS の Namespace とワークロード単位で選びます。
+- `.env` は暗号化して保存し、分析ではキー名だけを見ます。
+- 分析結果（中間仕様）には、アプリが使う DB、設定、外部公開、接続関係と、それぞれをプラットフォームの標準リソースにどう置き換えるかが入ります。
 
 </details>
 
 <details>
-<summary><b>② イメージビルド</b> — 同じソースを同じイメージに固定する</summary>
+<summary><b>2. イメージビルド</b></summary>
 
 ```mermaid
 flowchart LR
@@ -96,13 +83,13 @@ flowchart LR
   ECR -->|sha256 digest| NEXT[以降は digest だけでイメージを指す]
 ```
 
-- ビルド中はインスタンスメタデータ（認証情報）に届かないよう遮断し、ユーザーのコードがプラットフォームの権限を奪えないようにします。
-- サンドボックスと本番が**同じ digest** を使うため、検証したイメージと配備されるイメージは同じです。
+- プラットフォーム VM の Docker で buildx を使って amd64・arm64 のイメージをビルドし、ECR に push します。ビルド中はインスタンスメタデータへのアクセスを遮断し、ユーザーのコードがプラットフォームの認証情報を読めないようにしています。
+- 以降の段階はタグではなくイメージの digest を使います。サンドボックスでテストしたイメージがそのままデプロイされます。
 
 </details>
 
 <details>
-<summary><b>③ サンドボックス検証</b> — AI がまず動かして直す</summary>
+<summary><b>3. サンドボックス検証</b></summary>
 
 ```mermaid
 flowchart LR
@@ -113,13 +100,15 @@ flowchart LR
   T -->|失敗| FX[AI Fixer が修正] -->|最大3回| RD
 ```
 
-- サンドボックスと本番は**同じレンダラー**（`shared_deployment_v2`）を使います。
-- AI はこの隔離された場所でだけ自由に修正し、修正後は再びテストに合格しなければ先へ進めません。
+- プラットフォーム VM 上の k3d クラスターに、実行ごとに一時的な Namespace を作り、外向きの通信を遮断します。2 時間たつと削除します。
+- 標準テストはヘルスチェック、DB への書き込みと読み出し、再起動後のデータ保持です。これに AI が作ったテストが加わります。
+- 失敗すると Fixer が修正し、再度レンダリングしてテストします。最大 3 回まで試します。
+- サンドボックスと実際のデプロイは同じレンダラー（`shared_deployment_v2`）を使います。
 
 </details>
 
 <details>
-<summary><b>④ 移行計画と承認</b> — 移行先に合わせた Plan を人が承認する</summary>
+<summary><b>4. デプロイ計画と承認</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -133,13 +122,13 @@ sequenceDiagram
   WF->>WF: 実行時に承認済み digest を再照合
 ```
 
-- 接続の意図から作る **NetworkPolicy**：既定はすべて遮断し、アプリ→DB など移行元で使っていた経路だけを開けます。
-- 承認は特定の Revision に対してだけ有効で、実行時に digest が異なれば（`ARTIFACT_DIGEST_MISMATCH`）配備しません。
+- 移行先のプロファイル（オンプレミス、AWS、GCP）に合わせて Namespace、NetworkPolicy、DB、アプリの構成を作り、Revision として保存します。
+- 承認は Revision 単位です。デプロイ時のイメージ digest が承認時と異なる場合は `ARTIFACT_DIGEST_MISMATCH` で中止します。
 
 </details>
 
 <details>
-<summary><b>⑤ オンプレミス構築</b> — ポートを開けずにユーザーのクラスターへ配備する</summary>
+<summary><b>5. オンプレミスへのデプロイ</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -150,17 +139,19 @@ sequenceDiagram
   AG->>API: WireGuard 公開鍵を登録 → トンネル IP
   RL->>API: peer 一覧を同期
   AG-->>RL: 外向きにハンドシェイク（ユーザー側の受信ポート不要）
-  AG->>API: ポーリング — 承認済みジョブを受信
+  AG->>API: ポーリング: 承認済みジョブを受信
   AG->>AG: Namespace → NetworkPolicy → DB → App
   AG->>API: 進行・結果を報告 → Pod · DB · アプリ · トンネル経由ヘルスを確認
 ```
 
-- ユーザーは Agent の Helm チャートを**一度インストールする**だけです。失敗すると直前の Revision に戻します。
+- ユーザーは Agent の Helm チャートを一度インストールするだけです。Agent はワンタイムトークンで登録し、プラットフォームへの外向き接続だけを行います。
+- WireGuard トンネルも Agent から中継サーバーへ接続するため、ユーザーのネットワークでポートを開ける必要はありません。
+- Agent は承認済みのジョブをポーリングで受け取り、Namespace、NetworkPolicy、DB、アプリの順にデプロイして結果を報告します。失敗した場合は直前の Revision に戻します。
 
 </details>
 
 <details>
-<summary><b>⑥ データ複製と DB 切替</b> — 書き込みをほとんど止めない</summary>
+<summary><b>6. データ複製と DB 切替</b></summary>
 
 ```mermaid
 flowchart LR
@@ -171,12 +162,14 @@ flowchart LR
   PB --> SW[書き込み先を移行先へ]
 ```
 
-- クラウド間（EKS→GKE）の検証：書き込み停止 **83ms**、行数・チェックサム一致、アプリの書き込みエラー 0 件。
+- スキーマと初期データをコピーしたあと、論理レプリケーションで変更分に追いつきます。
+- DB の切り替えは 2 回目の承認のあとに行います。PgBouncer で書き込みを一時停止し、シーケンスを合わせ、行数とチェックサムを比較してから移行先 DB に切り替えます。
+- EKS から GKE への検証では、書き込みの停止は 83ms で、行数とチェックサムは一致しました。
 
 </details>
 
 <details>
-<summary><b>⑦ トラフィック切替</b> — 段階的に移し、異常なら戻す</summary>
+<summary><b>7. トラフィック切替</b></summary>
 
 ```mermaid
 flowchart LR
@@ -188,9 +181,10 @@ flowchart LR
   G -->|失敗| RB[自動ロールバック → 移行元 100%]
 ```
 
-</details>
+- 中継サーバーの Envoy の重みを 10%、50%、100% の順に変えます。各段階でリクエスト数、失敗、遅延を見て、基準を超えたら移行元に戻します。
+- Web からロールバックや再試行を実行することもできます。
 
----
+</details>
 
 ## アーキテクチャ
 
@@ -231,83 +225,89 @@ flowchart TB
   ENV -->|トンネル| K3S
 ```
 
-## 使っているクラウド
+## 使用しているクラウドサービス
 
 | クラウド | サービス | 用途 |
 | --- | --- | --- |
-| AWS | EC2 · SSM · CloudFormation | プラットフォームと中継サーバーの運用、SSH なしの配備、接続ロールのテンプレート |
-| AWS | EKS · IAM ロール・アクセスエントリ · CloudTrail · VPC | 移行元の読み取り専用分析、データ移行用に権限を絞った別ロール |
-| AWS | ECR · S3 | digest で固定したイメージ、ソースとログの保管 |
-| Google Cloud | GKE · Terraform | クラウドの移行先、クラウド間データ移行の検証 |
-| オンプレミス | K3s · Helm · WireGuard | Agent の配備、外向きだけのトンネル |
+| AWS | EC2、SSM、CloudFormation | プラットフォームと中継サーバーの運用、デプロイ、接続ロールのテンプレート |
+| AWS | EKS、IAM（ロール・アクセスエントリ）、CloudTrail、VPC | 移行元の分析（読み取り専用）、データ移行用の別ロール |
+| AWS | ECR、S3 | ビルドしたイメージ、ソースとビルドログ |
+| Google Cloud | GKE、Terraform | クラウドへのデプロイ、データ移行の検証 |
+| オンプレミス | K3s、Helm、WireGuard | Agent のデプロイ、トンネル |
 
-## AI を使う場所と安全装置
+## AI の利用範囲
 
-| どこで | 何を | 安全装置 |
-| --- | --- | --- |
-| 分析 | 移行元の構成を標準リソースに対応付ける | 判断ごとに根拠（ファイル:行）を残し、Plan プレビューで人が確認 |
-| サンドボックス | テスト生成、失敗の修正（Fixer） | 外部通信を遮断した一時的な場所だけで実施し、修正後は再テスト合格が必須 |
-| 共通 | Claude 呼び出し | コードで強制するコスト上限（移行1件 $3 · 1日 $20 · 1か月 $100）と使用量台帳。モデルにはマスクした根拠の断片だけを送り、`.env` の値やコード全体は送らない（[ADR-004](docs/decisions/ADR-004.md)） |
+AI には Claude を使っています。使っているのは次の 3 か所です。
 
-## どこまで動くか
+- 分析：移行元の構成をプラットフォームの標準リソースに対応付けます。判断ごとに根拠（ファイルと行番号）を残し、人が計画のプレビューで確認します。
+- サンドボックス：テストを作り、失敗したテストの原因を直します。外向きの通信を遮断したサンドボックスの中だけで動きます。
+- コストとデータ：移行 1 件あたり $3、1 日 $20、1 か月 $100 の上限をコードで適用しています。モデルにはマスクした根拠の一部だけを送り、`.env` の値やコード全体は送りません。詳しくは [ADR-004](docs/decisions/ADR-004.md) を参照してください。
 
-> デモで見せるのはモックではなく、デモサーバーで実際に動く流れです。進行中の部分はそう明記しています。
+## 実装状況
+
+デモサーバーで実際に動いている範囲です。
 
 | 段階 | 状態 |
 | --- | --- |
-| 接続・範囲選択、分析、イメージビルド、サンドボックス検証 | ✅ デモサーバーで実際に動作 |
-| 計画・承認、オンプレミス構築（Agent・トンネル） | ✅ 実際に動作 — ユーザーの K3s にアプリと DB を配備し、4つの確認に合格 |
-| トラフィック切替 | 🟡 実行で検証中 — 段階的な重み切替への進入を確認 |
-| データ複製・DB 切替 | 🟡 クラウド間（EKS→GKE）で検証済み · オンプレミス経路は実装中（[ADR-007](docs/decisions/ADR-007.md)） |
+| 接続・範囲選択、分析、イメージビルド、サンドボックス検証 | 動作 |
+| デプロイ計画・承認、オンプレミスへのデプロイ（Agent・トンネル） | 動作。ユーザーの K3s へのアプリと DB のデプロイまで確認 |
+| トラフィック切替 | 検証中。実際の実行で段階的な切替の開始まで確認 |
+| データ複製・DB 切替 | EKS→GKE は検証済み。オンプレミスの経路は実装中（[ADR-007](docs/decisions/ADR-007.md)） |
 
-## 技術的に工夫したこと
+## 主な設計判断
 
-- **長い処理を失わない** — 数時間かかる承認待ちやサーバー再起動に耐えるため Temporal を選び、移行の実行中にコードを変えるときは patch マーカーで新旧の実行を分けました（[ADR-001](docs/decisions/ADR-001.md)）。
-- **検証したものだけを配備する** — サンドボックスと本番が同じイメージ digest と同じレンダラーを使い、実行時に承認済み digest を再照合します（[ADR-003](docs/decisions/ADR-003.md)）。
-- **ユーザー側に穴を開けない** — オンプレミス Agent とトンネルはユーザー側から外向きにだけ接続します。データトンネルの向きも同じ原則で決めました（[ADR-007](docs/decisions/ADR-007.md)）。
-- **秘密情報を漏らさない** — `.env` は暗号化保存して以降は参照だけを渡し、Agent・承認者のトークンは DB に digest だけを残します。
-- **権限を分ける** — 移行元の接続は読み取り専用ロール、データ移行は2つの Namespace に絞った別ロールを使います。
+- Temporal を選んだ理由と、実行中のワークフローを保ったままコードを変更する方法：[ADR-001](docs/decisions/ADR-001.md)
+- サンドボックスで検証したイメージ digest を本番のデプロイにそのまま使う方式：[ADR-003](docs/decisions/ADR-003.md)
+- 移行元・移行先環境の接続方式（AWS のロール委任、GCP の固定プロジェクト）：[ADR-005](docs/decisions/ADR-005.md)
+- トラフィック切替を Envoy の中継で行う理由：[ADR-006](docs/decisions/ADR-006.md)
+- オンプレミスのデータ移行経路を移行元側のゲートウェイにした理由：[ADR-007](docs/decisions/ADR-007.md)
 
-## チーム開発のやり方
+秘密情報はリポジトリ、イベント、ログに残しません。`.env` は暗号化して保存し以降は参照だけを渡します。Agent と承認者のトークンは DB にハッシュだけを保存します。
 
-- 判断は **ADR 7件**と領域ごとの仕様（`specs/`）に残し、作業は **チケット136件**（`tickets/`）に分けて、代替案・選んだ理由・確認結果を記録しました。
-- すべての変更はブランチ → PR → CI（ruff、pytest **約3,000件**）→ squash マージで取り込み、マージ済み PR は約160件です。
-- 領域（分析・検証 / Provisioning / データ移行 / トラフィック / Web）ごとに担当を置き、互いの約束は `packages/contracts` とイベントスキーマで合わせました。
+## 開発の進め方
 
----
+- 判断は `docs/decisions/` の ADR 7 件と領域ごとの仕様（`specs/`）に残しました。作業は `tickets/` のチケット 136 件に分け、検討した代替案、選んだ理由、確認結果を一緒に書きました。
+- 変更はすべて PR で出し、CI（ruff、pytest 約 3,000 件）を通してから squash マージしました。これまでにマージした PR は約 160 件です。
+- 分析・検証、Provisioning、データ移行、トラフィック、Web で担当を分け、領域間のインターフェースは `packages/contracts` とイベントスキーマで合わせました。
 
 ## リポジトリ構成
 
-| パス | 役割 |
+| パス | 内容 |
 | --- | --- |
-| `apps/api` | FastAPI — 移行の開始・参照・承認、接続、Agent・トンネル、イベント（SSE）、レポート |
-| `apps/worker` | Temporal Workflow · Activity · Worker |
-| `packages/contracts` | 契約 — イベント、タスクキュー、入力モデル |
-| `packages/scanners` | コード · マニフェスト · AWS 分析 |
-| `packages/agents` | AI マッピング · テスト生成 · Fixer |
+| `apps/api` | FastAPI。移行の開始・参照・承認、接続、Agent・トンネル、イベント（SSE）、レポート |
+| `apps/worker` | Temporal の Workflow、Activity、Worker |
+| `packages/contracts` | イベント、タスクキュー、入力モデルの定義 |
+| `packages/scanners` | コード、マニフェスト、AWS の分析 |
+| `packages/agents` | AI マッピング、テスト生成、Fixer |
 | `packages/testsuite` | サンドボックスのテスト実行 |
-| `packages/providers` | レンダラー、NetworkPolicy、移行先ごとの構築、オンプレミス Agent・トンネル |
-| `packages/data` | データ複製 · DB 切替 |
-| `packages/traffic` | Envoy 設定 · トラフィック切替 |
+| `packages/providers` | レンダラー、NetworkPolicy、移行先ごとのデプロイ、オンプレミス Agent・トンネル |
+| `packages/data` | データ複製、DB 切替 |
+| `packages/traffic` | Envoy の設定、トラフィック切替 |
 | `infra/` | デモサーバー、Agent の Helm チャート、中継サーバー、接続テンプレート、Terraform |
-| `docs/` · `specs/` · `tickets/` | 設計判断、仕様、作業記録 |
+| `docs/`、`specs/`、`tickets/` | 設計判断、仕様、作業記録 |
 
-## はじめかた
+## ローカルでの実行
 
-必要なツール：Python 3.11、[uv](https://docs.astral.sh/uv/)、Docker Compose。ローカル実行・Agent 登録・ファイルごとの役割の詳細は[開発ガイド](docs/development.md)（韓国語）にあります。
+Python 3.11、[uv](https://docs.astral.sh/uv/)、Docker Compose が必要です。詳しい実行方法、Agent の登録、ファイルごとの役割は[開発ガイド](docs/development.md)（韓国語）を参照してください。
 
 ```bash
 cp .env.example .env
 make setup
 make infra-up    # PostgreSQL, Temporal
 make workers     # 別のターミナルで
-make api         # 別のターミナルで → http://localhost:8000/docs
+make api         # 別のターミナルで。http://localhost:8000/docs
 ```
 
-## さらに読む
+## ドキュメント
 
-設計文書の多くは韓国語で書かれています。
+設計ドキュメントの多くは韓国語で書かれています。
 
-[開発ガイド](docs/development.md) · [設計判断（ADR）](docs/decisions/) · [Temporal ガイド](docs/architecture/temporal-flow.md) · [イベントガイド](docs/engineering/events-guide.md) · [`.env` 参照ガイド](docs/engineering/env-file-guide.md) · [オンプレミス Agent の導入・運用](specs/provisioning/onprem-agent-install.md) · [デモサーバー運用](infra/demo/README.md)
+- [開発ガイド](docs/development.md)
+- [設計判断（ADR）](docs/decisions/)
+- [Temporal ガイド](docs/architecture/temporal-flow.md)
+- [イベントガイド](docs/engineering/events-guide.md)
+- [`.env` 参照ガイド](docs/engineering/env-file-guide.md)
+- [オンプレミス Agent の導入と運用](specs/provisioning/onprem-agent-install.md)
+- [デモサーバーの運用](infra/demo/README.md)
 
 <!-- TODO: チーム紹介 -->
