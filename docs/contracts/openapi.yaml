@@ -935,6 +935,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /provisioning/approvers/{approver_id}/migrations:
+    post:
+      tags:
+      - provisioning approval
+      summary: Grant Approver Migrations
+      description: 'Ticket 60: add Migration IDs to an approver (demo: one approver,
+        a new Migration per run).'
+      operationId: grant_approver_migrations_provisioning_approvers__approver_id__migrations_post
+      parameters:
+      - name: approver_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Approver Id
+      - name: x-approval-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Approval-Admin-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproverMigrations'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproverGrant'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /provisioning/plans/{plan_id}/revisions/{revision}/approvals:
     post:
       tags:
@@ -2355,6 +2397,37 @@ components:
       - approver_id
       - credential
       title: ApproverCredential
+    ApproverGrant:
+      properties:
+        approver_id:
+          type: string
+          title: Approver Id
+        migration_ids:
+          items:
+            type: string
+          type: array
+          title: Migration Ids
+      additionalProperties: false
+      type: object
+      required:
+      - approver_id
+      - migration_ids
+      title: ApproverGrant
+    ApproverMigrations:
+      properties:
+        migration_ids:
+          items:
+            type: string
+            minLength: 1
+            pattern: ^\S(?:.*\S)?$
+          type: array
+          minItems: 1
+          title: Migration Ids
+      additionalProperties: false
+      type: object
+      required:
+      - migration_ids
+      title: ApproverMigrations
     ApproverRegistration:
       properties:
         approver_id:

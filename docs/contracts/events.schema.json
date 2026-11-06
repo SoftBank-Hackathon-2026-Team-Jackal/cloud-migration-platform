@@ -393,6 +393,12 @@
           "enum": [
             "cutover"
           ]
+        },
+        "pending_decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
         }
       },
       "required": [
@@ -2461,7 +2467,10 @@
                 "enum": [
                   "CREATE",
                   "PINNED",
-                  "KEEP_SOURCE"
+                  "KEEP_SOURCE",
+                  "UPDATE",
+                  "DELETE",
+                  "EXISTING"
                 ]
               },
               "kind": {
@@ -2480,6 +2489,19 @@
               },
               "warning": {
                 "type": "string"
+              },
+              "resource_type": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "number",
+                "minimum": 0
+              },
+              "backend_name": {
+                "type": "string"
+              },
+              "defaulted": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -2706,6 +2728,31 @@
             "lines"
           ],
           "additionalProperties": false
+        },
+        "pending_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "resource": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "manifest_digest": {
+          "type": "string"
         }
       },
       "required": [
@@ -2717,6 +2764,177 @@
         "env_remap",
         "security_rules",
         "validation"
+      ],
+      "additionalProperties": false
+    },
+    "data:plan.preview.backend": {
+      "type": "object",
+      "description": "백엔드 Preview(cmp_contracts.plan.Preview) 그대로 + 프론트 감싸기 [가정](plan_id·revision·source·target·env_remap·security_rules는 Preview에 없어 계획 입력·앱 Values에서 채운다). 화면은 previewAdapter로 옮긴다.",
+      "properties": {
+        "contract_version": {
+          "const": "1"
+        },
+        "manifest_digest": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/previewChange"
+          }
+        },
+        "applied_defaults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/previewChange"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
+        },
+        "pending_decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validationIssue"
+          }
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "platform",
+            "location"
+          ],
+          "additionalProperties": false
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "platform",
+            "location"
+          ],
+          "additionalProperties": false
+        },
+        "env_remap": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "secret": {
+                "type": "boolean"
+              },
+              "keep": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "key",
+              "from",
+              "to",
+              "secret"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "security_rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "port": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "protocol": {
+                "enum": [
+                  "TCP",
+                  "UDP",
+                  "ANY"
+                ]
+              },
+              "action": {
+                "enum": [
+                  "ALLOW",
+                  "DENY"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "port",
+              "protocol",
+              "action"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "manifest_digest",
+        "changes",
+        "applied_defaults",
+        "warnings",
+        "errors",
+        "pending_decisions"
       ],
       "additionalProperties": false
     },
@@ -2747,7 +2965,14 @@
           "type": "string"
         },
         "data": {
-          "$ref": "#/$defs/data:plan.preview"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/data:plan.preview"
+            },
+            {
+              "$ref": "#/$defs/data:plan.preview.backend"
+            }
+          ]
         }
       },
       "required": [
@@ -3591,6 +3816,68 @@
         "type",
         "status",
         "data"
+      ],
+      "additionalProperties": false
+    },
+    "previewChange": {
+      "type": "object",
+      "description": "cmp_contracts.plan.ResourceChange. size는 검토된 표시용 문자열.",
+      "properties": {
+        "resource_type": {
+          "type": "string",
+          "description": "NETWORK · CLUSTER · NODE · APP · DATABASE · STORAGE · INGRESS"
+        },
+        "action": {
+          "enum": [
+            "CREATE",
+            "UPDATE",
+            "DELETE",
+            "READ",
+            "NO_CHANGE"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "size": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "resource_type",
+        "action",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "validationIssue": {
+      "type": "object",
+      "description": "cmp_contracts.provisioning.ValidationIssue",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "path",
+        "message"
       ],
       "additionalProperties": false
     }

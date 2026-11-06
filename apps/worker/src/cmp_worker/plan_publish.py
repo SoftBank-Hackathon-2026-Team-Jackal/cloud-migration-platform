@@ -15,6 +15,7 @@ from pathlib import Path
 from cmp_api.agent_registry import RegisteredAgent
 from cmp_api.approvals import (
     ApprovalError,
+    PlanApproval,
     PlanExecution,
     PlanPublication,
     PlanRevision,
@@ -31,6 +32,7 @@ from cmp_api.plan_inputs import (
     load_planning_input,
     template_version,
 )
+from cmp_contracts.analysis import AnalysisReport, MappingRow
 from cmp_contracts.artifact import ArtifactRef
 from cmp_contracts.env_plan import EnvPlan, EnvPlanEntry, EnvVarRef
 from cmp_contracts.plan import OnPremIdentity, PlanManifest, Preview, ResourceChange
@@ -79,11 +81,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from cmp_worker.activities.aws_workloads import target_from_refs as aws_target
 from cmp_worker.activities.gcp_workloads import target_from_refs as gcp_target
+from cmp_worker.provisioning_events import PlanView
 from cmp_worker.provisioning_v2 import prepare_plan_v2
 
 ROOT = resource_root()
 DB_CHART = ROOT / "infra/helm/postgres"
 APP_CHART = ROOT / "infra/helm/application"
+PLATFORMS = {"AWS": "EKS", "GCP": "GKE", "ON_PREM": "K3s"}
 CLUSTER_TARGETS = {"AWS": aws_target, "GCP": gcp_target}  # 09 W11 / 11 K12 ref names
 # v2 resource-output binding → v1 DATABASE env field read by 09/11 (W6).
 DATABASE_FIELDS = {
@@ -342,11 +346,18 @@ class PlanPublisher:
         return registration
 
     def _publish_revision(self, session, plan_id, digest, template, build) -> dict:
-        """P3: reuse the latest Revision for the same input Digest, else publish latest+1."""
+        """P3: reuse the latest Revision for the same input Digest, else publish latest+1.
+
+        Ticket 60: a REJECTed Revision is never reused (it can never be approved again), so the
+        same input after a REJECT publishes latest+1 for a new decision."""
         latest = latest_revision(session, plan_id)
         if latest is not None:
             published = session.get(PlanPublication, (plan_id, latest))
-            if published is not None and published.input_digest == digest:
+            if (
+                published is not None
+                and published.input_digest == digest
+                and not _rejected(session, plan_id, latest)
+            ):
                 return self._result(session, plan_id, latest, "PLAN_REUSED")
         revision = (latest or 0) + 1
         plan = {"plan_id": plan_id, "revision": revision, "template_version": template}
@@ -378,6 +389,38 @@ class PlanPublisher:
             "manifest_digest": manifest_digest(manifest),
             "preview_digest": sha256_json(row.preview),
         }
+
+    # -- ticket 60: what the web shows for a published Revision ------------------------------
+
+    def plan_view(self, migration_id: str, result: dict) -> PlanView:
+        """Stored Preview, target, security rules and analysis mapping rows (names only)."""
+        with self._sessions() as session:
+            row = session.get(PlanRevision, (result["plan_id"], result["revision"]))
+            registration = self._registration(session, migration_id)
+        manifest = PlanManifest.model_validate(row.manifest)
+        identity = manifest.target
+        target = {
+            "provider": identity.provider,
+            "platform": PLATFORMS[identity.provider],
+            "location": getattr(identity, "region", None) or identity.environment_id,
+        }
+        try:
+            spec, _ = self._validated(registration)
+            rules = _security_rules(spec)
+        except PublishFailure:
+            rules = ()
+        return PlanView(
+            preview=row.preview, target=target, security_rules=rules, rows=self._rows(registration)
+        )
+
+    def _rows(self, registration: PlanningInputRegistration) -> tuple[MappingRow, ...] | None:
+        """Mapping rows of the analysis report the Sandbox verified (shared ArtifactStore)."""
+        sha = registration.planning_request.sandbox.report_ref.sha256
+        try:
+            report = AnalysisReport.model_validate_json(self._store.read_raw(sha))
+        except (RolloutError, ValueError):
+            return None
+        return tuple(report.mapping)
 
     def _env(self, registration, spec, namespace: str) -> EnvRendering | None:
         """ENV-04: the approved EnvPlan → app env bindings + Preview lines (names only).
@@ -764,6 +807,39 @@ def network_policies(spec: ProvisioningSpecV2, deployment: dict) -> NetworkRende
         tuple(change(line) for line in lines),
         tuple(change(line) for line in defaults),
     )
+
+
+def _rejected(session: Session, plan_id: str, revision: int) -> bool:
+    decision = session.scalar(
+        select(PlanApproval.decision).where(
+            PlanApproval.plan_id == plan_id, PlanApproval.revision == revision
+        )
+    )
+    return decision == "REJECT"
+
+
+def _security_rules(spec: ProvisioningSpecV2) -> tuple[dict, ...]:
+    """Approved network intent (+ app → DB) as allow rules, then the default deny (ticket 26)."""
+    database, app = _topology(spec)
+    intents = with_connections(
+        [i.model_dump(mode="json") for i in spec.requirements.network_intent],
+        [(app.id, database.id)],
+    )
+    rules = [
+        {"from": "ingress", "to": app.id, "port": app.port, "protocol": "TCP", "action": "ALLOW"}
+    ]
+    rules += [
+        {
+            "from": intent["source_resource_id"],
+            "to": intent.get("destination_resource_id") or intent["external_host"],
+            "port": intent["port"],
+            "protocol": intent.get("protocol") or "TCP",
+            "action": "ALLOW",
+        }
+        for intent in intents
+    ]
+    rules.append({"from": "*", "to": "*", "port": None, "protocol": "ANY", "action": "DENY"})
+    return tuple(rules)
 
 
 def _env_plan_document(registration: PlanningInputRegistration) -> dict:

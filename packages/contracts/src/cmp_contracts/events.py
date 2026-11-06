@@ -159,7 +159,7 @@ class PlanPreviewResourcesItem(WebModel):
     detail: str
     size: str
     size_detail: str | None = Field(default=None)
-    change: Literal["CREATE", "PINNED", "KEEP_SOURCE"]
+    change: Literal["CREATE", "PINNED", "KEEP_SOURCE", "UPDATE", "DELETE", "EXISTING"]
     kind: (
         Literal[
             "ingress",
@@ -176,6 +176,10 @@ class PlanPreviewResourcesItem(WebModel):
         | None
     ) = Field(default=None)
     warning: str | None = Field(default=None)
+    resource_type: str | None = Field(default=None)
+    quantity: float | None = Field(default=None, ge=0)
+    backend_name: str | None = Field(default=None)
+    defaulted: bool | None = Field(default=None)
 
 
 class PlanPreviewEnvRemapItem(WebModel):
@@ -248,13 +252,58 @@ class PlanPreviewData(WebModel):
     env_remap: list[PlanPreviewEnvRemapItem]
     security_rules: list[PlanPreviewSecurityRulesItem]
     validation: PlanPreviewValidation
+    pending_decisions: list[PlanPreviewValidationErrorsItem] | None = Field(default=None)
+    manifest_digest: str | None = Field(default=None)
     rollout: PlanPreviewRollout | None = Field(default=None)
     cost: PlanPreviewCost | None = Field(default=None)
+
+
+# Optional *and* nullable on the web side (`type: [x, "null"]`): keep the null branch.
+NULLABLE = {"x-nullable": True}
+
+
+class PreviewChange(WebModel):
+    """cmp_contracts.plan.ResourceChange. size는 검토된 표시용 문자열."""
+
+    resource_type: str
+    action: Literal["CREATE", "UPDATE", "DELETE", "READ", "NO_CHANGE"]
+    name: str
+    quantity: int | None = Field(default=None, ge=1, json_schema_extra=NULLABLE)
+    size: str | None = Field(default=None, json_schema_extra=NULLABLE)
+
+
+class ValidationIssue(WebModel):
+    """cmp_contracts.provisioning.ValidationIssue"""
+
+    code: str
+    path: str
+    message: str
+
+
+class PlanPreviewBackendData(WebModel):
+    """백엔드 Preview(cmp_contracts.plan.Preview) 그대로 + 계획 식별자·대상·보안 규칙(티켓 60).
+
+    웹은 `changes`가 배열이면 이 모양으로 읽는다(`isBackendPreview`)."""
+
+    contract_version: Literal["1"] | None = Field(default=None)
+    manifest_digest: str
+    changes: list[PreviewChange]
+    applied_defaults: list[PreviewChange]
+    warnings: list[ValidationIssue]
+    errors: list[ValidationIssue]
+    pending_decisions: list[ValidationIssue]
+    plan_id: str | None = Field(default=None)
+    revision: int | None = Field(default=None, ge=1)
+    source: PlanPreviewSource | None = Field(default=None)
+    target: PlanPreviewTarget | None = Field(default=None)
+    env_remap: list[PlanPreviewEnvRemapItem] | None = Field(default=None)
+    security_rules: list[PlanPreviewSecurityRulesItem] | None = Field(default=None)
 
 
 class ApprovalRequiredData(WebModel):
     excluded: list[str]
     rollback_policy: str
+    pending_decisions: list[ValidationIssue] | None = Field(default=None)
     gate: Literal["cutover"] | None = Field(default=None)
 
 
@@ -646,6 +695,21 @@ DATA_MODELS: dict[str, type[WebModel]] = {
     "sandbox.attempt": SandboxAttemptData,
     "sandbox.done": SandboxDoneData,
 }
+# Types whose `data` has a second accepted shape (web `oneOf`), chosen when `data.changes` is a list (web `isBackendPreview`).
+ALTERNATE_MODELS: dict[str, tuple[str, type[WebModel]]] = {
+    "plan.preview": ("plan.preview.backend", PlanPreviewBackendData),
+}
+NAMED_DEFS: dict[str, type[WebModel]] = {
+    "previewChange": PreviewChange,
+    "validationIssue": ValidationIssue,
+}
+
+
+def _model_for(event_type: str, data: dict[str, Any]) -> type[WebModel] | None:
+    alternate = ALTERNATE_MODELS.get(event_type)
+    if alternate is not None and isinstance(data.get("changes"), list):
+        return alternate[1]
+    return DATA_MODELS.get(event_type)
 
 
 # ---- envelope ----
@@ -727,7 +791,7 @@ def to_web(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
 
 def validate_data(event_type: str, data: dict[str, Any]) -> dict[str, Any]:
     """Return web-shaped JSON for `data` or raise `ValueError` (unknown type, invalid fields)."""
-    model = DATA_MODELS.get(event_type)
+    model = _model_for(event_type, data)
     if model is None:
         raise ValueError(f"unknown event type: {event_type}")
     return model.model_validate(to_web(event_type, data)).model_dump(mode="json", by_alias=True)
@@ -751,7 +815,7 @@ def _strip_optional_null(schema: dict) -> dict:
         for name, prop in props.items():
             prop.pop("default", None)
             prop.pop("title", None)
-            if name in required:
+            if prop.pop("x-nullable", False) or name in required:
                 continue
             branches = prop.get("anyOf")
             if branches and any(b.get("type") == "null" for b in branches):
@@ -768,14 +832,23 @@ def event_json_schema() -> dict:
     """The web-layout schema: `$defs` `data:<type>`, `event:<type>`, `snapshotData`."""
     defs: dict[str, Any] = {"phase": {"enum": list(PHASES)}, "status": {"enum": list(STATUSES)}}
     one_of = []
+
+    def add(name: str, model: type[WebModel]) -> None:
+        schema = _strip_optional_null(model.model_json_schema(by_alias=True, mode="serialization"))
+        nested = schema.pop("$defs", {})
+        defs.update({f"model:{k}": v for k, v in nested.items()})  # already stripped
+        defs[name] = schema
+
+    for name, model in NAMED_DEFS.items():
+        add(name, model)
     for event_type, model in DATA_MODELS.items():
-        data_schema = _strip_optional_null(
-            model.model_json_schema(by_alias=True, mode="serialization")
-        )
-        nested = data_schema.pop("$defs", {})
-        defs.update({f"model:{k}": _strip_optional_null(v) for k, v in nested.items()})
-        defs[f"data:{event_type}"] = data_schema
-        defs[f"event:{event_type}"] = _envelope(event_type, f"#/$defs/data:{event_type}")
+        add(f"data:{event_type}", model)
+        data_ref: Any = f"#/$defs/data:{event_type}"
+        if event_type in ALTERNATE_MODELS:
+            alternate, alternate_model = ALTERNATE_MODELS[event_type]
+            add(f"data:{alternate}", alternate_model)
+            data_ref = [data_ref, f"#/$defs/data:{alternate}"]
+        defs[f"event:{event_type}"] = _envelope(event_type, data_ref)
         one_of.append({"$ref": f"#/$defs/event:{event_type}"})
     defs["nonSnapshotEvent"] = {"oneOf": list(one_of)}
     defs["snapshotData"] = {
@@ -807,7 +880,12 @@ def _prefix_model_refs(defs: dict) -> dict:
     return json.loads(raw)
 
 
-def _envelope(event_type: str, data_ref: str) -> dict:
+def _envelope(event_type: str, data_ref: str | list[str]) -> dict:
+    data = (
+        {"$ref": data_ref}
+        if isinstance(data_ref, str)
+        else {"oneOf": [{"$ref": ref} for ref in data_ref]}
+    )
     return {
         "type": "object",
         "properties": {
@@ -821,7 +899,7 @@ def _envelope(event_type: str, data_ref: str) -> dict:
             "status": {"$ref": "#/$defs/status"},
             "progress": {"type": "number"},
             "message": {"type": "string"},
-            "data": {"$ref": data_ref},
+            "data": data,
         },
         "required": ["seq", "at", "phase", "type", "status", "data"],
         "additionalProperties": False,

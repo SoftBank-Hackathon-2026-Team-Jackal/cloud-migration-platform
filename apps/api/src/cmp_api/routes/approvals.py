@@ -28,6 +28,7 @@ from cmp_api.approvals import (
     authorize_view,
     execution_status,
     get_approval,
+    grant_migrations,
     mark_delivery,
     record_decision,
     register_approver,
@@ -50,6 +51,7 @@ STATUS = {
     "APPROVAL_TARGET_MISMATCH": 409,
     "ALREADY_DECIDED": 409,
     "APPROVER_EXISTS": 409,
+    "APPROVER_NOT_FOUND": 404,
     "PLAN_NOT_APPROVABLE": 422,
 }
 
@@ -61,6 +63,15 @@ class Request(BaseModel):
 class ApproverRegistration(Request):
     approver_id: Text
     migration_ids: list[Text] = Field(min_length=1)
+
+
+class ApproverMigrations(Request):
+    migration_ids: list[Text] = Field(min_length=1)
+
+
+class ApproverGrant(Request):
+    approver_id: str
+    migration_ids: list[str]
 
 
 class ApproverCredential(Request):
@@ -205,6 +216,22 @@ def create_approver(request: ApproverRegistration, session: SessionDep):
     except ApprovalError as exc:
         raise _http_error(exc) from None
     return ApproverCredential(approver_id=request.approver_id, credential=credential)
+
+
+@router.post(
+    "/approvers/{approver_id}/migrations",
+    response_model=ApproverGrant,
+    dependencies=[Depends(require_admin)],
+)
+def grant_approver_migrations(approver_id: str, request: ApproverMigrations, session: SessionDep):
+    """Ticket 60: add Migration IDs to an approver (demo: one approver, a new Migration per run)."""
+    try:
+        granted = grant_migrations(
+            session, approver_id=approver_id, migration_ids=request.migration_ids
+        )
+    except ApprovalError as exc:
+        raise _http_error(exc) from None
+    return ApproverGrant(approver_id=approver_id, migration_ids=granted)
 
 
 @router.post(

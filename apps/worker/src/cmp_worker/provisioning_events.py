@@ -1,4 +1,5 @@
-"""Provisioning-owned events (ticket 24): `plan.ready`, `provision.resource`, `provision.check`.
+"""Provisioning-owned events (tickets 24, 60): `plan.step`, `plan.preview`, `plan.ready`,
+`approval.required`, `provision.resource`, `provision.check`.
 
 Workflow heartbeat strings (`started`, `running`, `connect`, `helm:<name>`, ...) stay command-line
 values for Temporal liveness; these helpers emit the web events at step boundaries instead (E16).
@@ -9,6 +10,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+from cmp_contracts.analysis import MappingRow
 from cmp_contracts.plan import Preview
 from cmp_providers.terraform_events import ApplyProgress
 
@@ -143,6 +145,87 @@ def log_workload_result(step: str, result: dict) -> None:
         log_result(run.migration_id, step, result)
 
 
+# ---- planning / approval (ticket 60): plan.step* → plan.preview → plan.ready → approval.required
+
+
+@dataclass(frozen=True)
+class PlanView:
+    """What a published Revision shows before approval; names, codes and Digests only."""
+
+    preview: dict  # stored `Preview` (cmp_contracts.plan), JSON
+    target: dict | None = None  # {provider, platform, location}
+    security_rules: tuple[dict, ...] = ()
+    rows: tuple[MappingRow, ...] | None = None  # None: analysis report not readable
+
+
+def plan_step(row: MappingRow) -> dict:
+    """Analysis mapping row → web `plan.step` (events-guide §2 계획: 매핑)."""
+    return {
+        "id": row.id,
+        "group": "code" if row.evidence and row.evidence[0].kind == "CODE" else "infrastructure",
+        "grade": row.grade,
+        "before": row.capability,
+        "after": "",  # MappingRow has no target service value yet
+        "evidence": ", ".join(item.locator for item in row.evidence),
+        "change": row.usage,
+        "action": row.treatment or "APPROVAL",
+        "keep_source": row.disposition == "KEEP",
+        "verification": row.status,
+    }
+
+
+def emit_plan_events(migration_id: str, result: dict, view: PlanView | None) -> None:
+    """Web script order for one published Revision. Never raises (emit_event logs rejects)."""
+    if result.get("status") != "PUBLISHED":
+        return
+    plan_key = f"{result['plan_id']}:{result['revision']}"
+    if view is not None:
+        if view.rows is None:
+            log_event(migration_id, "warning", "PLAN_STEP_SOURCE_UNAVAILABLE", {"plan": plan_key})
+        for row in view.rows or ():
+            emit_event(
+                migration_id,
+                "plan.step",
+                "planning",
+                "running",
+                plan_step(row),
+                idempotency_key=f"{plan_key}:step:{row.id}",
+            )
+        preview = {
+            **view.preview,
+            "plan_id": result["plan_id"],
+            "revision": result["revision"],
+            "security_rules": list(view.security_rules),
+        }
+        if view.target is not None:
+            preview["target"] = view.target
+        emit_event(
+            migration_id,
+            "plan.preview",
+            "planning",
+            "running",
+            preview,
+            idempotency_key=f"{plan_key}:preview",
+        )
+    emit_plan_ready(migration_id, result)
+    pending = (view.preview.get("pending_decisions") if view else None) or []
+    emit_event(
+        migration_id,
+        "approval.required",
+        "awaiting_approval",
+        "waiting",
+        {
+            # KEEP rows stay on the source (AV-022); the screen lists them as excluded.
+            "excluded": [row.id for row in (view.rows or ()) if row.disposition == "KEEP"]
+            if view
+            else [],
+            "rollback_policy": "",  # no backend rollback policy value at plan time
+            "pending_decisions": pending,
+        },
+        idempotency_key=f"{plan_key}:required",
+    )
+
+
 # ---- plan.ready ----
 
 
@@ -164,8 +247,10 @@ def emit_plan_ready(migration_id: str, result: dict) -> None:
     )
 
 
-class PlanReadyEvents:
-    """Wraps a `PlanPublisher`: each `publish*(migration_id, ...)` emits `plan.ready` on success.
+class PlanEvents:
+    """Wraps a `PlanPublisher`: each successful `publish*(migration_id, ...)` emits the planning
+    and approval events (ticket 60), read back through the publisher's `plan_view` when it has
+    one. A reused Revision emits the same values again (a retried publish still reaches the web).
 
     A wrapper keeps the publisher (and the Activity class) unchanged while ticket 22 edits them.
     """
@@ -180,7 +265,22 @@ class PlanReadyEvents:
 
         def publish(migration_id: str, *args, **kwargs):
             result = attribute(migration_id, *args, **kwargs)
-            emit_plan_ready(migration_id, result)
+            emit_plan_events(migration_id, result, self._view(migration_id, result))
             return result
 
         return publish
+
+    def _view(self, migration_id: str, result: dict) -> PlanView | None:
+        reader = getattr(self._publisher, "plan_view", None)
+        if reader is None or result.get("status") != "PUBLISHED":
+            return None
+        try:
+            return reader(migration_id, result)
+        except Exception as error:  # noqa: BLE001 — events never fail the publication
+            log_event(
+                migration_id, "warning", "PLAN_VIEW_UNAVAILABLE", {"error": type(error).__name__}
+            )
+            return None
+
+
+PlanReadyEvents = PlanEvents  # ticket 24 name

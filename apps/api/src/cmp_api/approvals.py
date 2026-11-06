@@ -197,6 +197,18 @@ def register_approver(session: Session, *, approver_id: str, migration_ids: list
     return credential
 
 
+def grant_migrations(session: Session, *, approver_id: str, migration_ids: list[str]) -> list[str]:
+    """Operator-only (ticket 60): let an existing approver decide more Migrations.
+
+    The credential is unchanged and never returned; scoping per Migration stays."""
+    approver = session.get(Approver, approver_id)
+    if approver is None:
+        raise ApprovalError("APPROVER_NOT_FOUND")
+    approver.migration_ids = sorted(set(approver.migration_ids) | set(migration_ids))
+    session.commit()
+    return list(approver.migration_ids)
+
+
 def authenticate_approver(session: Session, credential: str) -> Approver:
     approver = session.scalar(
         select(Approver).where(Approver.credential_digest == _digest(credential))
