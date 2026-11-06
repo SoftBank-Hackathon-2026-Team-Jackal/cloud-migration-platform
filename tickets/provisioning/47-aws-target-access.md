@@ -97,7 +97,9 @@ main 병합 뒤 깨끗한 체크아웃에서:
 | pull 역할 정책 `simulate-custom-policy` | 이 저장소 pull 3동작·`GetAuthorizationToken` `allowed`, push 4동작·`DeleteRepository`·다른 저장소 pull `implicitDeny` |
 | `uvx cfn-lint` `target-role.yaml`·`source-role.yaml`·`build-stack.yaml` | 오류 없음 |
 | `terraform validate`(docker `hashicorp/terraform:1.16.4`, AWS Provider 6.71.0, backend 제외 사본) · `terraform fmt -check` | `Success! The configuration is valid.` · 통과 |
-| `make check`(ruff + pytest) | 아래 PR 본문 기준 |
+| `make check`(ruff + pytest) | ruff 통과, 2349 passed, 9 skipped |
+| `bash infra/demo/deploy-build-stack.sh --plan`(변경 세트만, 실행 안 함) | `cmp-demo-build`: `EcrPullRole`(AWS::IAM::Role) **Add**, `BuildAccessPolicy` **Modify**(PolicyDocument, 교체 없음). `BuildRepository` 변경 없음(`PullAccountIds` 비어 있음) |
+| `bash infra/demo/deploy-connection-templates.sh --plan`(변경 세트만) | `cmp-demo-connection-templates`: `TemplateBucketPolicy` **Modify**(공개 접두어 `connections/v1/*` → `v2/*`, 교체 없음) |
 | `make openapi` | 차이 없음(HTTP 변경 없음) |
 
 ### 미검증·제한 사항
