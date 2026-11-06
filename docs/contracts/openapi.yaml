@@ -4749,6 +4749,11 @@ components:
             type: integer
           type: array
           title: Allowed Ports
+        kube_api_port:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Kube Api Port
         revoked:
           type: boolean
           title: Revoked
