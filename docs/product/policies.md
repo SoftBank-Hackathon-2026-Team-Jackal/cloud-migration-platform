@@ -65,6 +65,8 @@ Build 결과에는 소스·Dockerfile/빌드 설정·플랫폼 출처를, Sandbo
 
 이미지만 바뀌고 나머지 실행 요구가 같다면 같은 Chart와 검증 환경에서 이미지 교체 후 재검증한다. 포트·환경변수·DB 스키마/데이터·자원 요구가 바뀌면 Values 갱신 및 테스트 데이터 초기화/환경 재구성 필요성을 Sandbox가 판단한다. 이미지 교체가 무조건 안전하다고 간주하지 않는다.
 
+사용자 Dockerfile은 신뢰하지 않는 코드다. 빌드 단계(`RUN`)는 플랫폼 실행 자격(인스턴스 메타데이터의 역할 자격 등)에 닿지 않아야 한다. 데모 환경의 차단 방식은 [티켓 54](../../tickets/provisioning/54-build-isolation.md)를 따른다.
+
 결정은 [ADR-003](../decisions/ADR-003.md), 미구현 전환 범위는 [B-01](../../tickets/provisioning/b-01-image-build.md)을 따른다.
 
 ### P-11. 온프레미스 Agent 소유와 공통 배포 입력

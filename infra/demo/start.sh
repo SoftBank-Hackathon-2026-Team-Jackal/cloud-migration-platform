@@ -18,6 +18,9 @@ docker compose version
 # Keys/passwords are generated once and kept; the AWS profile file is regenerated (ticket 21).
 bash infra/demo/ensure-secrets.sh /opt/cmp/.env /opt/cmp/secrets
 
+# Ticket 54: user-app build steps (RUN on docker0) must not reach the instance metadata service.
+sh infra/demo/build-imds-guard.sh install
+
 compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
 "${compose[@]}" up -d platform-db temporal-db temporal temporal-ui
 # Build first: the migration must run with the new release's code, not the previously built image.
