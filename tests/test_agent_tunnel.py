@@ -10,7 +10,9 @@ import json
 import socket
 import subprocess
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from itertools import pairwise
 
 import pytest
 from cmp_providers.agent_runtime import HALT_SECONDS
@@ -28,7 +30,9 @@ from cmp_providers.agent_tunnel import (
     plan_from_config,
     postgres_ready,
     public_key,
+    read_wake,
     run_tunnel,
+    write_wake,
 )
 from cmp_providers.remote_agent import AgentControlClient, AgentTransportError
 
@@ -665,3 +669,121 @@ def test_client_tunnel_calls_use_the_credential_header_and_methods():
     assert all(r.get_header("Authorization") == "Bearer secret" for r in requests)
     with pytest.raises(AgentTransportError, match="INVALID_AGENT_OR_JOB_ID"):
         client.tunnel_config(agent_id="../x", credential="secret")
+
+
+# --- ticket 66 (#283): report right after an app port is assigned ------------------------------
+
+
+class Timeline:
+    """Fake clock + `wait` for `run_tunnel`: waiting advances time; stops at `until`."""
+
+    def __init__(self, clock, until):
+        self.clock, self.until, self.waits = clock, until, []
+        self.events: list[tuple[float, Callable]] = []
+
+    def at(self, when, action):
+        self.events.append((when, action))
+
+    def __call__(self, seconds):
+        self.waits.append(seconds)
+        self.clock.now += seconds
+        for when, action in list(self.events):
+            if self.clock.now >= when:
+                action()
+                self.events.remove((when, action))
+        return self.clock.now >= self.until
+
+
+class LiveLink(FakeLink):
+    def __init__(self, clock):
+        super().__init__()
+        self.clock = clock
+
+    def latest_handshake(self, relay_public_key):
+        return self.clock.now  # the relay keeps answering
+
+
+def scenario(until):
+    clock = Clock(now=0)
+    client = FakeClient()
+    client.config = config(exposed_ports=[5432])  # rollout not recorded yet
+    built, _ = manager(client=client, clock=clock, link=LiveLink(clock))
+    timeline = Timeline(clock, until)
+    stamped = []
+    original = client.report_tunnel_status
+
+    def report(**kwargs):
+        stamped.append((clock.now, kwargs["report"]))
+        original(**kwargs)
+
+    client.report_tunnel_status = report
+    return built, client, timeline, stamped
+
+
+def first_healthy(stamped):
+    return next(t for t, r in stamped if r["app_health_ok"] and r["code"] is None)
+
+
+def test_app_port_assigned_after_a_rollout_signal_is_reported_within_seconds():
+    built, client, timeline, stamped = scenario(until=900)
+    wake = {"token": None}
+    # Idle for 10 minutes, then the agent container finishes a rollout (signal) and the
+    # platform records READY 30 s later, which assigns the app port.
+    timeline.at(600, lambda: wake.update(token="rollout-1"))
+    timeline.at(630, lambda: client.config.update(exposed_ports=[5432, 8080]))
+    run_tunnel(built, wait=timeline, interval=15, log=lambda e: None, wake=lambda: wake["token"])
+    assert 630 <= first_healthy(stamped) <= 633  # not the next 15 s cycle
+
+
+def test_waiting_for_an_app_port_has_a_call_budget():
+    built, _, timeline, stamped = scenario(until=1800)
+    run_tunnel(built, wait=timeline, interval=15, log=lambda e: None, wake=lambda: None)
+    # startup fast window: at most 120 s / 2 s, then the regular 15 s cycle
+    assert len(stamped) <= 120 / 2 + 1800 / 15 + 2
+    assert all(r["code"] == "APP_PORT_NOT_ASSIGNED" for _, r in stamped)
+    late = [t for t, _ in stamped if t > 130]
+    assert all(b - a >= 15 for a, b in pairwise(late))
+
+
+def test_repeated_signals_never_poll_faster_than_the_fast_interval():
+    built, _, timeline, stamped = scenario(until=400)
+    counter = {"n": 0}
+
+    def wake():
+        counter["n"] += 1  # a new token on every check
+        return counter["n"]
+
+    run_tunnel(built, wait=timeline, interval=15, log=lambda e: None, wake=wake)
+    times = [t for t, _ in stamped]
+    assert all(b - a >= 2 for a, b in pairwise(times))
+
+
+def test_healthy_tunnel_keeps_the_regular_cycle_even_in_the_fast_window():
+    built, client, timeline, stamped = scenario(until=300)
+    client.config.update(exposed_ports=[5432, 8080])
+    run_tunnel(built, wait=timeline, interval=15, log=lambda e: None, wake=lambda: "same")
+    times = [t for t, _ in stamped]
+    assert all(r["code"] is None for _, r in stamped)
+    assert all(b - a >= 15 for a, b in pairwise(times))
+
+
+def test_a_port_change_seen_on_a_regular_poll_checks_health_again_quickly():
+    built, client, timeline, stamped = scenario(until=900)
+    health = {"ok": False}
+    built.http_ok = lambda ip, port, path: health["ok"]
+    # Port appears without a signal (seen on the regular cycle); the app becomes healthy
+    # shortly afterwards and must be reported within the fast interval, not 15 s later.
+    timeline.at(600, lambda: client.config.update(exposed_ports=[5432, 8080]))
+    timeline.at(620, lambda: health.update(ok=True))
+    run_tunnel(built, wait=timeline, interval=15, log=lambda e: None, wake=lambda: None)
+    assert 620 <= first_healthy(stamped) <= 623
+
+
+def test_wake_file_written_by_the_agent_is_read_by_the_tunnel(tmp_path):
+    path = tmp_path / "signal" / "rollout"
+    assert read_wake(path) is None
+    path.parent.mkdir()
+    write_wake(path)
+    first = read_wake(path)
+    write_wake(path)
+    assert first is not None and read_wake(path) not in (None, first)
