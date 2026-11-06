@@ -9,6 +9,8 @@ path of any one application.
 Seam: the suite model and runner with fake probes, and the pure case generator.
 """
 
+import gzip
+
 import pytest
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_testsuite import Suite, SuiteCase, dump_bundle, load_bundle, run_case
@@ -17,8 +19,10 @@ from cmp_testsuite.model import ProbeStep
 from cmp_testsuite.security import SKIPPED_TEMPLATES, security_probe_cases
 from cmp_testsuite.standard import AppApi, standard_cases
 
-# The SHA-256 of this standard suite before probes existed: it must not change.
-PINNED = "cc68397e03925b4310d4b99230ddf3e93adc14efa891dcccf82d5f652eb451dc"
+# The SHA-256 of this standard suite's tar content from before probes existed. It is the content
+# that is pinned, not the compressed bytes: gzip output depends on the zlib build, so the
+# compressed SHA-256 of the same suite differs between a Mac and a Linux runner.
+PINNED_TAR_SHA256 = "e87ca29323b771f3fd5794ed67d4a8d63973aa68dc6e3620a019d013bf692dd7"
 
 
 def probe(role="OUTSIDER", expect="BLOCKED", *, source=None, target="db", port=5432):
@@ -71,7 +75,7 @@ def test_suites_without_probes_keep_their_sha256():
         health_from_target=True,
     )  # fmt: skip
     suite = Suite(name="pin", cases=standard_cases(api))
-    assert sha256_of(dump_bundle(suite)) == PINNED
+    assert sha256_of(gzip.decompress(dump_bundle(suite))) == PINNED_TAR_SHA256
 
 
 # --- the runner ---------------------------------------------------------------------------------
