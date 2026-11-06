@@ -9,6 +9,7 @@ approval gate stops on; `UNKNOWN` is "ask a person", never an assumption of the 
 import pytest
 from cmp_contracts.analysis import AnalysisInput, SecurityJudgement, SecurityMeasure
 from cmp_contracts.provisioning_v2 import RequirementsV2
+from cmp_scanners import security_judge
 from cmp_scanners.security_judge import (
     SUGGESTIONS,
     TargetSecurity,
@@ -144,9 +145,23 @@ def test_the_same_input_gives_the_same_judgements_in_the_same_order():
 # --- what the platform builds for a target ----------------------------------------------------
 
 
-def test_the_on_prem_entry_has_no_tls_in_the_first_phase():
-    state = target_security("ON_PREM", requirements(), [])["EXTERNAL_HTTPS"]
-    assert state.state == "UNPROTECTED" and "TARGET_ENTRY_WITHOUT_TLS" in state.reasons
+@pytest.mark.parametrize(
+    ("entry", "state", "reason"),
+    [
+        ("TRUSTED", "PROTECTED", "TARGET_ENTRY_TLS_AT_RELAY"),
+        ("UNTRUSTED", "PARTIAL", "TARGET_TLS_UNTRUSTED_CERT"),
+        ("NONE", "UNPROTECTED", "TARGET_ENTRY_WITHOUT_TLS"),
+    ],
+)
+def test_the_on_prem_entry_follows_the_tls_the_relay_offers(monkeypatch, entry, state, reason):
+    monkeypatch.setattr(security_judge, "ON_PREM_ENTRY_TLS", entry)
+    result = target_security("ON_PREM", requirements(), [])["EXTERNAL_HTTPS"]
+    assert result.state == state and reason in result.reasons
+
+
+def test_the_relay_serves_a_trusted_certificate_so_the_on_prem_entry_is_protected():
+    result = target_security("ON_PREM", requirements(), [])["EXTERNAL_HTTPS"]
+    assert result.state == "PROTECTED"
 
 
 @pytest.mark.parametrize("provider", ["AWS", "GCP"])
@@ -198,7 +213,10 @@ def test_an_unknown_provider_makes_every_target_state_unknown():
 # --- the demo's picture, end to end on measures ----------------------------------------------
 
 
-def test_the_demo_source_against_an_on_prem_target():
+def test_the_demo_source_against_an_on_prem_target(monkeypatch):
+    monkeypatch.setattr(
+        security_judge, "ON_PREM_ENTRY_TLS", "NONE"
+    )  # the entry before the relay had TLS
     source = [
         measure("EXTERNAL_HTTPS", "PROTECTED"),
         measure("DB_ACCESS_SCOPE", "UNPROTECTED"),
@@ -207,7 +225,9 @@ def test_the_demo_source_against_an_on_prem_target():
     ]
     result = judge_security(source, target_security("ON_PREM", requirements(), source))
     by = {j.criterion: j for j in result}
-    assert by["EXTERNAL_HTTPS"].verdict == "LOWER"  # CloudFront HTTPS has no counterpart (P0)
+    assert (
+        by["EXTERNAL_HTTPS"].verdict == "LOWER"
+    )  # CloudFront HTTPS has no counterpart without TLS
     assert by["DB_ACCESS_SCOPE"].verdict == "HIGHER"  # default deny where every pod could connect
     assert (by["DB_TRANSPORT_ENCRYPTION"].verdict, by["DB_TRANSPORT_ENCRYPTION"].weak_source) == (
         "SAME",
@@ -217,6 +237,23 @@ def test_the_demo_source_against_an_on_prem_target():
         "SAME",
         True,
     )
+
+
+def test_the_demo_source_against_an_on_prem_target_with_tls_at_the_relay():
+    """With the relay serving a trusted certificate nothing is lowered for the demo source: the entry
+    keeps its HTTPS and the two weak criteria stay as weak as they were."""
+    source = [
+        measure("EXTERNAL_HTTPS", "PROTECTED"),
+        measure("DB_ACCESS_SCOPE", "UNPROTECTED"),
+        measure("DB_TRANSPORT_ENCRYPTION", "UNPROTECTED"),
+        measure("ADMIN_API_EXPOSURE", "UNPROTECTED"),
+    ]
+    by = {
+        j.criterion: j
+        for j in judge_security(source, target_security("ON_PREM", requirements(), source))
+    }
+    assert by["EXTERNAL_HTTPS"].verdict == "SAME"
+    assert not any(j.verdict == "LOWER" for j in by.values())
 
 
 # --- the report -----------------------------------------------------------------------------

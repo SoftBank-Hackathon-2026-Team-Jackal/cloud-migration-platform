@@ -51,6 +51,18 @@ class TargetSecurity:
     reasons: list[str] = field(default_factory=list)
 
 
+# TLS at the on-premises entry, which is the relay server (infra/relay/setup-tls.sh): "TRUSTED" is a
+# certificate the browser trusts (Let's Encrypt for <relay-ip>.sslip.io), "UNTRUSTED" encrypts but
+# warns the browser (self-signed) and "NONE" is plain HTTP. Agreed with the analysis owner on
+# 2026-11-07 (ticket 29-A). Change this one value if the relay's entry changes.
+ON_PREM_ENTRY_TLS = "TRUSTED"
+_ENTRY_TLS = {
+    "TRUSTED": TargetSecurity("PROTECTED", ["TARGET_ENTRY_TLS_AT_RELAY"]),
+    "UNTRUSTED": TargetSecurity("PARTIAL", ["TARGET_TLS_UNTRUSTED_CERT"]),
+    "NONE": TargetSecurity("UNPROTECTED", ["TARGET_ENTRY_WITHOUT_TLS"]),
+}
+
+
 def _unknown(reason: str) -> TargetSecurity:
     return TargetSecurity("UNKNOWN", [reason])
 
@@ -68,10 +80,10 @@ def target_security(
     )
     states: dict[str, TargetSecurity] = {}
 
-    # The entry. On-premises traffic comes in through the relay by address, with no domain or TLS
-    # in the first phase (ADR-006). The cloud entries are not defined here yet.
+    # The entry. On-premises traffic comes in through the relay (ADR-006); what the relay offers is
+    # `ON_PREM_ENTRY_TLS` above. The cloud entries are not defined here yet.
     states["EXTERNAL_HTTPS"] = (
-        TargetSecurity("UNPROTECTED", ["TARGET_ENTRY_WITHOUT_TLS"])
+        _ENTRY_TLS[ON_PREM_ENTRY_TLS]
         if provider == "ON_PREM"
         else _unknown("TARGET_ENTRY_NOT_DEFINED")
     )
