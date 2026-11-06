@@ -171,3 +171,11 @@ def test_unknown_type_and_extra_fields_are_rejected():
         validate_data("plan.unknown", {})
     with pytest.raises(ValueError):
         validate_data("provision.check", {"name": "pods_ready", "state": "done", "extra": 1})
+
+
+def test_plan_ready_scope_is_optional_and_limited_to_approval_scopes():
+    old = {"plan_id": "plan-1", "revision": 1}
+    assert validate_data("plan.ready", old) == old  # events before the field still validate
+    assert validate_data("plan.ready", old | {"scope": "WORKLOADS"})["scope"] == "WORKLOADS"
+    with pytest.raises(ValueError):
+        validate_data("plan.ready", old | {"scope": "workloads"})

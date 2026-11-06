@@ -164,6 +164,9 @@ class PlanReadyData(WebModel):
     verified_digest: str | None = Field(default=None)
     manifest_digest: str | None = Field(default=None, pattern="^[a-f0-9]{64}$")
     preview_digest: str | None = Field(default=None, pattern="^[a-f0-9]{64}$")
+    # The Revision's approval scope (`PlanManifest.scope`), the value the approval API compares;
+    # the web sends it back unchanged on APPROVE/REJECT. Optional: older events omit it.
+    scope: Literal["INFRASTRUCTURE", "WORKLOADS", "FULL"] | None = Field(default=None)
 
 
 class PlanPreviewSource(WebModel):

@@ -307,17 +307,21 @@ def emit_plan_events(migration_id: str, result: dict, view: PlanView | None) -> 
 def emit_plan_ready(migration_id: str, result: dict) -> None:
     if result.get("status") != "PUBLISHED":
         return
+    data = {
+        "plan_id": result["plan_id"],
+        "revision": result["revision"],
+        "manifest_digest": result["manifest_digest"],
+        "preview_digest": result["preview_digest"],
+    }
+    if result.get("scope") is not None:
+        # Same `manifest.scope` the approval API compares (409 APPROVAL_TARGET_MISMATCH).
+        data["scope"] = result["scope"]
     emit_event(
         migration_id,
         "plan.ready",
         "planning",
         "done",
-        {
-            "plan_id": result["plan_id"],
-            "revision": result["revision"],
-            "manifest_digest": result["manifest_digest"],
-            "preview_digest": result["preview_digest"],
-        },
+        data,
         idempotency_key=f"{result['plan_id']}:{result['revision']}",
     )
 
