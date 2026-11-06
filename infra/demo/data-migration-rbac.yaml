@@ -1,0 +1,40 @@
+# Data migration ticket 12: Kubernetes objects next to data-migration-stack.yaml, applied by
+# deploy-data-migration-stack.sh with the operator's own temporary kubeconfig.
+# - The tunnel Namespace exists before the access entry is used (namespace-scoped access policies
+#   cannot create a Namespace). Labels match cmp_data.tunnel.namespace_manifest().
+# - The tunnel Activity server-side applies that Namespace object on every run (a PATCH on a
+#   cluster-scoped object). AmazonEKSEditPolicy only reads namespaces, so the access entry group
+#   gets get/patch on this one Namespace, nothing else.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cmp-data-tunnel
+  labels:
+    app.kubernetes.io/managed-by: cmp-data-migration
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cmp-data-migration-tunnel-namespace
+  labels:
+    app.kubernetes.io/managed-by: cmp-data-migration
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["cmp-data-tunnel"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cmp-data-migration-tunnel-namespace
+  labels:
+    app.kubernetes.io/managed-by: cmp-data-migration
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cmp-data-migration-tunnel-namespace
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: cmp-data-migration

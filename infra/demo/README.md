@@ -191,6 +191,25 @@ docker exec cmp-demo-worker-1 aws ecr describe-repositories --region ap-northeas
 docker exec cmp-demo-worker-1 python -c 'from cmp_worker.config import settings as s; from cmp_worker.build_wiring import BuildSettings as B; print(B.from_values(s.build_source_bucket, s.build_ecr_repository, s.build_log_bucket, s.build_platform, s.build_aws_profile))'
 ```
 
+## 데이터 이전 원본 쓰기 역할 (데이터 티켓 12)
+
+데이터 이전은 원본 EKS `cmp-demo-source`에 쓰기가 필요하다. 원본 연결 역할(`AmazonEKSViewPolicy`)은 "연결은 읽기 전용" 원칙으로 그대로 두고, **별도 스택** `cmp-demo-data-migration`(`data-migration-stack.yaml`)으로 데이터 전용 역할을 둔다. 자세한 근거와 확인 결과는 `tickets/data-migration/12-source-write-role.md`.
+
+| 항목 | 값 |
+| --- | --- |
+| IAM 역할 | `cmp-demo-data-migration`: 인스턴스 역할만 신뢰(ExternalId 없음), 인라인 `eks:DescribeCluster`(이 클러스터만) |
+| EKS 접근 항목 | `AmazonEKSEditPolicy`, namespace 범위 `chat-source`·`cmp-data-tunnel`, 그룹 `cmp-data-migration` |
+| Kubernetes 객체 | `data-migration-rbac.yaml`: Namespace `cmp-data-tunnel`, 그 Namespace 객체 하나의 get·patch(터널이 매번 server-side apply) |
+| 인스턴스 역할 인라인 정책 | `cmp-demo-data-migration`: 이 역할 `sts:AssumeRole`만 |
+| 프로필(이름 고정) | `cmp-demo-data-migration`. `.env`에 `DATA_MIGRATION_ROLE_ARN`이 있으면 `ensure-secrets.sh`가 `role_arn` + `credential_source = Ec2InstanceMetadata`로 쓴다(`source_profile` 없음, #265). worker는 `DATA_MIGRATION_AWS_PROFILE=cmp-demo-data-migration` |
+
+```sh
+bash infra/demo/deploy-data-migration-stack.sh --plan   # 변경 세트만
+bash infra/demo/deploy-data-migration-stack.sh          # 스택 + RBAC(임시 kubeconfig), DATA_MIGRATION_ROLE_ARN 줄 출력
+# 서버(SSM): /opt/cmp/.env에 출력 줄 추가 → release.sh. 확인:
+docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-data-migration --query Arn --output text   # .../assumed-role/cmp-demo-data-migration/...
+```
+
 ## 환경 연결 Launch Stack (#205, 티켓 23b)
 
 AWS 연결 생성 응답의 `launch_stack_url`(ADR-005)은 api가 `CONNECTION_PLATFORM_PRINCIPAL_ARN`과 `CONNECTION_TEMPLATE_BASE_URL`을 모두 받아야 만들어진다. 둘 중 하나라도 비면 `null`이다(이전 동작).
