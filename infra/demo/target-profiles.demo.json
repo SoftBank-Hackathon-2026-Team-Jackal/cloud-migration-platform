@@ -1,0 +1,11 @@
+{
+  "_comment": "Finals demo catalog (ticket 44 S6): ON_PREM only, so the web's default target (onprem-k3s-basic) is the one real build path. Install as /opt/cmp/config/target-profiles.json. A GCP/AWS start is refused at start (422 TARGET_PROFILE_NOT_FOUND) instead of failing after analysis. Agent id and tunnel IP are Agent registration values, not catalog fields. No secrets.",
+  "profiles": {
+    "onprem-k3s-basic": {
+      "provider": "ON_PREM",
+      "namespace": "cmp-app",
+      "storage_class": "local-path",
+      "database_image": "docker.io/library/postgres@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a"
+    }
+  }
+}
