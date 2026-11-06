@@ -2,7 +2,7 @@
 
 ## 상태
 
-코드·문서 완료. AWS 적용과 `kubectl auth can-i` 확인은 아래 「적용과 확인」 결과를 채운 뒤 DONE.
+DONE(2026-11-07, AWS 적용·`kubectl auth can-i` 확인). 서버 `.env` 반영과 compose 프로필 연결은 남은 운영 일(아래).
 
 ## 결론
 
@@ -54,7 +54,27 @@ CMP_DATA_VERIFIER_ARN=arn:aws:iam::714066696240:role/aws-reserved/sso.amazonaws.
 bash infra/demo/deploy-data-migration-stack.sh
 ```
 
-결과: (적용 뒤 기록)
+결과(2026-11-07 적용, 사용자 승인):
+
+| 항목 | 값 |
+| --- | --- |
+| 스택 | `cmp-demo-data-migration`(ap-northeast-2) |
+| 역할 | `arn:aws:iam::714066696240:role/cmp-demo-data-migration`. 확인 뒤 다시 적용해 신뢰는 인스턴스 역할 `cmp-demo-control-plane-InstanceRole-oAXRipePmZCe` 하나만 남김 |
+| 접근 항목 | `arn:aws:eks:ap-northeast-2:714066696240:access-entry/cmp-demo-source/role/714066696240/cmp-demo-data-migration/58d0d948-d41f-92f5-5d68-08ae5c95fa9a` |
+| 인스턴스 역할 인라인 정책 | `cmp-demo-data-migration` → 이 역할만 |
+| Kubernetes | Namespace `cmp-data-tunnel` 생성, ClusterRole·Binding `cmp-data-migration-tunnel-namespace` |
+
+실제 역할로 assume(`assumed-role/cmp-demo-data-migration/...`, 그룹 `cmp-data-migration`)해서 만든 임시 kubeconfig로 `kubectl auth can-i`:
+
+| 동작 | chat-source | cmp-data-tunnel | default | kube-system |
+| --- | --- | --- | --- | --- |
+| create pods/exec, delete·list pods | yes | yes | no | no |
+| get·create·update secrets | yes | yes | no | no |
+| get·patch deployments, list replicasets | yes | yes | no | no |
+| create·patch services, create configmaps, patch networkpolicies | yes | yes | no | no |
+| create roles(RBAC) | no | no | no | no |
+
+클러스터 범위: `patch namespace/cmp-data-tunnel` yes, `patch namespace/chat-source` no, `create namespaces` no, `list nodes` no. 터널과 같은 Namespace server-side apply는 `--dry-run=server`로 성공. chat-source의 기존 리소스는 건드리지 않았다.
 
 ## 서버 반영(운영, 이 티켓에서 안 함)
 
