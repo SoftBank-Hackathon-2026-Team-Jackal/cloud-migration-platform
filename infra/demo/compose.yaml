@@ -109,6 +109,10 @@ services:
       # SandboxSettings JSON object in /opt/cmp/.env (demo-app line: runtime.env.example). Empty:
       # the rehearsal runs the health test only (today's behavior).
       WEB_START_SANDBOX_SETTINGS: ${WEB_START_SANDBOX_SETTINGS:-}
+      # Data-migration ticket 08: the data step's input for web starts, a DataMigrationInput JSON
+      # object in /opt/cmp/.env (source DB, source app, cutover settings, target tunnel address;
+      # no secrets). Empty: the data step stays the scaffold (today's behavior).
+      WEB_START_DATA_MIGRATION: ${WEB_START_DATA_MIGRATION:-}
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans

@@ -528,7 +528,8 @@ def test_runtime_example_values_point_at_the_mounted_worker_paths():
     example, worker, api = _runtime_example(), _env("worker"), _env("api")
     targets = _mount_targets("worker")
     for name in example:
-        consumer = api if name == "WEB_START_SANDBOX_SETTINGS" else worker  # ticket 57: API only
+        # ticket 57 and data-migration ticket 08: API only
+        consumer = api if name.startswith("WEB_START_") else worker
         assert f"${{{name}:-" in str(consumer.get(name)), name  # every example line is consumed
     # Planning reads the analysis results from the same store (runbook: same directory).
     assert example["ANALYSIS_ARTIFACT_STORE_DIR"] == worker["ARTIFACT_STORE_DIR"]
@@ -743,3 +744,33 @@ def test_api_runtime_report_names_the_web_start_sandbox_state(monkeypatch):
     assert report()["web_start_sandbox"] == "on"
     monkeypatch.setattr(settings, "web_start_sandbox_settings", "[1]")
     assert report()["web_start_sandbox"] == "error:SANDBOX_SETTINGS_INVALID"
+
+
+# --- data-migration ticket 08: the data step's input for web starts ----------------------------
+
+
+def test_web_start_data_migration_is_an_api_value_off_by_default():
+    assert _env("api")["WEB_START_DATA_MIGRATION"] == "${WEB_START_DATA_MIGRATION:-}"
+    assert "WEB_START_DATA_MIGRATION" not in _env("worker")
+    assert _runtime_example()["WEB_START_DATA_MIGRATION"] == ""  # depends on the WireGuard path
+    assert "WEB_START_DATA_MIGRATION" in (DEMO / "runtime-check.sh").read_text()
+
+
+def test_api_runtime_report_names_the_web_start_data_migration_state(monkeypatch):
+    import json
+
+    from cmp_api.config import settings
+    from cmp_api.runtime_report import report
+
+    value = {
+        "source": {"access": "KUBECONFIG", "kubeconfig_ref": "src", "namespace": "app",
+                   "pod": "db-0", "peer_host": "10.0.0.1", "dbname": "app"},
+        "app": {"namespace": "app", "deployment": "app", "url_secret": "db-url"},
+        "settings": {"image": "cmp-cutover:test"},
+    }  # fmt: skip
+    monkeypatch.setattr(settings, "web_start_data_migration", None)
+    assert report()["web_start_data_migration"] == "off"
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(value))
+    assert report()["web_start_data_migration"] == "on"
+    monkeypatch.setattr(settings, "web_start_data_migration", '{"source": {}}')
+    assert report()["web_start_data_migration"] == "error:DATA_MIGRATION_SETTINGS_INVALID"

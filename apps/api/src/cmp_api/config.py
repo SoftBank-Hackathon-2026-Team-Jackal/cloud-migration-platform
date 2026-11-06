@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # null and the rehearsal runs the health test only; not a JSON object: 503
     # `SANDBOX_SETTINGS_INVALID`.
     web_start_sandbox_settings: str | None = None
+    # Data-migration ticket 08: the data step's input for web (`target`) starts, a
+    # `DataMigrationInput` JSON object (source DB endpoint, source app, cutover settings, target
+    # tunnel address; the CLI's `--data-migration`, no secrets). Operator configuration for the
+    # app being migrated. Unset: no `data_migration`, so the data step stays the scaffold; not a
+    # valid input: 503 `DATA_MIGRATION_SETTINGS_INVALID`.
+    web_start_data_migration: str | None = None
 
 
 settings = Settings()

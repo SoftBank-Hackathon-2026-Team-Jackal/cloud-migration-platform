@@ -9,7 +9,12 @@ from cmp_providers.env_file import EnvFileError
 
 from cmp_api.config import settings
 from cmp_api.env_store import configured_env_file_store
-from cmp_api.start_request import StartRefused, load_target_profiles, sandbox_settings
+from cmp_api.start_request import (
+    StartRefused,
+    data_migration_settings,
+    load_target_profiles,
+    sandbox_settings,
+)
 
 
 def report() -> dict[str, str]:
@@ -32,6 +37,11 @@ def report() -> dict[str, str]:
         result["web_start_sandbox"] = "on" if on else "off"
     except StartRefused as exc:
         result["web_start_sandbox"] = f"error:{exc.code}"
+    try:  # data-migration ticket 08: the web start's data step input
+        on = data_migration_settings(settings.web_start_data_migration) is not None
+        result["web_start_data_migration"] = "on" if on else "off"
+    except StartRefused as exc:
+        result["web_start_data_migration"] = f"error:{exc.code}"
     return result
 
 
