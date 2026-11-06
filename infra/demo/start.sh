@@ -4,6 +4,8 @@ set -euo pipefail
 release_dir="${1:?release directory required}"
 cd "$release_dir"
 install -d -m 700 /opt/cmp/data/plans /opt/cmp/data/artifact-store /opt/cmp/data/caddy
+# Ticket 45: `.env` uploads (api writes, worker reads), analysis workspaces, Claude spend ledger.
+install -d -m 700 /opt/cmp/data/env-files /opt/cmp/data/analysis-workspaces /opt/cmp/data/llm
 # The web container runs as uid 1000 (node) and keeps the voice model and its cache here.
 install -d -m 700 -o 1000 -g 1000 /opt/cmp/data/web-models /opt/cmp/data/web-cache
 
@@ -43,7 +45,7 @@ for attempt in {1..30}; do
   platform_db_health="$(docker inspect --format '{{.State.Health.Status}}' cmp-demo-platform-db-1 2>/dev/null || true)"
   temporal_db_health="$(docker inspect --format '{{.State.Health.Status}}' cmp-demo-temporal-db-1 2>/dev/null || true)"
   if [[ "$worker_running" == true && "$platform_db_health" == healthy && "$temporal_db_health" == healthy ]] && curl --fail --silent http://127.0.0.1:8000/health | grep -q '"status":"ok"' \
-    && docker exec cmp-demo-worker-1 sh -c 'terraform version && helm version --short && kubectl version --client && aws --version && gcloud --version && docker version && docker buildx version' >/dev/null 2>&1; then
+    && docker exec cmp-demo-worker-1 sh -c 'git --version && terraform version && helm version --short && kubectl version --client && aws --version && gcloud --version && docker version && docker buildx version' >/dev/null 2>&1; then
     echo "CMP demo API healthy"
     "${compose[@]}" ps
     exit 0

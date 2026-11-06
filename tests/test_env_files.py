@@ -153,6 +153,28 @@ def test_operator_key_is_required(client):
         assert wrong.status_code == 403
 
 
+def test_operator_key_is_the_connection_and_agent_key_not_the_approval_key(client, monkeypatch):
+    """Ticket 45 R7: the web BFF holds one operator key (`PLATFORM_ENROLLMENT_ADMIN_KEY` =
+    `AGENT_ENROLLMENT_ADMIN_KEY`) for `/connections`, `/agent-enrollments` and `/env-files`."""
+    from cmp_api.routes import agents, connections, env_files
+
+    approval_key = "approval-only-test-key"
+    monkeypatch.setattr(settings, "approval_admin_key", approval_key)
+    assert _upload(client).status_code == 201
+    refused = client.post(
+        "/env-files",
+        content=ENV,
+        headers={"X-Approval-Admin-Key": approval_key, "Content-Type": "text/plain"},
+    )
+    assert refused.status_code == 403
+
+    def guards(router) -> set:
+        return {dep.dependency for dep in router.dependencies}
+
+    assert agents.require_admin in guards(env_files.router)
+    assert agents.require_admin in guards(connections.router)
+
+
 def test_delete_then_read_is_expired(client, store):
     ref = ContentRef.model_validate(_upload(client).json()["env_file_ref"])
     assert client.delete(f"/env-files/{ref.id}", headers=ADMIN).status_code == 204

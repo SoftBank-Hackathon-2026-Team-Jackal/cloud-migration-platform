@@ -72,7 +72,8 @@ RUN set -eux; \
       *) echo "unsupported architecture: ${TARGETARCH}"; exit 1 ;; \
     esac; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl unzip; \
+    # git stays: the real analysis clones the source (cmp_scanners.source, ticket 45).
+    apt-get install -y --no-install-recommends ca-certificates curl unzip git; \
     cd /tmp; \
     curl -fsSLo terraform.zip \
       "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip"; \

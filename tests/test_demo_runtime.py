@@ -412,3 +412,257 @@ def test_build_stack_apply_refuses_a_repository_outside_the_expected_registry(tm
     )
     assert result.returncode != 0
     assert "PLATFORM_ECR_REGISTRY=" not in result.stdout
+
+
+# -- Ticket 45 (#180): analysis·Sandbox·ENV·catalog wiring and the read-only server check ------
+
+
+def _runtime_example() -> dict[str, str]:
+    """`infra/demo/runtime.env.example`: the optional `/opt/cmp/.env` lines (no secrets)."""
+    lines = (DEMO / "runtime.env.example").read_text().splitlines()
+    return dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
+
+
+def _mount_targets(service: str) -> dict[str, str]:
+    """container path -> host path."""
+    mounts = _compose()["services"][service]["volumes"]
+    return {m.split(":")[1]: m.split(":")[0] for m in mounts}
+
+
+def test_env_file_store_is_shared_by_api_and_worker_with_a_generated_key():
+    api, worker = _env("api"), _env("worker")
+    for env in (api, worker):
+        assert env["ENV_FILE_STORE_DIR"] == "/opt/cmp/env-files"
+        assert env["ENV_FILE_ENCRYPTION_KEY"] == (
+            "${ENV_FILE_ENCRYPTION_KEY:?set ENV_FILE_ENCRYPTION_KEY}"
+        )
+    services = _compose()["services"]
+    # The API writes uploads; the worker reads names/values (EnvPlan, render_env). Not `:ro`:
+    # opening the store chmods its root (local compose run: the worker crashed with EROFS).
+    for service in ("api", "worker"):
+        assert "/opt/cmp/data/env-files:/opt/cmp/env-files" in services[service]["volumes"]
+    assert "ENV_FILE_ENCRYPTION_KEY" not in services["web"].get("environment", {})
+
+
+def test_ensure_secrets_generates_an_env_file_key_the_store_accepts_once(tmp_path):
+    from cmp_providers.env_file_store import load_key
+
+    env_file = tmp_path / ".env"
+    secrets = tmp_path / "secrets"
+    script = DEMO / "ensure-secrets.sh"
+    subprocess.run(["bash", str(script), str(env_file), str(secrets)], check=True)
+    first = env_file.read_text()
+    subprocess.run(["bash", str(script), str(env_file), str(secrets)], check=True)
+    assert env_file.read_text() == first  # never regenerated: old uploads stay readable
+    values = dict(line.split("=", 1) for line in first.splitlines())
+    assert len(load_key(values["ENV_FILE_ENCRYPTION_KEY"])) == 32
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", values["ENV_FILE_ENCRYPTION_KEY"])
+    # The Sandbox kubeconfig directory exists (empty) so its read-only mount never fails.
+    assert stat.S_IMODE((secrets / "sandbox").stat().st_mode) == 0o700
+    assert not list((secrets / "sandbox").iterdir())
+
+
+def test_worker_analysis_sandbox_and_llm_settings_default_to_the_scaffold():
+    worker = _env("worker")
+    expected = {
+        "ANALYSIS_ARTIFACT_STORE_DIR": "${ANALYSIS_ARTIFACT_STORE_DIR:-}",
+        "ANALYSIS_WORKSPACE_ROOT": "${ANALYSIS_WORKSPACE_ROOT:-}",
+        "SANDBOX_KUBECONFIG": "${SANDBOX_KUBECONFIG:-}",
+        "SANDBOX_PREBUILT_IMAGES": "${SANDBOX_PREBUILT_IMAGES:-}",
+        "LLM_ENABLED": "${LLM_ENABLED:-false}",
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY:-}",
+        "LLM_LEDGER_PATH": "/opt/cmp/llm/ledger.json",
+        "LLM_KILL_SWITCH_PATH": "/opt/cmp/llm/disabled",
+    }
+    assert {name: worker.get(name) for name in expected} == expected
+    from cmp_worker.config import Settings
+    from cmp_worker.llm_factory import build_llm_factory
+    from cmp_worker.workers.analysis import build_pipeline
+    from cmp_worker.workers.sandbox import build_sandbox_loop
+
+    # Unset in /opt/cmp/.env (compose passes empty strings): today's scaffold registrations.
+    empty = Settings(
+        _env_file=None,
+        analysis_artifact_store_dir="",
+        analysis_workspace_root="",
+        sandbox_kubeconfig="",
+        sandbox_prebuilt_images="",
+        llm_enabled=False,
+        llm_ledger_path=expected["LLM_LEDGER_PATH"],
+    )
+    assert build_pipeline(empty) is None
+    assert build_sandbox_loop(empty) is None
+    assert build_llm_factory(empty) is None
+    for name in ("ANTHROPIC_API_KEY", "LLM_ENABLED", "SANDBOX_KUBECONFIG"):
+        assert name not in _env("api"), name
+
+
+def test_runtime_example_values_point_at_the_mounted_worker_paths():
+    example, worker = _runtime_example(), _env("worker")
+    targets = _mount_targets("worker")
+    for name in example:
+        assert f"${{{name}:-" in str(worker.get(name)), name  # every example line is consumed
+    # Planning reads the analysis results from the same store (runbook: same directory).
+    assert example["ANALYSIS_ARTIFACT_STORE_DIR"] == worker["ARTIFACT_STORE_DIR"]
+    assert targets["/opt/cmp/analysis-workspaces"] == "/opt/cmp/data/analysis-workspaces"
+    assert example["ANALYSIS_WORKSPACE_ROOT"] == "/opt/cmp/analysis-workspaces"
+    assert targets["/run/cmp/sandbox"] == "/opt/cmp/secrets/sandbox"
+    assert targets["/opt/cmp/llm"] == "/opt/cmp/data/llm"
+    # Values owned by analysis/Sandbox (박승철님) and secrets stay empty in the repository.
+    for name in ("SANDBOX_KUBECONFIG", "SANDBOX_PREBUILT_IMAGES", "ANTHROPIC_API_KEY"):
+        assert example[name] == "", name
+    assert example["LLM_ENABLED"] == "false"
+
+
+def test_start_script_creates_the_runtime_data_directories():
+    start = (DEMO / "start.sh").read_text()
+    for path in (
+        "/opt/cmp/data/env-files",
+        "/opt/cmp/data/analysis-workspaces",
+        "/opt/cmp/data/llm",
+    ):
+        assert path in start, path
+    for service in ("api", "worker"):
+        for host in _mount_targets(service).values():
+            if host.startswith("/opt/cmp/data/") and host != "/opt/cmp/data/aws-connections":
+                assert host in start, host
+
+
+def test_worker_runtime_report_names_real_or_scaffold_paths_only(tmp_path, monkeypatch):
+    from cmp_worker.config import Settings
+    from cmp_worker.runtime_report import report
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    scaffold = report(Settings(_env_file=None))
+    assert scaffold["analysis"] == "scaffold"
+    assert scaffold["sandbox"] == "scaffold"
+    assert scaffold["build"] == "off"
+    assert scaffold["llm"] == "off"
+
+    real = report(
+        Settings(
+            _env_file=None,
+            analysis_artifact_store_dir=str(tmp_path / "store"),
+            analysis_workspace_root=str(tmp_path / "work"),
+            sandbox_kubeconfig=str(tmp_path / "missing-kubeconfig"),
+            build_source_bucket="only-one-of-four",
+        )
+    )
+    assert real["analysis"] == "real"
+    assert real["sandbox"] == "error:SANDBOX_KUBECONFIG_NOT_FOUND"
+    assert real["build"] == "error:BUILD_SETTINGS_INCOMPLETE"
+
+
+def test_api_runtime_report_names_store_catalog_and_link_state(tmp_path, monkeypatch):
+    import base64
+
+    from cmp_api.config import settings
+    from cmp_api.runtime_report import report
+
+    for name in (
+        "env_file_store_dir",
+        "env_file_encryption_key",
+        "planning_target_profiles_file",
+        "connection_platform_principal_arn",
+        "connection_template_base_url",
+        "platform_ecr_registry",
+    ):
+        monkeypatch.setattr(settings, name, None)
+    off = report()
+    assert off["env_store"] == "error:ENV_FILE_STORE_UNCONFIGURED"
+    assert off["target_profiles"] == "error:TARGET_PROFILES_UNCONFIGURED"
+    assert off["connection_link"] == "off"
+    assert off["platform_ecr_registry"] == "off"
+
+    from pydantic import SecretStr
+
+    catalog = tmp_path / "target-profiles.json"
+    catalog.write_text((DEMO / "target-profiles.example.json").read_text())
+    monkeypatch.setattr(settings, "env_file_store_dir", str(tmp_path / "env-files"))
+    monkeypatch.setattr(
+        settings,
+        "env_file_encryption_key",
+        SecretStr(base64.urlsafe_b64encode(b"k" * 32).decode()),
+    )
+    monkeypatch.setattr(settings, "planning_target_profiles_file", str(catalog))
+    on = report()
+    assert on["env_store"] == "on"
+    assert on["target_profiles"] == "aws-eks-basic,gcp-vm-basic,onprem-k3s-basic"
+
+
+def _run_runtime_check(tmp_path, env_text: str) -> subprocess.CompletedProcess:
+    root = tmp_path / "opt-cmp"
+    root.mkdir()
+    (root / ".env").write_text(env_text)
+    (root / "current-revision").write_text("0123456789ab\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {
+        "docker": """case "$*" in
+  *"alembic current"*) echo "20261106_02 (head)" ;;
+  *cmp_worker.runtime_report*) printf 'analysis=scaffold\\nsandbox=scaffold\\n' ;;
+  *cmp_api.runtime_report*) printf 'env_store=on\\ntarget_profiles=onprem-k3s-basic\\n' ;;
+  *"ps "*) echo "cmp-demo-worker-1 running" ;;
+  *) echo "unexpected docker $*" >&2; exit 9 ;;
+esac
+""",
+        "iptables": "echo '-A DOCKER-USER -i docker0 -m comment --comment cmp-build-imds-guard'\n",
+        "systemctl": "echo enabled\n",
+    }
+    for name, body in stubs.items():
+        path = bin_dir / name
+        path.write_text("#!/usr/bin/env bash\n" + body)
+        path.chmod(0o755)
+    return subprocess.run(
+        ["bash", str(DEMO / "runtime-check.sh"), str(root)],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_runtime_check_prints_names_and_states_never_env_values(tmp_path):
+    secret = "do-not-print-0123456789abcdef"
+    result = _run_runtime_check(
+        tmp_path,
+        f"APPROVAL_ADMIN_KEY={secret}\nENV_FILE_ENCRYPTION_KEY={secret}x\n"
+        f"ANTHROPIC_API_KEY={secret}y\nBUILD_PLATFORM=linux/amd64\n",
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout + result.stderr
+    assert secret not in out and "linux/amd64" not in out
+    for expected in (
+        "revision=0123456789ab",
+        "alembic=20261106_02 (head)",
+        "analysis=scaffold",
+        "env_store=on",
+        "target_profiles=onprem-k3s-basic",
+        "imds_guard_rules=1",
+        "imds_guard_service=enabled",
+        "APPROVAL_ADMIN_KEY",
+        "BUILD_PLATFORM",
+    ):
+        assert expected in out, expected
+    # Names the demo needs but .env lacks are listed as missing (here: the DB passwords).
+    assert "missing=" in out and "PLATFORM_DB_PASSWORD" in out.split("missing=", 1)[1]
+    optional = out.split("optional_unset=", 1)[1].splitlines()[0].split()
+    for name in (
+        "PLATFORM_ECR_PULL_ROLE_ARN",
+        "PROVISIONING_PLATFORM_EGRESS_CIDRS",
+        "CMP_GCP_PROJECT",
+    ):
+        assert name in optional, name  # 47·48 names are reported when unset
+    assert "BUILD_PLATFORM" not in optional
+
+
+def test_worker_image_keeps_git_for_the_real_analysis_source_fetch():
+    """Ticket 45 local run: real analysis `fetch_source` failed ANALYSIS_INPUT_INVALID because
+    `git` was missing (FileNotFoundError). The release health check now requires it."""
+    dockerfile = (DEMO / "Dockerfile").read_text()
+    worker_stage = dockerfile.split("FROM api AS worker", 1)[1]
+    install = re.search(r"apt-get install -y --no-install-recommends ([^;]+);", worker_stage)
+    assert install and "git" in install.group(1).split()
+    purge = re.search(r"apt-get purge -y ([^;]+);", worker_stage)
+    assert purge and "git" not in purge.group(1).split()
+    assert "git --version" in (DEMO / "start.sh").read_text()

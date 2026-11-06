@@ -97,9 +97,15 @@ services:
       # target-profiles.example.json). Absent file → real starts are 503
       # TARGET_PROFILES_UNCONFIGURED; the scaffold start still works.
       PLANNING_TARGET_PROFILES_FILE: /opt/cmp/config/target-profiles.json
+      # Ticket 45 (#180, N12): uploaded `.env` files (ENV-01), encrypted under this directory.
+      # The base64url 32-byte key is generated once by ensure-secrets.sh and never rotated
+      # (a new key makes every stored upload unreadable). Same store/key as the worker.
+      ENV_FILE_STORE_DIR: /opt/cmp/env-files
+      ENV_FILE_ENCRYPTION_KEY: ${ENV_FILE_ENCRYPTION_KEY:?set ENV_FILE_ENCRYPTION_KEY}
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
+      - /opt/cmp/data/env-files:/opt/cmp/env-files
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
       # Ticket 46: no keys in it (ARNs, External IDs, profile names), so it lives with the data.
       - /opt/cmp/data/aws-connections:/run/cmp/aws-connections
@@ -147,12 +153,39 @@ services:
       BUILD_LOG_BUCKET: ${BUILD_LOG_BUCKET:-}
       BUILD_PLATFORM: ${BUILD_PLATFORM:-}
       BUILD_AWS_PROFILE: cmp-demo-build
+      # Ticket 45 (#180, N12): the same `.env` store as the API (EnvPlan names, render_env). The worker
+      # never writes uploads, but the store sets its root to 0700 when opened, so the mount is not :ro.
+      ENV_FILE_STORE_DIR: /opt/cmp/env-files
+      ENV_FILE_ENCRYPTION_KEY: ${ENV_FILE_ENCRYPTION_KEY:?set ENV_FILE_ENCRYPTION_KEY}
+      # Ticket 45 (A-03, D-08): analysis and Sandbox settings, names only; values in /opt/cmp/.env
+      # (lines: runtime.env.example). Empty keeps today's scaffold registrations. The real analysis
+      # Activities reuse the scaffold names with dict arguments, so one worker serves one path:
+      # both ANALYSIS_* lines → web (`target`) starts analyse for real and the scaffold start
+      # fails in analysis. ANALYSIS_ARTIFACT_STORE_DIR must equal ARTIFACT_STORE_DIR (Planning
+      # reads the requirements there).
+      ANALYSIS_ARTIFACT_STORE_DIR: ${ANALYSIS_ARTIFACT_STORE_DIR:-}
+      ANALYSIS_WORKSPACE_ROOT: ${ANALYSIS_WORKSPACE_ROOT:-}
+      # Real Sandbox loop: kubeconfig of the dedicated `k3d-cmp-sandbox` cluster, placed by the
+      # operator at /opt/cmp/secrets/sandbox/kubeconfig → /run/cmp/sandbox/kubeconfig. A set path
+      # without the file stops the worker at start-up (SANDBOX_KUBECONFIG_NOT_FOUND).
+      SANDBOX_KUBECONFIG: ${SANDBOX_KUBECONFIG:-}
+      SANDBOX_PREBUILT_IMAGES: ${SANDBOX_PREBUILT_IMAGES:-}
+      # Claude (ADR-004): off unless LLM_ENABLED=true and a key is set; spend ledger and kill
+      # switch (`touch /opt/cmp/data/llm/disabled`) live on the host.
+      LLM_ENABLED: ${LLM_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_LEDGER_PATH: /opt/cmp/llm/ledger.json
+      LLM_KILL_SWITCH_PATH: /opt/cmp/llm/disabled
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
+      - /opt/cmp/data/env-files:/opt/cmp/env-files
+      - /opt/cmp/data/analysis-workspaces:/opt/cmp/analysis-workspaces
+      - /opt/cmp/data/llm:/opt/cmp/llm
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
       - /opt/cmp/data/aws-connections:/run/cmp/aws-connections:ro
       - /opt/cmp/secrets/gcp:/run/cmp/gcp:ro
+      - /opt/cmp/secrets/sandbox:/run/cmp/sandbox:ro
       # Ticket 28: builds run on the host daemon. Whoever holds this socket is root-equivalent on
       # the host; only the worker gets it (production: rootless BuildKit, see README).
       - /var/run/docker.sock:/var/run/docker.sock
@@ -167,6 +200,9 @@ services:
   # values (GitHub OAuth app id/secret, optional GEMINI_API_KEY) go in /opt/cmp/web.env (0600). The web does
   # NOT get AGENT_ENROLLMENT_ADMIN_KEY: its /api/agents routes have no user login yet, so a public web holding
   # the key would let anyone mint Agent enrollments (without it the connections screens use their mock data).
+  # Ticket 45: the same single operator key guards /connections, /agent-enrollments and /env-files, and a real
+  # web start needs an uploaded `.env` (ENV_FILE_REF_REQUIRED). Real mode therefore means the operator puts
+  # PLATFORM_ENROLLMENT_ADMIN_KEY in /opt/cmp/web.env once the web guards those routes (README, approval).
   web:
     build:
       context: ${CMP_WEB_DIR:-/opt/cmp/web/current}
