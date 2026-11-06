@@ -1,9 +1,9 @@
-# Ticket 64 — ON_PREM 트래픽 인계 조회가 터널 앱 헬스 확인을 조건으로 대기
+# Ticket 67 — ON_PREM 트래픽 인계 조회가 터널 앱 헬스 확인을 조건으로 대기
 
 ## 상태
 IN_PROGRESS (로컬 구현·검증 완료, 리뷰·데모 서버 확인 대기) — [Issue #284](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/284). 2026-11-07 조율 세션 지시로 착수. 담당 민서.
 
-> 번호 주의: "Provisioning 64"라는 제목은 #280·#281(PR #282, 헬스 경로·ON_PREM 구축 이벤트)에서도 쓰였다. 이 문서는 `64-handover-tunnel-wait.md`로 구분한다. 번호 정리는 조율 세션 결정을 따른다.
+> 번호: 처음 "Provisioning 64"로 올렸으나 main에서 64(헬스 경로, #282)·65(ON_PREM 구축 이벤트)·66(터널 즉시 보고, #286)이 먼저 쓰여 67로 바꿨다(조율 세션 결정, 2026-11-07).
 
 ## 배경
 2026-11-07 데모 서버 ON_PREM 실행(`migration-a224dfbd…`, 릴리스 98b359d)에서 구축은 성공(`SUCCEEDED READY`)했다. 그런데 `get_traffic_handover`가 19:37:35Z에 **한 번만** 조회돼 `external_endpoint: null`, `blocked_by: [EXTERNAL_ENDPOINT_UNAVAILABLE]`로 `traffic_blocked` 종료됐다.
@@ -19,7 +19,7 @@ ON_PREM 외부 주소(`http://<tunnel_ip>:<app port>`)는 터널 상태 `app_hea
   - 롤아웃 이후 보고만 근거로 인정(`after_rollout`), 터널 뷰에 `reported_at`
   - `MigrationWorkflow`: 새 patch 아래 이 Activity의 타임아웃·heartbeat 타임아웃만 변경
 - 제외
-  - Agent 터널 컨테이너 즉시 확인·보고(티켓 65, `agent_tunnel.py`)
+  - Agent 터널 컨테이너 즉시 확인·보고(티켓 66, #286, `agent_tunnel.py`)
   - 데이터 이전 인계(`get_migration_handoff`) 대기 — D7
   - 새 이벤트 타입·계약 변경·웹 변경
 
@@ -35,7 +35,7 @@ ON_PREM 외부 주소(`http://<tunnel_ip>:<app port>`)는 터널 상태 `app_hea
 | D6 | Workflow 타임아웃 | `traffic-handover-wait-v1` patch 아래 `start_to_close_timeout` 600초, `heartbeat_timeout` 30초(재시도 3회·`schedule_to_start` 5분은 그대로). 대기 중 매 간격 heartbeat. patch 이전 이력은 1분 타임아웃으로 그대로 재생된다 | 상한 180초가 기존 1분 타임아웃을 넘는다. heartbeat가 Worker 중단을 30초 안에 알린다. Activity 옵션만 바뀌어 명령 순서는 같다 |
 | D7 | 데이터 인계 | 이번에는 적용하지 않는다. `get_migration_handoff`(DATA_MIGRATION, `TUNNEL_DB_NOT_VERIFIED`)는 같은 구조지만 데이터 담당의 `_data_migration` 호출(1분 타임아웃, heartbeat 없음)·`cmp_data.handoff` 판정을 함께 바꿔야 한다. 같은 헬퍼(`_read`)로 쉽게 붙일 수 있게 나눴다 | 데모 실패는 트래픽 인계였다. DB 확인이 롤아웃 직후 같은 지연을 겪는지는 실제 기록으로 확인하지 않았다. 같은 지연이 보이면 데이터 담당과 별도 티켓 |
 | D8 | 진행 이벤트 | 기다리기 시작할 때 `provision.check{name:"tunnel_app_health", state:"running"}`, 끝날 때 `done`(진행) 또는 `failed`(상한·다른 이유). 봉투 `phase=traffic`, status는 failed만 failed, 나머지 running. 멱등 키 `chk:tunnel_app_health:<plan>:<rev>:<state>`. 바로 진행·바로 막힘이면 내지 않는다 | 기존 계약 타입(`ProvisionCheckData.name`은 자유 문자열). 새 타입 없음. 지금 단계가 `traffic`이라 웹 단계가 뒤로 가지 않는다 |
-| D9 | 65와의 관계 | 이 티켓만으로 원큐 진행(최대 터널 보고 주기만큼 대기). 65가 포트 배정 즉시 보고하면 몇 초 안에 진행 | 두 티켓 파일이 겹치지 않는다(`agent_tunnel.py` 미수정) |
+| D9 | 66과의 관계 | 이 티켓만으로 원큐 진행(최대 터널 보고 주기 15초 + 다음 조회 2초만큼 대기). 66(#286, main 병합)은 포트 배정 직후 수 초 안에 `app_health_ok=true`를 보고하므로, 함께 있으면 롤아웃 기록 뒤 몇 초 안에 다음 2초 조회에서 진행한다(`test_with_the_immediate_tunnel_report_the_handover_goes_on_within_seconds`). 이 티켓은 `agent_tunnel.py`를 바꾸지 않는다 | 두 티켓 파일이 겹치지 않는다 |
 
 ## 공개 인터페이스
 
@@ -60,6 +60,7 @@ after_rollout(TrafficHandoff, tunnel: dict | None, recorded_at: int) -> TrafficH
 - [x] 롤아웃 이전 보고는 무시(그것뿐이면 상한 뒤 `TUNNEL_STATUS_STALE`)
 - [x] 상한 초과 시 기존 코드(`EXTERNAL_ENDPOINT_UNAVAILABLE`)로 종료, `provision.check failed`
 - [x] AWS·GCP·결과 없음·다른 막힘은 대기 없음
+- [x] 66(즉시 보고)과 함께: 롤아웃 3초 뒤 보고 → 4초 안에 진행
 - [x] Temporal 테스트 서버 통합 테스트 1개, Replay
 - [x] `make check`
 - [ ] 데모 서버 ON_PREM 원큐 실행 확인(배포 뒤, 조율 세션)

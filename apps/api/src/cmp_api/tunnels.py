@@ -260,7 +260,7 @@ def tunnel_view(session: Session, agent_id: str | None, *, now: int | None = Non
         "db_connect_ok": status.db_connect_ok,
         "last_handshake_at": status.last_handshake_at,
         "code": status.code,
-        "reported_at": status.reported_at,  # ticket 64: only reports after the rollout count
+        "reported_at": status.reported_at,  # ticket 67: only reports after the rollout count
         "stale": stale,
         "fresh_until": fresh_until,
     }

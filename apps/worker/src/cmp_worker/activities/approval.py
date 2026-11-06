@@ -22,7 +22,7 @@ from cmp_providers.provisioning_result import (
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio import activity
 
-# Ticket 64: the `provision.check` shown while the lookup waits for the tunnel health check.
+# Ticket 67: the `provision.check` shown while the lookup waits for the tunnel health check.
 TUNNEL_CHECK = "tunnel_app_health"
 
 
@@ -40,7 +40,7 @@ class ApprovalActivities:
         self._session_factory = session_factory
         # Ticket 25 F4: tunnel freshness is judged at read time; tests inject the clock.
         self._clock = clock
-        # Ticket 64: the ON_PREM handover wait (deadline timer, sleep, cap, read interval).
+        # Ticket 67: the ON_PREM handover wait (deadline timer, sleep, cap, read interval).
         self._timer, self._sleep = timer, sleep
         wait = settings.traffic_handover_wait_seconds if wait_seconds is None else wait_seconds
         self.wait_seconds = max(0, min(wait, TRAFFIC_HANDOVER_WAIT_MAX_S))
@@ -118,7 +118,7 @@ class ApprovalActivities:
     async def get_traffic_handover(self, request: dict) -> dict:
         """Ticket 50: the TRAFFIC_MIGRATION view as the Traffic `Handover` shape (#128 input).
 
-        Ticket 64: an ON_PREM view blocked only by tunnel evidence that is not there yet
+        Ticket 67: an ON_PREM view blocked only by tunnel evidence that is not there yet
         (`tunnel_wait_needed`) is read again every `poll_seconds` until a report from after the
         rollout passes the app health check, another block appears, or `wait_seconds` pass. The
         last view is returned as it is, so a timeout keeps the original `blocked_by` code.
