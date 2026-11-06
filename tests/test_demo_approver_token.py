@@ -55,3 +55,17 @@ def test_create_and_grant_need_a_migration(monkeypatch):
     for action in ("create", "grant"):
         with pytest.raises(SystemExit):
             approver_token.main([action, "demo-approver"])
+
+
+def test_script_stays_runnable_on_the_demo_host_python39():
+    # Amazon Linux python3 is 3.9: PEP 604 annotations need lazy evaluation, and no match statement.
+    import ast
+
+    tree = ast.parse(SCRIPT.read_text())
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in tree.body
+    )
+    assert not any(isinstance(node, ast.Match) for node in ast.walk(tree))

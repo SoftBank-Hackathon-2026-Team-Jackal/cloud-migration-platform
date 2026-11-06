@@ -7,6 +7,9 @@ never from an argument. The issued credential is written once: to stdout, or wit
 straight into the web env file (0600) as PLATFORM_APPROVER_TOKEN without printing it.
 """
 
+# The demo host runs Amazon Linux python3 (3.9): keep annotations lazy and avoid 3.10+ syntax.
+from __future__ import annotations
+
 import argparse
 import getpass
 import json
