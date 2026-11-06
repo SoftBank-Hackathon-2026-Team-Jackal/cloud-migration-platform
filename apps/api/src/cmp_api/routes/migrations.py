@@ -22,7 +22,7 @@ from cmp_api.event_stream import (
     stream_events,
 )
 from cmp_api.migration_events import list_events, list_logs
-from cmp_api.migration_state import read_migration_state
+from cmp_api.migration_state import read_migration_state, stored_last_error
 from cmp_api.routes.env_files import get_env_file_store
 from cmp_api.start_request import (
     StartRefused,
@@ -144,7 +144,9 @@ async def get_migration(workflow_id: str) -> MigrationStatus:
     """Ticket 49: a closed Workflow reports its Temporal outcome (never `running`), with the
     failure code, web phase and detailed codes (`failure_issues`)."""
     try:
-        state = await read_migration_state(await _handle(workflow_id))
+        state = await read_migration_state(
+            await _handle(workflow_id), last_error=stored_last_error(SessionLocal)
+        )
     except RPCError as exc:
         code = 404 if exc.status == RPCStatusCode.NOT_FOUND else 503
         raise HTTPException(status_code=code, detail="Workflow not found or unavailable") from exc
@@ -174,7 +176,9 @@ async def cancel_migration(workflow_id: str) -> dict[str, str]:
 async def read_workflow_status(workflow_id: str) -> dict | None:
     """MigrationWorkflow state (ticket 49: execution status applied); None when not found."""
     try:
-        return await read_migration_state(await _handle(workflow_id))
+        return await read_migration_state(
+            await _handle(workflow_id), last_error=stored_last_error(SessionLocal)
+        )
     except RPCError as exc:
         if exc.status == RPCStatusCode.NOT_FOUND:
             return None
