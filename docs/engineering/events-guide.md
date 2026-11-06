@@ -41,7 +41,7 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 - `status`는 `running` · `done` · `waiting` · `failed`. **`failed`는 화면에서 이전 실패로 보인다.** 재시도할 실패(빌드 1차 실패 등)는 `running`으로 보내고 `data`의 상태 값으로 표현한다.
 - **문구는 보내지 않는다.** 값·코드·식별자만 보낸다(화면이 key로 자기 언어 문구를 고른다). `error.message`는 빈 문자열.
 - **비밀값은 참조만**(Secret name/key). 저장 전 `cmp_scanners.masking`으로 한 번 더 가리고, 키 이름이 password·secret·token·credential이면 값을 통째로 가린다(`*_ref`는 유지).
-- 같은 Activity 시도 안에서 같은 타입을 여러 번 내면 `idempotency_key`로 구분한다(기본값은 `data` Digest라 같은 값은 한 번만 남는다). Temporal 재시도(새 attempt)는 새 이벤트로 남는다.
+- 같은 Activity 시도 안에서 같은 타입을 여러 번 내면 `idempotency_key`로 구분한다(기본값은 `data` Digest라 같은 값은 한 번만 남는다). Temporal 재시도(새 attempt)는 새 이벤트로 남는다(`across_retries=True`면 같은 키는 재시도에도 한 건, Provisioning 59).
 - `data`는 32 KiB 이하. 틀린 필드·이름·큰 데이터는 저장하지 않고 `None`을 돌려주며 운영 로그 `EVENT_INVALID`·`EVENT_TOO_LARGE`를 남긴다. 발행 실패가 Activity를 실패시키지는 않는다.
 - 테스트: `configure_emitter(InMemoryEmitter())`로 바꾸고 `emitter.of_type("…")`로 확인한다([tests/test_migration_events.py](../../tests/test_migration_events.py) 참고).
 
@@ -58,20 +58,21 @@ log_event(migration_id, "error", "SBX_APPLY_FAILED", {"attempt": 2, "namespace":
 
 주의: 백엔드 `Evidence.kind`는 `CODE/MANIFEST/CLOUD_RESOURCE/IAM_POLICY/CLOUDTRAIL/CONFIG`인데 웹 `via`는 `code/iam/trail/config`뿐이다. **결정 필요**(§5): 웹이 6개 값을 그대로 받게 할지, 백엔드가 `CODE→code, IAM_POLICY→iam, CLOUDTRAIL→trail, MANIFEST·CLOUD_RESOURCE·CONFIG→config`로 줄여 보낼지. 결정 전에는 줄인 값을 쓰면 검증을 통과한다.
 
-### 샌드박스·빌드 (승철님) — `phase: build`
+### 샌드박스·빌드 (승철님, 발행은 Provisioning 59 대행) — `phase: build`
 
-자식 `SandboxVerificationWorkflow`의 `attempt`·`phase`를 **Activity 경계에서** 낸다(Workflow 코드에서 내지 않는다). `status` Query의 `{phase, attempt, verdict, cleanup_failed, attempts[]}`와 같은 값이다.
+발행 위치(Provisioning 59, [티켓](../../tickets/provisioning/59-sandbox-events.md)): `SandboxVerificationWorkflow._run_integrated`는 패치 `sandbox-events-v1` 뒤로 각 `sbx_*` Activity 입력에 `events: {migration_id, run, attempt}`를 넣고, Activity가 자기 단계 이벤트를 낸다(문맥이 없으면 내지 않는다). Workflow 수준 이벤트(`sandbox.attempt`·`sandbox.done`·`build.review`)는 샌드박스 큐의 `sbx_emit` Activity로 낸다(실패해도 루프는 그대로). `run`은 `sbx_apply` 횟수(화면 트랙, INFRA 재시도는 run만 늘린다), `attempt`는 수정 시도(1~3). 키는 `sbx:{run}:{attempt}:{step}:{state}`이고 `across_retries=True`라 Activity 재시도에도 한 건만 남는다. 도우미는 `cmp_worker.sandbox_events`.
 
-| 보낼 이벤트 | 어느 Activity에서 | 기존 값 → 필드 | 예시 |
+| 보낼 이벤트 | 어디서 | 값 | 예시 |
 | --- | --- | --- | --- |
-| `sandbox.env` | `sbx_apply` 첫 시도 성공 직후 | `plan.namespace` → `namespace`, `plan.expires_at - now` → `expires_minutes`, `apply_network(...)`가 돌려주는 허용 목록 길이 → `egress_allowed`. **지금 `sbx_apply`는 `apply_network` 반환값을 버린다** — 변수로 받아 쓰면 된다 | `{"namespace":"sbx-m1-r1","expires_minutes":60,"egress_allowed":3}` |
-| `sandbox.step` | `sbx_prepare`(render)·`sbx_apply`(apply)·`check_sandbox`(ready)·`sbx_verify`(test·judge) 시작·끝 | `payload["attempt"]` → `attempt`, 화면 트랙 순번 → `run`(INFRA 재시도는 attempt를 늘리지 않으므로 run을 1 늘린다), 단계 → `step`, `running/done/failed` → `state` | `{"run":1,"attempt":1,"step":"apply","state":"done"}` |
-| `sandbox.tests` | `sbx_verify` 시작 시 | 고정 테스트 묶음 출처별 개수 | `{"total":12,"catalog":6,"original":4,"generated":2,"read_only":3}` |
-| `sandbox.attempt` | `sbx_classify` 끝 | `SandboxAttempt{attempt, verdict{passed,reasons}, failure_class}` + 판정 신호 → `checks`, 고친 `build.fix` id → `fix_ids` | `{"run":1,"attempt":1,"max_attempts":3,"verdict":{"passed":false,"reasons":["REQUIRED_TEST_FAILED"]},"failure_class":"CODE","checks":{"required_passed":10,"required_total":12,"unsupported_calls":0,"calls_in_mapping":4,"calls_total":4,"blocked_egress":0},"fix_ids":[]}` |
-| `build.fix` | `sbx_fix` 끝 | 패치 줄 → `lines[{kind,text}]`, 고친 파일 → `file`, 실패 검사 → `check`, `why`·`evidence`는 코드·위치 값 | `{"id":"fix-1","check":"health","lines":[{"kind":"del","text":"..."}],"why":"HEALTH_PATH","evidence":"app/main.py:42","file":"app/main.py"}` |
-| `build.result` | `sbx_build` 끝(시도마다). **`BuildResult`(`build_request.request_build`)를 루프에 연결해야 한다** — 지금 `sbx_build`는 `self.build`만 쓴다 | `BuildAttempt{status, image_uri, image_digest, error_code}` → `status`, `image_uri`, `digest`(자동 변환), `error_code`; 재사용 여부 → `reused` | `{"attempt":1,"max_attempts":3,"status":"SUCCEEDED","digest":"sha256:…","image_uri":"…/app","reused":false,"error_code":null}` |
-| `build.review` | 최대 시도 초과로 `NEEDS_REVIEW`(Workflow 대기) 직전 Activity | `attempts` 수 | `{"reason":"max_attempts","attempts":3}` (status `waiting`) |
-| `sandbox.done` | `sbx_publish`(통과) 또는 `sbx_teardown` 끝 | `SandboxVerification.status`·`cleanup_status`, 통과 Digest | `{"status":"PASSED","cleanup_status":"CLEANED","digest":"sha256:…"}` |
+| `build.check` | `sbx_build` 시작·끝 | `{id:"build", state, attempt}` | `{"id":"build","state":"done","attempt":1}` |
+| `build.result` | `sbx_build` 끝(시도마다) | 첫 앱 이미지의 `digest`·`image_uri`, 증거 경로의 `reused`, 실패 코드(계약 밖이면 `BUILD_FAILED`) | `{"attempt":1,"max_attempts":3,"status":"SUCCEEDED","digest":"sha256:…","image_uri":"…/app@sha256:…","reused":false,"error_code":null}` |
+| `sandbox.env` | 첫 `sbx_prepare` 성공 | `plan.namespace`, `plan.expires_at - now`(분), `allowlist(network_intent, keep_hosts)` 길이 | `{"namespace":"sbx-m1-r1","expires_minutes":120,"egress_allowed":3}` |
+| `sandbox.step` | `sbx_apply`(render·apply·ready), `sbx_verify`(test·judge) | 단계 running → done/failed. 판정 실패는 judge failed | `{"run":1,"attempt":1,"step":"apply","state":"done"}` |
+| `sandbox.tests` | `sbx_verify` 시작(테스트 실행 전) | 고정 묶음의 출처별 개수(STANDARD→catalog, ORIGINAL→original, AI→generated), `READ_ONLY` 수 | `{"total":12,"catalog":6,"original":4,"generated":2,"read_only":3}` |
+| `sandbox.attempt` | Workflow(판정 직후, 수정이 있으면 같은 run을 `fix_ids`와 다시) | `verdict`, 분류, `sbx_verify`가 돌려준 `checks` | `{"run":1,"attempt":1,"max_attempts":3,"verdict":{"passed":false,"reasons":["TEST_FAILED:std-health"]},"failure_class":"CODE","checks":{…},"fix_ids":["fix-1-1"]}` |
+| `build.fix` | `sbx_fix` 끝(고친 파일마다, 요구사항 수정은 한 건) | 바뀐 줄(가림, `.env` 계열은 키만), `why`=분류 사유 코드, `evidence`=파일 | `{"id":"fix-1-1","check":"code","lines":[{"kind":"add","text":"+ HOST = '0.0.0.0'"}],"why":"TEST_FAILED:std-health","evidence":"app.py","file":"app.py"}` |
+| `build.review` | Workflow(3회 실패로 `NEEDS_REVIEW`, `sandbox.done` 뒤) | 시도 수 | `{"reason":"max_attempts","attempts":3}` (status `waiting`) |
+| `sandbox.done` | Workflow(정리 전 `PENDING`, 정리 뒤 `CLEANED`) | 루프 결과, 통과 Digest | `{"status":"PASSED","cleanup_status":"CLEANED","digest":"sha256:…"}` (status `done`, 통과 외 `failed`) |
 
 ### 계획: 매핑 (승철님) — `phase: planning`
 
