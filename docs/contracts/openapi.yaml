@@ -44,8 +44,11 @@ paths:
         not a JSON object), `DATA_MIGRATION_SETTINGS_INVALID` (the server''s data-migration
         input is
 
-        not a valid `DataMigrationInput`) or the `.env` store codes. Nothing starts
-        on a refusal.'
+        not a valid `DataMigrationInput`), `TRAFFIC_SETTINGS_INVALID` (the server''s
+        traffic input is not
+
+        a valid `TrafficShiftInput`) or the `.env` store codes. Nothing starts on
+        a refusal.'
       operationId: start_migration_migrations_post
       requestBody:
         content:
