@@ -2,6 +2,7 @@
 # 1) 설정 만들기: python -c "from cmp_traffic.relay import render_bootstrap; print(render_bootstrap(('원본주소', 80), ('대상주소', 80)))" > bootstrap.yaml
 # 2) WireGuard가 필요하면 render_wireguard()로 wg0.conf 템플릿을 만들고 키는 배포 때 주입한다(MTU 1420 고정).
 # 3) 라우트 파일(rds.json)은 이 호스트의 릴레이 워커가 같은 볼륨에 쓴다(TRAFFIC_RDS_PATH).
+#    대상 주소를 이전마다 바꾸려면 대상 클러스터 파일(cds.json)도 같은 방식으로 쓴다(TRAFFIC_CDS_PATH, enable-dynamic-target.sh).
 #    실행: python -m cmp_worker.workers.relay --relay-queue relay-1  (요청의 relay_queue와 같은 이름)
 #    Amazon Linux 서버 초기 설정은 setup-relay.sh 를 쓴다(Docker run 방식, 이 compose와 같은 구성).
 # Envoy 관리 포트(9901)는 이 호스트 안에서만 쓴다(공개하지 않는다).

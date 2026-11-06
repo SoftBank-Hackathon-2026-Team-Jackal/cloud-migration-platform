@@ -4,6 +4,9 @@
   TRAFFIC_RDS_PATH     Envoy와 공유하는 라우트 파일 경로
   TRAFFIC_ENVOY_ADMIN  Envoy 관리 주소(기본 http://127.0.0.1:9901)
   TRAFFIC_TARGET_HOST  대상이 Host 헤더로 서비스를 구분할 때 덮어쓸 호스트(선택)
+  TRAFFIC_CDS_PATH     Envoy와 공유하는 대상 클러스터 파일 경로(선택). 있으면 이전이 넘긴 대상 주소로 바꾼다.
+                       없으면(정적 설정) 대상이 인계값과 다를 때 전환을 시작하지 않는다.
+  TRAFFIC_TARGET_ALLOWED_CIDRS  대상 주소를 바꿔도 되는 범위(쉼표 구분, 기본 10.200.0.0/24 = 터널 대역)
 
 #234: `traffic_prepare`는 대상 헬스 확인 결과를 `checks`로 돌려주고, `traffic_readiness`는 같은 실행의
 데이터 이전(`data-<migration_id>`) 최근 값을 읽어 `traffic.ready`에 쓸 숫자를 돌려준다. 이벤트 발행은
@@ -13,6 +16,7 @@ Workflow가 `emit_migration_event`로 한다(중계 서버 워커에는 이벤�
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import urllib.error
 import urllib.request
@@ -26,6 +30,9 @@ from temporalio.exceptions import ApplicationError
 
 HEALTH_TRIES = 3
 HEALTH_TIMEOUT_S = 3.0
+DEFAULT_ALLOWED_CIDRS = "10.200.0.0/24"  # 플랫폼 터널 대역(cmp_api.tunnels.TUNNEL_CIDR)
+RETARGET_CONFIRM_S = 15.0  # 새 대상이 Envoy에서 활성이 되기를 기다리는 시간(헬스 체크 한 번 포함)
+RETARGET_POLL_S = 0.5
 
 
 def handover_target(handover: Handover) -> tuple[str, int] | None:
@@ -34,6 +41,25 @@ def handover_target(handover: Handover) -> tuple[str, int] | None:
     if not parsed.hostname:
         return None
     return parsed.hostname, parsed.port or handover.port
+
+
+def target_allowed(host: str) -> bool:
+    """대상 주소를 바꿔도 되는 곳인가. IP 주소가 허용 범위 안일 때만 True(이름은 범위를 알 수 없어 거절한다).
+
+    인계값은 플랫폼이 만들지만, 중계 서버가 엉뚱한 곳으로 트래픽을 보내지 않도록 범위를 한 번 더 막는다.
+    """
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    allowed = os.environ.get("TRAFFIC_TARGET_ALLOWED_CIDRS") or DEFAULT_ALLOWED_CIDRS
+    for item in allowed.split(","):
+        try:
+            if address in ipaddress.ip_network(item.strip(), strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def build_ports() -> tuple[EnvoyProxy, EnvoyObserver]:
@@ -45,7 +71,13 @@ def build_ports() -> tuple[EnvoyProxy, EnvoyObserver]:
             non_retryable=True,
         )
     admin = os.environ.get("TRAFFIC_ENVOY_ADMIN", "http://127.0.0.1:9901")
-    proxy = EnvoyProxy(Path(rds), admin, target_host=os.environ.get("TRAFFIC_TARGET_HOST") or None)
+    cds = os.environ.get("TRAFFIC_CDS_PATH")
+    proxy = EnvoyProxy(
+        Path(rds),
+        admin,
+        target_host=os.environ.get("TRAFFIC_TARGET_HOST") or None,
+        cds_path=Path(cds) if cds else None,
+    )
     return proxy, EnvoyObserver(admin)
 
 
@@ -78,6 +110,43 @@ async def check_health(host: str, port: int, path: str) -> int:
     )
 
 
+async def retarget(
+    proxy: EnvoyProxy, observer: EnvoyObserver, wanted: tuple[str, int], health_path: str
+) -> None:
+    """중계 서버의 대상 주소를 인계값의 목적지로 바꾸고, Envoy에서 활성이 될 때까지 확인한다.
+
+    안전 조건(하나라도 아니면 `TargetMismatch`로 멈춘다, 재시도하지 않는다):
+    - 동적 대상(CDS 경로)으로 깔려 있다. 정적 설정은 바꿀 수 없다.
+    - 새 주소가 허용 범위 안의 IP다.
+    - 지금 대상으로 가는 트래픽이 0%다(전환 중인 대상을 바꾸지 않는다).
+    """
+
+    def refuse(why: str) -> ApplicationError:
+        return ApplicationError(
+            f"relay target does not match the handover ({why})",
+            type="TargetMismatch",
+            non_retryable=True,
+        )
+
+    if proxy.cds_path is None:
+        raise refuse("static target")
+    if not target_allowed(wanted[0]):
+        raise refuse("target address not allowed")
+    if await asyncio.to_thread(proxy.target_weight) != 0:
+        raise refuse("traffic is already on the target")
+    try:
+        await asyncio.to_thread(proxy.set_target, wanted[0], wanted[1], health_path)
+    except RuntimeError as exc:
+        raise ApplicationError(str(exc), type="ApplyNotConfirmed", non_retryable=True) from exc
+    waited = 0.0
+    while waited < RETARGET_CONFIRM_S:
+        if await asyncio.to_thread(observer.target_address) == wanted:
+            return
+        await asyncio.sleep(RETARGET_POLL_S)
+        waited += RETARGET_POLL_S
+    raise refuse("new target did not become active")
+
+
 @activity.defn
 async def traffic_prepare(payload: dict) -> dict:
     """인계값을 확인하고 대상 헬스를 본 뒤 원본 기준선을 재고 원본 100% 설정을 깐다."""
@@ -87,15 +156,16 @@ async def traffic_prepare(payload: dict) -> dict:
         raise ApplicationError(check.reason, type="HandoverNotReady", non_retryable=True)
     policy = TrafficPolicy.model_validate(payload.get("policy") or {})
     proxy, observer = build_ports()
-    # 전환 전에 이 중계 서버의 대상이 인계값의 목적지와 같은지 본다(다르면 엉뚱한 곳으로 보내지 않는다).
+    # 전환 전에 이 중계 서버의 대상이 인계값의 목적지와 같은지 본다. 다르면 동적 대상(CDS)으로 깔려 있고
+    # 허용 범위 안일 때만 인계값의 주소로 바꾸고, 그렇지 않으면 엉뚱한 곳으로 보내지 않고 멈춘다.
     wanted = handover_target(handover)
-    actual = await asyncio.to_thread(observer.target_address)
-    if wanted is None or actual != wanted:
+    if wanted is None:
         raise ApplicationError(
-            "relay target does not match the handover",
-            type="TargetMismatch",
-            non_retryable=True,
+            "relay target does not match the handover", type="TargetMismatch", non_retryable=True
         )
+    actual = await asyncio.to_thread(observer.target_address)
+    if actual != wanted:
+        await retarget(proxy, observer, wanted, handover.health_path)
     status = await check_health(wanted[0], wanted[1], handover.health_path)
     baseline = await asyncio.to_thread(observer.sample_origin, policy.observe_seconds)
     await asyncio.to_thread(proxy.apply, weights_for(0))
