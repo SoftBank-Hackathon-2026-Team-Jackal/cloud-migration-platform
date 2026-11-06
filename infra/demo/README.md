@@ -219,10 +219,11 @@ docker exec cmp-demo-worker-1 sh -c 'grep -c "^\[profile cmp-conn-" "$AWS_CONFIG
 ```sh
 # 1. 이 커밋을 main에 병합한 뒤 GitHub Actions Deploy demo(또는 bash infra/demo/release.sh HEAD).
 #    start.sh의 ensure-secrets.sh가 ENV_FILE_ENCRYPTION_KEY를 없을 때만 만들고 /opt/cmp/data/{env-files,analysis-workspaces,llm}을 만든다.
-# 2. (SSM 세션) 카탈로그: 예시를 복사해 실제 계정·프로젝트·State 버킷 값을 넣는다. 비밀 없음.
+# 2. (SSM 세션) 카탈로그. 결선 데모 기본은 ON_PREM 하나뿐인 target-profiles.demo.json이다(웹 기본 대상
+#    onprem-k3s-basic). GCP·AWS 시작은 분석 뒤가 아니라 시작에서 422 TARGET_PROFILE_NOT_FOUND로 거절된다.
+#    AWS_TARGET 연결·GCP 키가 준비된 뒤에만 예시(target-profiles.example.json)를 복사해 실제 계정·프로젝트·State 값을 넣는다. 비밀 없음.
 sudo install -d -m 755 /opt/cmp/config
-sudo install -m 644 /opt/cmp/releases/<SHA>/infra/demo/target-profiles.example.json /opt/cmp/config/target-profiles.json
-sudo vi /opt/cmp/config/target-profiles.json
+sudo install -m 644 /opt/cmp/releases/<SHA>/infra/demo/target-profiles.demo.json /opt/cmp/config/target-profiles.json
 # 3. (SSM 세션, 선택) 빌드 값: deploy-build-stack.sh가 출력한 다섯 줄(PLATFORM_ECR_REGISTRY, BUILD_*)을 /opt/cmp/.env에 추가.
 # 4. (SSM 세션, 선택, 협의 후) 분석·Sandbox·Claude 줄을 runtime.env.example에서 골라 /opt/cmp/.env에 추가.
 #    Sandbox는 kubeconfig를 /opt/cmp/secrets/sandbox/kubeconfig(root, 0600)에 먼저 둔다.
