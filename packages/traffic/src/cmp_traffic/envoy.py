@@ -17,7 +17,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -71,9 +71,38 @@ def window_p99(before: str, after: str, side: str) -> float:
     return 0.0
 
 
+BLOCKED_PREFIXES = ("/admin", "/__cmp")
+
+
+def check_stream_prefixes(prefixes: Sequence[str]) -> tuple[str, ...]:
+    """실시간 연결 경로 검증(#294). `/`로 시작하고 막힌 경로(`/admin`·`/__cmp`)와 겹치지 않아야 한다.
+
+    겹침은 양방향이다: `/admin/x`처럼 막힌 경로 안쪽도, `/`·`/a`처럼 막힌 경로를 품는 것도 거절한다
+    (`/`를 받으면 모든 요청이 제한시간 없이 나가게 된다).
+    """
+    out: list[str] = []
+    for prefix in prefixes:
+        if not prefix.startswith("/"):
+            raise ValueError(f"실시간 연결 경로는 /로 시작해야 합니다: {prefix!r}")
+        if any(prefix.startswith(b) or b.startswith(prefix) for b in BLOCKED_PREFIXES):
+            raise ValueError(f"실시간 연결 경로가 막힌 경로와 겹칩니다: {prefix!r}")
+        if prefix not in out:
+            out.append(prefix)
+    return tuple(out)
+
+
 def build_route_config(
-    weights: dict[str, int], version: int, target_host: str | None = None
+    weights: dict[str, int],
+    version: int,
+    target_host: str | None = None,
+    stream_prefixes: Sequence[str] = (),
 ) -> dict[str, Any]:
+    """가중치 라우트 설정(RDS). `stream_prefixes`는 SSE 같은 오래 열린 연결의 경로다(#294).
+
+    그 경로는 `/`와 같은 가중치로 나누되 제한시간을 끄고(`0s`) 재시도하지 않는다. 전체 제한시간(5초)에
+    끊기면 `upstream_rq_timeout`으로 세어 전환 판정이 실패로 보고 롤백한다. 빈 값이면 출력이 예전과 같다.
+    """
+    streams = check_stream_prefixes(stream_prefixes)
     origin, target = weights["origin"], weights["target"]
     if origin < 0 or target < 0 or origin + target != 100:
         raise ValueError("가중치는 0 이상이고 합이 100이어야 합니다.")
@@ -95,6 +124,13 @@ def build_route_config(
     routes = [  # 공개 경로로 관리·내부 경로에 접근하지 못하게 가장 먼저 막는다
         {"match": {"prefix": "/admin"}, "direct_response": forbidden},
         {"match": {"prefix": "/__cmp"}, "direct_response": forbidden},
+        *(
+            {
+                "match": {"prefix": prefix},
+                "route": {"weighted_clusters": {"clusters": clusters}, "timeout": "0s"},
+            }
+            for prefix in streams
+        ),
         {
             "match": {"prefix": "/"},
             "route": {
@@ -134,8 +170,10 @@ class EnvoyProxy:
         confirm_timeout: float = 2.5,
         poll_interval: float = 0.05,
         cds_path: Path | None = None,
+        stream_prefixes: Sequence[str] = (),
     ) -> None:
         self.rds_path = Path(rds_path)
+        self.stream_prefixes = check_stream_prefixes(stream_prefixes)
         self.cds_path = Path(cds_path) if cds_path else None
         self.admin_url = admin_url.rstrip("/")
         self.fetch = fetch or http_get_json
@@ -195,7 +233,7 @@ class EnvoyProxy:
 
     def apply(self, weights: dict[str, int]) -> None:
         version = self._next_version()
-        doc = build_route_config(weights, version, self.target_host)
+        doc = build_route_config(weights, version, self.target_host, self.stream_prefixes)
         self._publish(self.rds_path, doc, version, RDS_STAT)
 
     def target_weight(self) -> int | None:

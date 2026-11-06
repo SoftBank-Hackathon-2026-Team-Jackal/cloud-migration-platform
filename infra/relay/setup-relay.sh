@@ -18,6 +18,11 @@
 #   BOOTSTRAP: render_bootstrap(('원본주소', 80), ('10.200.0.2', 8080), cds_path='/etc/envoy/cds/cds.json')
 #   CDS_INIT=cds.json: python -c "from cmp_traffic.relay import render_target_cds; print(render_target_cds(('10.200.0.2', 8080)))"
 #   그리고 릴레이 워커에 TRAFFIC_CDS_PATH=/etc/envoy/cds/cds.json 을 준다. 이미 깔린 서버는 enable-dynamic-target.sh.
+#
+# relay-worker(systemd, 이 스크립트 밖에서 등록) 환경 기본값: 데모 채팅 앱의 실시간 연결은 제한시간·재시도 없이 보낸다(#294).
+#   Environment=TRAFFIC_STREAM_PREFIXES=/api/stream
+#   없으면 /api/stream(SSE)이 라우트 제한시간 5초에 끊겨 timeout으로 세어지고 전환이 롤백된다.
+#   이미 깔린 서버는 enable-stream-routes.sh(unit에 줄 추가 → daemon-reload → relay-worker 재시작).
 # 사용: BOOTSTRAP=./bootstrap.yaml RDS_INIT=./rds.json [CDS_INIT=./cds.json] ./setup-relay.sh
 set -euo pipefail
 

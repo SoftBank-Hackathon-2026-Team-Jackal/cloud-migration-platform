@@ -7,6 +7,8 @@
   TRAFFIC_CDS_PATH     Envoy와 공유하는 대상 클러스터 파일 경로(선택). 있으면 이전이 넘긴 대상 주소로 바꾼다.
                        없으면(정적 설정) 대상이 인계값과 다를 때 전환을 시작하지 않는다.
   TRAFFIC_TARGET_ALLOWED_CIDRS  대상 주소를 바꿔도 되는 범위(쉼표 구분, 기본 10.200.0.0/24 = 터널 대역)
+  TRAFFIC_STREAM_PREFIXES  제한시간·재시도 없이 보낼 실시간 연결 경로(쉼표 구분, 선택, 예: /api/stream).
+                       비어 있으면 라우트는 예전과 같다(#294).
 
 #234: `traffic_prepare`는 대상 헬스 확인 결과를 `checks`로 돌려주고, `traffic_readiness`는 같은 실행의
 데이터 이전(`data-<migration_id>`) 최근 값을 읽어 `traffic.ready`에 쓸 숫자를 돌려준다. 이벤트 발행은
@@ -62,6 +64,12 @@ def target_allowed(host: str) -> bool:
     return False
 
 
+def stream_prefixes_from_env() -> tuple[str, ...]:
+    """`TRAFFIC_STREAM_PREFIXES`(쉼표 구분)를 경로 목록으로. 빈 항목은 건너뛴다."""
+    raw = os.environ.get("TRAFFIC_STREAM_PREFIXES") or ""
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
 def build_ports() -> tuple[EnvoyProxy, EnvoyObserver]:
     rds = os.environ.get("TRAFFIC_RDS_PATH")
     if not rds:
@@ -72,12 +80,16 @@ def build_ports() -> tuple[EnvoyProxy, EnvoyObserver]:
         )
     admin = os.environ.get("TRAFFIC_ENVOY_ADMIN", "http://127.0.0.1:9901")
     cds = os.environ.get("TRAFFIC_CDS_PATH")
-    proxy = EnvoyProxy(
-        Path(rds),
-        admin,
-        target_host=os.environ.get("TRAFFIC_TARGET_HOST") or None,
-        cds_path=Path(cds) if cds else None,
-    )
+    try:
+        proxy = EnvoyProxy(
+            Path(rds),
+            admin,
+            target_host=os.environ.get("TRAFFIC_TARGET_HOST") or None,
+            cds_path=Path(cds) if cds else None,
+            stream_prefixes=stream_prefixes_from_env(),
+        )
+    except ValueError as exc:  # 잘못된 TRAFFIC_STREAM_PREFIXES는 다시 해도 같다
+        raise ApplicationError(str(exc), type="RelayNotConfigured", non_retryable=True) from exc
     return proxy, EnvoyObserver(admin)
 
 

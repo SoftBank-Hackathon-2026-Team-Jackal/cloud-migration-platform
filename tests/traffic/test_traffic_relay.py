@@ -47,3 +47,19 @@ def test_wireguard_config_fixes_mtu_and_uses_placeholders_for_secrets() -> None:
 def test_wireguard_rejects_values_that_could_inject_config_lines() -> None:
     with pytest.raises(ValueError):
         render_wireguard(address="10.8.0.1/24\nPostUp = rm -rf /", peer_allowed_ips="10.8.0.2/32")
+
+
+def test_demo_relay_turns_on_the_stream_route_for_the_chat_app_by_default() -> None:
+    """데모 중계 서버의 relay-worker 기본값(#294). 이미 깔린 서버에는 enable-stream-routes.sh로 넣는다."""
+    import re
+    import subprocess
+    from pathlib import Path
+
+    relay = Path(__file__).resolve().parents[2] / "infra" / "relay"
+    script = (relay / "enable-stream-routes.sh").read_text()
+    assert re.search(r'PREFIXES="\$\{TRAFFIC_STREAM_PREFIXES:-/api/stream\}"', script)
+    # 줄이 이미 있으면 바꾸고 없으면 TRAFFIC_RDS_PATH 다음에 넣은 뒤 unit을 다시 읽고 워커를 다시 띄운다
+    assert "Environment=TRAFFIC_STREAM_PREFIXES=" in script
+    assert "systemctl daemon-reload" in script and "systemctl restart relay-worker" in script
+    subprocess.run(["bash", "-n", str(relay / "enable-stream-routes.sh")], check=True)
+    assert "TRAFFIC_STREAM_PREFIXES=/api/stream" in (relay / "setup-relay.sh").read_text()
