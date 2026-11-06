@@ -89,6 +89,4 @@ def test_target_role_scopes_writes_to_platform_resources():
     for sid, statement in by_sid.items():
         if statement["Effect"] != "Allow" or sid == "Read":
             continue
-        # SecurityGroupRules (46) is scoped to the new rule resource type; the same call must
-        # also pass ChangeTagged for the tagged security group itself.
-        assert "Condition" in statement or sid in {"PlatformIamOnly", "SecurityGroupRules"}, sid
+        assert "Condition" in statement or sid == "PlatformIamOnly", sid

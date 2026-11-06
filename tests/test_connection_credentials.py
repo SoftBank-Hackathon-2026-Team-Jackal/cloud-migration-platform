@@ -6,6 +6,7 @@ hook, the connections API (start-up config sync, platform principal) and the dem
 templates. No cloud call is made.
 """
 
+import configparser
 import json
 import os
 import subprocess
@@ -50,13 +51,22 @@ def test_connection_ref_runs_the_target_with_the_connection_and_state_with_the_p
     assert connection_id_of(ref(CONN)) == CONN
 
 
+def test_profile_name_ref_from_the_start_request_names_the_same_connection():
+    """Ticket 44 writes the connection's `credential_ref` (`cmp-conn-<hex>`, ADR-005)."""
+    profiles = resolve_aws_profiles(ref(PROFILE), platform_profile=PLATFORM)
+    assert profiles == AwsProfiles(provider=PROFILE, state=PLATFORM, connection_id=CONN)
+    assert connection_id_of(ref(PROFILE)) == CONN
+
+
 def test_non_connection_ref_keeps_the_fixed_platform_profile_for_everything():
     profiles = resolve_aws_profiles(ref("credential-001"), platform_profile=PLATFORM)
     assert profiles == AwsProfiles(provider=PLATFORM, state=PLATFORM, connection_id=None)
     assert connection_id_of(ref("credential-001")) is None
 
 
-@pytest.mark.parametrize("bad", ["conn-", "conn-XYZ", "conn-0123456789abc", "conn-../etc"])
+@pytest.mark.parametrize(
+    "bad", ["conn-", "conn-XYZ", "conn-0123456789a", "conn-../etc", "cmp-conn-x", "cmp-conn-"]
+)
 def test_malformed_connection_ref_is_refused(bad):
     with pytest.raises(ProvisioningInputError, match="INVALID_CREDENTIAL_REF"):
         resolve_aws_profiles(ref(bad), platform_profile=PLATFORM)
@@ -399,17 +409,17 @@ def test_api_start_up_rewrites_the_shared_config_from_the_db(sessions, tmp_path,
     from cmp_api.main import sync_connection_profiles
 
     base = tmp_path / "base"
-    base.write_text("[profile cmp-platform-connector]\ncredential_source = Ec2InstanceMetadata\n")
+    base.write_text("[profile cmp-demo-build]\ncredential_source = Ec2InstanceMetadata\n")
     target = tmp_path / "shared/config"
     monkeypatch.setattr(settings, "connection_aws_config_file", str(target))
     monkeypatch.setattr(settings, "connection_aws_base_config_file", str(base))
-    monkeypatch.setattr(settings, "connection_platform_aws_profile", "cmp-platform-connector")
+    monkeypatch.setattr(settings, "connection_platform_aws_profile", "cmp-demo-build")
     with sessions() as session:
         add_connection(session)
     sync_connection_profiles(sessions)
     text = target.read_text()
-    assert "[profile cmp-platform-connector]" in text and f"[profile {PROFILE}]" in text
-    assert "source_profile = cmp-platform-connector" in text
+    assert "[profile cmp-demo-build]" in text and f"[profile {PROFILE}]" in text
+    assert "source_profile = cmp-demo-build" in text
 
 
 def test_api_start_up_sync_is_a_no_op_without_the_setting(sessions, monkeypatch):
@@ -446,95 +456,16 @@ def test_ecr_token_minting_has_its_own_profile(monkeypatch):
 
     seen = []
     monkeypatch.setattr(agents, "boto3_minter", lambda profile: seen.append(profile))
-    monkeypatch.setattr(settings, "connection_platform_aws_profile", "cmp-platform-connector")
+    monkeypatch.setattr(settings, "connection_platform_aws_profile", "cmp-connections")
     monkeypatch.setattr(settings, "platform_ecr_aws_profile", "cmp-demo-build")
     agents.get_ecr_minter()
     monkeypatch.setattr(settings, "platform_ecr_aws_profile", None)
     agents.get_ecr_minter()
-    assert seen == ["cmp-demo-build", "cmp-platform-connector"]  # unset: ticket 41 behavior
-
-
-# --- templates -------------------------------------------------------------------------------
+    assert seen == ["cmp-demo-build", "cmp-connections"]  # unset: ticket 41 behavior
 
 
 def load(path: Path):
     return yaml.safe_load(path.read_text())
-
-
-@pytest.mark.parametrize(
-    ("name", "kind"), [("source-role.yaml", "source"), ("target-role.yaml", "target")]
-)
-def test_user_roles_have_a_fixed_cmp_name_from_the_external_id(name, kind):
-    role = load(ROOT / "infra/connections" / name)["Resources"]["ConnectionRole"]["Properties"]
-    assert role["RoleName"] == {
-        "Fn::Sub": [
-            f"cmp-{kind}-${{Id}}",
-            {"Id": {"Fn::Select": [1, {"Fn::Split": ["-", {"Ref": "ExternalId"}]}]}},
-        ]
-    }
-    assert {"Key": "cmp:managed-by", "Value": "cloud-migration-platform"} in role["Tags"]
-
-
-def test_target_role_pins_the_iam_prefix_and_allows_new_rule_and_eks_tags():
-    template = load(ROOT / "infra/connections/target-role.yaml")
-    assert template["Parameters"]["ResourcePrefix"]["AllowedValues"] == ["cmp-"]
-    statements = {
-        s["Sid"]: s
-        for s in template["Resources"]["TargetBuild"]["Properties"]["PolicyDocument"]["Statement"]
-    }
-    rules = statements["SecurityGroupRules"]
-    assert sorted(rules["Action"]) == [
-        "ec2:AuthorizeSecurityGroupEgress",
-        "ec2:AuthorizeSecurityGroupIngress",
-    ]
-    assert rules["Resource"] == {
-        "Fn::Sub": "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:security-group-rule/*"
-    }
-    assert "eks:TagResource" in statements["CreateTagged"]["Action"]
-    # The security group itself stays tag-scoped.
-    assert "ec2:AuthorizeSecurityGroupEgress" in statements["ChangeTagged"]["Action"]
-
-
-def connector():
-    return load(ROOT / "infra/demo/connector-stack.yaml")
-
-
-def test_connector_role_has_a_fixed_name_and_assumes_only_platform_tagged_cmp_roles():
-    resources = connector()["Resources"]
-    role = resources["ConnectorRole"]["Properties"]
-    assert role["RoleName"] == "cmp-platform-connector"
-    assert role["MaxSessionDuration"] == 3600
-    (trust,) = role["AssumeRolePolicyDocument"]["Statement"]
-    assert trust["Principal"] == {
-        "AWS": {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${InstanceRoleName}"}
-    }
-    (policy,) = role["Policies"]
-    (statement,) = policy["PolicyDocument"]["Statement"]
-    assert statement["Action"] == "sts:AssumeRole"
-    assert statement["Resource"] == {"Fn::Sub": "arn:${AWS::Partition}:iam::*:role/cmp-*"}
-    assert statement["Condition"] == {
-        "StringEquals": {"aws:ResourceTag/cmp:managed-by": "cloud-migration-platform"},
-        "StringLike": {"sts:ExternalId": "cmp-*"},
-    }
-    instance = resources["InstanceAssumesConnector"]
-    assert instance["Type"] == "AWS::IAM::RolePolicy"
-    assert instance["Properties"]["RoleName"] == {"Ref": "InstanceRoleName"}
-    (allow,) = instance["Properties"]["PolicyDocument"]["Statement"]
-    assert allow["Resource"] == {"Fn::GetAtt": ["ConnectorRole", "Arn"]}
-
-
-def test_template_bucket_is_public_read_for_connection_templates_only():
-    resources = connector()["Resources"]
-    bucket = resources["TemplateBucket"]["Properties"]
-    block = bucket["PublicAccessBlockConfiguration"]
-    assert block["BlockPublicAcls"] is True and block["IgnorePublicAcls"] is True
-    statements = resources["TemplateBucketPolicy"]["Properties"]["PolicyDocument"]["Statement"]
-    public = [s for s in statements if s["Effect"] == "Allow"]
-    assert len(public) == 1 and public[0]["Action"] == "s3:GetObject"
-    assert public[0]["Resource"] == {"Fn::Sub": "${TemplateBucket.Arn}/connections/*"}
-    assert any(s["Effect"] == "Deny" and "aws:SecureTransport" in json.dumps(s) for s in statements)
-    outputs = connector()["Outputs"]
-    assert set(outputs) >= {"PlatformPrincipalArn", "TemplateBaseUrl"}
 
 
 # --- demo wiring -----------------------------------------------------------------------------
@@ -553,10 +484,8 @@ def test_api_writes_and_worker_reads_the_same_connection_config():
     assert "/opt/cmp/data/aws-connections:/run/cmp/aws-connections" in api["volumes"]
     assert "/opt/cmp/data/aws-connections:/run/cmp/aws-connections:ro" in worker["volumes"]
     env = api["environment"]
-    assert (
-        env["CONNECTION_PLATFORM_AWS_PROFILE"]
-        == "${CONNECTION_PLATFORM_AWS_PROFILE:-cmp-demo-build}"
-    )
+    # Ticket 23b: the connection principal stays the instance role (`cmp-demo-build`).
+    assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
     assert env["CONNECTION_PLATFORM_PRINCIPAL_ARN"] == "${CONNECTION_PLATFORM_PRINCIPAL_ARN:-}"
     assert env["CONNECTION_TEMPLATE_BASE_URL"] == "${CONNECTION_TEMPLATE_BASE_URL:-}"
     assert env["PLATFORM_ECR_AWS_PROFILE"] == "cmp-demo-build"
@@ -581,17 +510,27 @@ def test_ensure_secrets_seeds_the_shared_config_once(tmp_path):
     shared = tmp_path / "aws-connections/config"
     assert shared.read_text() == (secrets / "aws/config").read_text()
     assert oct(shared.stat().st_mode & 0o777) == "0o640"
-    assert "cmp-platform-connector" not in shared.read_text()
     shared.write_text("generated by api\n")
     run_ensure_secrets(tmp_path)
     assert shared.read_text() == "generated by api\n"  # never clobbers the API's file
 
 
-def test_ensure_secrets_adds_the_connector_profile_once_its_arn_is_known(tmp_path):
-    arn = "arn:aws:iam::714066696240:role/cmp-platform-connector"
-    secrets = run_ensure_secrets(tmp_path, f"CONNECTION_PLATFORM_PRINCIPAL_ARN={arn}\n")
-    text = (secrets / "aws/config").read_text()
-    section = text.split("[profile cmp-platform-connector]\n", 1)[1].split("[", 1)[0]
-    assert f"role_arn = {arn}" in section
-    assert "credential_source = Ec2InstanceMetadata" in section
+def test_generated_profiles_chain_to_the_instance_role_build_profile(tmp_path):
+    """23b·46: `cmp-conn-*` → `cmp-demo-build` (credential_source, no role_arn) = instance role."""
+    secrets = run_ensure_secrets(tmp_path, "PROVISIONING_AWS_ROLE_ARN=arn:aws:iam::1:role/other\n")
+    base = secrets / "aws/config"
+    connection = EnvironmentConnection(
+        id=CONN, kind="AWS_TARGET", role_arn="arn:aws:iam::123456789012:role/cmp-t",
+        external_id="cmp-" + "a" * 32, region="ap-northeast-2",
+    )  # fmt: skip
+    text = connections.render_aws_config(
+        [connection], base=base.read_text(), platform_profile="cmp-demo-build"
+    )
+    parser = configparser.ConfigParser()
+    parser.read_string(text)
+    generated = parser[f"profile {PROFILE}"]
+    assert generated["source_profile"] == "cmp-demo-build"
+    platform = parser["profile cmp-demo-build"]
+    assert platform["credential_source"] == "Ec2InstanceMetadata"
+    assert "role_arn" not in platform  # never PROVISIONING_AWS_ROLE_ARN
     assert "aws_access_key_id" not in text

@@ -18,13 +18,28 @@ paths:
       tags:
       - migration scaffold
       summary: Start Migration
-      description: 'Start a migration. `env_file_ref` (from `POST /env-files`) is
-        optional; an unknown,
+      description: 'Start a migration. Unknown fields are 422.
 
-        changed or deleted reference is 422 `{"detail": {"code": "ENV_FILE_NOT_FOUND"
-        |
 
-        "ENV_FILE_DIGEST_MISMATCH" | "ENV_FILE_EXPIRED"}}` and nothing starts.'
+        Without `target` this is the scaffold start: `env_file_ref` (from `POST /env-files`)
+        is
+
+        optional. With `target` (the web `StartRequest`, ticket 44) the real pipeline
+        starts: `source`
+
+        and `env_file_ref` (an `envf-` id, pinned to its latest version, or an exact
+        reference) are
+
+        required and the target profile catalog supplies the target settings. Refusals
+        are
+
+        `{"detail": {"code": ...}}`: 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`,
+
+        `ENV_FILE_NOT_FOUND` | `ENV_FILE_DIGEST_MISMATCH` | `ENV_FILE_EXPIRED`, `TARGET_*`;
+        503
+
+        `TARGET_PROFILES_UNCONFIGURED` or the `.env` store codes. Nothing starts on
+        a refusal.'
       operationId: start_migration_migrations_post
       requestBody:
         content:
@@ -2877,18 +2892,39 @@ components:
           title: Source Provider
           default: AWS
         target_provider:
-          type: string
-          const: GCP
+          anyOf:
+          - type: string
+            enum:
+            - AWS
+            - GCP
+            - ON_PREM
+          - type: 'null'
           title: Target Provider
-          default: GCP
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/StartTarget'
+          - type: 'null'
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/StartSource'
+          - type: 'null'
         env_file_ref:
           anyOf:
           - $ref: '#/components/schemas/ContentRef'
+          - type: string
+            pattern: ^envf-[a-f0-9]{32}$
           - type: 'null'
+          title: Env File Ref
+      additionalProperties: false
       type: object
       required:
       - project_id
       title: MigrationRequest
+      description: 'Ticket 44: without `target` this is the scaffold start (unchanged);
+        with it the real
+
+        pipeline starts and `source` and `env_file_ref` are required. Unknown fields
+        are refused.'
     MigrationStatus:
       properties:
         workflow_id:
@@ -4170,6 +4206,79 @@ components:
       - name
       - key
       title: SecretRefV2
+    StartSource:
+      properties:
+        kind:
+          type: string
+          const: GITHUB_PUBLIC
+          title: Kind
+        repository_id:
+          type: integer
+          minimum: 1.0
+          title: Repository Id
+        full_name:
+          type: string
+          maxLength: 200
+          pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+          title: Full Name
+        commit_sha:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+          title: Commit Sha
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - repository_id
+      - full_name
+      - commit_sha
+      title: StartSource
+      description: 'Web `StartRequest.source`: a public GitHub repository pinned to
+        a commit.'
+    StartTarget:
+      properties:
+        provider:
+          type: string
+          enum:
+          - AWS
+          - GCP
+          - ON_PREM
+          title: Provider
+        profile:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9][a-z0-9-]*$
+          title: Profile
+        region:
+          anyOf:
+          - type: string
+            maxLength: 63
+            minLength: 1
+          - type: 'null'
+          title: Region
+        agent_id:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Agent Id
+        credential_ref:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Credential Ref
+      additionalProperties: false
+      type: object
+      required:
+      - provider
+      - profile
+      title: StartTarget
+      description: Web `StartRequest.target` (cloud-migration-web `contract/rest.schema.json`),
+        plus AWS.
     TargetSelectionV2:
       properties:
         ref:

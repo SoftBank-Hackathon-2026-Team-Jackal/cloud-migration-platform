@@ -55,10 +55,13 @@ def test_build_stack_creates_only_the_repository_and_an_inline_policy():
     assert {k: v["Type"] for k, v in resources.items()} == {
         "BuildRepository": "AWS::ECR::Repository",
         "BuildAccessPolicy": "AWS::IAM::RolePolicy",
+        # Ticket 23b (#205): connection AssumeRole, a separate inline policy on the same role
+        # (scope tested in tests/test_connection_launch_stack.py).
+        "ConnectionAssumePolicy": "AWS::IAM::RolePolicy",
     }
     # Attached to the existing role by parameter; no role, user or bucket is created here.
-    policy = resources["BuildAccessPolicy"]["Properties"]
-    assert policy["RoleName"] == {"Ref": "InstanceRoleName"}
+    for name in ("BuildAccessPolicy", "ConnectionAssumePolicy"):
+        assert resources[name]["Properties"]["RoleName"] == {"Ref": "InstanceRoleName"}
 
 
 def test_repository_is_immutable_scanned_retained_and_expires_untagged_only():

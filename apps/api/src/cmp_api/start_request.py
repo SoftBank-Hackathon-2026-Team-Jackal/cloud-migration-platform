@@ -1,0 +1,205 @@
+"""Web start request → real pipeline start input (ticket 44, S1~S12).
+
+Pure functions plus two small lookups (connection, Agent). Builds the same dict
+`scripts/start_migration.py` gives `MigrationWorkflow`: `{project_id, analysis, sandbox,
+planning, env_file_ref}`. Target settings come from the operator's profile catalog (S6); the
+request may only choose the region, the target connection and the ON_PREM Agent (S7). Refusals
+are code-only (`StartRefused`) and never echo input values.
+"""
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from cmp_contracts.analysis import AnalysisInput
+from cmp_contracts.migration import MigrationRequest, StartSource, StartTarget
+from cmp_contracts.plan_publish import TargetSettings
+from cmp_contracts.provisioning import ContentRef, ProvisioningInputError
+from cmp_contracts.provisioning_v2 import TargetSelectionV2
+from cmp_providers.aws_preview import AwsPlanInput, validate_aws_input
+from cmp_providers.gcp_preview import GcpPlanInput, terraform_variables
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy.orm import Session
+
+from cmp_api.agent_registry import RegisteredAgent
+from cmp_api.connections import PROFILE_PREFIX, EnvironmentConnection, credential_ref
+from cmp_api.plan_inputs import CLOUD_TEMPLATES
+
+_TARGET_SETTINGS = TypeAdapter(TargetSettings)
+_CLOUD = {"AWS": (AwsPlanInput, validate_aws_input), "GCP": (GcpPlanInput, terraform_variables)}
+_CONNECTION_KIND = {"AWS": "AWS_TARGET", "GCP": "GCP_TARGET"}
+_ONPREM_FIELDS = ("namespace", "storage_class", "database_image")
+
+
+class StartRefused(Exception):
+    """`code` is stable and safe to show; `status` is the HTTP status."""
+
+    def __init__(self, code: str, status: int = 422):
+        super().__init__(code)
+        self.code = code
+        self.status = status
+
+
+def load_target_profiles(path: str | None) -> dict[str, dict]:
+    """The catalog `{"profiles": {name: entry}}`; missing or unreadable is 503 (S6)."""
+    if not path:
+        raise StartRefused("TARGET_PROFILES_UNCONFIGURED", 503)
+    try:
+        profiles = json.loads(Path(path).read_text(encoding="utf-8"))["profiles"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise StartRefused("TARGET_PROFILES_UNCONFIGURED", 503) from None
+    if not isinstance(profiles, dict):
+        raise StartRefused("TARGET_PROFILES_UNCONFIGURED", 503)
+    return profiles
+
+
+def check_request(request: MigrationRequest) -> tuple[StartTarget, StartSource]:
+    """S3/S4: a real start needs a source and a `.env` reference; providers must agree."""
+    target = request.target
+    assert target is not None
+    if request.target_provider is not None and request.target_provider != target.provider:
+        raise StartRefused("TARGET_PROVIDER_MISMATCH")
+    if request.source is None:
+        raise StartRefused("SOURCE_REQUIRED")
+    if request.env_file_ref is None:
+        raise StartRefused("ENV_FILE_REF_REQUIRED")
+    if target.provider == "ON_PREM":
+        if target.region is not None or target.credential_ref is not None:
+            raise StartRefused("TARGET_FIELD_NOT_APPLICABLE")
+        if target.agent_id is None:
+            raise StartRefused("TARGET_AGENT_REQUIRED")
+    elif target.agent_id is not None:
+        raise StartRefused("TARGET_FIELD_NOT_APPLICABLE")
+    return target, request.source
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+
+
+def find_connection(session: Session, value: str, provider: str) -> EnvironmentConnection:
+    """S8: `conn-<hex>` or `cmp-conn-<hex>` → a CONNECTED target connection of this provider."""
+    connection_id = "conn-" + value.removeprefix(PROFILE_PREFIX).removeprefix("conn-")
+    connection = session.get(EnvironmentConnection, connection_id)
+    if connection is None:
+        raise StartRefused("TARGET_CONNECTION_NOT_FOUND")
+    if connection.kind != _CONNECTION_KIND[provider]:
+        raise StartRefused("TARGET_CONNECTION_KIND_MISMATCH")
+    if connection.status != "CONNECTED":
+        raise StartRefused("TARGET_CONNECTION_NOT_READY")
+    return connection
+
+
+def find_agent(session: Session, agent_id: str) -> RegisteredAgent:
+    agent = session.get(RegisteredAgent, agent_id)
+    if agent is None or agent.revoked_at is not None:
+        raise StartRefused("TARGET_AGENT_NOT_FOUND")
+    return agent
+
+
+def _cloud_target(
+    target: StartTarget, entry: dict, connection: EnvironmentConnection | None
+) -> tuple[dict, str]:
+    settings = dict(entry.get("settings") or {})
+    if target.region is not None:
+        settings["region"] = target.region
+    if connection is not None:
+        settings["credential_ref"] = {
+            "id": credential_ref(connection) or connection.id,  # S8: AWS profile, GCP ID
+            "version": "1",
+        }
+        if target.provider == "AWS" and connection.account_id:
+            settings["account_id"] = connection.account_id
+        if target.provider == "GCP" and connection.project_id:
+            settings["project_id"] = connection.project_id
+    region = settings.get("region")
+    if not region:
+        raise StartRefused("TARGET_REGION_REQUIRED")
+    model, validate = _CLOUD[target.provider]
+    plan = {"plan_id": "plan-start-check", "revision": 1}
+    try:
+        validate(
+            model.model_validate(
+                {
+                    **settings,
+                    "migration_id": "start-check",
+                    "plan": {**plan, "template_version": CLOUD_TEMPLATES[target.provider]},
+                }
+            )
+        )
+    except (ValidationError, ProvisioningInputError, ValueError):
+        raise StartRefused("TARGET_SETTINGS_INVALID") from None
+    body = {"provider": target.provider, "settings": settings}
+    if entry.get("workloads") is not None:
+        body["workloads"] = entry["workloads"]
+    return body, region
+
+
+def planning_settings(
+    target: StartTarget,
+    entry: dict,
+    *,
+    connection: EnvironmentConnection | None = None,
+    agent: RegisteredAgent | None = None,
+) -> dict:
+    """S6~S9, S12: `PlanningSettings` JSON with `env_file_ref: null` (the parent copies it in).
+
+    55 (EnvPlan) does not extend this: the EnvPlan joins at `assemble_registration`.
+    """
+    if entry.get("provider") != target.provider:
+        raise StartRefused("TARGET_PROFILE_PROVIDER_MISMATCH")
+    if target.provider == "ON_PREM":
+        assert agent is not None
+        body = {
+            "provider": "ON_PREM",
+            "environment_id": entry.get("environment_id") or agent.id,
+            "agent_id": agent.id,
+            "cluster_uid": agent.cluster_uid,
+            **{name: entry.get(name) for name in _ONPREM_FIELDS},
+        }
+        location = None
+        access_ref = {"id": agent.id, "version": agent.cluster_uid}
+    else:
+        body, location = _cloud_target(target, entry, connection)
+        access_ref = body["settings"].get("credential_ref")
+    try:
+        settings = _TARGET_SETTINGS.validate_python(body).model_dump(mode="json")
+        selection = TargetSelectionV2.model_validate(
+            {
+                "ref": {"id": f"target-{target.profile}", "version": _digest(settings)},
+                "provider": target.provider,
+                "location": location,
+                "access_ref": access_ref,
+                "capabilities_ref": {"id": f"profile-{target.profile}", "version": _digest(entry)},
+                "profile": target.profile,
+            }
+        )
+    except (ValidationError, ValueError):
+        raise StartRefused("TARGET_SETTINGS_INVALID") from None
+    return {
+        "target_selection": selection.model_dump(mode="json"),
+        "target": settings,
+        "env_file_ref": None,
+        "template_version": "v2",
+    }
+
+
+def start_input(
+    request: MigrationRequest, source: StartSource, planning: dict, env_ref: ContentRef
+) -> dict:
+    """S10: the `build_start_input` shape (CLI) for a public GitHub source."""
+    analysis = AnalysisInput(
+        migration_id=request.project_id,
+        repository=f"https://github.com/{source.full_name}.git",
+        requested_commit=source.commit_sha,
+    )
+    return {
+        "project_id": request.project_id,
+        "analysis": analysis.model_dump(mode="json"),
+        "sandbox": None,
+        "planning": planning,
+        "env_file_ref": env_ref.model_dump(mode="json"),
+    }

@@ -23,7 +23,10 @@ from urllib.parse import quote, urlencode
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
-from cmp_providers.aws_credentials import connection_profile
+from cmp_providers.aws_credentials import (
+    PROFILE_PREFIX,  # noqa: F401 - start_request (44)
+    connection_profile,
+)
 from sqlalchemy import Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 

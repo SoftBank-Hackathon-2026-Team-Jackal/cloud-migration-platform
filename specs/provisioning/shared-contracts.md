@@ -109,6 +109,25 @@ identity = approval_target(manifest, preview)
 
 `cmp_contracts.provisioning_result.ProvisioningResult` v1이 Provisioning → Data/Traffic Migration 인계 계약이다. `cmp_providers.provisioning_result`의 `build_provisioning_result`(실행 상태·코드·단계·refs → 결과), `handoff`(소비자별 뷰·`proceed`/`blocked_by`), `public_summary`(사용자 요약)는 순수 함수다. 저장·조회는 `cmp_api.provisioning_results`(`add_result`/`load_result`, 테이블 `provisioning_results`), Worker 진입점은 Activity `get_migration_handoff`, 사용자 조회는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`다. 필드·판정 규칙은 [티켓 13 결정 R1~R10](../../tickets/provisioning/13-result-handoff.md#착수-결정-2026-11-05)을 따른다. Provider 실행 refs의 표준 키(R4)는 이 결과의 입력이며 기존 키는 유지한다.
 
+**인계 조회 방식 (50, #185):** 이름·코드는 `cmp_contracts.handoff`에 있다. 두 Activity 모두 Provisioning 큐에서 저장된 결과를 Plan Revision(AWS/GCP는 **워크로드** Revision)으로 읽고, 조회 시점에 ON_PREM 터널 상태를 합친다.
+
+| Activity | 입력 | 출력 | 소비자 |
+| --- | --- | --- | --- |
+| `get_migration_handoff` | `{plan_id, revision, consumer}` | R7 뷰 `{plan_id, revision, consumer, common, database\|application, proceed, blocked_by}` | 데이터 이전(`cmp_data.handoff.target_endpoint`, DATA_MIGRATION) |
+| `get_traffic_handover` | `TrafficHandoverRequest{plan_id, revision}` | `TrafficHandoff{contract_version:"1", plan_id, revision, provider, proceed, blocked_by, handover}` | 상위 Workflow → `TrafficShiftWorkflow` 요청의 `handover`(#128) |
+
+`handover`(`TrafficHandover`)는 Traffic `cmp_traffic.contracts.Handover`와 필드·기본값이 같다(계약 테스트가 실제 모델로 고정). 변환 `cmp_providers.provisioning_result.traffic_handover(view)`:
+
+| Handover | 인계 뷰(TRAFFIC_MIGRATION) |
+| --- | --- |
+| `status` | `common.status`: READY→READY, FAILED→FAILED, INFRASTRUCTURE_READY·UNKNOWN·결과 없음→UNKNOWN |
+| `external_endpoint` | `http://{application.external_host}:{application.external_port}`(둘 다 있을 때만) |
+| `port` | `application.external_port`(AWS/GCP LB 80, ON_PREM 터널 쪽 앱 포트). 앱 `port`(클러스터 안 컨테이너 포트)는 쓰지 않는다 |
+| `health_path` | `application.health_path`, 없으면 `/health` |
+| `ready` | `proceed` ∧ status READY ∧ 목적지 있음 ∧ `application.ready` ∧ HTTP·TLS 없음(P0). `TrafficHandoff.proceed`와 같다 |
+
+막힘 코드(`blocked_by`, 첫 값이 원인): `RESULT_NOT_FOUND`, `WORKLOADS_NOT_DEPLOYED`, `PROVISIONING_NOT_READY`, `DATABASE_NOT_READY`, `TUNNEL_DB_NOT_VERIFIED`, `APPLICATION_NOT_READY`, `EXTERNAL_ENDPOINT_UNAVAILABLE`, `TUNNEL_STATUS_STALE`. 조회 자체가 실패하면 Workflow가 `HANDOFF_UNAVAILABLE`로 기록한다. 데이터 이전이 읽는 DATA_MIGRATION 필드는 `proceed`, `blocked_by`, `common.namespace`, `common.cluster.{kind,name,location,account_id}`, `database.{release,name,tunnel_endpoint}`이며 이 티켓에서 바꾸지 않았다. AWS/GCP DB 외부 주소는 두지 않는다(CDC는 `kubectl exec`, 클러스터 사이 주소는 WireGuard `peer_host` 입력). 상세는 [50 H1~H8](../../tickets/provisioning/50-handoff-contract.md#착수-결정-2026-11-06).
+
 ## 터널 설정 교환 (16)
 
 `cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록(응답에 중계 서버 목록 포함)·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록·중계 서버용 Agent 목록(`GET /relays/{relay_id}/agents`, 중계 서버 자격 증명, 폐기 Agent는 `revoked: true`로 남음, 내용 digest인 `list_version`)을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`와 `ApplicationHandoff.external_host`·`external_port`가 추가됐다. `external_endpoint`는 "중계 서버가 전달할 목적지"이며 호환을 위해 유지하고, 같은 목적지를 host·port로도 준다(AWS/GCP는 LB 주소·80). `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합친다. Data 인계는 터널 경유 DB 접속 확인 뒤, Traffic 인계는 터널 경유 앱 헬스 확인 뒤(`http://터널IP:앱포트`)에만 진행한다. 중계 서버 공인 주소는 어느 인계 필드에도 없다. 상세는 [티켓 16 T1~T13](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.
@@ -165,7 +184,7 @@ API 설정(`cmp_api.config`):
 - `connection_gcp_project_id`
 - `platform_ecr_aws_profile`(46): Agent ECR 토큰 발급 주체. 없으면 `connection_platform_aws_profile`(41 동작)
 
-**Provisioning의 연결 사용 (46):** AWS Plan 입력 `credential_ref`(`VersionRef`)의 `id`가 연결 ID `conn-<12 hex>`면 대상 연결이고, `version`은 `"1"`이다(Role ARN은 한 번만 등록). 새 계약 필드는 없다. 44의 시작 요청은 `PlanningSettings.target.settings.credential_ref`에 이 값을 넣는다. `conn-`으로 시작하지만 형식이 틀리면 `INVALID_CREDENTIAL_REF`, 연결 ID가 아니면 worker 고정 프로필(이전 동작).
+**Provisioning의 연결 사용 (46):** AWS Plan 입력 `credential_ref`(`VersionRef`)의 `id`가 연결 프로필 이름 `cmp-conn-<12 hex>`(44의 시작 요청이 `PlanningSettings.target.settings.credential_ref`에 넣는 값) 또는 연결 ID `conn-<12 hex>`면 대상 연결이고, `version`은 `"1"`이다(Role ARN은 한 번만 등록). 새 계약 필드는 없다. 두 접두어로 시작하지만 형식이 틀리면 `INVALID_CREDENTIAL_REF`, 그 밖의 값이면 worker 고정 프로필(이전 동작).
 - `cmp_providers.aws_credentials`: `connection_profile(id)`, `connection_id_of(ref)`, `resolve_aws_profiles(ref, *, platform_profile) -> AwsProfiles(provider, state, connection_id)`. `plan_aws_infrastructure`·`apply_aws_infrastructure`의 `aws_profile`은 플랫폼 프로필(State backend·기본값) 뜻이다. S3 backend `init`에 `-backend-config=profile=<state>`가 항상 붙는다.
 - `cmp_api.connections.check_target_connection(session, id, *, account_id)`: Plan 게시 전 검사. 실패 `PLAN_FAILED` + `TARGET_CONNECTION_NOT_FOUND`·`TARGET_CONNECTION_KIND_MISMATCH`·`TARGET_CONNECTION_NOT_VERIFIED`·`TARGET_CONNECTION_ACCOUNT_MISMATCH`.
 - 연결 경로 Plan: `cluster_name`이 `cmp-`로 시작해야 한다(`INVALID_CLUSTER_NAME`).
@@ -185,7 +204,7 @@ API 설정(`cmp_api.config`):
 | `POST /env-files` | 본문 = `.env` 원본 바이트(`application/octet-stream` 또는 `text/plain`, UTF-8, 64 KiB 이하) | 201 `{env_file_ref: {id: "envf-<32 hex>", version: "1", sha256}, keys: [이름], warnings: [{code: "ENV_KEY_DUPLICATED", key}]}`. `sha256`은 원본 바이트 기준 |
 | `POST /env-files/{id}` | 같은 본문 | 201, 같은 `id`의 다음 `version`. 이전 버전은 보관 기간까지 읽을 수 있다 |
 | `DELETE /env-files/{id}` | — | 204. 모든 버전 삭제, 반복 호출도 204 |
-| `POST /migrations` | 선택 `env_file_ref: ContentRef` | 없으면 지금과 같다. 있으면 저장소에 같은 `version`·`sha256`이 있어야 하고, 아니면 422 `ENV_FILE_NOT_FOUND`·`ENV_FILE_DIGEST_MISMATCH`·`ENV_FILE_EXPIRED`(시작하지 않음) |
+| `POST /migrations` | 선택 `env_file_ref: ContentRef` 또는 `envf-<32 hex>`(44) | 없으면 지금과 같다. 있으면 저장소에 같은 `version`·`sha256`이 있어야 하고, 아니면 422 `ENV_FILE_NOT_FOUND`·`ENV_FILE_DIGEST_MISMATCH`·`ENV_FILE_EXPIRED`(시작하지 않음). 문자열 id는 시작 순간 최신 버전으로 고정한다. `target`이 있는 웹 시작에서는 필수다(아래 44) |
 
 오류 코드: `ENV_FILE_NOT_FOUND` 404, `ENV_FILE_EXPIRED` 410(삭제·보관 만료), `ENV_FILE_TOO_LARGE` 413, `ENV_FILE_NOT_UTF8` 422, `ENV_FILE_STORE_UNCONFIGURED`·`ENV_FILE_KEY_INVALID` 503.
 
@@ -200,6 +219,27 @@ API 설정(`cmp_api.config`):
 API 설정(`cmp_api.config`): `env_file_store_dir`(`ENV_FILE_STORE_DIR`), `env_file_encryption_key`(`ENV_FILE_ENCRYPTION_KEY`, base64url 32바이트, 서버 `.env`에만).
 
 Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`를 분석 자식 입력 `AnalysisInput.env_file_ref`(추가 선택 필드), Sandbox `SandboxSettings`·`SandboxInput.env_file_ref`(추가 선택 필드), Planning 인계 설정 `PlanningSettings.env_file_ref`(시작 요청 값이 우선)로 복사한다. `status` 쿼리에 `env_file_ref`가 추가됐다. API의 scaffold 시작(`analysis` 없음)은 `{project_id, env_file_ref}` dict로 시작하며 분석·Sandbox 자식은 여전히 scaffold 문자열 입력이다.
+
+## 웹 시작 요청 → 실제 시작 입력 (44)
+
+[44 티켓](../../tickets/provisioning/44-web-start-to-planning.md#착수-결정-2026-11-06). `cmp_contracts.migration.MigrationRequest`는 웹 `cloud-migration-web` `contract/rest.schema.json` `StartRequest`와 같은 모양이고 모르는 필드는 422다(`extra="forbid"`).
+
+| 필드 | 형식 | 비고 |
+| --- | --- | --- |
+| `project_id` | 문자열(필수) | |
+| `source_provider` | `AWS` | |
+| `target_provider` | `AWS`·`GCP`·`ON_PREM`(선택) | `target.provider`와 다르면 422 `TARGET_PROVIDER_MISMATCH` |
+| `target` | `{provider, profile, region?, agent_id?, credential_ref?}` | 없으면 scaffold 시작(입력 바이트 동일). 있으면 실제 시작 |
+| `source` | `{kind: GITHUB_PUBLIC, repository_id, full_name, commit_sha}` | 실제 시작에 필수(`SOURCE_REQUIRED`) |
+| `env_file_ref` | `ContentRef` 또는 `envf-<32 hex>` | 실제 시작에 필수(`ENV_FILE_REF_REQUIRED`) |
+
+실제 시작 입력은 CLI `build_start_input`과 같은 `{project_id, analysis: AnalysisInput{repository: https://github.com/<full_name>.git, requested_commit}, sandbox: null, planning: PlanningSettings(env_file_ref null), env_file_ref}`이고 `MigrationWorkflow`는 바뀌지 않았다. `PlanningSettings`는 `cmp_api.start_request.planning_settings`가 만든다.
+
+- 대상 Profile 카탈로그(API 설정 `planning_target_profiles_file`, `PLANNING_TARGET_PROFILES_FILE`): `{"profiles": {<profile>: 항목}}`. 항목은 AWS·GCP `{provider, settings: Plan 입력에서 migration_id·plan을 뺀 필드, workloads?}`, ON_PREM `{provider, environment_id?, namespace, storage_class, database_image}`. 예시는 `infra/demo/target-profiles.example.json`. 코드 기본값은 없다. 없으면 503 `TARGET_PROFILES_UNCONFIGURED`.
+- 요청이 바꿀 수 있는 값: 클라우드 `region`(→ `settings.region`·`location`), 대상 연결 `credential_ref`(`conn-<hex>` 또는 `cmp-conn-<hex>`, `AWS_TARGET`·`GCP_TARGET`·`CONNECTED`; → `settings.credential_ref = {id: AWS는 cmp-conn-<hex>·GCP는 conn-<hex>, version: "1"}`, AWS `account_id`·GCP `project_id`도 연결 값), ON_PREM `agent_id`(→ `cluster_uid`는 등록 값, `environment_id`는 항목 값 또는 `agent_id`). 나머지는 카탈로그 값 그대로다.
+- `TargetSelectionV2`: `ref {id: target-<profile>, version: 대상 설정 sha256 앞 16자}`, `access_ref`(클라우드 `credential_ref`, ON_PREM `{id: agent_id, version: cluster_uid}`), `capabilities_ref {id: profile-<profile>, version: 항목 sha256 앞 16자}`, `profile`.
+- 거절 코드(`{"detail": {"code"}}`, 시작하지 않음): 422 `SOURCE_REQUIRED`, `ENV_FILE_REF_REQUIRED`, ENV-02 코드, `TARGET_PROVIDER_MISMATCH`, `TARGET_PROFILE_NOT_FOUND`, `TARGET_PROFILE_PROVIDER_MISMATCH`, `TARGET_FIELD_NOT_APPLICABLE`, `TARGET_REGION_REQUIRED`, `TARGET_AGENT_REQUIRED`, `TARGET_AGENT_NOT_FOUND`(없음·폐기), `TARGET_CONNECTION_NOT_FOUND`, `TARGET_CONNECTION_KIND_MISMATCH`, `TARGET_CONNECTION_NOT_READY`, `TARGET_SETTINGS_INVALID`(`TargetSettings`·05/06 입력 검증 실패); 503 `TARGET_PROFILES_UNCONFIGURED`, `.env` 저장소 코드.
+- 추가 공개 함수: `EncryptedEnvFileStore.latest(file_id) -> ContentRef`.
 
 ## 구축 env 렌더 (ENV-04)
 

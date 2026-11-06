@@ -77,6 +77,7 @@ PROV-003, PROV-021, **PROV-022(신규, 환경 연결 발급)**
   - API 컨테이너에 플랫폼 프로필·`CONNECTION_*` 설정
   - api·worker가 생성 config를 공유하고 worker `AWS_CONFIG_FILE`이 그 파일을 가리키게 함
   - 템플릿 S3 버킷 생성·업로드
+- 후속 메모(2026-11-06): 인스턴스 역할 AssumeRole 권한·api `CONNECTION_PLATFORM_PRINCIPAL_ARN`/`CONNECTION_TEMPLATE_BASE_URL`·템플릿 S3 버킷은 [23b](23b-connection-launch-stack-hotfix.md)(#205)에서 코드·변경 세트로 준비했다(반영 승인 대기). 생성 config 공유는 46(#181).
 - GCP verify의 실제 ADC 호출은 기존 06/10 경로와 같은 함수지만, API 컨테이너에는 gcloud·ADC가 없다(데모는 worker에만 있음). 데모 반영 시 API에 ADC를 줄지, 확인을 worker로 옮길지 결정이 필요하다.
 
 ## 후속 제안
@@ -94,4 +95,4 @@ PROV-003, PROV-021, **PROV-022(신규, 환경 연결 발급)**
 - 시각 필드는 epoch 초 정수다. 웹 목업이 ISO 문자열이면 BFF에서 변환하거나 계약을 맞춰야 한다.
 
 ## 후속 (티켓 46, 2026-11-06)
-- Provisioning이 연결 `credential_ref`로 Plan·Apply·워크로드를 실행하고, State backend는 플랫폼 프로필을 따로 쓴다. 플랫폼 주체는 고정 역할 `cmp-platform-connector`(스택 `cmp-demo-connector`), 템플릿 역할 이름은 `cmp-<종류>-<External ID hex>`, 생성 파일은 API 시작 때도 다시 쓴다. 위 "남는 일"의 backend profile·AssumeRole 권한·compose 연결 항목은 46에서 처리했다(배포는 승인 대기). [46](46-connection-credentials.md)
+- Provisioning이 연결 `credential_ref`로 Plan·Apply·워크로드를 실행하고 State backend는 플랫폼 프로필을 따로 쓴다. 생성 config는 api·worker가 `/opt/cmp/data/aws-connections/config`로 공유하고 API 시작 때도 다시 쓴다. 위 "남는 일"의 backend profile·compose 연결 항목을 처리했다(AssumeRole 권한·템플릿 버킷은 23b). [46](46-connection-credentials.md)

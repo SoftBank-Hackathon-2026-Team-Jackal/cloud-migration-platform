@@ -90,4 +90,4 @@ Blocked by: B-01 (DONE), 21 (로컬 완료). 29(#153, Agent 이미지 pull·토�
 - 접두사 `sources/`·`tests/`·`builds/`는 박승철님 확인 대기.
 
 ## 후속 (티켓 46, 2026-11-06)
-- 같은 방식(D1)으로 별도 스택 `cmp-demo-connector`를 둔다: 인스턴스 역할에 인라인 정책 `cmp-demo-connector`(연결 주체 역할 Assume만)를 붙이고 컨트롤 플레인 스택은 갱신하지 않는다. [46](46-connection-credentials.md)
+- 46은 AWS 리소스를 추가하지 않는다. 연결 AssumeRole 권한은 23b가 이 스택(`cmp-demo-build`)의 `ConnectionAssumePolicy`로 넣었다. [46](46-connection-credentials.md)

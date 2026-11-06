@@ -75,12 +75,15 @@ services:
       # environment connections (ticket 23) is the instance-role build profile from
       # ensure-secrets.sh; no static keys and no GCP credentials on the API.
       AWS_CONFIG_FILE: /run/cmp/aws/config
-      # Ticket 46 (#181): after deploy-connector-stack.sh, /opt/cmp/.env switches the connection
-      # principal to cmp-platform-connector and sets its ARN and the template URL (empty: no link).
-      CONNECTION_PLATFORM_AWS_PROFILE: ${CONNECTION_PLATFORM_AWS_PROFILE:-cmp-demo-build}
+      CONNECTION_PLATFORM_AWS_PROFILE: cmp-demo-build
+      # Ticket 23b (#205): the Launch Stack link (null while either is empty). Values from
+      # /opt/cmp/.env, printed by deploy-connection-templates.sh: the instance role's ARN (the
+      # identity the profile above resolves to) and the public connections/<version> prefix of
+      # the template bucket. API only; the worker never builds the link.
       CONNECTION_PLATFORM_PRINCIPAL_ARN: ${CONNECTION_PLATFORM_PRINCIPAL_ARN:-}
       CONNECTION_TEMPLATE_BASE_URL: ${CONNECTION_TEMPLATE_BASE_URL:-}
-      # The API writes the generated connection profiles here; the worker reads the same file.
+      # Ticket 46 (#181): the API writes the generated connection profiles (`cmp-conn-*`, whose
+      # source_profile is cmp-demo-build = the instance role) here; the worker reads the same file.
       CONNECTION_AWS_CONFIG_FILE: /run/cmp/aws-connections/config
       CONNECTION_AWS_BASE_CONFIG_FILE: /run/cmp/aws/config
       # K3s Agent ECR pull tokens stay with the instance-role build profile (ticket 41).
@@ -89,12 +92,17 @@ services:
       # prints it). Empty keeps the pre-ticket-29 behavior (no platform registry).
       PLATFORM_ECR_REGISTRY: ${PLATFORM_ECR_REGISTRY:-}
       PLATFORM_ECR_REPOSITORIES: ${PLATFORM_ECR_REPOSITORIES:-cmp-platform-builds}
+      # Ticket 44 (#179): target profile catalog for web starts (shape:
+      # target-profiles.example.json). Absent file → real starts are 503
+      # TARGET_PROFILES_UNCONFIGURED; the scaffold start still works.
+      PLANNING_TARGET_PROFILES_FILE: /opt/cmp/config/target-profiles.json
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
-      # No keys in it (ARNs, External IDs, profile names), so it lives with the data, writable.
+      # Ticket 46: no keys in it (ARNs, External IDs, profile names), so it lives with the data.
       - /opt/cmp/data/aws-connections:/run/cmp/aws-connections
+      - /opt/cmp/config:/opt/cmp/config:ro
     command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     # Loopback only; the public edge forwards /agents/* and /relays/* on the internal network.
     ports:

@@ -1,8 +1,9 @@
 """Which named AWS profile runs each part of an AWS Plan/Apply/workload run (ticket 46, ADR-005).
 
 `credential_ref` (the Plan input's existing `VersionRef`) names the target environment
-connection when its `id` is a connection ID (`conn-<12 hex>`). That connection's generated
-assume-role profile `cmp-conn-<12 hex>` (ticket 23) then runs the Terraform provider, `aws sts`,
+connection when its `id` is that connection's profile name `cmp-conn-<12 hex>` (ADR-005; what the
+start request writes, ticket 44) or its connection ID `conn-<12 hex>`. The generated assume-role
+profile `cmp-conn-<12 hex>` (ticket 23) then runs the Terraform provider, `aws sts`,
 `aws eks` and kubectl. The Terraform State backend always stays on the platform profile: the
 State bucket is in the platform account (B-13).
 
@@ -17,7 +18,8 @@ from cmp_contracts.provisioning import ProvisioningInputError, ValidationIssue, 
 
 CONNECTION_PREFIX = "conn-"
 PROFILE_PREFIX = "cmp-conn-"
-_CONNECTION_ID = re.compile(r"conn-([0-9a-f]{12})")
+# Connection IDs are `conn-` + 12 hex today (ticket 23); up to 32 is accepted, nothing else.
+_CONNECTION_ID = re.compile(r"conn-([0-9a-f]{12,32})")
 
 
 @dataclass(frozen=True)
@@ -39,11 +41,18 @@ def connection_profile(connection_id: str) -> str:
 
 
 def connection_id_of(credential_ref: VersionRef) -> str | None:
-    """The connection ID a `credential_ref` names, or None for the fixed platform profile."""
-    if not credential_ref.id.startswith(CONNECTION_PREFIX):
+    """The connection ID a `credential_ref` names, or None for the fixed platform profile.
+
+    Both `cmp-conn-<hex>` and `conn-<hex>` name a connection; anything else that starts with
+    either prefix is malformed (`INVALID_CREDENTIAL_REF`), never a silent fallback.
+    """
+    value = credential_ref.id
+    if value.startswith(PROFILE_PREFIX):
+        value = value.removeprefix("cmp-")
+    elif not value.startswith(CONNECTION_PREFIX):
         return None
-    connection_profile(credential_ref.id)  # validates the format
-    return credential_ref.id
+    connection_profile(value)  # validates the format
+    return value
 
 
 def resolve_aws_profiles(

@@ -1,16 +1,52 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from cmp_contracts.provisioning import ContentRef
 
+TargetProvider = Literal["AWS", "GCP", "ON_PREM"]
+# Ticket 44 (S5): the web sends the upload `id` only; the API pins its latest version at start.
+EnvFileId = Annotated[str, Field(pattern=r"^envf-[a-f0-9]{32}$")]
+
+
+class StartTarget(BaseModel):
+    """Web `StartRequest.target` (cloud-migration-web `contract/rest.schema.json`), plus AWS."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: TargetProvider
+    profile: str = Field(min_length=1, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    region: str | None = Field(default=None, min_length=1, max_length=63)
+    agent_id: str | None = Field(default=None, min_length=1, max_length=120)
+    # Target connection: its ID `conn-<hex>` or its AWS profile name `cmp-conn-<hex>` (ticket 23).
+    credential_ref: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class StartSource(BaseModel):
+    """Web `StartRequest.source`: a public GitHub repository pinned to a commit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["GITHUB_PUBLIC"]
+    repository_id: int = Field(ge=1)
+    full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", max_length=200)
+    commit_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+
 
 class MigrationRequest(BaseModel):
+    """Ticket 44: without `target` this is the scaffold start (unchanged); with it the real
+    pipeline starts and `source` and `env_file_ref` are required. Unknown fields are refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
     project_id: str = Field(min_length=1)
     source_provider: Literal["AWS"] = "AWS"
-    target_provider: Literal["GCP"] = "GCP"
+    # Legacy top-level copy of `target.provider`; when both are given they must be equal.
+    target_provider: TargetProvider | None = None
+    target: StartTarget | None = None
+    source: StartSource | None = None
     # ENV-02: reference returned by `POST /env-files`; the `.env` values never travel here.
-    env_file_ref: ContentRef | None = None
+    env_file_ref: ContentRef | EnvFileId | None = None
 
 
 class MigrationCreated(BaseModel):
@@ -46,6 +82,7 @@ FAILURE_OUTCOMES = frozenset(
         "provisioning_failed",
         "data_blocked",
         "data_failed",
+        "traffic_blocked",  # ticket 50: no Traffic handover, the shift was not started
     }
 )
 OUTCOME_PHASE: dict[str, str] = {
@@ -55,6 +92,7 @@ OUTCOME_PHASE: dict[str, str] = {
     "approval_expired": "awaiting_approval",
     "data_blocked": "data_copy",  # specs/data-migration: handoff/precheck blocked the copy
     "data_failed": "data_copy",
+    "traffic_blocked": "traffic",
 }
 
 

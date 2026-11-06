@@ -338,11 +338,8 @@ def test_api_uses_the_instance_role_build_profile_without_gcp_credentials():
     assert "/opt/cmp/secrets/aws:/run/cmp/aws:ro" in api["volumes"]
     # Same profile the worker's Build module uses; ensure-secrets.sh writes it as the instance
     # role itself (never PROVISIONING_AWS_ROLE_ARN).
-    # Ticket 46: the default until the connector stack exists; ECR tokens keep this profile.
-    assert (
-        env["CONNECTION_PLATFORM_AWS_PROFILE"]
-        == "${CONNECTION_PLATFORM_AWS_PROFILE:-cmp-demo-build}"
-    )
+    # Ticket 23b·46: the connection principal stays this profile; ECR tokens have their own.
+    assert env["CONNECTION_PLATFORM_AWS_PROFILE"] == "cmp-demo-build"
     assert env["PLATFORM_ECR_AWS_PROFILE"] == _env("worker")["BUILD_AWS_PROFILE"]
     assert "PROVISIONING_AWS_PROFILE" not in env
     # The API never gets the GCP key or a gcloud configuration.

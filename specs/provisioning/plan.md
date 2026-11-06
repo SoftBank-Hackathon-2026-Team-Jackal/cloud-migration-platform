@@ -226,6 +226,8 @@ Data Migration에는 대상 DB Endpoint·네트워크 접근 요구·인증 참�
 
 **13 구현 (#53):** 위 제안 필드를 `ProvisioningResult` v1로 확정했다. 승인 실행 완료 시 업무 DB `provisioning_results`에 불변 저장하고, Workflow 이력에는 `plan_id`·`revision`·`status`만 남긴다. Data/Traffic Worker는 `get_migration_handoff` Activity로 자기 섹션과 진행 가능 여부를 읽고, 사용자는 읽기 전용 요약 API로 상태·앱 외부 주소·검사 결과만 본다. 검사 목록은 Provider별 고정 검사 순서와 첫 실패 코드에서 추론하며, 데이터 변경 기능 테스트는 항상 `NOT_RUN`(데이터 이전 후 실행)이다. 상세 결정은 [티켓 13](../../tickets/provisioning/13-result-handoff.md)에 있다.
 
+**50 구현 (#185):** `MigrationWorkflow`는 승인 실행이 성공한 실행에서 `traffic` 단계 직전(데이터 단계 뒤) `traffic-handoff-v1` patch 아래 `get_traffic_handover`로 Traffic `Handover` 모양의 인계를 읽어 Workflow 상태 `traffic_handoff`에 보존한다. `proceed=false`이거나 조회가 실패하면 `traffic_blocked`(코드 = 첫 `blocked_by` 또는 `HANDOFF_UNAVAILABLE`)로 끝나고 전환 Activity를 실행하지 않는다. 변환은 Provisioning 쪽 순수 함수이고 Traffic 계약은 바꾸지 않는다. 자식 `TrafficShiftWorkflow` 연결은 #128이다. 상세는 [티켓 50](../../tickets/provisioning/50-handoff-contract.md#착수-결정-2026-11-06).
+
 ## 12. Failure, retry, and rollback behavior
 
 | 실패 | 처리·복구 경계 |
@@ -331,5 +333,5 @@ Terraform 1.10.5 이상과 잠금 파일의 Google Provider 7.x를 사용한다.
 - **`credential_ref` 해석:** 역할을 등록하거나 연결을 삭제할 때마다(46부터 API 시작 때도) API가 `connection_aws_config_file`을 DB 기준으로 다시 쓴다. 내용은 플랫폼 기본 프로필 파일 + 연결별 `[profile cmp-conn-<hex>]`(`role_arn`, `external_id`, `source_profile`)다. worker·분석은 `AWS_CONFIG_FILE`로 같은 파일을 읽는다. 그러면 분석 `get_session(credential_ref)`, Provisioning `aws_profile`, Terraform·AWS CLI가 코드 변경 없이 SDK의 assume-role로 동작한다.
 - **GCP:** `cmp_providers.gcp_preview.verify_adc_principal`(06의 ADC 검사 공개 함수)을 재사용한다.
 - **템플릿:** `infra/connections/{source,target}-role.yaml`. S3 공개 읽기 객체로 호스팅하고 `connection_template_base_url`로 빠른 생성 링크를 만든다.
-- **Provisioning 연결 실행(46):** Plan 입력 `credential_ref.id`가 연결 ID면 Plan·Apply·AWS 워크로드가 승인된 Spec의 그 연결 프로필로 실행하고, State backend는 플랫폼 프로필을 따로 쓴다(`cmp_providers.aws_credentials`). 플랫폼 주체는 이름 고정 역할 `cmp-platform-connector`(별도 스택 `cmp-demo-connector`)다. 상세는 [46](../../tickets/provisioning/46-connection-credentials.md).
+- **Provisioning 연결 실행(46):** Plan 입력 `credential_ref.id`가 연결(`cmp-conn-<hex>` 또는 `conn-<hex>`)이면 Plan·Apply·AWS 워크로드가 승인된 Spec의 그 연결 프로필로 실행하고, State backend는 플랫폼 프로필을 따로 쓴다(`cmp_providers.aws_credentials`). 플랫폼 주체는 인스턴스 역할(23b). 상세는 [46](../../tickets/provisioning/46-connection-credentials.md).
 - **제외:** `MigrationRequest` 연결 ID, 다른 계정 Apply의 backend 프로필, 데모 반영은 후속이다([23 티켓](../../tickets/provisioning/23-environment-connections.md)).

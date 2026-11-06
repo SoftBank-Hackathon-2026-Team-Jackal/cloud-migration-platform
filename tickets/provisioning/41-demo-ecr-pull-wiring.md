@@ -81,4 +81,4 @@ Blocked by: 28 (#152, 스택 배포 완료), 29 (#153, main 병합). 코드(`app
 - 연결 관리의 실제 AssumeRole 동작이 같은지(D3)는 코드·botocore 체인으로만 확인했다.
 
 ## 후속 (티켓 46, 2026-11-06)
-- D2·D3의 "토큰 발급과 연결이 같은 프로필"을 나눴다. api `PLATFORM_ECR_AWS_PROFILE=cmp-demo-build`(토큰 발급, 그대로 인스턴스 역할), `CONNECTION_PLATFORM_AWS_PROFILE`은 연결 주체 스택 배포 뒤 `cmp-platform-connector`. 설정이 없으면 41 동작 그대로. [46](46-connection-credentials.md)
+- 토큰 발급 주체를 별도 설정 `PLATFORM_ECR_AWS_PROFILE`(데모 `cmp-demo-build`)로 분리했다. 연결 주체 `CONNECTION_PLATFORM_AWS_PROFILE`도 `cmp-demo-build` 그대로라 지금 동작은 같고, 둘을 따로 바꿀 수 있다. 설정이 없으면 41 동작. [46](46-connection-credentials.md)

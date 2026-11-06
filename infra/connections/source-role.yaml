@@ -19,17 +19,6 @@ Resources:
   ConnectionRole:
     Type: AWS::IAM::Role
     Properties:
-      # Ticket 46: a fixed cmp- name (from the External ID's hex) whatever the stack is called, so
-      # the platform principal's sts:AssumeRole scope (role/cmp-*) always matches.
-      RoleName:
-        Fn::Sub:
-          - "cmp-source-${Id}"
-          - Id:
-              Fn::Select:
-                - 1
-                - Fn::Split:
-                    - "-"
-                    - Ref: ExternalId
       Description: Cloud Migration Platform read-only scan role
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
