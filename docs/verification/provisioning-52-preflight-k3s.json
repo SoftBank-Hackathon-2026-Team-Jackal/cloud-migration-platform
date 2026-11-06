@@ -1,0 +1,270 @@
+{
+ "cluster": {
+  "context": "k3d-cmp-p52",
+  "node": "k3d-cmp-p52-server-0"
+ },
+ "scenarios": {
+  "pass": {
+   "status": "PASS",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "PASS",
+     null
+    ],
+    "probe_large_transfer": [
+     "PASS",
+     null
+    ]
+   },
+   "transfer": {
+    "bytes_expected": 4194304,
+    "bytes_received": 4194304,
+    "seconds": 0.03,
+    "stopped_after_64kib": false,
+    "mtu": "NOT_ATTEMPTED"
+   },
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "57e4eb19-878e-43a5-8e3b-35cd54984b00",
+    "namespace": "cmp-migration",
+    "node": "k3d-cmp-p52-server-0"
+   },
+   "may_start": [
+    true,
+    []
+   ],
+   "seconds": 5.1,
+   "jobs": [
+    {
+     "id": "preflight-33cf3c86980cfe4c0ed011b2",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ],
+   "probe_pods_left": 0
+  },
+  "same_request_reused": {
+   "status": "PASS",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "PASS",
+     null
+    ],
+    "probe_large_transfer": [
+     "PASS",
+     null
+    ]
+   },
+   "transfer": {
+    "bytes_expected": 4194304,
+    "bytes_received": 4194304,
+    "seconds": 0.03,
+    "stopped_after_64kib": false,
+    "mtu": "NOT_ATTEMPTED"
+   },
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "57e4eb19-878e-43a5-8e3b-35cd54984b00",
+    "namespace": "cmp-migration",
+    "node": "k3d-cmp-p52-server-0"
+   },
+   "may_start": [
+    true,
+    []
+   ],
+   "seconds": 0.0,
+   "jobs": [
+    {
+     "id": "preflight-33cf3c86980cfe4c0ed011b2",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ]
+  },
+  "bad_password": {
+   "status": "FAIL",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "PASS",
+     null
+    ],
+    "probe_db_path": [
+     "FAIL",
+     "AUTH_FAILED"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NOT_RUN"
+    ]
+   },
+   "transfer": {
+    "mtu": "NOT_ATTEMPTED"
+   },
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "57e4eb19-878e-43a5-8e3b-35cd54984b00",
+    "namespace": "cmp-migration",
+    "node": "k3d-cmp-p52-server-0"
+   },
+   "may_start": [
+    false,
+    [
+     "PREFLIGHT_NOT_PASSED"
+    ]
+   ],
+   "seconds": 7.1,
+   "jobs": [
+    {
+     "id": "preflight-33cf3c86980cfe4c0ed011b2",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    },
+    {
+     "id": "preflight-96de85245f55e2fdbda8262d",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ]
+  },
+  "namespace_not_owned": {
+   "status": "UNKNOWN",
+   "checks": {
+    "check_cidr_overlap": [
+     "PASS",
+     null
+    ],
+    "check_route": [
+     "UNKNOWN",
+     "NAMESPACE_NOT_OWNED"
+    ],
+    "probe_db_path": [
+     "UNKNOWN",
+     "NAMESPACE_NOT_OWNED"
+    ],
+    "probe_large_transfer": [
+     "UNKNOWN",
+     "NAMESPACE_NOT_OWNED"
+    ]
+   },
+   "transfer": {},
+   "probe_location": {
+    "agent_id": "agent-preflight-smoke",
+    "cluster_uid": "57e4eb19-878e-43a5-8e3b-35cd54984b00",
+    "namespace": "cmp-unowned",
+    "node": "k3d-cmp-p52-server-0"
+   },
+   "may_start": [
+    false,
+    [
+     "PREFLIGHT_NOT_PASSED"
+    ]
+   ],
+   "seconds": 1.0,
+   "jobs": [
+    {
+     "id": "preflight-30fdcf76c11d963bedc37f96",
+     "status": "FAILED",
+     "code": "NAMESPACE_NOT_OWNED"
+    },
+    {
+     "id": "preflight-33cf3c86980cfe4c0ed011b2",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    },
+    {
+     "id": "preflight-96de85245f55e2fdbda8262d",
+     "status": "SUCCEEDED",
+     "code": "PROBED"
+    }
+   ],
+   "pods_in_unowned_namespace": 0
+  }
+ },
+ "probe_image": {
+  "value": "docker.io/library/postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab",
+  "chart_default": true
+ },
+ "agent_log_job_events": [
+  {
+   "status": "SUCCEEDED",
+   "code": "PROBED"
+  },
+  {
+   "status": "SUCCEEDED",
+   "code": "PROBED"
+  },
+  {
+   "status": "FAILED",
+   "code": "NAMESPACE_NOT_OWNED"
+  }
+ ],
+ "events": [
+  {
+   "type": "data.preflight",
+   "status": "done",
+   "result": "PASS",
+   "may_start": true
+  },
+  {
+   "type": "data.preflight",
+   "status": "done",
+   "result": "PASS",
+   "may_start": true
+  },
+  {
+   "type": "data.preflight",
+   "status": "failed",
+   "result": "FAIL",
+   "may_start": false
+  },
+  {
+   "type": "data.preflight",
+   "status": "failed",
+   "result": "UNKNOWN",
+   "may_start": false
+  }
+ ],
+ "probe_pods_left": 0,
+ "revoked_idle": {
+  "seconds": 90,
+  "phase": "Running",
+  "restarts": {
+   "agent": 0
+  },
+  "running": {
+   "agent": true
+  },
+  "agent_stopped_events": [
+   {
+    "event": "stopped",
+    "code": "AGENT_UNAUTHORIZED"
+   }
+  ]
+ },
+ "password_absent_from_evidence_logs_events": true,
+ "password_absent_from_job_rows": true,
+ "cleanup": {
+  "agent_release_uninstalled": true,
+  "namespaces_deleted": true
+ }
+}

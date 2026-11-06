@@ -1,7 +1,7 @@
 # Ticket 52 — Agent 작업 시한·취소·정리 작업과 운영 보강
 
 ## 상태
-IN_PROGRESS (구현·단위 테스트·k3d 실측 중) — [Issue #187](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/187). 우선순위 중간(P1/P2), 담당 민서. 15·17·51 후속, #164(40) 참고. **새 Agent 릴리스가 필요하다(Agent 코드·Chart·RBAC 변경, 태그는 사용자 승인 뒤).**
+IN_PROGRESS (로컬 구현·테스트·k3d 실측 완료, 리뷰 대기) — [Issue #187](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/187). 우선순위 중간(P1/P2), 담당 민서. 15·17·51 후속, #164(40) 참고. **새 Agent 릴리스가 필요하다(Agent 코드·Chart·RBAC 변경, 태그는 사용자 승인 뒤).**
 
 ## 배경 (2026-11-06 실동작 점검 C·B, 이전 N9·N13·N14)
 - **C-04 / N14 (P1, 실재현):** Agent가 꺼진 동안 승인 실행 Activity는 30분 뒤 `UNKNOWN AGENT_OFFLINE`을 반환하지만 작업은 `QUEUED`로 남는다. Agent가 돌아오면 그 작업을 받아 운영 배포를 한다. Workflow는 이미 끝났으므로 추적되지 않는 배포가 생긴다. 작업 취소 API도 없다.
@@ -21,9 +21,9 @@ PROV-009, PROV-015, PROV-016, PROV-017, PROV-021
 - 제외: 자격 재발급 API 구현(C-11, 설계만 D15), Namespace 한정 Role 모드(B-17, 설계만 D16), 노드 아키텍처 사전 대조(#155, C-03), Agent 버전 보고·dispatch 사전 차단(#164), 원본 DB 인증 Secret 전달(C-06 데이터 담당), UDP 대체 터널(C-10), 정리 시점을 정하는 Workflow 단계(Traffic·데이터 담당과 순서 합의 필요)
 
 ## 수용 기준 (Issue #187)
-- [ ] 시한 지난 작업은 실행되지 않고 결과가 보고된다.
-- [ ] 정리 작업으로 대상 Namespace 리소스가 지워진다(k3d 확인).
-- [ ] 값 없이 설치해도 preflight가 기본 이미지로 돈다.
+- [x] 시한 지난 작업은 실행되지 않고 결과가 보고된다. — Agent를 끈 채 Activity가 대기 한도에 닿자 `FAILED AGENT_OFFLINE`, 작업 `EXPIRED`. 돌아온 Agent는 받은 작업이 없고 Helm 이력이 그대로다(k3d 3단계). claim 시점·Agent 쪽 시한은 단위 테스트.
+- [x] 정리 작업으로 대상 Namespace 리소스가 지워진다(k3d 확인). — 데이터 유지: Release·관리 Secret·관리 NetworkPolicy·pull Secret 삭제, PVC·DB 비밀번호·사용자 Secret·사용자 정책·Namespace 유지(0.7초). 데이터 삭제: PVC·Namespace까지 삭제(52초).
+- [x] 값 없이 설치해도 preflight가 기본 이미지로 돈다. — `networkPreflight` 값 없이 이 브랜치 Agent 이미지를 설치해 PASS(기본 Digest 사용).
 
 ## Test Seam
 - 플랫폼 작업 수명: `cmp_api.agent_registry.poll_job`·`report_job`, 새 `cmp_api.agent_jobs`(취소·만료·정리 작업 생성), 관리자 HTTP 경로(`TestClient`): `tests/test_agent_job_lifecycle.py`
@@ -31,7 +31,7 @@ PROV-009, PROV-015, PROV-016, PROV-017, PROV-021
 - Agent: `RolloutAgent.poll_once`·`RolloutRunner.rollout`·새 `TeardownRunner.run` + 12의 `FakeCluster`: `tests/test_agent_teardown.py`, `tests/test_onprem_agent.py`, `tests/test_image_pull.py`
 - 폐기 정지: `AgentDaemon.run`·`run_tunnel`(가짜 대기): `tests/test_agent_runtime.py`, `tests/test_agent_tunnel.py`
 - Chart: 실제 `helm template`: `tests/test_onprem_agent_chart.py`
-- 실제 K3s·Helm·RBAC: `scripts/smoke_onprem_rollout.py` 7~9단계(격리 k3d, Agent ServiceAccount 토큰 kubeconfig)
+- 실제 K3s·Helm·RBAC: `scripts/smoke_onprem_job_lifecycle.py`(격리 k3d, Agent ServiceAccount 토큰 kubeconfig), `scripts/smoke_onprem_preflight.py`(Chart 기본 probe, 폐기 관찰)
 - 놓치는 것: 실제 프록시 환경(C-08), 실제 Agent 이미지(릴리스 전), 12시간 ECR 토큰 만료 실측(C-14), Helm 3
 
 ## 착수 결정 (2026-11-06)
@@ -64,13 +64,54 @@ PROV-009, PROV-015, PROV-016, PROV-017, PROV-021
 - Worker: `apps/worker/src/cmp_worker/activities/onprem_execution.py`(대기 한도에서 만료)
 - Agent: `packages/providers/src/cmp_providers/agent_teardown.py`(신규), `onprem_agent.py`(시한·정리 분기·C-14), `agent_runtime.py`·`agent_tunnel.py`(폐기 정지), `provisioning_result.py`(D6)
 - Chart: `infra/helm/onprem-agent/values.yaml`·`values.schema.json`·`templates/deployment.yaml`·`templates/rbac.yaml`·`README.md`
-- 실측: `scripts/smoke_onprem_rollout.py`(7~9단계, Agent ServiceAccount 토큰)
+- 실측: `scripts/smoke_onprem_job_lifecycle.py`(신규, Agent ServiceAccount 토큰), `scripts/smoke_onprem_preflight.py`(`--probe-image` 선택, `--observe-revocation`)
 
 ## 검증
-(구현 후 기록)
+- 단위: `tests/test_agent_job_lifecycle.py`(15), `tests/test_agent_teardown.py`(13), 바뀐 `test_onprem_rollout`·`test_plan_publish`·`test_image_pull`·`test_agent_runtime`·`test_agent_tunnel`·`test_onprem_agent_chart` 통과
+- RED: 새 테스트가 구현 전 실패(모듈 없음, Chart 스키마 `proxy` 거절·`watch` 존재·probe 기본값 없음, 폐기 시 즉시 종료, 29의 갱신 거절)
+- `make check`: 2041 passed, 9 skipped (ruff lint·format 포함)
+- `make openapi`: 관리자 경로 3개·`expires_in_seconds`·`EXPIRED`/`CANCELLED` 추가(삭제 없음)
+- Alembic(SQLite): `upgrade head` → `check`(변경 없음) → `downgrade 20261106_01` → `upgrade head`, head `20261106_02`
+- `make smoke-temporal`: 로컬 Temporal이 떠 있지 않아 실행하지 않았다. Workflow 코드는 바뀌지 않았고 승인 Workflow 경로는 `test_approval_workflow_dispatches_on_prem_and_records_ready`(Temporal 테스트 환경)로 확인했다
+
+### k3d 실측 (2026-11-06)
+k3d v5.9.0 / K3s v1.36.4+k3s1 / arm64, Helm v4.3.1, 전용 kubeconfig, context `k3d-cmp-p52`. 가짜 플랫폼 ECR 호스트(`123456789012.dkr.ecr.ap-northeast-2.amazonaws.com`)를 노드 containerd가 로컬 레지스트리로 미러(점검 C 방식, AWS 호출 없음, 가짜 토큰).
+
+**① 수명·정리·C-14** — `scripts/smoke_onprem_job_lifecycle.py`. Agent는 호스트에서 돌지만 **Chart가 만든 ServiceAccount 토큰**으로 클러스터에 접근한다(이 브랜치 ClusterRole: `watch secrets` no, `delete namespaces` yes). [증거](../../docs/verification/provisioning-52-k3s.json)
+
+| 단계 | 결과 |
+| --- | --- |
+| 1 rev1 | `SUCCEEDED READY`, pull Secret 소유 작업 = rev1 |
+| 2 C-14: 노드와 다른 아키텍처 rev2 | `FAILED WORKLOAD_NOT_READY`, DB Release 복원(`superseded, superseded, deployed`), DB Pod Ready. pull Secret 소유 작업이 rev1로 돌아왔고 갱신 시점을 강제하자 `REFRESHED`(플랫폼이 rev1 작업 토큰 발급) |
+| 3 시한 | Agent 끈 채 rev3 → Activity `FAILED AGENT_OFFLINE`, 작업 `EXPIRED`. 돌아온 Agent poll 결과 없음, Helm 이력 불변 |
+| 4 취소 | 대기 중 rev4 → 관리자 취소 `CANCELLED JOB_CANCELLED`, Agent poll 결과 없음 |
+| 5 정리(데이터 유지) | `SUCCEEDED TORN_DOWN`. 전: Release 2, Secret `cmp-ecr-pull`·`demo-app-env`·`demo-db-auth`, 정책 `cmp-managed-seed`·`user-policy`. 후: Release 0, Workload 0, Secret `demo-app-env`·`demo-db-auth`, 정책 `user-policy`, PVC `demo-db`, Namespace 유지 |
+| 6 정리(데이터 삭제) | `SUCCEEDED TORN_DOWN`, Namespace·PVC·Secret 모두 없음(52초) |
+| 정리 | 두 Namespace 삭제, ClusterRole/Binding 삭제, 기본 kubeconfig 불변, 가짜 토큰이 증거에 없음 |
+
+주: 이 Plan 픽스처에는 26 NetworkPolicy 산출물이 없어, 관리 라벨 정책 하나와 사용자 정책 하나를 직접 넣어 선택 삭제를 확인했다. 2단계 직후 앱은 DB 재시작 뒤 재연결 전이라 0/1이었다(51과 같은 동작).
+
+**② 기본 probe 이미지·폐기 정지** — `scripts/smoke_onprem_preflight.py`를 `--probe-image` 없이(Chart 기본값) 실행. 이 브랜치로 빌드한 Agent 이미지(`cmp-onprem-agent:p52`, `k3d image import`)를 Chart로 설치, in-cluster ServiceAccount. [증거](../../docs/verification/provisioning-52-preflight-k3s.json)
+
+| 시나리오 | 결과 |
+| --- | --- |
+| 정상 | `PASS`(probe 이미지 = Chart 기본 Digest) |
+| 같은 요청 | `PASS`(재사용) |
+| 틀린 비밀번호 | `FAIL`(MNP-01과 같음) |
+| 소유하지 않은 Namespace | `UNKNOWN NAMESPACE_NOT_OWNED`, Pod 생성 없음 |
+| 폐기 후 90초(C-09) | Pod `Running`, `agent` 재시작 0회, `stopped AGENT_UNAUTHORIZED` 한 번. 이어서 `helm uninstall` 정상 |
+
+같은 스크립트의 첫 재실행은 Helm 4 `--wait`가 Agent가 등록 직후 지우는 enrollment Secret을 기다리다 실패했다(스크립트 경합). 스크립트에서 `--wait`를 빼고 등록 대기만 남겼다. 사용자 설치 명령에는 원래 `--wait`가 없다.
+
+정리: `k3d cluster delete cmp-p52`, `k3d registry delete k3d-cmp-p52-reg`, 로컬 이미지 삭제. `k3d cluster list`·`registry list` 비어 있음.
 
 ## 미검증
-(구현 후 기록)
+- 실제 HTTPS 프록시 환경(C-08): Chart 렌더만 확인
+- 실제 ECR 12시간 토큰 만료 뒤 재스케줄(C-14): 갱신 허용·소유 작업 복원까지만 확인
+- `tunnel` 컨테이너의 폐기 정지(smoke는 터널을 끔): 단위 테스트만
+- Agent가 Helm 단계 실행 중일 때의 `RUNNING` 취소 요청(D5): 단위 테스트만
+- 구버전 Agent(v0.3.0)가 정리 작업을 `UNSUPPORTED_JOB`으로 거절하는 실측: 같은 검증 경로(`ProductionRolloutJob` 검증 실패)를 단위 테스트로만 확인
+- 게시된 GHCR 이미지(새 릴리스 승인 대기), Helm 3
 
 ## 문서 변경
 - `specs/provisioning/onprem-agent-install.md` §2·§3·§4·§5·§6
@@ -83,8 +124,8 @@ PROV-009, PROV-015, PROV-016, PROV-017, PROV-021
 
 ## 완료 체크리스트
 - [x] 티켓·tasks.md 행·Issue 연결
-- [ ] RED → GREEN 단위 테스트
-- [ ] k3d 실측(시한 거절·정리·기본 probe·복원 뒤 pull Secret)
-- [ ] SDD 문서 갱신
+- [x] RED → GREEN 단위 테스트
+- [x] k3d 실측(시한 거절·정리·기본 probe·복원 뒤 pull Secret·폐기 정지)
+- [x] SDD 문서 갱신
 - [ ] 리뷰·병합(오케스트레이터)
 - [ ] Agent 릴리스(사용자 승인)

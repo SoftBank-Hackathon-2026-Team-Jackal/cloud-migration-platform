@@ -1,0 +1,187 @@
+{
+  "cluster": {
+    "context": "k3d-cmp-p52"
+  },
+  "steps": {
+    "rev1_ready": {
+      "agent": {
+        "job_id": "rollout-23d0a1fc6da16776771b2107",
+        "status": "SUCCEEDED",
+        "code": "READY"
+      },
+      "activity_status": [
+        "SUCCEEDED",
+        "READY"
+      ],
+      "pull_secret_owner_is_rev1": true,
+      "state": {
+        "namespace": true,
+        "releases": [
+          "demo-db",
+          "demo-app"
+        ],
+        "secrets": [
+          "cmp-ecr-pull",
+          "demo-app-env",
+          "demo-db-auth"
+        ],
+        "networkpolicies": [],
+        "pvcs": [
+          "demo-db"
+        ],
+        "workloads": [
+          "demo-db",
+          "demo-app"
+        ]
+      }
+    },
+    "c14_failed_revision": {
+      "agent": {
+        "job_id": "rollout-82ff68560cc40028295cbbab",
+        "status": "FAILED",
+        "code": "WORKLOAD_NOT_READY"
+      },
+      "activity_status": [
+        "FAILED",
+        "WORKLOAD_NOT_READY"
+      ],
+      "pull_secret_owner_is_rev1": true,
+      "refresh": [
+        {
+          "event": "image_pull_refresh",
+          "code": "REFRESHED",
+          "namespace": "cmp-prod-demo"
+        }
+      ],
+      "after": {
+        "db_ready_replicas": 1,
+        "app_ready_replicas": 0,
+        "db_pods": [
+          {
+            "phase": "Running",
+            "ready": true
+          }
+        ],
+        "helm_history": {
+          "demo-db": [
+            "superseded",
+            "superseded",
+            "deployed"
+          ],
+          "demo-app": [
+            "deployed"
+          ]
+        }
+      }
+    },
+    "deadline_offline": {
+      "activity_status": [
+        "FAILED",
+        "AGENT_OFFLINE"
+      ],
+      "agent_poll_after_return": null,
+      "helm_history_unchanged": true,
+      "job": [
+        "EXPIRED",
+        "AGENT_OFFLINE"
+      ]
+    },
+    "cancel_queued": {
+      "cancel": [
+        "CANCELLED",
+        "JOB_CANCELLED"
+      ],
+      "agent_poll": null,
+      "helm_history_unchanged": true
+    },
+    "teardown_keep_data": {
+      "request": [
+        201,
+        "QUEUED"
+      ],
+      "before": {
+        "namespace": true,
+        "releases": [
+          "demo-db",
+          "demo-app"
+        ],
+        "secrets": [
+          "cmp-ecr-pull",
+          "demo-app-env",
+          "demo-db-auth"
+        ],
+        "networkpolicies": [
+          "cmp-managed-seed",
+          "user-policy"
+        ],
+        "pvcs": [
+          "demo-db"
+        ],
+        "workloads": [
+          "demo-db",
+          "demo-app"
+        ]
+      },
+      "agent": {
+        "job_id": "teardown-3602b77686598a1213675495",
+        "status": "SUCCEEDED",
+        "code": "TORN_DOWN"
+      },
+      "seconds": 0.7,
+      "after": {
+        "namespace": true,
+        "releases": [],
+        "secrets": [
+          "demo-app-env",
+          "demo-db-auth"
+        ],
+        "networkpolicies": [
+          "user-policy"
+        ],
+        "pvcs": [
+          "demo-db"
+        ],
+        "workloads": []
+      },
+      "job": {
+        "job_id": "teardown-3602b77686598a1213675495",
+        "mode": "ENVIRONMENT_TEARDOWN",
+        "agent_id": "agent-smoke",
+        "status": "SUCCEEDED",
+        "code": "TORN_DOWN",
+        "cancel_requested": false
+      }
+    },
+    "teardown_delete_data": {
+      "request": [
+        201,
+        "QUEUED"
+      ],
+      "agent": {
+        "job_id": "teardown-8d7d36c10652ff19dceebc8b",
+        "status": "SUCCEEDED",
+        "code": "TORN_DOWN"
+      },
+      "seconds": 52.4,
+      "after": {
+        "namespace": false,
+        "releases": [],
+        "secrets": [],
+        "networkpolicies": [],
+        "pvcs": [],
+        "workloads": []
+      }
+    }
+  },
+  "agent_rbac": {
+    "watch_secrets": "no",
+    "delete_namespaces": "yes",
+    "create_pods": "yes"
+  },
+  "cleanup": {
+    "cmp-prod-demo": true,
+    "cmp-system": true
+  },
+  "default_kubeconfig_unchanged": true,
+  "fake_token_absent_from_evidence": true
+}
