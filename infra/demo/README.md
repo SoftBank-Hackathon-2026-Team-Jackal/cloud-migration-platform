@@ -69,6 +69,46 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 
 웹은 **실제 모드로 빌드**된다(#225). `NEXT_PUBLIC_*`는 빌드 때 화면 코드에 들어가므로 compose `web.build.args`에 둔다: `NEXT_PUBLIC_API_MODE=sse`, `NEXT_PUBLIC_SSE_START=source`(고른 저장소가 있을 때만 `POST /migrations`), `NEXT_PUBLIC_API_BASE=https://<CMP_PUBLIC_HOST>`(같은 출처). sse 빌드는 웹의 연결·Agent 화면 기본값도 실제 API로 바꾸므로, compose가 `PLATFORM_CONNECTIONS=${WEB_PLATFORM_CONNECTIONS:-mock}`으로 지금의 목업 화면을 유지한다. 실제 연결 화면을 쓰려면 `/opt/cmp/.env`에 `WEB_PLATFORM_CONNECTIONS=real`, `/opt/cmp/web.env`에 운영자 키를 둔다(위 주의 참고). 빌드 인자는 활성 플랫폼 릴리스의 compose에서 오므로 **플랫폼 배포(Deploy demo·`release.sh`)를 먼저 하고 `release-web.sh`로 웹을 다시 빌드**한다.
 
+### 데모 승인자 토큰 (웹 `PLATFORM_APPROVER_TOKEN`)
+
+승인 API(`POST /provisioning/plans/{plan_id}/revisions/{rev}/approvals`, `.../approvals/{id}/delivery`)와 Plan 미리보기·결과 조회는 승인자 Bearer가 없거나 틀리면 401 `APPROVER_AUTH_REQUIRED`다. 브라우저는 토큰을 갖지 않고, 웹 서버(BFF)가 `/opt/cmp/web.env`의 `PLATFORM_APPROVER_TOKEN`으로 대신 붙인다. 승인자는 데모용 1명(`demo-approver`)만 둔다.
+
+- **Migration 권한**: 승인 권한은 승인자에게 등록된 `migration_id` 목록이다(티켓 07 D2, 판정 규칙은 그대로). 데모 이전은 시작할 때마다 새 ID(`migration-<uuid>`)를 받으므로, **이전을 시작한 뒤 승인 전에** 운영자가 그 ID를 같은 승인자에게 추가(`grant`)한다. 추가하지 않으면 그 이전의 미리보기·승인은 403 `APPROVER_FORBIDDEN`이다. 토큰은 바뀌지 않으므로 웹은 다시 만들 필요가 없다.
+- **주의**: 웹이 이 토큰을 가지면, 웹에서 승인 버튼을 누를 수 있는 사람은 누구나 이 승인자로 승인한다. 대회 데모 동안만 두고 끝나면 폐기한다. 실제 사용자 인증은 후속이다.
+- 스크립트 `infra/demo/approver-token.py`(표준 라이브러리만)는 서버 내부 API(`127.0.0.1:8000`)를 부른다. 운영자 키는 환경변수 `APPROVAL_ADMIN_KEY` 또는 숨김 프롬프트로만 받는다(인자 금지). 발급한 토큰은 한 번만 쓴다: `--env-file`이면 그 파일(0600)에 `PLATFORM_APPROVER_TOKEN=` 줄을 바꿔 넣고 화면에 찍지 않으며, 없으면 stdout에 한 줄만 낸다. DB에는 SHA-256 digest만 있어서 잃어버린 토큰은 다시 볼 수 없다(교체한다).
+
+```bash
+# SSM 세션에서 (root). 키 값은 히스토리·프로세스 인자에 남지 않는다(셸 내장 export로 환경변수에만 둔다).
+sudo -i
+cd /opt/cmp/releases/$(cat /opt/cmp/current-revision)
+compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml --profile public)
+export "$(grep '^APPROVAL_ADMIN_KEY=' /opt/cmp/.env)"
+
+# 1. 생성 + 웹 env에 넣기 (한 번만. 이미 있으면 409 APPROVER_EXISTS → 3번 교체를 쓴다)
+#    --migration은 필수다. 아직 이전이 없으면 리허설 이전의 ID나 자리표시(demo-placeholder)를 넣는다.
+python3 infra/demo/approver-token.py create demo-approver --migration demo-placeholder --env-file /opt/cmp/web.env
+"${compose[@]}" up -d --force-recreate web    # 웹이 web.env를 다시 읽는다(이미지 재빌드 불필요)
+
+# 2. 이전마다 권한 추가(grant): 웹에서 시작한 뒤 Plan이 게시되면 가장 최근 Migration ID를 추가한다.
+mid="$("${compose[@]}" exec -T platform-db psql -U platform -d platform -Atc \
+  "select migration_id from provisioning_plan_revisions order by published_at desc limit 1")"
+python3 infra/demo/approver-token.py grant demo-approver --migration "$mid"
+
+# 3. 교체(rotate): 새 토큰 발급, 이전 토큰은 즉시 401. 웹을 다시 만들기 전까지는 웹 승인도 401이다.
+python3 infra/demo/approver-token.py rotate demo-approver --env-file /opt/cmp/web.env
+"${compose[@]}" up -d --force-recreate web
+
+# 4. 폐기(revoke): 대체 토큰 없이 무효화. 승인자 행·권한·지난 승인 기록은 남는다(다시 쓰려면 3번).
+python3 infra/demo/approver-token.py revoke demo-approver
+sed -i '/^PLATFORM_APPROVER_TOKEN=/d' /opt/cmp/web.env && "${compose[@]}" up -d --force-recreate web
+
+# 확인: 토큰 없이는 401 (토큰 값은 찍지 않는다)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/provisioning/plans/p/revisions/1/approvals/a/delivery   # 401
+unset APPROVAL_ADMIN_KEY
+```
+
+같은 일을 HTTP로 하면(모두 `X-Approval-Admin-Key` 필요, 틀리면 403): 생성 `POST /provisioning/approvers` `{approver_id, migration_ids}` → 201 `{approver_id, credential}`, 권한 추가 `POST /provisioning/approvers/{approver_id}/migrations` `{migration_ids}` → 200 `{approver_id, migration_ids}`, 교체 `POST /provisioning/approvers/{approver_id}/credential` → 200 `{approver_id, credential}`, 폐기 `DELETE /provisioning/approvers/{approver_id}/credential` → 204. 없는 승인자는 404 `APPROVER_NOT_FOUND`. 이 경로는 `/provisioning/*`라 에지로도 열려 있지만 운영자 키 없이는 403이므로, 키는 위처럼 SSM 세션 안에서만 쓴다.
+
 웹 화면은 이 저장소가 아니라 `cloud-migration-web`에서 온다. 노트북에서 `bash infra/demo/release-web.sh <웹 저장소 경로>`로 올리면 `releases/web-<sha>.tar.gz`로 올라가고(인스턴스 역할은 `releases/*`만 읽을 수 있다), 서버에서 `/opt/cmp/web/<sha>`로 풀려 `/opt/cmp/web/current`가 가리키며 `web` 서비스가 다시 만들어진다. 이후 플랫폼 릴리스(`start.sh`)도 `/opt/cmp/web/current/Dockerfile`이 있으면 웹을 함께 올린다.
 
 ### 원격 반영 순서 (각 단계 사용자 승인 필요)

@@ -85,7 +85,7 @@ Preview ID/Revision을 승인할 때만 안전한 executor가 호출되는 흐�
 
 - 실제 AWS/GCP 운영 승인 가능 상태가 아니다. 중앙 S3 State·잠금으로 만든 최종 저장 Plan과 권한 검증은 08/10의 선행 조건이다(ADR-002 #10).
 - 실제 Terraform·Helm·Agent executor는 연결하지 않았다. 실행 표식이 RUNNING/FAILED로 남으면 executor를 재호출하지 않으며 실제 상태 조회 후 재개는 08/10/12 범위다.
-- 승인자 자격 증명은 실제 사용자 인증 체계가 생길 때까지의 임시 방식이다. 자격 증명 회전·폐기 API는 없다.
+- 승인자 자격 증명은 실제 사용자 인증 체계가 생길 때까지의 임시 방식이다. 결선 데모(2026-11-06)를 위해 운영자 키로 보호되는 운영 API만 추가했다(승인 판정 규칙·스키마는 그대로): 교체 `POST /provisioning/approvers/{approver_id}/credential`(새 자격 증명 1회 반환, 이전 것은 즉시 401), 폐기 `DELETE .../credential`(204), 권한 추가 `POST .../migrations`(D2 grant 목록에 Migration ID 추가). 승인자 행은 지우지 않아 승인 기록의 `approver_id` 추적이 유지된다. 데모 이전은 시작마다 새 Migration ID를 받으므로 운영자가 승인 전에 grant한다. 절차는 [infra/demo README](../../infra/demo/README.md#데모-승인자-토큰-웹-platform_approver_token).
 - Planning→`publish_plan_revision` 연결과 상위 `MigrationWorkflow` 연결은 후속 통합 작업이다. 스캐폴드 `/migrations/{id}/approve`는 그대로 남아 있다.
 - 실제 Temporal 서버 장애 시 `delivery_status=FAILED`는 가짜 delivery 포트로 확인했고 실서버 장애 주입은 하지 않았다. API 라우트는 동기 DB 호출을 async 라우트에서 수행한다(스캐폴드 수준).
 - `spec.md`의 요구사항·수용 기준은 바뀌지 않아 수정하지 않았다.
