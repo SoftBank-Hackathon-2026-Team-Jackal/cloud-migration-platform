@@ -46,6 +46,7 @@ def create_worker(client: Client) -> Worker:
             approval.claim_approved_execution,
             approval.complete_approved_execution,
             approval.get_migration_handoff,  # ticket 13
+            approval.get_traffic_handover,  # ticket 50
             aws_infra.execute_aws_plan,
             build_aws_workloads_activities(SessionLocal).execute_aws_workloads,
             gcp_workloads.execute_gcp_workloads,  # ticket 11

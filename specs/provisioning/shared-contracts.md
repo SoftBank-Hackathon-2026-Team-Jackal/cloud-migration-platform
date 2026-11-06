@@ -109,6 +109,25 @@ identity = approval_target(manifest, preview)
 
 `cmp_contracts.provisioning_result.ProvisioningResult` v1이 Provisioning → Data/Traffic Migration 인계 계약이다. `cmp_providers.provisioning_result`의 `build_provisioning_result`(실행 상태·코드·단계·refs → 결과), `handoff`(소비자별 뷰·`proceed`/`blocked_by`), `public_summary`(사용자 요약)는 순수 함수다. 저장·조회는 `cmp_api.provisioning_results`(`add_result`/`load_result`, 테이블 `provisioning_results`), Worker 진입점은 Activity `get_migration_handoff`, 사용자 조회는 `GET /provisioning/plans/{plan_id}/revisions/{revision}/result`다. 필드·판정 규칙은 [티켓 13 결정 R1~R10](../../tickets/provisioning/13-result-handoff.md#착수-결정-2026-11-05)을 따른다. Provider 실행 refs의 표준 키(R4)는 이 결과의 입력이며 기존 키는 유지한다.
 
+**인계 조회 방식 (50, #185):** 이름·코드는 `cmp_contracts.handoff`에 있다. 두 Activity 모두 Provisioning 큐에서 저장된 결과를 Plan Revision(AWS/GCP는 **워크로드** Revision)으로 읽고, 조회 시점에 ON_PREM 터널 상태를 합친다.
+
+| Activity | 입력 | 출력 | 소비자 |
+| --- | --- | --- | --- |
+| `get_migration_handoff` | `{plan_id, revision, consumer}` | R7 뷰 `{plan_id, revision, consumer, common, database\|application, proceed, blocked_by}` | 데이터 이전(`cmp_data.handoff.target_endpoint`, DATA_MIGRATION) |
+| `get_traffic_handover` | `TrafficHandoverRequest{plan_id, revision}` | `TrafficHandoff{contract_version:"1", plan_id, revision, provider, proceed, blocked_by, handover}` | 상위 Workflow → `TrafficShiftWorkflow` 요청의 `handover`(#128) |
+
+`handover`(`TrafficHandover`)는 Traffic `cmp_traffic.contracts.Handover`와 필드·기본값이 같다(계약 테스트가 실제 모델로 고정). 변환 `cmp_providers.provisioning_result.traffic_handover(view)`:
+
+| Handover | 인계 뷰(TRAFFIC_MIGRATION) |
+| --- | --- |
+| `status` | `common.status`: READY→READY, FAILED→FAILED, INFRASTRUCTURE_READY·UNKNOWN·결과 없음→UNKNOWN |
+| `external_endpoint` | `http://{application.external_host}:{application.external_port}`(둘 다 있을 때만) |
+| `port` | `application.external_port`(AWS/GCP LB 80, ON_PREM 터널 쪽 앱 포트). 앱 `port`(클러스터 안 컨테이너 포트)는 쓰지 않는다 |
+| `health_path` | `application.health_path`, 없으면 `/health` |
+| `ready` | `proceed` ∧ status READY ∧ 목적지 있음 ∧ `application.ready` ∧ HTTP·TLS 없음(P0). `TrafficHandoff.proceed`와 같다 |
+
+막힘 코드(`blocked_by`, 첫 값이 원인): `RESULT_NOT_FOUND`, `WORKLOADS_NOT_DEPLOYED`, `PROVISIONING_NOT_READY`, `DATABASE_NOT_READY`, `TUNNEL_DB_NOT_VERIFIED`, `APPLICATION_NOT_READY`, `EXTERNAL_ENDPOINT_UNAVAILABLE`, `TUNNEL_STATUS_STALE`. 조회 자체가 실패하면 Workflow가 `HANDOFF_UNAVAILABLE`로 기록한다. 데이터 이전이 읽는 DATA_MIGRATION 필드는 `proceed`, `blocked_by`, `common.namespace`, `common.cluster.{kind,name,location,account_id}`, `database.{release,name,tunnel_endpoint}`이며 이 티켓에서 바꾸지 않았다. AWS/GCP DB 외부 주소는 두지 않는다(CDC는 `kubectl exec`, 클러스터 사이 주소는 WireGuard `peer_host` 입력). 상세는 [50 H1~H8](../../tickets/provisioning/50-handoff-contract.md#착수-결정-2026-11-06).
+
 ## 터널 설정 교환 (16)
 
 `cmp_api.tunnels`와 `cmp_api.routes.tunnels`가 Agent 공개키 등록(응답에 중계 서버 목록 포함)·터널 IP 배정·Agent 터널 설정 조회·터널 상태 보고·중계 서버 등록·중계 서버용 Agent 목록(`GET /relays/{relay_id}/agents`, 중계 서버 자격 증명, 폐기 Agent는 `revoked: true`로 남음, 내용 digest인 `list_version`)을 제공한다. 결과 계약에는 `DatabaseHandoff.tunnel_endpoint`와 `ApplicationHandoff.external_host`·`external_port`가 추가됐다. `external_endpoint`는 "중계 서버가 전달할 목적지"이며 호환을 위해 유지하고, 같은 목적지를 host·port로도 준다(AWS/GCP는 LB 주소·80). `get_migration_handoff`는 ON_PREM 결과에 최신 터널 상태를 읽는 시점에 합친다. Data 인계는 터널 경유 DB 접속 확인 뒤, Traffic 인계는 터널 경유 앱 헬스 확인 뒤(`http://터널IP:앱포트`)에만 진행한다. 중계 서버 공인 주소는 어느 인계 필드에도 없다. 상세는 [티켓 16 T1~T13](../../tickets/provisioning/16-tunnel-config-exchange.md)을 따른다.

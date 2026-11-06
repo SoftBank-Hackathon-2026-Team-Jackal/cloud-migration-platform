@@ -6,7 +6,8 @@ from collections.abc import Callable
 from cmp_api.approvals import claim_execution, complete_execution
 from cmp_api.provisioning_results import load_result
 from cmp_api.tunnels import tunnel_view
-from cmp_providers.provisioning_result import handoff
+from cmp_contracts.handoff import TrafficHandoverRequest
+from cmp_providers.provisioning_result import handoff, traffic_handover
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio import activity
 
@@ -63,3 +64,14 @@ class ApprovalActivities:
     async def get_migration_handoff(self, request: dict) -> dict:
         """Ticket 13 R7: Data/Traffic Migration read the stored result by Plan Revision."""
         return await asyncio.to_thread(self._handoff, request)
+
+    @activity.defn(name="get_traffic_handover")
+    async def get_traffic_handover(self, request: dict) -> dict:
+        """Ticket 50: the TRAFFIC_MIGRATION view as the Traffic `Handover` shape (#128 input)."""
+        parsed = TrafficHandoverRequest.model_validate(request)
+        view = await asyncio.to_thread(
+            self._handoff,
+            {"plan_id": parsed.plan_id, "revision": parsed.revision,
+             "consumer": "TRAFFIC_MIGRATION"},
+        )  # fmt: skip
+        return traffic_handover(view).model_dump(mode="json")
