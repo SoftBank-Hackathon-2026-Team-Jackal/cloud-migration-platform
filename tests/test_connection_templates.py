@@ -94,3 +94,24 @@ def test_target_role_scopes_writes_to_platform_resources():
             continue
         resources = statement["Resource"]
         assert isinstance(resources, list | dict), sid
+
+
+def test_eks_view_access_is_one_cluster_scoped_view_entry():
+    """Ticket 56: Kubernetes read access for the source role, separate from the role template."""
+    template = load("eks-view-access.yaml")
+    assert template["AWSTemplateFormatVersion"] == "2010-09-09"
+    assert set(template["Parameters"]) == {"ClusterName", "PrincipalArn"}
+    assert set(template["Resources"]) == {"PlatformViewAccess"}
+    entry = template["Resources"]["PlatformViewAccess"]
+    assert entry["Type"] == "AWS::EKS::AccessEntry"
+    properties = entry["Properties"]
+    assert properties["ClusterName"] == {"Ref": "ClusterName"}
+    assert properties["PrincipalArn"] == {"Ref": "PrincipalArn"}
+    assert properties["Type"] == "STANDARD"
+    assert "KubernetesGroups" not in properties and "Username" not in properties
+    assert properties["AccessPolicies"] == [
+        {
+            "PolicyArn": "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy",
+            "AccessScope": {"Type": "cluster"},
+        }
+    ]

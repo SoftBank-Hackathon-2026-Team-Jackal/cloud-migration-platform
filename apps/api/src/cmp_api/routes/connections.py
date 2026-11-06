@@ -9,13 +9,14 @@ import re
 from collections.abc import Callable
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cmp_api import connections as svc
+from cmp_api import scope_selection as scope
 from cmp_api.config import settings
 from cmp_api.connections import (
     AWS_KINDS,
@@ -28,6 +29,7 @@ from cmp_api.connections import (
 )
 from cmp_api.gcp_connection_check import TemporalGcpChecker
 from cmp_api.routes.agents import SessionDep, require_admin
+from cmp_api.scope_selection import CLUSTER_NAME, NAMESPACE, WORKLOAD_NAME, KubeFactory
 
 
 class InputHidingRoute(APIRoute):
@@ -60,6 +62,12 @@ Status = Literal["PENDING", "CONNECTED", "FAILED"]
 _STATUS = {
     "CONNECTION_NOT_FOUND": 404,
     "INVALID_ROLE_ARN": 422,
+    # Ticket 56: scope selection
+    "CLUSTER_NOT_FOUND": 404,
+    "NAMESPACE_NOT_FOUND": 404,
+    "WORKLOAD_NOT_FOUND": 404,
+    "ANALYSIS_NOT_FOUND": 404,
+    "INVALID_SCOPE": 400,
 }
 
 
@@ -209,6 +217,77 @@ class ClusterList(BaseModel):
     eks_clusters: list[str]
 
 
+class NamespaceList(BaseModel):
+    connection_id: str
+    region: str
+    cluster: str
+    namespaces: list[str]
+
+
+class Workload(BaseModel):
+    kind: Literal["Deployment", "StatefulSet"]
+    name: str
+
+
+class WorkloadList(BaseModel):
+    connection_id: str
+    region: str
+    cluster: str
+    namespace: str
+    workloads: list[Workload]
+
+
+class ScopeAnalysisRequest(Strict):
+    region: str = Field(pattern=AWS_REGION)
+    cluster: str = Field(pattern=CLUSTER_NAME)
+    namespace: str = Field(pattern=NAMESPACE)
+    workload: str = Field(pattern=WORKLOAD_NAME)
+    # Not in the web's ScopeSelection: tells a Deployment from a StatefulSet of the same name.
+    # Omitted, a Deployment is tried first.
+    workload_kind: Literal["Deployment", "StatefulSet"] | None = None
+
+
+class ScopeSelection(BaseModel):
+    connection_id: str
+    region: str
+    cluster: str
+    namespace: str
+    workload: str
+    workload_kind: Literal["Deployment", "StatefulSet"]
+
+
+class ScopeEvidence(BaseModel):
+    kind: Literal["CODE", "MANIFEST", "CLOUD_RESOURCE", "IAM_POLICY", "CLOUDTRAIL", "CONFIG"]
+    location: str
+
+
+class ScopeCandidate(BaseModel):
+    candidate_id: str
+    resource_type: str
+    name: str
+    arn: str | None
+    evidence: list[ScopeEvidence]
+    suggested: bool
+
+
+class ScopeAnalysis(BaseModel):
+    analysis_id: str
+    selection: ScopeSelection
+    candidates: list[ScopeCandidate]
+
+
+class ScopeConfirmRequest(Strict):
+    included: list[str] = Field(max_length=500)
+
+
+class ScopeConfirmation(BaseModel):
+    scope_id: str
+    analysis_id: str
+    included: list[str]
+    excluded: list[str]
+    confirmed_at: str  # ISO-8601 UTC, as the web type (not epoch seconds like other routes)
+
+
 def get_aws_connector() -> AwsConnector:
     return AwsConnector(settings.connection_platform_aws_profile)
 
@@ -218,7 +297,15 @@ def get_gcp_checker() -> Callable[[str], str]:
     return TemporalGcpChecker()
 
 
+def get_kube_factory() -> KubeFactory:
+    return scope.default_kube_factory
+
+
 AwsDep = Annotated[AwsConnector, Depends(get_aws_connector)]
+KubeDep = Annotated[KubeFactory, Depends(get_kube_factory)]
+ClusterPath = Annotated[str, Path(pattern=CLUSTER_NAME)]
+NamespacePath = Annotated[str, Path(pattern=NAMESPACE)]
+RegionQuery = Annotated[str | None, Query(pattern=AWS_REGION)]
 GcpDep = Annotated[Callable[[str], str], Depends(get_gcp_checker)]
 
 
@@ -360,6 +447,92 @@ def eks_clusters(
     except ConnectionFailure as exc:
         _fail(exc)
     return {"connection_id": connection_id, "region": chosen, "eks_clusters": names}
+
+
+@router.get(
+    "/connections/{connection_id}/eks-clusters/{cluster}/namespaces", response_model=NamespaceList
+)
+def eks_namespaces(
+    connection_id: str,
+    cluster: ClusterPath,
+    session: SessionDep,
+    aws: AwsDep,
+    kube: KubeDep,
+    region: RegionQuery = None,
+):
+    """Ticket 56: namespaces of a source cluster, system namespaces excluded."""
+    try:
+        opened = scope.open_cluster(session, aws, kube, connection_id, region, cluster)
+        names = scope.list_namespaces(opened)
+    except ConnectionFailure as exc:
+        _fail(exc)
+    return {
+        "connection_id": connection_id,
+        "region": opened.region,
+        "cluster": cluster,
+        "namespaces": names,
+    }
+
+
+@router.get(
+    "/connections/{connection_id}/eks-clusters/{cluster}/namespaces/{namespace}/workloads",
+    response_model=WorkloadList,
+)
+def eks_workloads(
+    connection_id: str,
+    cluster: ClusterPath,
+    namespace: NamespacePath,
+    session: SessionDep,
+    aws: AwsDep,
+    kube: KubeDep,
+    region: RegionQuery = None,
+):
+    """Ticket 56: Deployments and StatefulSets in one namespace."""
+    try:
+        opened = scope.open_cluster(session, aws, kube, connection_id, region, cluster)
+        workloads = scope.list_workloads(opened, namespace)
+    except ConnectionFailure as exc:
+        _fail(exc)
+    return {
+        "connection_id": connection_id,
+        "region": opened.region,
+        "cluster": cluster,
+        "namespace": namespace,
+        "workloads": workloads,
+    }
+
+
+@router.post("/connections/{connection_id}/scope-analyses", response_model=ScopeAnalysis)
+def scope_analysis(
+    connection_id: str,
+    request: ScopeAnalysisRequest,
+    session: SessionDep,
+    aws: AwsDep,
+    kube: KubeDep,
+):
+    """Ticket 56: scope candidates from what the platform actually read (stored)."""
+    try:
+        opened = scope.open_cluster(
+            session, aws, kube, connection_id, request.region, request.cluster
+        )
+        return scope.analyze_scope(
+            session,
+            opened,
+            namespace=request.namespace,
+            workload=request.workload,
+            workload_kind=request.workload_kind,
+        )
+    except ConnectionFailure as exc:
+        _fail(exc)
+
+
+@router.post("/scope-analyses/{analysis_id}/confirm", response_model=ScopeConfirmation)
+def confirm_scope(analysis_id: str, request: ScopeConfirmRequest, session: SessionDep):
+    """Ticket 56: stores the included candidates; the rest of the analysis is excluded."""
+    try:
+        return scope.confirm_scope(session, analysis_id, request.included)
+    except ConnectionFailure as exc:
+        _fail(exc)
 
 
 @router.delete("/connections/{connection_id}", response_model=DeleteResponse)
