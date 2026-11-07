@@ -97,7 +97,12 @@ class AnthropicLLMClient:
             # The SDK already retried; give up with a code instead of spinning Activity retries.
             raise LLMError("LLM_UNAVAILABLE") from None
         if response.stop_reason == "refusal":
-            raise LLMError("LLM_REFUSED")
+            # `stop_details.category` is Anthropic's safety classifier's own label (e.g. "cyber",
+            # "bio", "frontier_llm", "reasoning_extraction", "general_harms", or None). Keeping it
+            # in the code tells a caller *why* a run stopped instead of just that it did.
+            details = getattr(response, "stop_details", None)
+            category = getattr(details, "category", None) if details else None
+            raise LLMError(f"LLM_REFUSED:{category or 'UNKNOWN'}")
         if response.stop_reason == "max_tokens":
             raise LLMError("LLM_OUTPUT_TRUNCATED")  # a cut-off tool call cannot be trusted
         text = "".join(b.text for b in response.content if b.type == "text") or None

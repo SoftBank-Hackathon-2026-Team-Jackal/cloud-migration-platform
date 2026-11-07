@@ -172,13 +172,22 @@ def test_no_tools_and_no_system_leave_those_fields_out():
 
 
 @pytest.mark.parametrize(
-    ("stop", "code"), [("refusal", "LLM_REFUSED"), ("max_tokens", "LLM_OUTPUT_TRUNCATED")]
+    ("stop", "code"), [("refusal", "LLM_REFUSED:UNKNOWN"), ("max_tokens", "LLM_OUTPUT_TRUNCATED")]
 )
 def test_a_refusal_or_a_cut_off_answer_ends_the_call_with_a_code(stop, code):
     c, _ = client(reply(text("partial"), stop=stop))
     with pytest.raises(LLMError) as exc:
         c.complete(system="", messages=USER, tools=TOOLS)
     assert exc.value.code == code
+
+
+def test_a_refusals_safety_category_rides_along_in_the_code():
+    outcome = reply(text("partial"), stop="refusal")
+    outcome.stop_details = SimpleNamespace(category="cyber")
+    c, _ = client(outcome)
+    with pytest.raises(LLMError) as exc:
+        c.complete(system="", messages=USER, tools=TOOLS)
+    assert exc.value.code == "LLM_REFUSED:cyber"
 
 
 @pytest.mark.parametrize(
