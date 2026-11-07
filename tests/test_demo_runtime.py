@@ -234,7 +234,7 @@ def test_web_is_built_in_real_sse_mode_against_the_public_origin():
         "NEXT_PUBLIC_API_BASE": "https://${CMP_PUBLIC_HOST:-localhost}",
         # Ticket 77: the web's real-mode screens backed by platform APIs that exist (report #240,
         # traffic rollback/retry #245). sandbox.retry has no platform API and stays off.
-        "NEXT_PUBLIC_SSE_CAPABILITIES": "${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry}",
+        "NEXT_PUBLIC_SSE_CAPABILITIES": "${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry,traffic.finalize}",
     }
     for name in web["build"]["args"]:
         assert name not in web["environment"], name
