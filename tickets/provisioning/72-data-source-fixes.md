@@ -1,7 +1,7 @@
 # Ticket 72 — 실제 원본 데이터 복제를 막는 5가지 수정 (ADR-007 단계 6, 데이터 범위 대행)
 
 ## 상태
-IN_PROGRESS (로컬 구현·검증 완료, PR 리뷰 대기) — [Issue #298](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/298). 2026-11-07 조율 세션 지시로 착수. 데이터 영역 코드이며 본선 일정 때문에 Provisioning(김민서)이 대행한다. 복제 단계 순서는 바꾸지 않는다.
+DONE (PR #300 병합, 2026-11-07 데이터 담당 확인. 실제 원본 복제·이미지 push는 승인 뒤) — [Issue #298](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform/issues/298). 2026-11-07 조율 세션 지시로 착수. 데이터 영역 코드이며 본선 일정 때문에 Provisioning(김민서)이 대행한다. 복제 단계 순서는 바꾸지 않는다.
 
 ## 배경
 결선 데모는 온프레미스(맥 k3d) 대상이고 데이터 이전은 실제 PostgreSQL 논리 복제로 한다(ADR-007 2안). 실제 원본 `cmp-demo-source`/`chat-source`로 돌리면 코드상 다섯 곳에서 막힌다: worker가 데이터 전용 AWS 프로필·kubeconfig 디렉터리를 받지 못하고, prepare가 원본에 만든 marker 표 때문에 스키마 비교가 `TARGET_SCHEMA_PARTIAL`로 멈추고, cutover 이미지를 만드는 정해진 경로가 없고, 복제가 실패하면 원본 슬롯이 남아 WAL을 붙잡고, 전환 검증 체크섬이 세션 TimeZone에 따라 달라진다.
