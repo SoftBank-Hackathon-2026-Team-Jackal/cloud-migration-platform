@@ -13,6 +13,7 @@ from temporalio.exceptions import (
 
 with workflow.unsafe.imports_passed_through():
     from cmp_contracts.handoff import (
+        DATA_HANDOFF_WAIT_PATCH,
         HANDOFF_UNAVAILABLE,
         TRAFFIC_HANDOFF_PATCH,
         TRAFFIC_HANDOVER_ACTIVITY,
@@ -312,12 +313,21 @@ class MigrationWorkflow:
         """
         self.phase = "data_copy"
         parsed = DataMigrationInput.model_validate(given)
+        # Provisioning 80: ON_PREM 조회는 Activity 안에서 터널 DB 확인을 기다린다(티켓 67과 같은 시간)
+        timeouts = (
+            {
+                "start_to_close_timeout": timedelta(seconds=TRAFFIC_HANDOVER_START_TO_CLOSE_S),
+                "heartbeat_timeout": timedelta(seconds=TRAFFIC_HANDOVER_HEARTBEAT_S),
+            }
+            if workflow.patched(DATA_HANDOFF_WAIT_PATCH)
+            else {"start_to_close_timeout": timedelta(minutes=1)}
+        )
         view = await workflow.execute_activity(
             "get_migration_handoff",
             {**(self.plan or {}), "consumer": "DATA_MIGRATION"},
             task_queue=PROVISIONING_QUEUE,
-            start_to_close_timeout=timedelta(minutes=1),
             retry_policy=RetryPolicy(maximum_attempts=3),
+            **timeouts,
         )
         migration_id = workflow.info().workflow_id
         # ticket 10: `tunnel`이 있으면 양쪽 peer_host가 플랫폼 WireGuard 게이트웨이 주소가 된다

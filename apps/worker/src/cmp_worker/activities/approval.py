@@ -15,8 +15,10 @@ from cmp_contracts.handoff import (
 )
 from cmp_providers.provisioning_result import (
     after_rollout,
+    data_after_rollout,
     handoff,
     traffic_handover,
+    tunnel_db_wait_needed,
     tunnel_wait_needed,
 )
 from sqlalchemy.orm import Session, sessionmaker
@@ -24,6 +26,8 @@ from temporalio import activity
 
 # Ticket 67: the `provision.check` shown while the lookup waits for the tunnel health check.
 TUNNEL_CHECK = "tunnel_app_health"
+# Ticket 80: the same for the Data lookup waiting for the tunnel DB check.
+TUNNEL_DB_CHECK = "tunnel_db"
 
 
 class ApprovalActivities:
@@ -76,6 +80,14 @@ class ApprovalActivities:
     def _handoff(self, request: dict) -> dict:
         return self._read(request["plan_id"], request["revision"], request["consumer"])[2]
 
+    def _data(self, plan_id: str, revision: int) -> tuple[dict, str | None]:
+        """Ticket 80: the DATA_MIGRATION view; ON_PREM proceeds only on a post-rollout report."""
+        result, tunnel, view = self._read(plan_id, revision, "DATA_MIGRATION")
+        if result is None:
+            return view, None
+        recorded_at = int(result.finished_at.timestamp())
+        return data_after_rollout(view, tunnel, recorded_at), result.migration_id
+
     def _traffic(self, plan_id: str, revision: int) -> tuple[TrafficHandoff, str | None]:
         """Ticket 50 view as `TrafficHandoff`; ON_PREM proceeds only on a post-rollout report."""
         result, tunnel, view = self._read(plan_id, revision, "TRAFFIC_MIGRATION")
@@ -85,7 +97,14 @@ class ApprovalActivities:
         recorded_at = int(result.finished_at.timestamp())
         return after_rollout(converted, tunnel, recorded_at), result.migration_id
 
-    async def _tunnel_check(self, migration_id: str | None, state: str, plan: str) -> None:
+    async def _tunnel_check(
+        self,
+        migration_id: str | None,
+        state: str,
+        plan: str,
+        name: str = TUNNEL_CHECK,
+        phase: str = "traffic",
+    ) -> None:
         if not (migration_id and activity.in_activity()):
             return
         from cmp_worker.events import emit_event_async  # Worker-side only (DB emitter)
@@ -93,10 +112,10 @@ class ApprovalActivities:
         await emit_event_async(
             migration_id,
             "provision.check",
-            "traffic",
+            phase,
             "failed" if state == "failed" else "running",
-            {"name": TUNNEL_CHECK, "state": state},
-            idempotency_key=f"chk:{TUNNEL_CHECK}:{plan}:{state}",
+            {"name": name, "state": state},
+            idempotency_key=f"chk:{name}:{plan}:{state}",
         )
 
     @activity.defn(name="claim_approved_execution")
@@ -111,8 +130,35 @@ class ApprovalActivities:
 
     @activity.defn(name="get_migration_handoff")
     async def get_migration_handoff(self, request: dict) -> dict:
-        """Ticket 13 R7: Data/Traffic Migration read the stored result by Plan Revision."""
-        return await asyncio.to_thread(self._handoff, request)
+        """Ticket 13 R7: Data/Traffic Migration read the stored result by Plan Revision.
+
+        Ticket 80: an ON_PREM DATA_MIGRATION view blocked only by tunnel evidence that is not
+        there yet (`tunnel_db_wait_needed`) is read again every `poll_seconds` until a report from
+        after the rollout shows the DB reachable over the tunnel, another block appears, or
+        `wait_seconds` pass (ticket 67 settings). A timeout keeps the original `blocked_by` code.
+        """
+        if request.get("consumer") != "DATA_MIGRATION":
+            return await asyncio.to_thread(self._handoff, request)
+        plan_id, revision = request["plan_id"], request["revision"]
+        plan = f"{plan_id}:{revision}"
+        view, migration_id = await asyncio.to_thread(self._data, plan_id, revision)
+        if not tunnel_db_wait_needed(view):
+            return view
+        check = {"name": TUNNEL_DB_CHECK, "phase": "data_copy"}
+        await self._tunnel_check(migration_id, "running", plan, **check)
+        deadline = self._timer() + self.wait_seconds
+        while tunnel_db_wait_needed(view):
+            remaining = deadline - self._timer()
+            if remaining <= 0:
+                break
+            if activity.in_activity():
+                activity.heartbeat(TUNNEL_DB_CHECK)
+            await self._sleep(min(self.poll_seconds, remaining))
+            view, _ = await asyncio.to_thread(self._data, plan_id, revision)
+        await self._tunnel_check(
+            migration_id, "done" if view["proceed"] else "failed", plan, **check
+        )
+        return view
 
     @activity.defn(name="get_traffic_handover")
     async def get_traffic_handover(self, request: dict) -> dict:

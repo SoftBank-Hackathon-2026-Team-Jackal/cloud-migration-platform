@@ -33,6 +33,9 @@ TRAFFIC_HANDOVER_START_TO_CLOSE_S = 600
 TRAFFIC_HANDOVER_HEARTBEAT_S = 30
 # The configured wait is cut to this, leaving a minute of the timeout for the reads themselves.
 TRAFFIC_HANDOVER_WAIT_MAX_S = TRAFFIC_HANDOVER_START_TO_CLOSE_S - 60
+# Ticket 80 (#319): the ON_PREM DATA_MIGRATION lookup waits the same way for the tunnel DB check;
+# under this patch the Workflow schedules it with the ticket 67 timeout and heartbeat.
+DATA_HANDOFF_WAIT_PATCH = "data-handoff-wait-v1"
 
 # Why a view does not proceed (ticket 13 R7, 16 T2/T7/T11, 25 F3). The first code is the cause.
 BlockCode = Literal[

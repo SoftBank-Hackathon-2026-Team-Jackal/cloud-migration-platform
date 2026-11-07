@@ -263,7 +263,7 @@ def checks(result) -> dict[str, str]:
 
 
 async def handoff(db, consumer, plan_id="plan-001") -> dict:
-    activities = ApprovalActivities(db)
+    activities = ApprovalActivities(db, wait_seconds=0)  # ticket 80 wait: tests of its own
     return await ActivityEnvironment().run(
         activities.get_migration_handoff,
         {"plan_id": plan_id, "revision": 1, "consumer": consumer},

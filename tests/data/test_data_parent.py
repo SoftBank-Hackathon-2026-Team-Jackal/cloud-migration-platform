@@ -203,3 +203,34 @@ async def test_parent_db_gate_turns_true_once_reverse_replication_streams() -> N
                 await asyncio.sleep(0.05)
             await child.signal(DataMigrationWorkflow.switchover)
             assert await handle.result() == [None, True]
+
+
+async def test_the_handoff_lookup_is_scheduled_long_enough_to_wait_for_the_tunnel() -> None:
+    """Provisioning 80: ON_PREM 인계 조회는 Activity 안에서 터널 DB 확인을 기다리므로 timeout·heartbeat가 있다."""
+    from cmp_contracts.handoff import (
+        MIGRATION_HANDOFF_ACTIVITY,
+        TRAFFIC_HANDOVER_HEARTBEAT_S,
+        TRAFFIC_HANDOVER_WAIT_MAX_S,
+    )
+    from temporalio.api.enums.v1 import EventType
+
+    scheduled = EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(env.client, task_queue=WORKFLOW_QUEUE, workflows=[DataStepProbe]),
+        handoff_worker(env.client, {"proceed": False, "blocked_by": ["TUNNEL_DB_NOT_VERIFIED"]}),
+    ):
+        handle = await env.client.start_workflow(
+            DataStepProbe.run, GIVEN, id=f"migration-{uuid.uuid4()}", task_queue=WORKFLOW_QUEUE
+        )
+        assert await handle.result() == "data_blocked"
+        history = await handle.fetch_history()
+    [attrs] = [
+        e.activity_task_scheduled_event_attributes
+        for e in history.events
+        if e.event_type == scheduled
+        and e.activity_task_scheduled_event_attributes.activity_type.name
+        == MIGRATION_HANDOFF_ACTIVITY
+    ]
+    assert attrs.heartbeat_timeout.ToSeconds() == TRAFFIC_HANDOVER_HEARTBEAT_S
+    assert attrs.start_to_close_timeout.ToSeconds() > TRAFFIC_HANDOVER_WAIT_MAX_S
