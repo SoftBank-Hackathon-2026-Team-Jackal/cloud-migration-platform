@@ -281,6 +281,9 @@ class TrafficShiftWorkflow:
             return await self._call(
                 traffic.traffic_observe, {"seconds": seconds}, timeout_s=seconds + 60, attempts=2
             )
+        # ABANDON: 취소를 서버에 요청하지 않고 곧바로 취소로 처리한다. 사람이 롤백을 누른 순간 관찰 활동이 막 끝났으면
+        # 이미 없는 활동의 취소를 요청하게 되어(ACTIVITY_UNKNOWN) 워크플로 태스크가 계속 실패하고 멈춘다.
+        # 관찰은 읽기 전용이라 남은 시간 동안 혼자 끝나도 해가 없다.
         handle = workflow.start_activity(
             traffic.traffic_observe,
             {"seconds": seconds},
@@ -288,6 +291,7 @@ class TrafficShiftWorkflow:
             schedule_to_start_timeout=timedelta(minutes=5),
             start_to_close_timeout=timedelta(seconds=seconds + 60),
             retry_policy=RetryPolicy(maximum_attempts=2),
+            cancellation_type=workflow.ActivityCancellationType.ABANDON,
         )
         await workflow.wait_condition(
             lambda: handle.done() or self.rollback_requested or self.finalize_requested
