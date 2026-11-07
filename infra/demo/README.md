@@ -235,7 +235,7 @@ curl -s 127.0.0.1:9902/listeners                         # kube_api_16402::172.3
 
 ## 온프레미스 데이터 터널 고정 원본 NLB (티켓 82, ADR-007 2안)
 
-`ingress="source"` 데이터 터널은 원본 EKS에 공개 UDP NLB가 있어야 한다. 실행마다 새로 만들면 provisioning·헬스체크·DNS로 3~4분이 걸린다. `WEB_START_DATA_MIGRATION`의 `tunnel`에 `"standing_ingress": true`를 넣으면 실행은 `cmp-data-tunnel/cmp-wg-standing-endpoint` Service 하나를 재사용한다(없으면 그 실행이 만든다). 실행마다 selector(이번 원본 게이트웨이 Pod)와 `loadBalancerSourceRanges`(`target_egress_cidrs`)만 맞추고, 정리 때 이 Service는 남긴다. 게이트웨이·키 Secret·NetworkPolicy는 실행마다 새로 만들고 지운다. 한 번에 한 실행만 쓴다(데이터 영역 대행, 데이터 담당 공유 필요). 헬스체크는 5초 간격·임계 2로 줄였다.
+`ingress="source"` 데이터 터널은 원본 EKS에 공개 UDP NLB가 있어야 한다. 실행마다 새로 만들면 provisioning·헬스체크·DNS로 3~4분이 걸린다. `WEB_START_DATA_MIGRATION`의 `tunnel`에 `"standing_ingress": true`를 넣으면 실행은 `cmp-data-tunnel/cmp-wg-standing-endpoint` Service 하나를 재사용한다(없으면 그 실행이 만든다). 원본 게이트웨이도 고정 Deployment `cmp-wg-standing`으로 재사용한다(Provisioning 83: 게이트웨이 Pod를 새로 만들면 NLB 대상 등록에 약 30초가 걸린다). 실행마다 `loadBalancerSourceRanges`(`target_egress_cidrs`)와 고정 게이트웨이의 peer(대상 공개키·원본 DB 주소)만 맞추고, 정리 때 고정 NLB·게이트웨이는 남긴다. 대상 게이트웨이·키 Secret·NetworkPolicy는 실행마다 새로 만들고 지운다. 한 번에 한 실행만 쓴다(데이터 영역 대행, 데이터 담당 공유 필요). 헬스체크는 5초 간격·임계 2로 줄였다.
 
 ### 시연 전 (각 단계 사용자 승인 필요)
 
@@ -243,12 +243,12 @@ curl -s 127.0.0.1:9902/listeners                         # kube_api_16402::172.3
 aws sts get-caller-identity --profile cmp-aws-prod                       # 714066696240
 curl -s https://checkip.amazonaws.com                                    # 맥 공인 IP
 aws eks update-kubeconfig --name cmp-demo-source --region ap-northeast-2 --profile cmp-aws-prod --alias cmp-demo-source
-make data-tunnel-nlb-up CONTEXT=cmp-demo-source CIDR=<맥 공인 IP>/32     # 주소 → NLB active → DNS 풀림까지 대기
-make data-tunnel-nlb-status CONTEXT=cmp-demo-source                       # 고른 게이트웨이: 없음(대기)
+make data-tunnel-nlb-up CONTEXT=cmp-demo-source CIDR=<맥 공인 IP>/32     # 키·고정 게이트웨이 → 주소 → NLB active → DNS → 대상 healthy까지 대기
+make data-tunnel-nlb-status CONTEXT=cmp-demo-source                       # 쓰는 실행: 없음(대기), 게이트웨이 대상: healthy
 # /opt/cmp/.env WEB_START_DATA_MIGRATION의 tunnel: {"ingress":"source","target_egress_cidrs":["<맥 공인 IP>/32"],"standing_ingress":true}
 ```
 
-시연 뒤 `make data-tunnel-nlb-down CONTEXT=cmp-demo-source`로 지운다(NLB 시간당 비용). 실행이 게이트웨이를 고르고 있으면 `up`·`down`은 거절한다(`--force`로 덮어씀). 맥 공인 IP가 바뀌면 `up`을 다시 하거나 실행 입력의 `target_egress_cidrs`만 바꾼다(실행이 맞춘다).
+시연 뒤 `make data-tunnel-nlb-down CONTEXT=cmp-demo-source`로 지운다(NLB 시간당 비용). 실행이 고정 게이트웨이를 쓰고 있으면 `up`·`down`은 거절한다(`--force`로 덮어씀). 맥 공인 IP가 바뀌면 `up`을 다시 하거나 실행 입력의 `target_egress_cidrs`만 바꾼다(실행이 맞춘다).
 
 ## 환경 연결 Launch Stack (#205, 티켓 23b)
 
