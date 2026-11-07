@@ -299,14 +299,24 @@ async def test_manual_rollback_then_retry_runs_the_shift_again_to_the_end() -> N
             task_queue=WORKFLOW_QUEUE,
         )
         status = await until(handle, lambda s: s["actions"]["rollback"])
-        assert status["actions"] == {"rollback": True, "retry": False, "finalize": False}
+        assert status["actions"] == {
+            "rollback": True,
+            "retry": False,
+            "finalize": False,
+            "advance": False,
+        }
         await handle.signal(TrafficShiftWorkflow.request_retry)  # wrong state: ignored
 
         await handle.signal(TrafficShiftWorkflow.request_rollback)
         status = await until(handle, lambda s: s["actions"]["retry"])
         assert status["snapshot"]["phase"] == "rolledback"
         assert status["snapshot"]["weights"] == {"origin": 100, "target": 0}
-        assert status["actions"] == {"rollback": False, "retry": True, "finalize": False}
+        assert status["actions"] == {
+            "rollback": False,
+            "retry": True,
+            "finalize": False,
+            "advance": False,
+        }
         await handle.signal(TrafficShiftWorkflow.request_rollback)  # already rolled back: ignored
 
         relay.release.set()

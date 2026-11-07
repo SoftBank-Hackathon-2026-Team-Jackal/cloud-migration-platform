@@ -2343,6 +2343,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /migrations/{migration_id}/traffic/advance:
+    post:
+      tags:
+      - traffic actions
+      summary: Advance Traffic
+      description: 수동 단계 모드(`manual_steps`)에서 판정을 통과하고 기다리는 중일 때 다음 전환 단계로 가라고 요청한다.
+      operationId: advance_traffic_migrations__migration_id__traffic_advance_post
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficActionAccepted'
+        '404':
+          description: MIGRATION_NOT_FOUND
+        '409':
+          description: TRAFFIC_NOT_RUNNING or TRAFFIC_ACTION_NOT_ALLOWED
+        '503':
+          description: TRAFFIC_UNAVAILABLE
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /migrations/{migration_id}/traffic/finalize:
     post:
       tags:
@@ -6393,6 +6426,7 @@ components:
           - rollback
           - retry
           - finalize
+          - advance
           title: Action
         signal:
           type: string

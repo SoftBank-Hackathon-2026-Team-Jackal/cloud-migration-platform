@@ -46,6 +46,7 @@ EVENTS_PATCH = "traffic-events-v1"
 ACTIONS_PATCH = "traffic-actions-v1"
 # 사용자 트래픽이 없으면 롤백하지 않고 합성 요청으로 확인한 뒤 진행한다(진행 중인 이전은 예전 동작 그대로).
 IDLE_PROBE_PATCH = "traffic-idle-probe-v1"
+MANUAL_STEPS_PATCH = "traffic-manual-steps-v1"
 EVENT_STATUS = {"complete": "done", "rolledback": "failed"}  # everything else is `running`
 ZERO = {"requests": 0, "failed": 0, "p99_ms": 0.0}
 QUEUE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -90,6 +91,10 @@ class TrafficShiftWorkflow:
         self.alerting = (
             False  # 지금 안정화 구간 이상을 알린 상태인지(같은 이상을 반복해 알리지 않는다)
         )
+        self.awaiting_advance = (
+            False  # 수동 단계 모드: 판정을 통과하고 사람의 "다음 단계"를 기다리는 중
+        )
+        self.advance_requested = False
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -106,6 +111,12 @@ class TrafficShiftWorkflow:
         """#234: 사람이 누른 재시도. 되돌린 뒤 기다리는 동안만 받는다. 아니면 무시한다(멱등)."""
         if self.waiting_retry:
             self.retry_requested = True
+
+    @workflow.signal
+    def request_advance(self) -> None:
+        """수동 단계 모드에서 사람이 누른 "다음 단계". 기다리는 동안만 받는다. 아니면 무시한다(멱등)."""
+        if self.awaiting_advance:
+            self.advance_requested = True
 
     @workflow.signal
     def request_finalize(self) -> None:
@@ -131,6 +142,7 @@ class TrafficShiftWorkflow:
             "actions": {
                 "rollback": self.can_rollback(),
                 "retry": self.waiting_retry and not self.retry_requested,
+                "advance": self.awaiting_advance and not self.advance_requested,
                 "finalize": self.snapshot.get("phase") == STABILIZING
                 and not self.finalize_requested
                 and not self.rollback_requested,
@@ -479,14 +491,47 @@ class TrafficShiftWorkflow:
             current = weights
             decision = "done" if step == policy.steps[-1] else "advance"
             self.events.append({"step": step, "decision": decision})
+            # 수동 단계: 이 단계가 통과했다는 알림(`awaitNext`)과 함께 멈춘다. 마지막(100%) 단계는 기다리지 않는다.
+            manual_wait = (
+                decision == "advance"
+                and policy.manual_steps
+                and self._actions_on()
+                and workflow.patched(MANUAL_STEPS_PATCH)
+            )
+            if manual_wait:
+                nxt = policy.steps[policy.steps.index(step) + 1]
+                self.next_notes.append({"key": "awaitNext", "params": {"pct": step, "next": nxt}})
             await self._publish(
                 policy, weights, step, baseline, total, 0,
                 "complete" if decision == "done" else "gate", decision=decision,
             )  # fmt: skip
+            if manual_wait:
+                stop = await self._await_advance(policy, baseline, step)
+                if stop is not None:
+                    return stop
 
         if policy.stabilize_seconds > 0 and self._actions_on():
             return await self._stabilize(policy, baseline, current)
         return {"status": "DONE", "final_weights": current, "events": self.events}
+
+    async def _await_advance(self, policy, baseline, step) -> dict | None:
+        """수동 단계: 사람이 "다음 단계"를 누르거나, 롤백·취소가 오거나, `manual_wait_seconds`가 지날 때까지 기다린다.
+        롤백·취소면 되돌린 결과를, 그 밖에는 None(다음 단계로)을 돌려준다."""
+        self.awaiting_advance, self.advance_requested = True, False
+        try:
+            await workflow.wait_condition(
+                lambda: self.advance_requested or self.rollback_requested or self.cancel_requested,
+                timeout=timedelta(seconds=policy.manual_wait_seconds),
+            )
+        except TimeoutError:
+            pass  # 아무도 누르지 않았다: 판정은 통과했으니 이어서 간다
+        finally:
+            self.awaiting_advance = False
+        if self.cancel_requested:
+            return await self._rollback(policy, baseline, step, "취소 요청")
+        if self.rollback_requested:
+            return await self._rollback(policy, baseline, step, "수동 롤백", manual=True)
+        return None
 
     async def _stabilize(self, policy, baseline, weights) -> dict:
         """100% 뒤 최종 확정 전 안정화 구간. 자동으로 되돌리지 않는다.

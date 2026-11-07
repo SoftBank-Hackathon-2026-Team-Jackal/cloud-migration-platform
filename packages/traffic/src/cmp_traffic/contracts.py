@@ -41,6 +41,13 @@ class TrafficPolicy(BaseModel):
     # 원본·대상 모두 최소 요청 수에 못 미치면(= 사용자 트래픽이 없으면) 롤백하지 않고, 중계 서버에서 대상으로
     # 합성 요청을 보내 실패·p99를 확인한 뒤 진행한다. 끄면(False) 예전처럼 요청 부족은 보류 후 롤백이다.
     idle_probe: bool = True
+    # 켜면 각 전환 단계(마지막 100% 제외)가 판정을 통과한 뒤 자동으로 다음 단계로 가지 않고, 사람이 "다음 단계"
+    # (`request_advance` 신호, `POST /migrations/{id}/traffic/advance`)를 누를 때까지 기다린다. 판정이 실패하면
+    # 평소처럼 롤백하고, 대기 중에도 롤백·취소는 받는다. 시연에서 진행 속도를 발표자가 정하려는 용도다.
+    manual_steps: bool = False
+    # 사람이 누르지 않아도 이 시간(초)이 지나면 다음 단계로 간다(판정은 이미 통과했다). 아무도 없는 이전이 영원히
+    # 멈춰 배포를 막지 않게 하는 안전장치다.
+    manual_wait_seconds: float = Field(default=3600, gt=0, le=14_400)
     # 합성 요청 하나의 응답 제한(초). 넘으면 실패로 센다.
     idle_probe_timeout_s: float = Field(default=3.0, gt=0, le=30)
 

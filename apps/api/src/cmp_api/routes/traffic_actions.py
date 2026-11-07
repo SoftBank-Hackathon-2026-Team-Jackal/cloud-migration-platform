@@ -27,11 +27,12 @@ from cmp_api.temporal_client import get_temporal_client
 
 router = APIRouter(prefix="/migrations", tags=["traffic actions"])
 
-Action = Literal["rollback", "retry", "finalize"]
+Action = Literal["rollback", "retry", "finalize", "advance"]
 SIGNALS: dict[str, str] = {
     "rollback": "request_rollback",
     "retry": "request_retry",
     "finalize": "request_finalize",
+    "advance": "request_advance",
 }
 
 
@@ -156,6 +157,17 @@ async def rollback_traffic(migration_id: str, control: ControlDep) -> dict:
 async def retry_traffic(migration_id: str, control: ControlDep) -> dict:
     """되돌린 뒤 기다리는 동안 첫 단계부터 다시 전환하라고 요청한다."""
     return await _request(migration_id, "retry", control)
+
+
+@router.post(
+    "/{migration_id}/traffic/advance",
+    status_code=202,
+    response_model=TrafficActionAccepted,
+    responses=ERRORS,
+)
+async def advance_traffic(migration_id: str, control: ControlDep) -> dict:
+    """수동 단계 모드(`manual_steps`)에서 판정을 통과하고 기다리는 중일 때 다음 전환 단계로 가라고 요청한다."""
+    return await _request(migration_id, "advance", control)
 
 
 @router.post(
