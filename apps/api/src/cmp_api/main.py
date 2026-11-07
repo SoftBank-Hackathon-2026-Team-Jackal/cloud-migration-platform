@@ -16,6 +16,7 @@ from cmp_api.routes.migration_report import router as migration_report_router
 from cmp_api.routes.migrations import router as migration_router
 from cmp_api.routes.onprem_rollout import router as rollout_router
 from cmp_api.routes.plan_inputs import router as plan_input_router
+from cmp_api.routes.pulse import router as pulse_router
 from cmp_api.routes.traffic_actions import router as traffic_action_router
 from cmp_api.routes.tunnels import router as tunnel_router
 
@@ -70,6 +71,7 @@ app.include_router(env_file_router)
 app.include_router(traffic_action_router)  # #234
 app.include_router(analysis_review_router)  # analysis review gate (confirm / approve)
 app.include_router(agent_chat_router)  # agent chat (internal: the web server calls it)
+app.include_router(pulse_router)  # server pulse (internal: the web server calls it)
 
 
 @app.get("/health")
