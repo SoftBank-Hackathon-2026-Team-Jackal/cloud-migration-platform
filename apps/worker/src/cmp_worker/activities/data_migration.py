@@ -66,6 +66,8 @@ PSQL = (
     f"PGAPPNAME={q.TOOL_APP_NAME} exec psql -X -q -At -v ON_ERROR_STOP=1 "
     '-U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 )
+# 스키마 복원은 한 트랜잭션: 중간에 실패해도 표가 반쯤 남지 않는다(남으면 재시도가 TARGET_SCHEMA_PARTIAL로 멈춘다).
+PSQL_ONE_TX = PSQL + " --single-transaction"
 PG_DUMP_SCHEMA = (
     'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --schema-only --no-owner '
     "--no-privileges --no-publications --no-subscriptions"
@@ -108,7 +110,7 @@ class KubectlDbPod:
         return self._exec(PG_DUMP_SCHEMA + flags, timeout=300)
 
     def restore(self, script: bytes) -> None:
-        self._exec(PSQL, script, timeout=300)
+        self._exec(PSQL_ONE_TX, script, timeout=300)
 
     def restart(self, timeout: int = 180) -> None:
         ep = self._ep
@@ -360,7 +362,7 @@ def copy_schema(req: DataMigrationRequest) -> dict:
         if copied:
             if present & wanted:
                 raise _fail("TARGET_SCHEMA_PARTIAL", retryable=False)
-            dst.restore(src.dump_schema(q.INTERNAL_TABLES))
+            dst.restore(src.dump_schema(q.INTERNAL_DUMP_EXCLUDES))
         dst.execute(q.ENSURE_MARKER_SQL)
     return {"copied": copied, "tables": len(wanted)}
 

@@ -184,7 +184,8 @@ async def test_copy_schema_restores_user_tables_without_the_marker_then_ensures_
     assert result == {"copied": True, "tables": 2}
     # dump는 내부 표를 빼고(대상에 이미 있어도 restore가 깨지지 않게), 뒤에 marker를 보장한다
     assert q.MARKER_TABLE in q.INTERNAL_TABLES
-    assert dbs["src"].dumped_excluding == set(q.INTERNAL_TABLES)
+    assert dbs["src"].dumped_excluding == set(q.INTERNAL_DUMP_EXCLUDES)
+    assert set(q.INTERNAL_TABLES) <= set(q.INTERNAL_DUMP_EXCLUDES)
     assert q.ENSURE_MARKER_SQL in dbs["dst"].executed
 
 
@@ -201,6 +202,38 @@ def test_kubectl_schema_dump_excludes_internal_tables_by_name() -> None:
     script = calls[0][-1]
     assert script.startswith("exec pg_dump ") and "--schema-only" in script
     assert "--exclude-table=public.cmp_switchover_marker" in script
+
+
+def test_kubectl_schema_dump_also_excludes_the_marker_sequence() -> None:
+    """표만 빼면 그 bigserial 시퀀스가 주인 없이 덤프에 남아 대상에 쌓이고, 다음 이전의 복원이 멈췄다(2026-11-07)."""
+    calls = []
+
+    class Session:
+        def _kubectl(self, *args, stdin=None, timeout=None):
+            calls.append(args)
+            return b""
+
+    ep = dm.DbEndpoint.model_validate(endpoint("src", "10.0.0.1"))
+    dm.KubectlDbPod(Session(), ep).dump_schema(q.INTERNAL_DUMP_EXCLUDES)
+    assert "--exclude-table=public.cmp_switchover_marker_id_seq" in calls[0][-1]
+
+
+def test_kubectl_schema_restore_is_one_transaction() -> None:
+    """복원이 중간에 실패해도 표가 반쯤 남지 않는다(남으면 재시도가 TARGET_SCHEMA_PARTIAL로 멈춘다)."""
+    calls = []
+
+    class Session:
+        def _kubectl(self, *args, stdin=None, timeout=None):
+            calls.append((args, stdin))
+            return b""
+
+    ep = dm.DbEndpoint.model_validate(endpoint("dst", "10.0.0.2"))
+    dm.KubectlDbPod(Session(), ep).restore(b"create table t();")
+    (args, stdin) = calls[0]
+    assert (
+        "psql" in args[-1] and "--single-transaction" in args[-1] and "ON_ERROR_STOP=1" in args[-1]
+    )
+    assert stdin == b"create table t();"
 
 
 async def test_copy_schema_restores_when_the_target_has_only_the_marker(dbs) -> None:

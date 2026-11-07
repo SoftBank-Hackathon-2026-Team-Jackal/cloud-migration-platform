@@ -8,7 +8,9 @@ duration of one `connect` and is deleted afterwards (provider runtimes own that)
 
 import base64
 import json
+import logging
 import os
+import re
 import subprocess
 import urllib.error
 import urllib.request
@@ -20,8 +22,63 @@ from cmp_providers.db_replication import DB_PROBE
 FIELD_MANAGER = "cmp-provisioning"
 
 
+log = logging.getLogger(__name__)
+
+# stderr는 클러스터 데이터(값)를 담을 수 있어 그대로 남기지 않는다. 알려진 실패 유형만 코드로 바꿔 남긴다.
+# 원인이 "kubectl"로만 남아 서버에서 다시 재현해야 했다(2026-11-07 TARGET_SCHEMA_PARTIAL의 실제 원인은
+# 스키마 복원 중 "relation ... already exists"였다).
+_REASONS = (
+    (re.compile(rb"already exists"), "OBJECT_EXISTS"),
+    (re.compile(rb"does not exist|not found|NotFound", re.IGNORECASE), "NOT_FOUND"),
+    (re.compile(rb"permission denied|Forbidden|must be owner", re.IGNORECASE), "PERMISSION_DENIED"),
+    (
+        re.compile(
+            rb"Unauthorized|password authentication failed|You must be logged in", re.IGNORECASE
+        ),
+        "UNAUTHORIZED",
+    ),
+    (re.compile(rb"syntax error"), "SQL_SYNTAX"),
+    (re.compile(rb"violates|duplicate key"), "CONSTRAINT_VIOLATION"),
+    (re.compile(rb"timed? ?out|deadline exceeded|i/o timeout", re.IGNORECASE), "TIMEOUT"),
+    (
+        re.compile(
+            rb"connection refused|could not connect|no route to host|connection reset",
+            re.IGNORECASE,
+        ),
+        "CONNECT_FAILED",
+    ),
+    (
+        re.compile(
+            rb"container not found|unable to upgrade connection|pod .* not running", re.IGNORECASE
+        ),
+        "POD_NOT_READY",
+    ),
+)
+
+
+# 로그에 남겨도 되는 하위 명령 이름(이 목록 밖의 인자는 경로·스크립트·값일 수 있어 남기지 않는다)
+_SUBCOMMANDS = frozenset({
+    "apply", "annotate", "create", "delete", "exec", "get", "install", "label", "logs", "patch",
+    "replace", "rollout", "run", "scale", "status", "uninstall", "upgrade", "wait",
+})  # fmt: skip
+
+
+def failure_reason(stderr: bytes | None) -> str:
+    """stderr를 값 없이 실패 유형 코드로 바꾼다. 모르면 OTHER."""
+    for pattern, code in _REASONS:
+        if stderr and pattern.search(stderr):
+            return code
+    return "OTHER"
+
+
 class CommandError(RuntimeError):
-    """Carries the tool name only; stdout/stderr may hold cluster data and are dropped."""
+    """Carries the tool name only; stdout/stderr may hold cluster data and are dropped.
+
+    `reason` is a value-free failure code (`failure_reason`), never the output itself."""
+
+    def __init__(self, tool: str, reason: str = "OTHER"):
+        super().__init__(tool)
+        self.reason = reason
 
 
 class CommandRunner:
@@ -49,10 +106,18 @@ class CommandRunner:
                 env={**self._env, **env} if env else self._env,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            raise CommandError(Path(args[0]).name) from None
+        except subprocess.TimeoutExpired:
+            log.warning("command failed: %s reason=TIMEOUT", Path(args[0]).name)
+            raise CommandError(Path(args[0]).name, "TIMEOUT") from None
+        except OSError:
+            raise CommandError(Path(args[0]).name, "NOT_INSTALLED") from None
         if done.returncode != 0:
-            raise CommandError(Path(args[0]).name)
+            reason = failure_reason(done.stderr)
+            # 도구 이름, 하위 명령(인자 첫 개), 종료 코드, 유형 코드만 남긴다. 인자·출력에는 값이 있을 수 있다.
+            sub = next((a for a in args[1:] if a in _SUBCOMMANDS), "")
+            log.warning("command failed: %s %s exit=%s reason=%s",
+                        Path(args[0]).name, sub, done.returncode, reason)  # fmt: skip
+            raise CommandError(Path(args[0]).name, reason)
         return done.stdout
 
     def http_get_ok(self, url: str) -> bool:

@@ -16,6 +16,9 @@ TOOL_APP_NAME = "cmp-data-migration"  # 이 도구의 접속. readiness 신호�
 MARKER_TABLE = "public.cmp_switchover_marker"  # 전환 때 마지막 변경 도착 확인용(PoC marker)
 # 이 도구가 DB에 만드는 내부 표(schema.table). 사용자 표 비교·스키마 복사·전환 검증 결과에서 뺀다.
 INTERNAL_TABLES = frozenset({MARKER_TABLE})
+# 스키마 덤프에서 뺄 내부 객체. 표만 빼면 그 bigserial 시퀀스가 주인 없는 시퀀스로 덤프에 남는다. 그러면 대상에 남아
+# 표를 지워도 사라지지 않고, 같은 대상으로 다시 이전할 때 복원이 "already exists"로 멈췄다(2026-11-07).
+INTERNAL_DUMP_EXCLUDES = INTERNAL_TABLES | frozenset({f"{MARKER_TABLE}_id_seq"})
 
 
 def literal(value: str) -> str:
