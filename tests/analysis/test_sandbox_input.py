@@ -1,7 +1,7 @@
 import pytest
 from cmp_contracts.analysis import MappingRow
 from cmp_testsuite import load_bundle
-from cmp_worker.artifact_store import ArtifactRef
+from cmp_worker.artifact_store import ArtifactRef, LocalArtifactStore
 from cmp_worker.sandbox_input import (
     POSTGRES_16,
     SandboxSettings,
@@ -284,3 +284,47 @@ def test_a_switched_on_red_team_reaches_the_input_aimed_at_the_application(repo)
     requirements = pipeline.store.get(ArtifactRef.model_validate(result["requirements_ref"]))
     assert red["target_resource_id"] in requirements.decode()  # an APPLICATION of the requirements
     assert SandboxInput.model_validate(result).redteam is not None  # and the loop accepts it
+
+
+def test_a_go_apps_own_scanned_routes_fill_redteam_endpoints_when_none_are_given(tmp_path):
+
+    store = LocalArtifactStore(tmp_path / "store")
+    assembly_ref = store.put(
+        b'{"http_routes": ['
+        b'{"method": "GET", "path": "/items", "file": "main.go", "line": 1},'
+        b'{"method": "POST", "path": "/items", "file": "main.go", "line": 2},'
+        b'{"method": null, "path": "/healthz", "file": "main.go", "line": 3},'
+        b'{"method": "GET", "path": "/items", "file": "main.go", "line": 4}'
+        b"]}",
+        ref_id="assembly-x",
+        kind="assembly",
+    )
+    analysis = {**probe_analysis(store), "assembly_ref": assembly_ref.model_dump(mode="json")}
+    settings = SandboxSettings(redteam=True, redteam_consent_ref="c-1")  # no redteam_endpoints
+    result = assemble_sandbox_input(analysis, settings, store)
+    paths = {e["path"] for e in result["redteam"]["endpoints"]}
+    assert paths == {"/items", "/healthz"}  # POST-only route dropped, GET-and-any kept, deduped
+
+
+def test_explicit_redteam_endpoints_are_not_overridden_by_scanned_routes(tmp_path):
+    store = LocalArtifactStore(tmp_path / "store")
+    assembly_ref = store.put(
+        b'{"http_routes": [{"method": "GET", "path": "/scanned", "file": "x.go", "line": 1}]}',
+        ref_id="assembly-y",
+        kind="assembly",
+    )
+    analysis = {**probe_analysis(store), "assembly_ref": assembly_ref.model_dump(mode="json")}
+    settings = SandboxSettings(
+        redteam=True, redteam_consent_ref="c-1",
+        redteam_endpoints=[{"method": "GET", "path": "/manual", "params": []}],
+    )  # fmt: skip
+    result = assemble_sandbox_input(analysis, settings, store)
+    assert [e["path"] for e in result["redteam"]["endpoints"]] == ["/manual"]
+
+
+def test_no_endpoints_anywhere_is_refused_only_once_redteam_is_actually_requested(tmp_path):
+    store = LocalArtifactStore(tmp_path / "store")
+    analysis = probe_analysis(store)  # no assembly_ref at all -> no scanned routes either
+    settings = SandboxSettings(redteam=True, redteam_consent_ref="c-1")  # valid at settings time
+    with pytest.raises(ValueError, match="REDTEAM_ENDPOINTS_MISSING"):
+        assemble_sandbox_input(analysis, settings, store)
