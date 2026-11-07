@@ -6,7 +6,14 @@ import logging
 import sys
 
 import pytest
+from cmp_worker.activities import k8s_workloads_cli as cli
 from cmp_worker.activities.k8s_workloads_cli import CommandError, CommandRunner, failure_reason
+
+
+@pytest.fixture(autouse=True)
+def _logger_enabled(monkeypatch):
+    """다른 시험이 부른 alembic `fileConfig`가 기존 로거를 끈다(disable_existing_loggers): 순서와 상관없이 본다."""
+    monkeypatch.setattr(cli.log, "disabled", False)
 
 
 @pytest.mark.parametrize(
