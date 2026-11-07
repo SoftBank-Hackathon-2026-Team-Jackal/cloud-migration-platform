@@ -393,7 +393,8 @@ async def test_activity_uses_agent_job_and_emits_data_preflight(db, credential, 
     assert result["status"] == "PASS" and direct.calls == []
     parsed = NetworkPreflightResult.model_validate_json(json.dumps(result))
     assert may_start_data_migration(parsed, request()) == (True, [])
-    (event,) = emitter.events
+    running, event = emitter.events
+    assert running.data["status"] == "RUNNING"
     assert (event.type, event.phase, event.status) == ("data.preflight", "data_copy", "done")
     assert validate_data("data.preflight", event.data) == event.data
     assert event.data["may_start"] is True
@@ -424,7 +425,8 @@ async def test_offline_agent_times_out_to_unknown_and_keeps_job(db, credential, 
     assert {c["code"] for c in result["checks"][1:]} == {"AGENT_OFFLINE"}
     with db() as session:
         assert [j.status for j in session.scalars(select(AgentJob))] == ["QUEUED"]
-    (event,) = emitter.events
+    running, event = emitter.events
+    assert running.data["status"] == "RUNNING"
     assert event.status == "failed" and event.data["may_start"] is False
 
 

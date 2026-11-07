@@ -16,6 +16,7 @@ Either way the verdict comes from the same `run_network_preflight`, the result i
 import asyncio
 import os
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -110,15 +111,21 @@ class NetworkPreflightActivities:
 
     @activity.defn(name="run_network_preflight")
     async def run_network_preflight(self, request: dict) -> dict:
+        # Imported here: the events module pulls in API settings, which the Workflow sandbox
+        # (it re-imports modules that register this Activity) must not load.
+        from cmp_worker.preflight_events import emit_preflight, emit_preflight_running
+
         parsed = NetworkPreflightRequest.model_validate(request)
+        # Provisioning 79: the screen shows "checking" while the probe runs (up to minutes).
+        started_at = datetime.now(UTC).isoformat()
+        await asyncio.to_thread(
+            emit_preflight_running, parsed, input_fingerprint(parsed), started_at
+        )
         work = asyncio.create_task(asyncio.to_thread(self._run, parsed))
         while not work.done():
             await asyncio.wait({work}, timeout=HEARTBEAT_SECONDS)
             activity.heartbeat("probing")
         result = work.result()
-        # Imported here: the events module pulls in API settings, which the Workflow sandbox
-        # (it re-imports modules that register this Activity) must not load.
-        from cmp_worker.preflight_events import emit_preflight
 
         may_start, _ = may_start_data_migration(result, parsed)
         emit_preflight(parsed, result, may_start)

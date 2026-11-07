@@ -83,31 +83,98 @@ def preflight_event_data(
                 item["mtu"] = evidence["mtu"]
         checks.append(item)
     location = result.probe_location
-    path = request.expected_network_path
-    interface = path.tunnel_interface
     return {
         "status": result.status,
         "checks": checks,
-        "probe_location": f"{location.agent_id}/{location.namespace}"
-        + (f"@{location.node}" if location.node else ""),
+        "probe_location": _probe_location(location.agent_id, location.namespace, location.node),
         "input_fingerprint": result.input_fingerprint,
         "checked_at": checked_at,
         "may_start": may_start,
-        "network": {
-            "source_cidr": ",".join(request.aws_vpc_cidrs),
-            "target_cidr": ",".join(request.onprem_routed_cidrs),
-            "path": {
-                "kind": "wireguard" if interface and interface.startswith("wg") else "other",
-                "name": interface or "",
-                "cidr": request.tunnel_cidrs[0] if request.tunnel_cidrs else None,
-            },
-            "source_db": request.database,
-            "source_addr": result.tested_endpoint,
-            "replication_node": location.node or "",
-            "target_db": location.namespace,
-            "target_db_detail": f"{location.agent_id} ({location.cluster_uid})",
-        },
+        "network": _network(
+            request,
+            source_addr=result.tested_endpoint,
+            node=location.node,
+            namespace=location.namespace,
+            detail=f"{location.agent_id} ({location.cluster_uid})",
+        ),
     }
+
+
+def _probe_location(agent_id: str, namespace: str, node: str | None) -> str:
+    return f"{agent_id}/{namespace}" + (f"@{node}" if node else "")
+
+
+def _path(request: NetworkPreflightRequest) -> dict:
+    """`wg*` on the probe node: that interface. No interface but a tunnel range: the data gateway
+    (ADR-007 2안, ticket 76 W9) — the source DB address is the gateway Service, whose name is the
+    first DNS label. Neither: `other`."""
+    interface = request.expected_network_path.tunnel_interface
+    cidr = request.tunnel_cidrs[0] if request.tunnel_cidrs else None
+    if interface and interface.startswith("wg"):
+        return {"kind": "wireguard", "name": interface, "cidr": cidr}
+    if not interface and cidr:
+        return {"kind": "wireguard", "name": request.source_db_host.split(".")[0], "cidr": cidr}
+    return {"kind": "other", "name": interface or "", "cidr": cidr}
+
+
+def _network(
+    request: NetworkPreflightRequest,
+    *,
+    source_addr: str,
+    node: str | None,
+    namespace: str,
+    detail: str,
+) -> dict:
+    return {
+        "source_cidr": ",".join(request.aws_vpc_cidrs),
+        "target_cidr": ",".join(request.onprem_routed_cidrs),
+        "path": _path(request),
+        "source_db": request.database,
+        "source_addr": source_addr,
+        "replication_node": node or "",
+        "target_db": namespace,
+        "target_db_detail": detail,
+    }
+
+
+CHECK_NAMES = ("check_cidr_overlap", "check_route", "probe_db_path", "probe_large_transfer")
+
+
+def running_event_data(request: NetworkPreflightRequest, fingerprint: str) -> dict:
+    """Before the probe: every check PENDING, no verdict yet, the same network block the result
+    will carry (from the request and its probe target)."""
+    target = request.probe_target
+    return {
+        "status": "RUNNING",
+        "checks": [
+            {"name": name, "status": "PENDING", "code": None, "evidence": ""}
+            for name in CHECK_NAMES
+        ],
+        "probe_location": _probe_location(target.agent_id, target.namespace, target.node_name),
+        "input_fingerprint": fingerprint,
+        "checked_at": None,
+        "may_start": False,
+        "network": _network(
+            request,
+            source_addr=f"{request.source_db_host}:{request.source_db_port}",
+            node=target.node_name,
+            namespace=target.namespace,
+            detail=f"{target.agent_id} ({target.cluster_uid})",
+        ),
+    }
+
+
+def emit_preflight_running(request: NetworkPreflightRequest, fingerprint: str, started_at: str):
+    """Once per check run (the key carries the start time, so a later run shows RUNNING again;
+    `preflight:running:` never matches a result key). Never raises."""
+    return emit_event(
+        request.migration_id,
+        "data.preflight",
+        PHASE,
+        "running",
+        running_event_data(request, fingerprint),
+        idempotency_key=f"preflight:running:{fingerprint}:{started_at}",
+    )
 
 
 def emit_preflight(
