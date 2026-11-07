@@ -56,6 +56,25 @@ class TunnelCluster(KubectlCluster):
         stamps = [int(line.split()[-1]) for line in out.splitlines() if line.strip()]
         return max(stamps, default=0)
 
+    def set_standing_peer(self, line: str, *, only_if_run: str | None = None) -> None:
+        """Provisioning 83: 고정 게이트웨이의 peer 설정 파일을 바꾼다(게이트웨이가 1초 안에 반영).
+
+        `only_if_run`이면 지금 그 실행의 설정일 때만 바꾼다(정리가 다른 실행의 peer를 지우지 않게).
+        """
+        pod = self.pod_for(wg.NAMESPACE, f"cmp.dev/data-tunnel={wg.STANDING_GATEWAY}")
+        path = wg.STANDING_PEER_FILE
+        script = f"cat > {path}.new && mv {path}.new {path}"
+        if only_if_run:
+            script = f'[ "$(cut -d" " -f1 {path} 2>/dev/null)" = "$1" ] || exit 0; ' + script
+        self._s._kubectl(
+            "exec", "-i", "-n", wg.NAMESPACE, pod, "-c", "wg", "--",
+            "sh", "-c", script, "_", only_if_run or "", stdin=line.encode(),
+        )  # fmt: skip
+
+    def standing_run(self) -> str | None:
+        item = self._s._get("service", wg.STANDING_ENDPOINT, wg.NAMESPACE) or {}
+        return (item.get("metadata", {}).get("annotations") or {}).get(wg.RUN_ANNOTATION)
+
 
 @contextmanager
 def open_cluster(endpoint: DbEndpoint) -> Iterator[TunnelCluster]:
@@ -115,10 +134,12 @@ def _release(target: DbEndpoint) -> str:
 
 def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
     base = wg.name(req.migration_id)
-    lb_service = tunnel.endpoint_service or f"{base}-endpoint"
+    lb_service = f"{base}-endpoint"
     selector = f"cmp.dev/data-tunnel={base}"
     if not req.source.local_host or not req.target.local_host:
         raise _fail("TUNNEL_DB_ADDRESS_MISSING")
+    if tunnel.standing_ingress:
+        return _establish_standing(req, tunnel)
     with OPEN_CLUSTER(req.target) as target, OPEN_CLUSTER(req.source) as source:
         for cluster in (target, source):
             cluster.apply([wg.namespace_manifest()])
@@ -147,7 +168,6 @@ def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
                         req.migration_id,
                         tunnel.egress_cidrs,
                         ingress=ingress,
-                        standing=tunnel.standing_ingress,
                     )
                 )
             if side == "target":
@@ -178,16 +198,65 @@ def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
             # NLB DNS는 즉시 나와도 IP 대상의 TCP health는 약 150초 뒤 통과한다(PoC 69).
             # AWS 조회 권한을 추가하지 않고 실제 handshake로 통신 준비까지 확인한다.
             deadline = max(deadline, endpoint_deadline)
-        while True:
-            try:
-                if clusters[caller].latest_handshake(wg.NAMESPACE, selector) > 0:
-                    break
-            except CommandError:
-                pass  # 게이트웨이가 아직 wg0를 만들지 않았다
-            if time.monotonic() > deadline:
-                raise _fail("TUNNEL_HANDSHAKE_TIMEOUT", retryable=True)
-            _beat("waiting for the WireGuard handshake")
-            SLEEP(3)
+        _wait_handshake(clusters[caller], selector, deadline)
+    return {"name": base, "endpoint": address, "handshake": True,
+            "peer_host": wg.peer_host(req.migration_id)}  # fmt: skip
+
+
+def _wait_handshake(caller: TunnelCluster, selector: str, deadline: float) -> None:
+    while True:
+        try:
+            if caller.latest_handshake(wg.NAMESPACE, selector) > 0:
+                return
+        except CommandError:
+            pass  # 게이트웨이가 아직 wg0를 만들지 않았다
+        if time.monotonic() > deadline:
+            raise _fail("TUNNEL_HANDSHAKE_TIMEOUT", retryable=True)
+        _beat("waiting for the WireGuard handshake")
+        SLEEP(1)
+
+
+def _establish_standing(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
+    """Provisioning 83: 원본 고정 NLB + 고정 게이트웨이. 원본은 peer 설정만 바꾸고, 대상 게이트웨이만 새로 띄운다.
+
+    고정 게이트웨이가 없으면(미리 만들지 않음) 여기서 만든다. 그 실행은 NLB 대상 등록을 기다리므로 느리다.
+    순서: 원본 고정 게이트웨이·NLB·peer-db Service → 원본 peer 설정 → 대상 게이트웨이(접속하는 쪽) → handshake.
+    원본 peer를 먼저 바꿔 두어 대상의 첫 handshake가 거절되지 않게 한다.
+    """
+    base = wg.name(req.migration_id)
+    selector = f"cmp.dev/data-tunnel={base}"
+    with OPEN_CLUSTER(req.target) as target, OPEN_CLUSTER(req.source) as source:
+        for cluster in (target, source):
+            cluster.apply([wg.namespace_manifest()])
+        target_pub, source_pub = _key(target, base), _key(source, wg.STANDING_GATEWAY)
+
+        source.apply([
+            *wg.standing_gateway_manifests(tunnel.image),
+            wg.endpoint_manifest(req.migration_id, tunnel.egress_cidrs, ingress="source",
+                                 standing=True),
+            wg.peer_db_service(req.migration_id, standing=True),
+        ])  # fmt: skip
+        endpoint_deadline = time.monotonic() + tunnel.endpoint_timeout_s
+        while not (address := source.lb_address(wg.NAMESPACE, wg.STANDING_ENDPOINT)):
+            if time.monotonic() > endpoint_deadline:
+                raise _fail("TUNNEL_ENDPOINT_TIMEOUT", retryable=True)
+            _beat("waiting for the source UDP load balancer")
+            SLEEP(5)
+        source.rollout_wait(wg.NAMESPACE, wg.STANDING_GATEWAY)
+        source.set_standing_peer(
+            wg.standing_peer_line(req.migration_id, target_pub, req.source.local_host)
+        )
+
+        target.apply([
+            *wg.gateway_manifests(req.migration_id, "target", image=tunnel.image,
+                                  local_db=req.target.local_host, peer_public_key=source_pub,
+                                  peer_endpoint=f"{address}:{wg.WG_PORT}", ingress="source"),
+            wg.db_ingress_policy(req.migration_id, req.target.namespace, _release(req.target)),
+        ])  # fmt: skip
+        target.rollout_wait(wg.NAMESPACE, base)
+        # 처음 만든 고정 게이트웨이는 NLB 대상 등록·healthy까지 기다려야 하므로 주소 대기 예산까지 둔다.
+        deadline = max(time.monotonic() + tunnel.handshake_timeout_s, endpoint_deadline)
+        _wait_handshake(target, selector, deadline)
     return {"name": base, "endpoint": address, "handshake": True,
             "peer_host": wg.peer_host(req.migration_id)}  # fmt: skip
 
@@ -196,14 +265,15 @@ def cleanup(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
     """복제·롤백·PgBouncer가 터널을 더 이상 쓰지 않을 때 명시적으로 호출한다.
 
     입구 Service 삭제가 실패하면 나머지 리소스를 보존한다. 공유 Namespace는 삭제하지 않는다.
-    고정 입구(`standing_ingress`, Provisioning 82)는 다음 실행이 쓰도록 남긴다(게이트웨이가 없어 아무 Pod도 받지 않음).
+    고정 입구(`standing_ingress`, Provisioning 82·83)는 `_cleanup_standing`이 맡는다.
     """
     base = wg.name(req.migration_id)
+    if tunnel.standing_ingress:
+        return _cleanup_standing(req, tunnel)
     with OPEN_CLUSTER(req.source) as source, OPEN_CLUSTER(req.target) as target:
-        if not tunnel.standing_ingress:
-            ingress = source if tunnel.ingress == "source" else target
-            _beat("deleting the UDP load balancer Service")
-            ingress.delete(wg.NAMESPACE, "service", f"{base}-endpoint")
+        ingress = source if tunnel.ingress == "source" else target
+        _beat("deleting the UDP load balancer Service")
+        ingress.delete(wg.NAMESPACE, "service", f"{base}-endpoint")
         for cluster in (source, target):
             for kind, resource in (
                 ("deployment", base),
@@ -213,6 +283,35 @@ def cleanup(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
             ):
                 _beat("deleting data tunnel resources")
                 cluster.delete(wg.NAMESPACE, kind, resource)
+        target.delete(req.target.namespace, "networkpolicy", f"{base}-db-in")
+    return {"name": base, "cleaned": True}
+
+
+def _cleanup_standing(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
+    """Provisioning 83: 대상 게이트웨이·키·정책과 원본 peer-db Service를 지우고, 원본 고정 게이트웨이의 peer를 비운다.
+
+    고정 NLB·고정 게이트웨이·그 키는 남긴다. 다른 실행이 이미 가져갔으면 그 실행의 설정은 건드리지 않는다.
+    """
+    base = wg.name(req.migration_id)
+    with OPEN_CLUSTER(req.source) as source, OPEN_CLUSTER(req.target) as target:
+        _beat("clearing the standing gateway peer")
+        try:
+            source.set_standing_peer("", only_if_run=base)
+        except CommandError:
+            pass  # 고정 게이트웨이가 없다(이미 지움). 남은 자원 정리는 계속한다.
+        if source.standing_run() == base:
+            idle = wg.standing_endpoint_manifest(tunnel.egress_cidrs)
+            source.apply([idle])
+        _beat("deleting data tunnel resources")
+        source.delete(wg.NAMESPACE, "service", f"{base}-peer-db")
+        for kind, resource in (
+            ("deployment", base),
+            ("service", f"{base}-peer-db"),
+            ("configmap", base),
+            ("secret", base),
+        ):
+            _beat("deleting data tunnel resources")
+            target.delete(wg.NAMESPACE, kind, resource)
         target.delete(req.target.namespace, "networkpolicy", f"{base}-db-in")
     return {"name": base, "cleaned": True}
 

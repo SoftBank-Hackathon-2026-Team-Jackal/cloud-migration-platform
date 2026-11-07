@@ -121,3 +121,54 @@ def test_without_kernel_wireguard_the_userspace_fallback_still_runs(tmp_path) ->
 
     assert proc.returncode == 0, proc.stderr
     assert "wireguard-go wg0" in log
+
+
+# ---- Provisioning 83: 원본 고정 게이트웨이(STANDING_SCRIPT) ----
+
+STANDING_WG = """echo "wg $*" >> "$S/log"
+[ "$*" = "show wg0 peers" ] && cat "$S/peers" 2>/dev/null
+exit 0"""
+
+
+def run_standing(tmp_path: Path, peer: str | None):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name, body in {**FAKES, "wg": STANDING_WG}.items():
+        path = bin_dir / name
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    peer_file = tmp_path / "run" / "peer"
+    if peer is not None:
+        peer_file.parent.mkdir(exist_ok=True)
+        peer_file.write_text(peer)
+    script = wg.STANDING_SCRIPT.replace("/tmp/started", str(tmp_path / "started")).replace(
+        "/dev/net", str(tmp_path / "dev-net")
+    )
+    proc = subprocess.run(
+        ["/bin/sh", "-c", script], check=False, capture_output=True, text=True, timeout=20,
+        env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "S": str(tmp_path),
+             "WG_IP": "10.210.0.1", "PEER_IP": "10.210.0.2", "KEEPALIVE": "25",
+             "HEALTH_PORT": "8080", "POD_IP": "10.20.0.9", "PEER_FILE": str(peer_file),
+             "STANDING_ONCE": "1"},
+    )  # fmt: skip
+    log = (tmp_path / "log").read_text().splitlines()
+    return proc, log
+
+
+def test_standing_gateway_starts_without_a_peer(tmp_path) -> None:
+    proc, log = run_standing(tmp_path, None)
+    assert proc.returncode == 0, proc.stderr
+    assert (tmp_path / "started").exists()
+    assert "wg set wg0 private-key /etc/wg/private listen-port 51820" in log
+    assert not any("allowed-ips" in line for line in log)
+    assert "STANDING_PEER none" in proc.stdout
+
+
+def test_standing_gateway_swaps_the_old_peer_for_the_new_one(tmp_path) -> None:
+    (tmp_path / "peers").write_text("OLDKEY\n")
+    proc, log = run_standing(tmp_path, "cmp-wg-1234 NEWKEY db.ns.svc\n")
+    assert proc.returncode == 0, proc.stderr
+    removed = log.index("wg set wg0 peer OLDKEY remove")
+    added = log.index("wg set wg0 peer NEWKEY allowed-ips 10.210.0.2/32 persistent-keepalive 25")
+    assert removed < added
+    assert "STANDING_PEER cmp-wg-1234" in proc.stdout

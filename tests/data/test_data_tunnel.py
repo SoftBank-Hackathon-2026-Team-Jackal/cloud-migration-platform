@@ -150,6 +150,22 @@ class FakeCluster:
         self.handshake_after -= 1
         return 1730900000 if self.handshake_after < 0 else 0
 
+    # Provisioning 83: 원본 고정 게이트웨이
+    peer_line = None
+    run = None
+
+    def set_standing_peer(self, line, *, only_if_run=None):
+        self.log.append((self.name, "peer", line, only_if_run))
+        current = (self.peer_line or "").split(" ")[0]
+        if only_if_run is None or current == only_if_run:
+            self.peer_line = line
+
+    def standing_run(self):
+        return self.run
+
+    def delete(self, namespace, kind, name):
+        self.log.append((self.name, "delete", (namespace, kind, name)))
+
 
 @pytest.fixture
 def clusters(monkeypatch):

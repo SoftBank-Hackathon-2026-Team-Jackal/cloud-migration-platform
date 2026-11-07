@@ -14,8 +14,12 @@ Namespace에 게이트웨이 Pod 하나를 둔다.
 - `ingress="source"`는 원본 EKS의 공개 NLB를 쓰고 대상 NAT 공인 IP(`target_egress_cidrs`)만 받는다.
   대상 게이트웨이가 접속하며 keepalive 25초, 원본 Pod의 TCP 8080으로 NLB 상태를 확인한다.
 - `standing_ingress`(Provisioning 82)는 원본 NLB Service를 고정 이름(`cmp-wg-standing-endpoint`)으로 재사용한다.
-  NLB 생성(2~3분)을 실행 전에 끝내 두고, 실행마다 selector(이번 게이트웨이)와 허용 IP만 바꾼다. 정리 때
-  이 Service는 지우지 않는다. 게이트웨이·키·정책은 지금처럼 실행마다 새로 만든다. 한 번에 한 실행만 쓴다.
+  NLB 생성(2~3분)을 실행 전에 끝내 두고, 실행마다 허용 IP만 바꾼다. 정리 때 이 Service는 지우지 않는다.
+  Provisioning 83: 원본 게이트웨이도 고정 Deployment(`cmp-wg-standing`)로 둔다. 게이트웨이 Pod를 실행마다 새로
+  만들면 NLB가 새 Pod IP를 대상으로 등록하고 healthy로 판정할 때까지 약 30초 동안 handshake UDP를 버린다
+  (2026-11-07 실측). 고정 게이트웨이는 NLB 대상으로 계속 healthy이고, 실행은 `kubectl exec`로 peer(대상
+  공개키)와 원본 DB 주소만 넘긴다(`STANDING_PEER_FILE`). 대상 쪽 게이트웨이·키·정책은 실행마다 만든다.
+  한 번에 한 실행만 쓴다.
 - 양쪽 Service 이름이 같아서, 원본·대상 `peer_host`가 모두 `<name>-peer-db.cmp-data-tunnel.svc.cluster.local`이다.
   원본 DB에서 보면 대상 DB, 대상 DB에서 보면 원본 DB로 이어진다.
 - 대상 Namespace에는 Provisioning의 기본 차단 정책이 있다. 게이트웨이를 별도 Namespace에 두고, 대상 DB
@@ -45,6 +49,13 @@ SECRET_KEY = "private"
 # Provisioning 82: 원본 클러스터의 cmp-data-tunnel Namespace에 하나만 둔다. 미리 만들 때는 아무 Pod도 고르지 않는다.
 STANDING_ENDPOINT = "cmp-wg-standing-endpoint"
 STANDING_IDLE = "standing-idle"
+# Provisioning 83: 원본 고정 게이트웨이(Deployment·ConfigMap·키 Secret 이름). NLB는 항상 이 Pod를 고른다.
+STANDING_GATEWAY = "cmp-wg-standing"
+STANDING_SELECTOR = {"cmp.dev/data-tunnel": STANDING_GATEWAY}
+# 고정 NLB Service에 지금 쓰는 실행 이름을 적는다(`STANDING_IDLE`이면 쉬는 중). 스크립트의 사용 중 판단 근거다.
+RUN_ANNOTATION = "cmp.dev/data-tunnel-run"
+# 고정 게이트웨이가 1초마다 읽는 설정 파일: `<실행 이름> <대상 공개키> <원본 DB 주소>` 한 줄, 비면 peer 없음.
+STANDING_PEER_FILE = "/run/cmp/peer"
 Side = Literal["source", "target"]
 
 # Provisioning 81: 컨테이너가 재시작하면 같은 Pod 네트워크에 이전 wg0이 남는다(먼저 지운다). 막 생긴 NLB의
@@ -73,6 +84,47 @@ if [ -n "${PEER_ENDPOINT:-}" ]; then
 fi
 touch /tmp/started
 wait
+"""
+
+# Provisioning 83: 원본 고정 게이트웨이. peer 없이 wg0·NLB 헬스 포트·터널 너머 DB 리스너를 먼저 띄우고,
+# STANDING_PEER_FILE이 바뀌면 이전 peer와 원본 DB 리스너를 지우고 새 값으로 다시 건다. emptyDir라서
+# 컨테이너가 재시작해도 마지막 설정을 다시 적용한다.
+STANDING_SCRIPT = """set -eu
+apk add --no-cache wireguard-tools wireguard-go socat iproute2 >/dev/null
+ip link del wg0 2>/dev/null || true
+if ! ip link add wg0 type wireguard 2>/dev/null; then
+  mkdir -p /dev/net; [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
+  WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1 wireguard-go wg0
+fi
+wg set wg0 private-key /etc/wg/private listen-port 51820
+ip addr add "$WG_IP/24" dev wg0
+ip link set mtu 1420 up dev wg0
+socat TCP-LISTEN:5432,bind="$POD_IP",fork,reuseaddr TCP:"$PEER_IP":5432 &
+socat TCP-LISTEN:"$HEALTH_PORT",bind="$POD_IP",fork,reuseaddr SYSTEM:true &
+PEER_FILE="${PEER_FILE:-/run/cmp/peer}"
+mkdir -p "$(dirname "$PEER_FILE")"
+touch /tmp/started
+applied="-"
+local_db_pid=""
+while :; do
+  want="$(cat "$PEER_FILE" 2>/dev/null || true)"
+  if [ "$want" != "$applied" ]; then
+    for old in $(wg show wg0 peers); do wg set wg0 peer "$old" remove || true; done
+    if [ -n "$local_db_pid" ]; then kill "$local_db_pid" 2>/dev/null || true; local_db_pid=""; fi
+    if [ -n "$want" ]; then
+      set -- $want
+      wg set wg0 peer "$2" allowed-ips "$PEER_IP/32" persistent-keepalive "$KEEPALIVE"
+      socat TCP-LISTEN:5432,bind="$WG_IP",fork,reuseaddr TCP:"$3":5432 &
+      local_db_pid=$!
+      echo "STANDING_PEER $1"
+    else
+      echo "STANDING_PEER none"
+    fi
+    applied="$want"
+  fi
+  [ -n "${STANDING_ONCE:-}" ] && break
+  sleep 1
+done
 """
 
 
@@ -112,11 +164,6 @@ class WireGuardTunnel(Strict):
         if self.standing_ingress and self.ingress != "source":
             raise ValueError("standing_ingress requires ingress=source")
         return self
-
-    @property
-    def endpoint_service(self) -> str | None:
-        """고정 입구 Service 이름. 실행별 입구면 None(`<name>-endpoint`)."""
-        return STANDING_ENDPOINT if self.standing_ingress else None
 
     @property
     def egress_cidrs(self) -> list[str]:
@@ -221,14 +268,7 @@ def gateway_manifests(
         deployment["spec"]["template"]["spec"]["containers"][0]["ports"].append(
             {"name": "health", "containerPort": HEALTH_PORT}
         )
-    service = {
-        "apiVersion": "v1",
-        "kind": "Service",
-        "metadata": _meta(f"{base}-peer-db", migration_id),
-        "spec": {"selector": selector,
-                 "ports": [{"name": "postgres", "port": DB_PORT, "targetPort": DB_PORT}]},
-    }  # fmt: skip
-    return [config, deployment, service]
+    return [config, deployment, peer_db_service(migration_id)]
 
 
 def endpoint_manifest(
@@ -245,9 +285,14 @@ def endpoint_manifest(
     base = name(migration_id)
     if standing:
         metadata = {"name": STANDING_ENDPOINT, "namespace": NAMESPACE,
-                    "labels": {**LABELS, "cmp.dev/data-tunnel-standing": "true"}}  # fmt: skip
+                    "labels": {**LABELS, "cmp.dev/data-tunnel-standing": "true"},
+                    "annotations": {RUN_ANNOTATION: base}}  # fmt: skip
+        selector = dict(
+            STANDING_SELECTOR
+        )  # Provisioning 83: 고정 게이트웨이(대상 등록이 바뀌지 않게)
     else:
         metadata = _meta(f"{base}-endpoint", migration_id)
+        selector = {"cmp.dev/data-tunnel": base}
     service = {
         "apiVersion": "v1",
         "kind": "Service",
@@ -255,35 +300,117 @@ def endpoint_manifest(
         "spec": {
             "type": "LoadBalancer",
             "loadBalancerSourceRanges": list(source_egress_cidrs),
-            "selector": {"cmp.dev/data-tunnel": base},
+            "selector": selector,
             "ports": [{"name": "wg", "port": WG_PORT, "targetPort": WG_PORT, "protocol": "UDP"}],
         },
     }
 
     if ingress == "source":
         prefix = "service.beta.kubernetes.io/aws-load-balancer-"
-        service["metadata"]["annotations"] = {
-            f"{prefix}scheme": "internet-facing",
-            f"{prefix}nlb-target-type": "ip",
-            f"{prefix}attributes": "load_balancing.cross_zone.enabled=true",
-            f"{prefix}healthcheck-protocol": "tcp",
-            f"{prefix}healthcheck-port": str(HEALTH_PORT),
-            # Provisioning 82: 새 게이트웨이 Pod가 대상으로 등록된 뒤 healthy까지 기본 30초 → 약 10초.
-            # NLB 허용 범위: 간격 5~300초, 제한 시간 2~120초, 임계값 2~10.
-            f"{prefix}healthcheck-interval": "5",
-            f"{prefix}healthcheck-timeout": "4",
-            f"{prefix}healthcheck-healthy-threshold": "2",
-            f"{prefix}healthcheck-unhealthy-threshold": "2",
-        }
+        service["metadata"].setdefault("annotations", {}).update(
+            {
+                f"{prefix}scheme": "internet-facing",
+                f"{prefix}nlb-target-type": "ip",
+                f"{prefix}attributes": "load_balancing.cross_zone.enabled=true",
+                f"{prefix}healthcheck-protocol": "tcp",
+                f"{prefix}healthcheck-port": str(HEALTH_PORT),
+                # Provisioning 82: 새 게이트웨이 Pod가 대상으로 등록된 뒤 healthy까지 기본 30초 → 약 10초.
+                # NLB 허용 범위: 간격 5~300초, 제한 시간 2~120초, 임계값 2~10.
+                f"{prefix}healthcheck-interval": "5",
+                f"{prefix}healthcheck-timeout": "4",
+                f"{prefix}healthcheck-healthy-threshold": "2",
+                f"{prefix}healthcheck-unhealthy-threshold": "2",
+            }
+        )
         service["spec"]["loadBalancerClass"] = "service.k8s.aws/nlb"
     return service
 
 
 def standing_endpoint_manifest(target_egress_cidrs: list[str]) -> dict[str, Any]:
-    """시연 전에 미리 만드는 원본 NLB. 아무 게이트웨이도 고르지 않고, 실행이 selector를 바꾼다."""
+    """시연 전에 미리 만드는 원본 NLB. 고정 게이트웨이를 고르고, 쓰는 실행이 없다(`STANDING_IDLE`)."""
     service = endpoint_manifest(STANDING_IDLE, target_egress_cidrs, ingress="source", standing=True)
-    service["spec"]["selector"] = {"cmp.dev/data-tunnel": STANDING_IDLE}
+    service["metadata"]["annotations"][RUN_ANNOTATION] = STANDING_IDLE
     return service
+
+
+def standing_gateway_manifests(
+    image: str = "docker.io/library/alpine:3.22",
+) -> list[dict[str, Any]]:
+    """Provisioning 83: 원본 고정 게이트웨이 ConfigMap·Deployment. 키 Secret(`STANDING_GATEWAY`)은 따로 만든다.
+
+    Pod 템플릿에 실행별 값이 없어서 같은 입력으로 다시 apply해도 Pod가 바뀌지 않는다(NLB 대상 유지).
+    """
+    meta = {"name": STANDING_GATEWAY, "namespace": NAMESPACE,
+            "labels": {**LABELS, "cmp.dev/data-tunnel-standing": "true"}}  # fmt: skip
+    env = {"WG_IP": ADDRESSES["source"], "PEER_IP": ADDRESSES["target"], "KEEPALIVE": "25",
+           "HEALTH_PORT": str(HEALTH_PORT), "PEER_FILE": STANDING_PEER_FILE}  # fmt: skip
+    config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": meta,
+              "data": {"start.sh": STANDING_SCRIPT}}  # fmt: skip
+    deployment = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": meta,
+        "spec": {
+            "replicas": 1,
+            "strategy": {"type": "Recreate"},
+            "selector": {"matchLabels": dict(STANDING_SELECTOR)},
+            "template": {
+                "metadata": {"labels": {**LABELS, **STANDING_SELECTOR}},
+                "spec": {
+                    "containers": [{
+                        "name": "wg",
+                        "image": image,
+                        "command": ["sh", "/opt/start.sh"],
+                        "env": [
+                            *({"name": k, "value": v} for k, v in env.items()),
+                            {"name": "POD_IP",
+                             "valueFrom": {"fieldRef": {"fieldPath": "status.podIP"}}},
+                        ],
+                        "ports": [
+                            {"name": "wg", "containerPort": WG_PORT, "protocol": "UDP"},
+                            {"name": "peer-db", "containerPort": DB_PORT},
+                            {"name": "health", "containerPort": HEALTH_PORT},
+                        ],
+                        "securityContext": {"privileged": True},
+                        "readinessProbe": {"exec": {"command": ["test", "-f", "/tmp/started"]},
+                                           "periodSeconds": 3},
+                        "resources": {"requests": {"cpu": "20m", "memory": "32Mi"}},
+                        "volumeMounts": [
+                            {"name": "start", "mountPath": "/opt"},
+                            {"name": "key", "mountPath": "/etc/wg", "readOnly": True},
+                            {"name": "peer", "mountPath": "/run/cmp"},
+                        ],
+                    }],
+                    "volumes": [
+                        {"name": "start", "configMap": {"name": STANDING_GATEWAY}},
+                        {"name": "key", "secret": {"secretName": STANDING_GATEWAY}},
+                        {"name": "peer", "emptyDir": {}},
+                    ],
+                },
+            },
+        },
+    }  # fmt: skip
+    return [config, deployment]
+
+
+def standing_peer_line(migration_id: str, peer_public_key: str, local_db: str) -> str:
+    """고정 게이트웨이에 넘기는 한 줄. 공백이 들어가면 셸이 다르게 나누므로 거절한다."""
+    parts = (name(migration_id), peer_public_key, local_db)
+    if any(not p or any(c.isspace() for c in p) for p in parts):
+        raise ValueError("standing peer fields must be non-empty without whitespace")
+    return " ".join(parts) + "\n"
+
+
+def peer_db_service(migration_id: str, *, standing: bool = False) -> dict[str, Any]:
+    """`<name>-peer-db` Service. standing이면 원본 고정 게이트웨이를 고른다(peer_host 계약은 같다)."""
+    selector = dict(STANDING_SELECTOR) if standing else {"cmp.dev/data-tunnel": name(migration_id)}
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": _meta(f"{name(migration_id)}-peer-db", migration_id),
+        "spec": {"selector": selector,
+                 "ports": [{"name": "postgres", "port": DB_PORT, "targetPort": DB_PORT}]},
+    }  # fmt: skip
 
 
 def db_ingress_policy(migration_id: str, db_namespace: str, db_release: str) -> dict[str, Any]:
