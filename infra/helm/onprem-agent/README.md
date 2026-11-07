@@ -24,7 +24,7 @@ helm install cmp-agent oci://ghcr.io/softbank-hackathon-2026-team-jackal/charts/
 | `networkPreflight.image` / `allowedImages` | 공식 `postgres` 16.15-alpine Digest / `[]` | Network Preflight 검사 이미지(Digest 고정). 기본값으로 바로 동작하며 `""`이면 끈다 (52) |
 | `proxy.https` / `http` / `noProxy` | `""` / `""` / K3s 기본 CIDR·`.svc` | 플랫폼 호출용 HTTPS 프록시. 설정하면 두 컨테이너에 `HTTPS_PROXY`·`NO_PROXY`(대소문자 둘 다)를 넣는다 (52) |
 | `tunnel.exposeKubeApi` | `false` | 켜면 플랫폼이 정한 `kube_api_port`(기본 6443)를 터널 IP에서 `kubernetes.default.svc:443`으로 전달한다(73, ADR-007). 플랫폼 `TUNNEL_EXPOSE_KUBE_API=true`도 필요. RBAC 추가 없음 |
-| `tunnel.enabled` / `mode` / `intervalSeconds` | `true` / `auto` / `15` | WireGuard 터널 컨테이너 (17). 켜면 agent가 작업 완료 신호(`/var/run/cmp-wake`, 메모리 emptyDir)를 보내 터널이 2초 간격으로 즉시 재확인한다 (66) |
+| `tunnel.enabled` / `mode` / `intervalSeconds` | `true` / `auto` / `5` | WireGuard 터널 컨테이너 (17). 켜면 agent가 작업 완료 신호(`/var/run/cmp-wake`, 메모리 emptyDir)를 보내 터널이 2초 간격으로 즉시 재확인한다 (66). 상태 보고(및 노드 CPU·메모리, 웹 서버 맥박의 이전 서버 값)는 이 주기로 간다. 노드 값을 빼려면 터널 컨테이너에 `--no-node-metrics` |
 
 ClusterRole에는 `watch`가 없고, 정리 작업(`ENVIRONMENT_TEARDOWN`)을 위해 Namespace delete가 있다. 폐기된 Agent는 재시작 반복 없이 대기한다(52).
 

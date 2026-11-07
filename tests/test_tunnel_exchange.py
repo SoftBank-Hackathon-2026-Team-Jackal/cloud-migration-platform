@@ -581,3 +581,31 @@ def test_kube_api_check_is_stored_apart_from_the_handoff_checks(client, db):
     assert report(client, headers).status_code == 202  # omitted = not exposed
     with db() as s:
         assert tunnel_view(s, "agent-001")["kube_api_ok"] is None
+
+
+def test_agent_status_with_node_metrics_feeds_the_target_server_pulse(client, db):
+    from cmp_api import pulse
+
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    pulse.REPORTS = pulse.ReportStore()
+    try:
+        assert report(client, headers).status_code == 202
+        assert pulse.REPORTS.side("target") is None  # no metrics -> nothing shown
+        body = {"cpu_percent": 12.5, "mem_used_mb": 1024, "mem_total_mb": 4096}
+        assert report(client, headers, **body).status_code == 202
+        side = pulse.REPORTS.side("target")
+        assert side["cpu_percent"] == 12.5 and side["mem_used_mb"] == 1024
+        assert side["mem_total_mb"] == 4096 and side["nodes"] == 1
+    finally:
+        pulse.REPORTS = pulse.ReportStore()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"cpu_percent": 101.0}, {"cpu_percent": -1.0}, {"mem_total_mb": 0}, {"mem_used_mb": -5}],
+)
+def test_node_metrics_are_range_checked(client, db, bad):
+    headers = agent(db)
+    put_key(client, "agent-001", headers)
+    assert report(client, headers, **bad).status_code == 422

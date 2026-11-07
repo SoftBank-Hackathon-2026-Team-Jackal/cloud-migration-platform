@@ -220,7 +220,7 @@ def test_tunnel_container_has_only_network_admin_and_no_host_network(tmp_path):
         "--mode",
         "auto",
         "--interval-seconds",
-        "15",
+        "5",
         "--wake-file",
         "/var/run/cmp-wake/job",
     ]
