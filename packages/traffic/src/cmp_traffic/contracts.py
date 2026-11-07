@@ -27,9 +27,12 @@ class TrafficPolicy(BaseModel):
     # 100% 전환 뒤 최종 확정 전 안정화 구간(초). 0이면 예전처럼 100%에 닿자마자 끝난다.
     # 이 구간에서는 자동으로 되돌리지 않는다: 이상을 알리고(`traffic.alert`) 사람의 롤백·확정을 기다린다.
     # 아무 결정이 없으면 구간이 끝날 때 확정한다.
-    stabilize_seconds: float = Field(default=0, ge=0, le=86_400)
+    stabilize_seconds: float = Field(default=0, ge=0, le=14_400)
     # 안정화 구간의 관찰 창 길이(초). 짧을수록 이상을 빨리 알린다.
     stabilize_window_seconds: float = Field(default=10, gt=0, le=600)
+    # 구간이 끝났는데 확정할 근거가 없으면(알림 중이거나 요청이 적어 한 번도 판정하지 못함) 사람의 결정을
+    # 이만큼 더 기다린다. 그래도 결정이 없으면 알림 중일 때는 원본으로 되돌리고, 판정만 못 했으면 확정한다.
+    stabilize_hold_seconds: float = Field(default=1800, ge=0, le=14_400)
     # 안정화 구간에서 이 오류율(실패/요청)을 넘으면 알린다. p99는 전환 단계와 같은 기준(`p99_limit`)을 쓴다.
     alert_error_rate: float = Field(default=0.05, ge=0, le=1)
     # 안정화 구간에서 롤백하면 DB 쓰기 주체도 원본으로 되돌린다(데이터 이전 `rollback` 신호, 역방향 복제).
