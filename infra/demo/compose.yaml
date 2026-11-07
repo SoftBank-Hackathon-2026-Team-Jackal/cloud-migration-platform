@@ -118,6 +118,11 @@ services:
       # /opt/cmp/.env (relay worker queue, step policy; no secrets). Empty: the traffic step stays
       # the scaffold and the relay server is never touched (today's behavior).
       WEB_START_TRAFFIC: ${WEB_START_TRAFFIC:-}
+      # Provisioning 73/78 (ADR-007 2안): expose the K3s API on every Agent tunnel IP so the
+      # data worker reaches on-prem k3d through the relay (Agent Chart tunnel.exposeKubeApi too).
+      # Off unless /opt/cmp/.env sets TUNNEL_EXPOSE_KUBE_API=true.
+      TUNNEL_EXPOSE_KUBE_API: ${TUNNEL_EXPOSE_KUBE_API:-false}
+      TUNNEL_KUBE_API_PORT: ${TUNNEL_KUBE_API_PORT:-6443}
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
       - /opt/cmp/data/plans:/opt/cmp/plans

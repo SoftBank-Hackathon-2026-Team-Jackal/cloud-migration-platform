@@ -858,3 +858,11 @@ def test_worker_gets_data_migration_cluster_access_names_with_empty_defaults():
     for name in ("DATA_MIGRATION_AWS_PROFILE", "DATA_MIGRATION_KUBECONFIG_DIR"):
         assert name in check, name
     assert "data_migration_kubeconfig_files=" in check
+
+
+def test_api_gets_the_tunnel_kube_api_switch_off_by_default():
+    # Provisioning 78: TUNNEL_EXPOSE_KUBE_API in /opt/cmp/.env must reach the api (ticket 73).
+    env = _env("api")
+    assert env["TUNNEL_EXPOSE_KUBE_API"] == "${TUNNEL_EXPOSE_KUBE_API:-false}"
+    assert env["TUNNEL_KUBE_API_PORT"] == "${TUNNEL_KUBE_API_PORT:-6443}"
+    assert "TUNNEL_EXPOSE_KUBE_API" not in _env("worker")
