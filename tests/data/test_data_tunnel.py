@@ -336,7 +336,7 @@ def test_ingress_rejects_missing_or_mixed_egress_cidrs(value) -> None:
     "cidrs",
     [
         [],
-        ["0.0.0.0/0"],
+        ["0.0.0.0/1"],
         ["10.0.0.0/15"],
         ["1.2.3.4/24"],
         ["::1/128"],
@@ -347,6 +347,28 @@ def test_ingress_rejects_missing_or_mixed_egress_cidrs(value) -> None:
 def test_target_egress_cidrs_must_be_narrow_ipv4(cidrs) -> None:
     with pytest.raises(ValidationError):
         wg.WireGuardTunnel.model_validate({**REVERSE_TUNNEL, "target_egress_cidrs": cidrs})
+
+
+def test_target_egress_accepts_any_ipv4_alone_for_onprem_ingress() -> None:
+    """온프레 NAT IP는 와이파이마다 바뀐다: 원본 NLB 입구만 0.0.0.0/0 하나로 열 수 있다(인증은 WireGuard 키)."""
+    tunnel = wg.WireGuardTunnel.model_validate(
+        {**REVERSE_TUNNEL, "target_egress_cidrs": ["0.0.0.0/0"]}
+    )
+    assert tunnel.egress_cidrs == ["0.0.0.0/0"]
+    lb = wg.endpoint_manifest(MID, tunnel.egress_cidrs, ingress="source", standing=True)
+    assert lb["spec"]["loadBalancerSourceRanges"] == ["0.0.0.0/0"]
+
+
+def test_any_ipv4_absorbs_other_target_cidrs() -> None:
+    """auto_target_egress가 /32를 더해도 0.0.0.0/0이 있으면 그것 하나로 합친다."""
+    value = {**REVERSE_TUNNEL, "target_egress_cidrs": ["0.0.0.0/0", "203.0.113.7/32"]}
+    assert wg.WireGuardTunnel.model_validate(value).egress_cidrs == ["0.0.0.0/0"]
+
+
+def test_source_egress_still_rejects_any_ipv4() -> None:
+    """원본 NAT 쪽(ingress=target)은 고정 IP라 넓게 열 이유가 없다."""
+    with pytest.raises(ValidationError):
+        wg.WireGuardTunnel(source_egress_cidrs=["0.0.0.0/0"])
 
 
 @pytest.mark.parametrize(
