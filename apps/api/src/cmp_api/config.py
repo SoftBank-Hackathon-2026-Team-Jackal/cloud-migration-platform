@@ -9,6 +9,15 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     database_url: str = "postgresql+psycopg://platform:platform@localhost:5433/platform"
     agent_enrollment_admin_key: str | None = None
+    # Agent chat ("Jackal"): answers the web's questions from the state summary the web sends, on the
+    # platform instead of the web server. Off unless `AGENT_CHAT_ENABLED=true`, a ledger file and the
+    # SDK's ANTHROPIC_API_KEY are all set (ADR-004: the same spend ledger and `disabled` kill switch the
+    # worker uses). Not routed by the public edge: only the web server reaches `POST /agent/ask`.
+    agent_chat_enabled: bool = False
+    agent_model: str = "claude-haiku-5-5"
+    agent_caption_model: str | None = None
+    llm_ledger_path: str | None = None
+    llm_kill_switch_path: str | None = None
     approval_admin_key: str | None = None
     # Ticket 60 A12 (demo): an existing approver that `POST /migrations` grants each new Migration
     # (ticket 07 operator grant, per-Migration scope kept). Unset: starts grant nothing.

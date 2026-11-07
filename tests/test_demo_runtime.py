@@ -532,16 +532,19 @@ def test_worker_analysis_sandbox_and_llm_settings_default_to_the_scaffold():
     assert build_pipeline(empty) is None
     assert build_sandbox_loop(empty) is None
     assert build_llm_factory(empty) is None
-    for name in ("ANTHROPIC_API_KEY", "LLM_ENABLED", "SANDBOX_KUBECONFIG"):
+    # The API holds the key only for the agent chat (`/agent/ask`, internal-only, ledger-limited,
+    # kill-switch aware). It still gets no analysis/sandbox/LLM-pipeline settings.
+    for name in ("LLM_ENABLED", "SANDBOX_KUBECONFIG"):
         assert name not in _env("api"), name
+    assert _env("api")["ANTHROPIC_API_KEY"] == "${ANTHROPIC_API_KEY:-}"
 
 
 def test_runtime_example_values_point_at_the_mounted_worker_paths():
     example, worker, api = _runtime_example(), _env("worker"), _env("api")
     targets = _mount_targets("worker")
     for name in example:
-        # ticket 57 and data-migration ticket 08: API only
-        consumer = api if name.startswith("WEB_START_") else worker
+        # ticket 57, data-migration ticket 08 and the agent chat: API only
+        consumer = api if name.startswith(("WEB_START_", "AGENT_CHAT_")) else worker
         assert f"${{{name}:-" in str(consumer.get(name)), name  # every example line is consumed
     # Planning reads the analysis results from the same store (runbook: same directory).
     assert example["ANALYSIS_ARTIFACT_STORE_DIR"] == worker["ARTIFACT_STORE_DIR"]

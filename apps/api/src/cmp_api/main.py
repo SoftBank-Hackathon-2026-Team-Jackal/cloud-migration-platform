@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from cmp_api.config import settings
+from cmp_api.routes.agent import router as agent_chat_router
 from cmp_api.routes.agent_jobs import router as agent_job_router
 from cmp_api.routes.agents import router as agent_router
 from cmp_api.routes.analysis_review import router as analysis_review_router
@@ -68,6 +69,7 @@ app.include_router(connection_router)
 app.include_router(env_file_router)
 app.include_router(traffic_action_router)  # #234
 app.include_router(analysis_review_router)  # analysis review gate (confirm / approve)
+app.include_router(agent_chat_router)  # agent chat (internal: the web server calls it)
 
 
 @app.get("/health")
