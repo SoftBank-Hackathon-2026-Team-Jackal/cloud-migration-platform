@@ -43,7 +43,7 @@ class OnPremExecutionActivities:
         store: ArtifactStore,
         *,
         wait_seconds: float = 1800,
-        poll_seconds: float = 5,
+        poll_seconds: float = 1,
     ):
         self._session_factory = session_factory
         self._store = store

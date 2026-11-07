@@ -71,6 +71,7 @@ spec:
             httpGet:
               path: {{ .Values.application.health_path | quote }}
               port: http
+            periodSeconds: 2
           resources:
             requests:
               cpu: {{ printf "%vm" .Values.application.cpu_millicores | quote }}
