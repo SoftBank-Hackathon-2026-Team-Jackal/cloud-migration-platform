@@ -268,6 +268,8 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 - **대상 한정:** 이 실행의 Sandbox Namespace(`cmp-sbx-*`, `cmp.sandbox/run-id`·관리 라벨 일치)의 `APPLICATION`만 대상이다. 아니면 `REDTEAM_TARGET_NOT_ALLOWED`. 대상 주소는 워커가 확인 시점의 Service 주소로 고정하며 호출하는 쪽이 고르지 않는다.
 - **동시 실행·정리:** 클러스터 전체에서 실행기는 1개(`REDTEAM_CONCURRENCY_LIMIT`, 같은 실행의 이전 잔여물은 제외). Pod 이름은 실행당 고정이라 재시도는 잔여물을 지우고 다시 만든다. 성공·실패·예외 어느 경로에서도 Pod와 임시 정책을 지우고 원래 DNS 규칙을 되돌린다.
 - **옵트인:** `SandboxSettings.redteam`(기본 꺼짐)은 동의 참조(`redteam_consent_ref`)가 있어야 켜진다. 꺼져 있으면 기존 정책·묶음·해시가 달라지지 않는다. 실제 시작은 실행마다 승인(티켓 34)을 거친다.
+- **시작 조건과 안전장치(티켓 34):** 실행마다 승인이 있어야 하고, 승인은 그 실행의 ID·강도·시간 상한과 같아야 하며 한 번만 쓰인다(`REDTEAM_NOT_APPROVED`·`REDTEAM_APPROVAL_MISMATCH`·`REDTEAM_APPROVAL_USED`). Sandbox가 시간 상한과 정리 여유(120초)보다 적게 남았으면 시작하지 않고(`REDTEAM_TIME_INSUFFICIENT`, 시작 시점 기준), `ACTIVE`는 복원할 기준선이 있을 때만 시작한다(`REDTEAM_BASELINE_MISSING`). 격리를 증명한 **뒤에** 외부 통신을 끊고(끊지 못하면 `REDTEAM_EXTERNAL_NOT_CUT`), 끝나면 차단 해제·실행기 제거 뒤에 `ACTIVE`만 데이터를 되돌린다. 복원 실패는 숨기지 않는다.
+- **결과(Finding):** 이미지 Digest와 묶음 SHA-256이 항상 붙고, 엔드포인트는 앱 안의 경로뿐이며, 증거는 앱의 실제 비밀 값과 비밀로 보이는 문자열을 지운 뒤에만 저장한다. 지울 수 없으면 저장하지 않는다(`SECRET_IN_EVIDENCE`). Workflow 이력에는 개수와 id만 남는다.
 - **제외:** 시험 도구와 Finding(34), Agent(35), 수정 연계(36), Namespace 전체의 Pod Security `enforce`와 ResourceQuota(앱·DB 차트와 데이터 초기화 재시작에 영향을 줄 수 있어 실행기 Pod 검사와 실행기 개수 제한으로 대체), EKS·GKE에서의 실제 강제 확인.
 
 ### 보안과 실행 안정성
