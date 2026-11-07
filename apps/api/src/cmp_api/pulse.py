@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,48 @@ from cmp_api.migration_events import MigrationEventRow, MigrationLogRow
 
 WINDOW_SECONDS = 300
 SAMPLE_GAP_SECONDS = 0.2
+ROLES = ("source", "target")  # 원본 서버, 이전 서버
+STALE_SECONDS = 15  # 이보다 오래된 보고는 "모름"으로 본다(꾸민 값을 보이지 않는다)
+MAX_NODES_PER_ROLE = 16
+
+
+class ReportStore:
+    """서버들이 보낸 CPU·메모리 보고를 메모리에만 둔다(재시작하면 비워진다). 역할(source/target)별로 합쳐서 내준다."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._items: dict[tuple[str, str], tuple[float, float, int, int]] = {}
+
+    def put(self, role: str, node: str, cpu: float, mem_used_mb: int, mem_total_mb: int) -> None:
+        now = self._clock()
+        with self._lock:
+            self._items[(role, node)] = (now, cpu, mem_used_mb, mem_total_mb)
+            nodes = sorted((v[0], k) for k, v in self._items.items() if k[0] == role)
+            for _, key in nodes[: max(0, len(nodes) - MAX_NODES_PER_ROLE)]:  # 오래된 것부터 버린다
+                del self._items[key]
+
+    def side(self, role: str) -> dict | None:
+        """그 역할의 신선한 보고를 합친다: CPU는 평균, 메모리는 합계. 신선한 보고가 없으면 None."""
+        now = self._clock()
+        with self._lock:
+            fresh = [
+                v for k, v in self._items.items() if k[0] == role and now - v[0] <= STALE_SECONDS
+            ]
+        if not fresh:
+            return None
+        used, total = sum(v[2] for v in fresh), sum(v[3] for v in fresh)
+        return {
+            "cpu_percent": round(sum(v[1] for v in fresh) / len(fresh), 1),
+            "mem_percent": round(100.0 * used / total, 1) if total > 0 else None,
+            "mem_used_mb": used,
+            "mem_total_mb": total,
+            "nodes": len(fresh),
+            "age_seconds": round(now - max(v[0] for v in fresh), 1),
+        }
+
+
+REPORTS = ReportStore()
 
 
 def parse_cpu(stat: str) -> tuple[int, int] | None:
@@ -101,6 +144,7 @@ def snapshot(
     sessions: Callable,
     read: Callable[[str], str] = read_proc,
     sleep: Callable[[float], None] = time.sleep,
+    reports: ReportStore | None = None,
 ) -> dict:
     """한 번 잰 맥박. CPU는 0.2초 간격의 두 번 읽기 차이로 구한다(블로킹이므로 스레드에서 부른다)."""
     before = parse_cpu(read("stat"))
@@ -117,4 +161,6 @@ def snapshot(
         "cores": os.cpu_count(),
         "errors_5m": count_errors(sessions),
         "window_seconds": WINDOW_SECONDS,
+        "source": (reports or REPORTS).side("source"),
+        "target": (reports or REPORTS).side("target"),
     }

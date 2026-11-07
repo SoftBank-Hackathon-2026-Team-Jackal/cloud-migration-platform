@@ -11,6 +11,7 @@ from cmp_api.db import Base
 from cmp_api.main import app
 from cmp_api.migration_events import MigrationEventRow, MigrationLogRow
 from cmp_api.routes.migrations import get_event_sessions
+from cmp_api.routes.pulse import get_report_token, get_reports
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -141,11 +142,127 @@ def test_the_route_returns_the_pulse(sessions) -> None:
         "cores",
         "errors_5m",
         "window_seconds",
+        "source",
+        "target",
     }
     assert body["errors_5m"] == 0
 
 
-def test_the_public_edge_does_not_route_the_pulse() -> None:
+def test_the_public_edge_routes_only_the_token_protected_report() -> None:
     caddy = (ROOT / "infra" / "demo" / "agent-routes.caddy").read_text(encoding="utf-8")
-    paths = [l for l in caddy.splitlines() if l.lstrip().startswith("@") and "path" in l]
-    assert paths and not any("/system" in line for line in paths)
+    assert "path /system/pulse/report" in caddy and "method POST" in caddy
+    # 맥박 조회(GET /system/pulse)와 그 밖의 /system 경로는 공개하지 않는다
+    paths = [line.strip() for line in caddy.splitlines() if "path" in line and "/system" in line]
+    assert paths == ["path /system/pulse/report"]
+
+
+# ---- 원본·이전 서버 보고 ----
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_a_side_is_the_average_cpu_and_the_summed_memory_of_fresh_nodes() -> None:
+    store = pulse.ReportStore(Clock())
+    store.put("source", "n1", 20.0, 1000, 4000)
+    store.put("source", "n2", 40.0, 3000, 4000)
+    side = store.side("source")
+    assert side["cpu_percent"] == 30.0 and side["mem_percent"] == 50.0
+    assert side["mem_used_mb"] == 4000 and side["mem_total_mb"] == 8000 and side["nodes"] == 2
+    assert store.side("target") is None  # 보고가 없으면 모름
+
+
+def test_a_report_older_than_the_stale_limit_is_not_shown() -> None:
+    clock = Clock()
+    store = pulse.ReportStore(clock)
+    store.put("target", "mac", 10.0, 100, 1000)
+    clock.now += pulse.STALE_SECONDS - 1
+    assert store.side("target") is not None
+    clock.now += 2
+    assert store.side("target") is None
+
+
+def test_only_the_newest_nodes_per_role_are_kept() -> None:
+    clock = Clock()
+    store = pulse.ReportStore(clock)
+    for i in range(pulse.MAX_NODES_PER_ROLE + 3):
+        clock.now += 0.1
+        store.put("source", f"n{i}", 1.0, 1, 2)
+    assert store.side("source")["nodes"] == pulse.MAX_NODES_PER_ROLE
+
+
+@pytest.fixture
+def reporting():
+    store = pulse.ReportStore()
+    app.dependency_overrides[get_reports] = lambda: store
+    app.dependency_overrides[get_report_token] = lambda: "secret-token"
+    yield store, TestClient(app)
+    app.dependency_overrides.pop(get_reports, None)
+    app.dependency_overrides.pop(get_report_token, None)
+
+
+GOOD = {
+    "role": "source",
+    "node": "eks-node-1",
+    "cpu_percent": 12.5,
+    "mem_used_mb": 900,
+    "mem_total_mb": 3800,
+}
+HEADERS = {"X-Pulse-Token": "secret-token"}
+
+
+def test_a_report_with_the_token_is_stored(reporting) -> None:
+    store, client = reporting
+    response = client.post("/system/pulse/report", json=GOOD, headers=HEADERS)
+    assert response.status_code == 204 and store.side("source")["cpu_percent"] == 12.5
+
+
+def test_a_report_without_or_with_a_wrong_token_is_refused(reporting) -> None:
+    store, client = reporting
+    assert client.post("/system/pulse/report", json=GOOD).status_code == 403
+    wrong = {"X-Pulse-Token": "nope"}
+    assert client.post("/system/pulse/report", json=GOOD, headers=wrong).status_code == 403
+    assert store.side("source") is None
+
+
+def test_reports_are_off_until_a_token_is_configured() -> None:
+    app.dependency_overrides[get_report_token] = lambda: ""
+    try:
+        response = TestClient(app).post("/system/pulse/report", json=GOOD, headers=HEADERS)
+    finally:
+        app.dependency_overrides.pop(get_report_token, None)
+    assert response.status_code == 503
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"role": "platform"},
+        {"node": "bad node!"},
+        {"cpu_percent": 101},
+        {"mem_total_mb": 0},
+        {"mem_used_mb": 9999},  # 전체보다 큼
+        {"extra": 1},
+    ],
+)
+def test_a_malformed_report_is_refused(reporting, change) -> None:
+    store, client = reporting
+    response = client.post("/system/pulse/report", json={**GOOD, **change}, headers=HEADERS)
+    assert response.status_code == 422 and store.side("source") is None
+
+
+def test_the_pulse_includes_what_the_servers_reported(reporting, sessions) -> None:
+    store, client = reporting
+    store.put("source", "n1", 25.0, 1000, 4000)
+    store.put("target", "mac", 10.0, 2000, 8000)
+    app.dependency_overrides[get_event_sessions] = lambda: sessions
+    try:
+        body = client.get("/system/pulse").json()
+    finally:
+        app.dependency_overrides.pop(get_event_sessions, None)
+    assert body["source"]["cpu_percent"] == 25.0 and body["target"]["mem_percent"] == 25.0

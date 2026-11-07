@@ -160,6 +160,13 @@ def test_edge_sends_agent_relay_and_migration_routes_to_the_api():
         "flush_interval -1",
         "}",
         "}",
+        "@pulse_report {",
+        "method POST",
+        "path /system/pulse/report",
+        "}",
+        "handle @pulse_report {",
+        "reverse_proxy {$CMP_API_UPSTREAM}",
+        "}",
         "@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*",
         "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
@@ -544,7 +551,7 @@ def test_runtime_example_values_point_at_the_mounted_worker_paths():
     targets = _mount_targets("worker")
     for name in example:
         # ticket 57, data-migration ticket 08 and the agent chat: API only
-        consumer = api if name.startswith(("WEB_START_", "AGENT_CHAT_")) else worker
+        consumer = api if name.startswith(("WEB_START_", "AGENT_CHAT_", "PULSE_")) else worker
         assert f"${{{name}:-" in str(consumer.get(name)), name  # every example line is consumed
     # Planning reads the analysis results from the same store (runbook: same directory).
     assert example["ANALYSIS_ARTIFACT_STORE_DIR"] == worker["ARTIFACT_STORE_DIR"]

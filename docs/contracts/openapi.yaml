@@ -2441,6 +2441,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pulse'
+  /system/pulse/report:
+    post:
+      tags:
+      - system
+      summary: Source/target server reports its CPU and memory
+      operationId: post_pulse_report_system_pulse_report_post
+      parameters:
+      - name: x-pulse-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Pulse-Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PulseReport'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -4791,6 +4821,14 @@ components:
         window_seconds:
           type: integer
           title: Window Seconds
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/Side'
+          - type: 'null'
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/Side'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -4803,7 +4841,45 @@ components:
       - cores
       - errors_5m
       - window_seconds
+      - source
+      - target
       title: Pulse
+    PulseReport:
+      properties:
+        role:
+          type: string
+          enum:
+          - source
+          - target
+          title: Role
+        node:
+          type: string
+          pattern: ^[A-Za-z0-9._-]{1,40}$
+          title: Node
+        cpu_percent:
+          type: number
+          maximum: 100.0
+          minimum: 0.0
+          title: Cpu Percent
+        mem_used_mb:
+          type: integer
+          maximum: 4000000.0
+          minimum: 0.0
+          title: Mem Used Mb
+        mem_total_mb:
+          type: integer
+          maximum: 4000000.0
+          exclusiveMinimum: 0.0
+          title: Mem Total Mb
+      additionalProperties: false
+      type: object
+      required:
+      - role
+      - node
+      - cpu_percent
+      - mem_used_mb
+      - mem_total_mb
+      title: PulseReport
     QueuedWork:
       properties:
         kind:
@@ -5684,6 +5760,38 @@ components:
       - name
       - key
       title: SecretRefV2
+    Side:
+      properties:
+        cpu_percent:
+          type: number
+          title: Cpu Percent
+        mem_percent:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Mem Percent
+        mem_used_mb:
+          type: integer
+          title: Mem Used Mb
+        mem_total_mb:
+          type: integer
+          title: Mem Total Mb
+        nodes:
+          type: integer
+          title: Nodes
+        age_seconds:
+          type: number
+          title: Age Seconds
+      additionalProperties: false
+      type: object
+      required:
+      - cpu_percent
+      - mem_percent
+      - mem_used_mb
+      - mem_total_mb
+      - nodes
+      - age_seconds
+      title: Side
     StartSource:
       properties:
         kind:
