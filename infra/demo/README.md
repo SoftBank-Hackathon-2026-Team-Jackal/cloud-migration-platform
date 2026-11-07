@@ -45,6 +45,7 @@ worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1
 | `CMP_PUBLIC_HOST` | edge | 비어 있으면 에지를 띄우지 않는다. 예: `<EIP>.sslip.io` |
 | `WEB_AUTH_SECRET` | web | `/opt/cmp/.env`에 없을 때만 생성(웹 로그인 세션 서명용). 웹은 `AUTH_SECRET`으로 받는다 |
 | `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET`, `GEMINI_API_KEY` 등 | web | 운영자가 `/opt/cmp/web.env`(0600)에 직접 둔다. 저장소·릴리스 아카이브에 넣지 않는다 |
+| `ADMIN_GITHUB_LOGINS` | web | compose가 팀원 4명(`gumtiket,ikellllllll,kmsdevdata-sketch,soulee-dev`)을 기본값으로 넣는다. 연결·Agent·`.env` 업로드 화면을 쓸 수 있는 GitHub 계정이다. 바꾸려면 `/opt/cmp/.env`에 `WEB_ADMIN_GITHUB_LOGINS=<쉼표 목록>`을 두고 웹을 다시 만든다. compose 값이 `web.env`보다 우선하므로 `web.env`의 같은 줄은 쓰이지 않는다. 목록에 없는 계정은 403 `NOT_ALLOWED` |
 
 `.env`·`/opt/cmp/secrets/`는 서버에만 있고 저장소·이미지·릴리스 아카이브에 들어가지 않는다. 키 값을 터미널이나 로그에 출력하지 않는다.
 

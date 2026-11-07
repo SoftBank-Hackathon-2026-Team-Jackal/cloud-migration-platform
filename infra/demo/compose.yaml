@@ -281,6 +281,10 @@ services:
       # operator key the public web does not hold (503). Keep the mock screens unless /opt/cmp/.env says
       # WEB_PLATFORM_CONNECTIONS=real (and web.env holds the key).
       PLATFORM_CONNECTIONS: ${WEB_PLATFORM_CONNECTIONS:-mock}
+      # GitHub logins allowed to use the connection/Agent/.env screens (real mode). The team list is the
+      # default so a fresh host or a rewritten web.env never locks a teammate out; /opt/cmp/.env
+      # WEB_ADMIN_GITHUB_LOGINS (comma list) replaces it. This wins over an ADMIN_GITHUB_LOGINS line in web.env.
+      ADMIN_GITHUB_LOGINS: ${WEB_ADMIN_GITHUB_LOGINS:-gumtiket,ikellllllll,kmsdevdata-sketch,soulee-dev}
     env_file:
       - path: /opt/cmp/web.env
         required: false
