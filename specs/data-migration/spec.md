@@ -54,6 +54,6 @@
 
 - Q1 (해결 2026-11-05) 쓰기 중단 장치 → PgBouncer(DM-010).
 - Q2 (해결 2026-11-05) 복제 경로 → WireGuard(DM-011). 남은 세부: AWS·GCP 대상에서 터널 양 끝을 노드·Pod·별도 VM 중 어디에 둘지, 터널 생명주기를 Provisioning과 Data 중 누가 소유할지(ticket 06).
-- Q3 (해결 2026-11-05, 담당 판단) 원본·대상 DB 접근은 `DbEndpoint`(비밀값 없음)로 받는다: 접근 방식(`AWS_EKS` 이름·리전, `GCP_GKE` 프로젝트·이름·위치, `KUBECONFIG` 참조 이름), Namespace, Pod, 컨테이너, 상대가 접속할 주소(`peer_host`), DB 이름. 자격 증명은 Worker 설정(`DATA_MIGRATION_AWS_PROFILE`, `DATA_MIGRATION_GCLOUD_CONFIGURATION`, `DATA_MIGRATION_KUBECONFIG_DIR`)에만 있다. 원본 값은 분석 결과에서, 대상 값은 Provisioning `DATA_MIGRATION` 보기에서 채운다(ticket 05).
+- Q3 (해결 2026-11-05, 담당 판단) 원본·대상 DB 접근은 `DbEndpoint`(비밀값 없음)로 받는다: 접근 방식(`AWS_EKS` 이름·리전, `GCP_GKE` 프로젝트·이름·위치, `KUBECONFIG` 참조 이름), Namespace, Pod, 컨테이너, 상대가 접속할 주소(`peer_host`), DB 이름. 자격 증명은 Worker 설정(`DATA_MIGRATION_AWS_PROFILE`, `DATA_MIGRATION_GCLOUD_CONFIGURATION`, `DATA_MIGRATION_KUBECONFIG_DIR`)에만 있다. `AWS_EKS`는 Worker 프로세스가 EKS 토큰 하나를 받아 만료 6분 전까지(약 8분) 여러 Activity에서 재사용한다(2026-11-07, `kubectl` 호출마다 `aws eks get-token`을 다시 실행하던 약 1.3초를 없앰). 토큰은 Worker 임시 디렉터리의 0600 kubeconfig에만 있고 Workflow 입력·결과·로그에는 없다. 원본 값은 분석 결과에서, 대상 값은 Provisioning `DATA_MIGRATION` 보기에서 채운다(ticket 05).
 - Q4 (해결 2026-11-06) 웹 계약: 웹 저장소 main의 이벤트 정의·reducer가 `data.phase`·`data.lsn`·`data.table`·`data.readiness`를 처리한다. Data 쪽 이벤트는 `validate_data`로 같은 계약을 지킨다.
 - Q5 (해결 2026-11-06) DB 전환 승인 → 웹이 정한 방식을 따른다. 자식이 `approval.required`(gate `cutover`)와 `cutover.plan`을 내고, 웹 승인 `POST /migrations/{id}/approve?gate=cutover`를 API가 자식 `switchover` 신호로 보낸다(ticket 07). 승인 기록(ADR-002)은 Plan 승인에만 쓴다.

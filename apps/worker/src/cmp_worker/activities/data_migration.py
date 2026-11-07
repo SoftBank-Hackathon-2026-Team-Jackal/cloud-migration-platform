@@ -11,16 +11,21 @@ Kubernetes Secret에 보관하고, SQL은 stdin으로만 넘긴다(명령줄·Wo
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
+import hashlib
 import json
 import os
 import secrets
 import shlex
+import shutil
+import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Protocol
 
 from cmp_data import (
@@ -151,13 +156,110 @@ class KubectlDbPod:
         self._s._kubectl("create", "-f", "-", stdin=json.dumps(manifest).encode())
 
 
-def _runtime_for(endpoint: DbEndpoint):
-    if endpoint.access == "AWS_EKS":
+class EksSessionCache:
+    """EKS kubeconfig with a static bearer token, reused across Activities in this process.
+
+    `aws eks update-kubeconfig` writes an `exec` credential plugin, so every `kubectl` call ran
+    `aws eks get-token` again (about 1 s each, measured on the demo worker; a k3s call takes
+    0.1 s). A data migration makes dozens of calls on the source side, so this writes the cluster
+    endpoint and one token instead and refreshes them well before the token expires (EKS tokens
+    last 15 minutes). The file is 0600 in a 0700 directory, replaced atomically (a `kubectl` that
+    already read the old one keeps a still-valid token), and removed at process exit. The token
+    never enters Workflow input/output or logs."""
+
+    # A token must outlive the longest single kubectl call that starts with it: `rollout status`
+    # waits up to 330 s (data_cutover). aws-cli tokens last 14 minutes, so one is reused ~8 min.
+    REFRESH_BEFORE_SECONDS = 360
+
+    def __init__(self, runtime_factory=None, clock=time.time):
+        self._factory = runtime_factory or self._cli_runtime
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._entries: dict[tuple, tuple[float, Path, CommandRunner]] = {}
+        self._root: Path | None = None
+
+    @staticmethod
+    def _cli_runtime(profile: str | None) -> CommandRunner:
         from cmp_worker.activities.aws_workloads_cli import CliRuntime
 
-        runtime = CliRuntime(aws_profile=os.environ.get("DATA_MIGRATION_AWS_PROFILE"))
-        target = SimpleNamespace(cluster_name=endpoint.cluster_name, region=endpoint.region)
-        return runtime.connect(target)
+        return CliRuntime(aws_profile=profile)
+
+    def _dir(self) -> Path:
+        if self._root is None:
+            self._root = Path(tempfile.mkdtemp(prefix="cmp-eks-cache-"))
+            self._root.chmod(0o700)
+            atexit.register(shutil.rmtree, self._root, True)
+        return self._root
+
+    def _refresh(self, key: tuple, runtime: CommandRunner) -> tuple[float, Path]:
+        cluster, region, _ = key
+        aws = getattr(runtime, "aws", "aws")
+        describe = [aws, "eks", "describe-cluster", "--name", cluster, "--region", region,
+                    "--query", "cluster.{endpoint:endpoint,ca:certificateAuthority.data}",
+                    "--output", "json"]  # fmt: skip
+        token = [aws, "eks", "get-token", "--cluster-name", cluster, "--region", region,
+                 "--output", "json"]  # fmt: skip
+        info = json.loads(runtime.run(describe))
+        cred = json.loads(runtime.run(token))["status"]
+        expires = datetime.fromisoformat(cred["expirationTimestamp"])
+        kubeconfig = {
+            "apiVersion": "v1",
+            "kind": "Config",
+            "clusters": [
+                {
+                    "name": "eks",
+                    "cluster": {
+                        "server": info["endpoint"],
+                        "certificate-authority-data": info["ca"],
+                    },
+                }
+            ],
+            "users": [{"name": "eks", "user": {"token": cred["token"]}}],
+            "contexts": [{"name": "eks", "context": {"cluster": "eks", "user": "eks"}}],
+            "current-context": "eks",
+        }
+        folder = self._dir()
+        path = folder / (hashlib.sha256(repr(key).encode()).hexdigest()[:16] + ".json")
+        fd, tmp = tempfile.mkstemp(dir=folder)
+        with os.fdopen(fd, "w") as f:
+            json.dump(kubeconfig, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        return expires.timestamp() - self.REFRESH_BEFORE_SECONDS, path
+
+    @contextmanager
+    def connect(self, endpoint: DbEndpoint) -> Iterator[KubectlSession]:
+        profile = os.environ.get("DATA_MIGRATION_AWS_PROFILE")
+        key = (endpoint.cluster_name, endpoint.region, profile)
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None or self._clock() >= entry[0]:
+                runtime = entry[2] if entry else self._factory(profile)
+                try:
+                    good_until, path = self._refresh(key, runtime)
+                except (KeyError, TypeError, ValueError):
+                    raise CommandError("aws") from None
+                entry = (good_until, path, runtime)
+                self._entries[key] = entry
+        _, path, runtime = entry
+        try:
+            with tempfile.TemporaryDirectory(prefix="cmp-eks-") as workdir:  # per-call scratch
+                yield KubectlSession(runtime, path, Path(workdir))
+        except CommandError:
+            # Errors carry no output, so a rejected token looks like any other failure. Drop the
+            # entry; the Activity retry then starts from a fresh token (one extra ~3 s refresh).
+            with self._lock:
+                if self._entries.get(key) is entry:
+                    del self._entries[key]
+            raise
+
+
+EKS_SESSIONS = EksSessionCache()
+
+
+def _runtime_for(endpoint: DbEndpoint):
+    if endpoint.access == "AWS_EKS":
+        return EKS_SESSIONS.connect(endpoint)
     if endpoint.access == "GCP_GKE":
         from cmp_worker.activities.gcp_workloads import GkeTarget
         from cmp_worker.activities.gcp_workloads_cli import GcpCliRuntime
