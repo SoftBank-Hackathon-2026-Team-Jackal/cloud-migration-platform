@@ -1,7 +1,8 @@
 """데이터 이전 자식 Workflow(specs/data-migration, ticket 05). 외부 호출은 Activity만 한다.
 
-흐름: (입력에 `tunnel`이 있으면) WireGuard 복제 경로 → 사전 점검 → 준비 → 스키마 → 구독 → streaming까지 감시 → PgBouncer 설치·앱 연결 →
+흐름: (입력에 `tunnel`이 있으면) WireGuard 복제 경로 → 사전 점검 → 준비 → 스키마 → 구독 → streaming까지 감시 → 앱 연결 →
 (감시하며 신호 대기) → `switchover` 신호로 DB 전환 → `rollback` 신호로 되돌리기 / `finish` 신호로 끝.
+PgBouncer 설치(`dm_install_cutover`)는 사전 점검 통과 직후 시작해 준비·복사와 함께 진행한다(시연 시간 단축).
 `cancel` 신호는 전환 전이면 구독·발행을 지우고 끝낸다(원본 슬롯이 WAL을 붙잡지 않게). 구독을 만든 뒤
 복제가 실패해도 같은 정리를 시도한다(Provisioning 72, 정리 실패는 `cleanup_code`).
 
@@ -21,6 +22,7 @@ API가 이 Workflow에 `switchover` 신호로 보낸다.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import timedelta
 
@@ -44,6 +46,7 @@ TUNNEL_PATCH = "data-tunnel-v1"
 FAILURE_CLEANUP_PATCH = "data-failure-cleanup-v1"  # Provisioning 72: 복제 실패 때도 슬롯 정리
 PREFLIGHT_PATCH = "data-network-preflight-v1"  # Provisioning 76: 복제 전 MNP 게이트
 TUNNEL_CLEANUP_PATCH = "data-tunnel-cleanup-v1"  # Provisioning 76: 끝날 때 터널(NLB) 정리
+EARLY_CUTOVER_PATCH = "data-early-cutover-install-v1"  # PgBouncer 설치를 복사와 함께
 SWITCH_FROM = {"switchover": "source", "rollback": "target"}
 
 
@@ -167,6 +170,34 @@ class DataMigrationWorkflow:
         if not pre["ok"]:
             self.failure_code = "PRECHECK_BLOCKED"
             return "blocked"
+        install = None
+        if workflow.patched(EARLY_CUTOVER_PATCH):
+            # PgBouncer는 원본 DB만 바라보므로 복제 준비·초기 복사와 함께 설치한다. 앱 연결 변경
+            # (`dm_route_app`)은 그대로 streaming 뒤에 한다.
+            install = asyncio.create_task(self._install_cutover(args))
+        try:
+            stopped = await self._sync(args, req, pre)
+        except BaseException:
+            await self._settle(install)
+            raise
+        if stopped:
+            await self._settle(install)
+            return stopped
+        await (install if install is not None else self._install_cutover(args))
+        await self._call(dc.dm_route_app, self._cutover_payload(args), timeout_s=600)
+        return None
+
+    async def _install_cutover(self, args: dict) -> dict:
+        return await self._call(dc.dm_install_cutover, self._cutover_payload(args), timeout_s=600)
+
+    @staticmethod
+    async def _settle(install: asyncio.Task | None) -> None:
+        """복제가 먼저 멈췄을 때 함께 돌던 설치가 끝나기를 기다린다(결과·오류는 버린다)."""
+        if install is not None:
+            await workflow.wait([install])
+
+    async def _sync(self, args: dict, req: dict, pre: dict) -> str | None:
+        """준비 → 스키마 → 구독 → streaming까지 감시. 멈추면 결과(cancelled·failed)를 준다."""
         self.phase = "prepare"
         await self._call(dm.dm_prepare, {"request": req, "actions": pre["actions"]}, timeout_s=600)
         self.phase = "schema"
@@ -180,16 +211,13 @@ class DataMigrationWorkflow:
             self.last_sample = await self._call(dm.dm_sample, req, timeout_s=60)
             self.phase = self.last_sample["phase"]
             if self.phase == "streaming":
-                break
+                return None
             if self.requested == "cancel":
                 return await self._cancel(args)
             if workflow.now() > deadline:
                 self.failure_code = "SYNC_TIMEOUT"
                 return "failed"
             await workflow.sleep(interval)
-        await self._call(dc.dm_install_cutover, self._cutover_payload(args), timeout_s=600)
-        await self._call(dc.dm_route_app, self._cutover_payload(args), timeout_s=600)
-        return None
 
     async def _network_preflight(self, request: dict) -> str | None:
         """MNP 게이트. 막히면 원인 코드를 준다. 결과 이벤트(`data.preflight`)는 Activity가 낸다."""

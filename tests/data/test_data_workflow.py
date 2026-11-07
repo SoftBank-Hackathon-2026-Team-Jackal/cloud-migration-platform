@@ -137,13 +137,34 @@ async def test_replicates_until_streaming_then_switches_rolls_back_and_finishes(
     assert result["status"] == "done" and result["active"] == "source"
     assert [s["active"] for s in result["switches"]] == ["target", "source"]
     order = [c for c in fakes.calls if not c.startswith(("dm_sample", "dm_readiness"))]
-    assert order[:6] == ["dm_precheck", "dm_prepare", "dm_copy_schema", "dm_subscribe",
-                         "dm_install_cutover", "dm_route_app"]  # fmt: skip
+    # PgBouncer 설치는 준비·복사와 함께 돌므로 순서는 고정되지 않는다. 앱 연결만 마지막이다.
+    assert order[0] == "dm_precheck" and order[5] == "dm_route_app"
+    assert sorted(order[1:5]) == sorted(["dm_prepare", "dm_copy_schema", "dm_subscribe",
+                                         "dm_install_cutover"])  # fmt: skip
+    assert order.index("dm_prepare") < order.index("dm_copy_schema") < order.index("dm_subscribe")
     assert "dm_sample:reverse" in fakes.calls  # 전환 뒤에는 역방향 복제를 감시한다
     # 원본이 쓰기 주체일 때만 계획과 승인 요청을 알린다: 처음 한 번, 롤백 뒤(새 시도) 한 번
     announced = [c for c in order if c.startswith(("dm_announce", "dm_switchover"))]
     assert announced == ["dm_announce_cutover:True", "dm_switchover:forward:1",
                          "dm_switchover:reverse:2", "dm_announce_cutover:True"]  # fmt: skip
+
+
+async def test_pgbouncer_install_is_scheduled_with_prepare_not_after_the_copy() -> None:
+    fakes = Fakes()
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        workers, handle = await start(env, fakes)
+        async with workers[0], workers[1]:
+            await wait_phase(handle, "streaming")
+            await handle.signal(DataMigrationWorkflow.finish)
+            await handle.result()
+            history = await handle.fetch_history()
+    scheduled = [
+        e.activity_task_scheduled_event_attributes.activity_type.name
+        for e in history.events
+        if e.HasField("activity_task_scheduled_event_attributes")
+    ]
+    assert scheduled.index("dm_install_cutover") < scheduled.index("dm_subscribe")
+    assert scheduled.index("dm_route_app") > scheduled.index("dm_install_cutover")
 
 
 async def test_blocked_precheck_creates_nothing() -> None:
