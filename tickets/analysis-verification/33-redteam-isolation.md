@@ -1,7 +1,7 @@
 # Ticket 33 — 레드팀 실행기 격리와 강제 확인
 
 ## 상태
-DRAFT — 사용자 검토 대기. Issue 미생성. [ADR-008](../../docs/decisions/ADR-008.md) R1 확정 후 착수.
+IN_REVIEW — Issue #332. 단위·서비스 시험과 lint 통과(로컬). 격리 k3d 실측과 전체 pytest는 CI·Linux/Mac 환경에서 확인 대기. [ADR-008](../../docs/decisions/ADR-008.md) R1~R8 확정.
 
 ## 목적
 Sandbox Namespace에 레드팀 실행기 Pod를 띄울 수 있게 하되, **공격 코드 없이 격리만** 만들고 증명한다. 이 티켓은 배포 구성 변경이 중심이다.
@@ -41,4 +41,25 @@ Blocked by: 30(병합됨), 26 Provisioning(병합 상태 확인). 결정: ADR-00
 - 놓치는 것: EKS·GKE Sandbox의 CNI 차이(별도 확인), 컨테이너 탈출
 
 ## 문서
-ADR-008 갱신, spec AV-024 추가, plan §2.7·§6, runbook, tasks.md를 같은 PR에서 갱신한다.
+ADR-008 갱신, spec AV-024 추가, runbook, tasks.md를 같은 PR에서 갱신했다. plan.md는 바꾸지 않았다(§2.7의 규칙은 그대로이고 레드팀 정책은 AV-024에 둔다. 마스킹·외부 차단을 다루는 §6은 티켓 34에서 갱신).
+
+## 구현 요약
+- `cmp_providers.network_policy.allow_dns(..., exclude_label=)`, `base_policies(..., dns_exclude_label=)`: 인자를 주지 않으면 기존 출력과 같다.
+- `cmp_worker.sandbox_redteam`(순수): 역할 라벨, `egress_policy`, 실행기·확인 Pod 매니페스트, `restricted_violations`(Pod 보안 검사), 확인 스크립트와 판정(`isolation_verdict`).
+- `cmp_worker.sandbox_network.build_manifests(..., redteam=False)`: 켜면 DNS 규칙에서 실행기를 빼고 `cmp-redteam-egress`를 더한다.
+- `cmp_worker.sandbox_isolation.RedTeamIsolation.session`: 대상 확인 → 동시 실행 확인 → 정책 적용 → 확인 Pod로 증명 → 실행기 생성 → 정리(Pod·정책 삭제, 원래 DNS 규칙 복원).
+- `SandboxSettings.redteam`, `redteam_consent_ref`: 아직 소비하는 곳이 없다(실행 시작은 티켓 34의 승인).
+
+## 티켓과 달라진 점
+- **Namespace 전체 Pod Security `enforce: restricted`와 ResourceQuota는 넣지 않았다.** 앱·DB 차트가 그 기준을 전제로 만들어지지 않았고, 데이터 초기화가 앱을 다시 띄우므로 재시작이 막힐 수 있다. 대신 실행기·확인 Pod를 만들기 전에 `restricted_violations`로 검사하고(hostNetwork·특권·hostPort·capability·토큰·환경변수 등), 동시 실행은 클러스터 전체 1개로 제한했다.
+- Job이 아니라 Pod다(ticket 30의 시험 Pod와 같은 방식, 종료 시한 `activeDeadlineSeconds`).
+- 클러스터 allowlist는 기존 `SandboxCluster`의 컨텍스트 검사(`CONTEXT_NOT_ALLOWED`)가 이미 강제한다. 새로 더한 것은 Namespace의 실행 ID·관리 라벨 확인이다.
+
+## 검증 (2026-11-07, Windows)
+- `tests/sandbox/test_redteam_isolation.py` 36개 통과(매니페스트·정책을 NetworkPolicy 평가기로 판정, 기록하는 `FakeRunner`로 세션 순서·정리·실패 경로). `ruff check`·`ruff format --check` 통과.
+- 이 PC에서는 전체 pytest가 `fcntl` 없음과 `cp949` 인코딩으로 일부 파일을 불러오지 못한다(기존 코드, 이 변경과 무관). 전체 회귀는 CI(`check.yml`, Ubuntu)로 확인한다.
+
+## 미검증
+- 실제 k3d에서의 허용·차단 경로와 느슨한 정책 주입 시 중단(`tests/integration/sandbox -m k3d -k redteam`는 아직 없다). 이 PC에 Docker가 없어 만들지 못했다.
+- EKS·GKE Sandbox의 CNI 강제.
+- 확인 Pod의 실제 연결 판정 스크립트(`VERIFY_SCRIPT`)는 실제 클러스터에서 돌려 보지 않았다.

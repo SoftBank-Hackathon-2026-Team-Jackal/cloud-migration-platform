@@ -20,6 +20,8 @@ from cmp_providers.network_policy import policy as _policy
 from cmp_providers.network_policy import selector as _selector
 from pydantic import BaseModel, ConfigDict
 
+from cmp_worker.sandbox_redteam import REDTEAM_ROLE_LABEL, egress_policy
+
 PROXY_NAME = "cmp-egress-proxy"
 PROXY_PORT = 3128
 # python:3.12.7-slim index digest (resolved from Docker Hub on 2026-11-05).
@@ -64,14 +66,23 @@ def build_manifests(
     intents: list[dict[str, Any]],
     allow: list[dict[str, Any]],
     proxy_script: str,
+    redteam: bool = False,
 ) -> list[dict[str, Any]]:
     apps = [r for r in resources if r["kind"] == "APPLICATION"]
-    # Shared with Production (ticket 26): default-deny, DNS and resource → resource edges.
-    manifests = network_policy.base_policies(namespace, labels, releases, intents)
+    # Shared with Production (ticket 26): default-deny, DNS and resource → resource edges. With
+    # `redteam`, the executor Pod (ticket 33) is left out of the DNS rule.
+    manifests = network_policy.base_policies(
+        namespace, labels, releases, intents,
+        dns_exclude_label=REDTEAM_ROLE_LABEL if redteam else None,
+    )  # fmt: skip
     # Test runners and ingress reach only the application port.
     manifests += [
         network_policy.entry(namespace, labels, a["release_name"], a["port"]) for a in apps
     ]
+
+    if redteam:
+        # Ticket 33: the executor reaches the first application's port and nothing else.
+        manifests.append(egress_policy(namespace, labels, apps[0]["release_name"], apps[0]["port"]))
 
     # Applications may only leave through the proxy; the proxy keeps the allow list.
     app_selector = {"matchExpressions": [{"key": _INSTANCE, "operator": "In",

@@ -258,6 +258,18 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 - **전제:** 데모는 VPC당 앱 하나다(같은 VPC의 다른 앱 리소스를 걸러내지 않는다. 분석 범위 입력은 별도 결정).
 - **제외(후속·타 담당):** 배포된 대상의 실제 측정과 원본 대비 최종 비교(Provisioning 배포 후), 비교 화면(상헌), 보강의 대상 구성 반영(민서), 감사 로그·백업·저장 암호화 항목.
 
+#### AV-024 — 레드팀 검증의 격리 (티켓 33, [ADR-008](../../docs/decisions/ADR-008.md))
+
+배포된 앱을 능동적으로 시험하는 레드팀 검증은 **격리가 증명된 뒤에만** 시작한다. 이 요구사항은 격리까지이며, 시험 도구·Agent·수정 연계는 티켓 34~36이다.
+
+- **실행기:** Sandbox Namespace 안의 실행기 Pod 하나. 비특권, 모든 capability 제거, 읽기 전용 루트, 서비스 어카운트 토큰·환경변수·볼륨·서비스 링크 없음, Digest 고정 이미지, CPU·메모리 상한과 종료 시한. 라벨은 `cmp.sandbox/role: redteam-executor`이고 앱·DB·프록시의 선택자 라벨과 겹치지 않는다.
+- **통신:** 대상 앱 Pod의 한 TCP 포트만 열고(`cmp-redteam-egress`) 그 밖은 기본 차단이다. 공통 DNS 규칙(`cmp-allow-dns`)은 실행기를 제외하고 다른 Pod에는 그대로 둔다. 실행기에는 DNS 질의도 나가지 않는다.
+- **강제 확인(fail-closed):** 실행기와 같은 라벨의 확인 Pod가 DB, 프록시, 다른 Namespace, 클러스터 API, 메타데이터 주소, 인터넷에 닿지 않고 이름 조회도 되지 않는지 시험한다. 하나라도 닿거나 판정할 수 없으면 `REDTEAM_ISOLATION_NOT_ENFORCED`로 멈추고 실행기를 만들지 않는다. 앱이 응답하지 않으면 `REDTEAM_TARGET_UNREACHABLE`이다.
+- **대상 한정:** 이 실행의 Sandbox Namespace(`cmp-sbx-*`, `cmp.sandbox/run-id`·관리 라벨 일치)의 `APPLICATION`만 대상이다. 아니면 `REDTEAM_TARGET_NOT_ALLOWED`. 대상 주소는 워커가 확인 시점의 Service 주소로 고정하며 호출하는 쪽이 고르지 않는다.
+- **동시 실행·정리:** 클러스터 전체에서 실행기는 1개(`REDTEAM_CONCURRENCY_LIMIT`, 같은 실행의 이전 잔여물은 제외). Pod 이름은 실행당 고정이라 재시도는 잔여물을 지우고 다시 만든다. 성공·실패·예외 어느 경로에서도 Pod와 임시 정책을 지우고 원래 DNS 규칙을 되돌린다.
+- **옵트인:** `SandboxSettings.redteam`(기본 꺼짐)은 동의 참조(`redteam_consent_ref`)가 있어야 켜진다. 꺼져 있으면 기존 정책·묶음·해시가 달라지지 않는다. 실제 시작은 실행마다 승인(티켓 34)을 거친다.
+- **제외:** 시험 도구와 Finding(34), Agent(35), 수정 연계(36), Namespace 전체의 Pod Security `enforce`와 ResourceQuota(앱·DB 차트와 데이터 초기화 재시작에 영향을 줄 수 있어 실행기 Pod 검사와 실행기 개수 제한으로 대체), EKS·GKE에서의 실제 강제 확인.
+
 ### 보안과 실행 안정성
 
 #### AV-020 — 비밀정보 보호

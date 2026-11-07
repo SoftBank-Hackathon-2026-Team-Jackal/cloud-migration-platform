@@ -1,7 +1,7 @@
 # Ticket 35 — 워커 쪽 레드팀 Agent 역할과 Tool 경계
 
 ## 상태
-DRAFT — 사용자 검토 대기. Issue 미생성. 선행: 33, 34. 결정: [ADR-008](../../docs/decisions/ADR-008.md) R1.
+DRAFT — 사용자 검토 대기. Issue #334. 선행: 33, 34. 결정: [ADR-008](../../docs/decisions/ADR-008.md) R1.
 
 ## 목적
 레드팀 판단을 기존 에이전트 런타임(08A, Mapper·Tester·Fixer와 같은 구조) 안의 새 역할로 두고, **Tool 경계와 비용 상한 안에서만** 동작하게 한다. Pod는 실행기일 뿐 판단하지 않는다.

@@ -14,7 +14,7 @@ from cmp_testsuite import dump_bundle
 from cmp_testsuite.model import Suite
 from cmp_testsuite.security import security_probe_cases
 from cmp_testsuite.standard import AppApi, standard_cases
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cmp_worker.artifact_store import ArtifactRef, LocalArtifactStore
 
@@ -44,6 +44,11 @@ class SandboxSettings(BaseModel):
     # Ticket 30: also prove, from short-lived Pods, that only the network intent's sources reach
     # the database. Off by default; the suite is then exactly the standard one.
     security_probes: bool = False
+    # Ticket 33 (ADR-008): allow a red-team run in this Sandbox. Off by default, and switching it on
+    # needs the reference of the user's consent. Nothing reads this yet: starting a run is gated by
+    # the per-run approval of ticket 34, so on its own this setting starts nothing.
+    redteam: bool = False
+    redteam_consent_ref: str | None = None
     write_path: str | None = None
     read_path: str | None = None
     # The app's write API shape (ticket 27); see `AppApi`. Left out, the original shape is used.
@@ -53,6 +58,12 @@ class SandboxSettings(BaseModel):
     value_field: str = "value"
     read_back: Literal["GET", "REPEAT_WRITE"] = "GET"
     repeat_status: int = 200
+
+    @model_validator(mode="after")
+    def _redteam_needs_consent(self) -> "SandboxSettings":
+        if self.redteam and not self.redteam_consent_ref:
+            raise ValueError("REDTEAM_CONSENT_MISSING")
+        return self
 
 
 def keep_hosts(report: AnalysisReport | None, region: str) -> list[dict[str, Any]]:
