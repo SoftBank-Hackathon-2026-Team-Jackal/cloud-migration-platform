@@ -57,6 +57,16 @@ rules:
   - apiGroups: [""]
     resources: ["services/proxy"]
     verbs: ["get"]
+  # Provisioning 84: in each Namespace it creates, bind the data migration worker's ClusterRole
+  # (made by make-data-kubeconfig.py) so the binding lives and dies with the Namespace. `bind` on
+  # that one ClusterRole lets the Agent grant it without holding every permission it contains.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "create"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["cmp-data-migration-db"]
   {{- if .Values.networkPreflight.image }}
   # MNP-01 (N2/N3): short-lived probe Pod in the replication Namespace plus a read-only
   # hostNetwork Pod running `ip route get` on the same node; the Agent creates them only in

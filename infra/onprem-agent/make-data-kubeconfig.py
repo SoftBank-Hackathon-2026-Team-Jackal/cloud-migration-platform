@@ -8,7 +8,7 @@ ADR-007 2안: worker는 중계 서버 → Agent 터널 → `kubernetes.default.s
 
     python3 infra/onprem-agent/make-data-kubeconfig.py apply --context k3d-cmp-local \\
         --namespace <대상 앱 Namespace> --server https://<중계 서버 사설 IP>:<포트> --ref <kubeconfig_ref>
-    python3 infra/onprem-agent/make-data-kubeconfig.py bind   --context … --namespace … [--wait-namespace 900]
+    python3 infra/onprem-agent/make-data-kubeconfig.py bind   --context … --namespace …  # 84 이전 연결 옮기기
     python3 infra/onprem-agent/make-data-kubeconfig.py verify --context … --namespace …
     python3 infra/onprem-agent/make-data-kubeconfig.py delete --context … --namespace …
 
@@ -123,8 +123,25 @@ def _role(name: str, namespace: str, rules: list[dict]) -> list[dict]:
     ]
 
 
+def db_binding(app_namespace: str) -> dict:
+    """앱 Namespace의 DB 권한 연결. Agent도 Namespace를 만들 때 같은 이름·내용으로 만든다(Provisioning 84)."""
+    return {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "RoleBinding",
+        "metadata": _meta(DB_ROLE, app_namespace),
+        "subjects": _subject(),
+        "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole",
+                    "name": DB_ROLE},
+    }  # fmt: skip
+
+
 def rbac_manifests(app_namespace: str | None) -> list[dict]:
-    """적용 순서대로. 앱 Namespace는 Agent 소유라 만들지 않는다(없으면 None으로 그 Role만 뺀다)."""
+    """적용 순서대로. 앱 Namespace는 Agent 소유라 만들지 않는다(없으면 None으로 그 연결만 뺀다).
+
+    DB 권한은 ClusterRole 하나에 두고 앱 Namespace의 RoleBinding으로만 효력이 생긴다(Provisioning 84).
+    Agent가 앱 Namespace를 만들 때 같은 RoleBinding을 만들므로, Namespace를 지우고 다시 만들어도
+    `bind`를 다시 실행할 필요가 없다.
+    """
     if app_namespace is not None:
         _check_namespace(app_namespace)
     rbac = "rbac.authorization.k8s.io/v1"
@@ -140,9 +157,10 @@ def rbac_manifests(app_namespace: str | None) -> list[dict]:
          "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole",
                      "name": CLUSTER_ROLE}},
         *_role(TUNNEL_ROLE, TUNNEL_NAMESPACE, TUNNEL_RULES),
+        {"apiVersion": rbac, "kind": "ClusterRole", "metadata": _meta(DB_ROLE), "rules": DB_RULES},
     ]  # fmt: skip
     if app_namespace is not None:
-        out += _role(DB_ROLE, app_namespace, DB_RULES)
+        out.append(db_binding(app_namespace))
     return out
 
 
@@ -282,6 +300,15 @@ def _namespace_exists(kubectl: Kubectl, namespace: str) -> bool:
     return bool(out.strip())
 
 
+def _drop_namespaced_db_role(kubectl: Kubectl, namespace: str) -> None:
+    """Provisioning 84 이전에는 앱 Namespace에 Role을 두고 연결했다. roleRef는 바꿀 수 없으므로
+    그 연결과 Role을 지운 뒤 ClusterRole 연결로 다시 만든다."""
+    kind = kubectl(["get", "rolebinding", DB_ROLE, "-n", namespace, "--ignore-not-found",
+                    "-o", "jsonpath={.roleRef.kind}"])  # fmt: skip
+    if kind.strip() == b"Role":
+        kubectl(["delete", "rolebinding,role", DB_ROLE, "-n", namespace, "--ignore-not-found"])
+
+
 def _bind(kubectl: Kubectl, namespace: str, wait_s: float) -> bool:
     deadline = time.monotonic() + wait_s
     while not _namespace_exists(kubectl, namespace):
@@ -289,6 +316,7 @@ def _bind(kubectl: Kubectl, namespace: str, wait_s: float) -> bool:
             _apply(kubectl, rbac_manifests(None))
             return False
         time.sleep(5)
+    _drop_namespaced_db_role(kubectl, namespace)
     _apply(kubectl, rbac_manifests(namespace))
     return True
 
@@ -304,8 +332,8 @@ def _root_ca(kubectl: Kubectl) -> str:
 
 
 def _pending(namespace: str) -> None:
-    print(f"APP_NAMESPACE_PENDING {namespace}: 배포 뒤 `bind --namespace {namespace}`를 다시 실행한다"
-          " (데이터 Activity는 권한 거부를 재시도한다)")  # fmt: skip
+    print(f"APP_NAMESPACE_PENDING {namespace}: Agent가 이 Namespace를 만들 때 DB 권한을 연결한다"
+          " (Agent Chart가 Provisioning 84 이전이면 배포 뒤 `bind`를 실행한다)")  # fmt: skip
 
 
 def cmd_apply(args, kubectl: Kubectl) -> int:
@@ -319,8 +347,7 @@ def cmd_apply(args, kubectl: Kubectl) -> int:
     write_private(path, json.dumps(cfg, indent=2) + "\n")
     print(f"KUBECONFIG_WRITTEN {path} (0600) expires {status.get('expirationTimestamp')}")
     if not bound:
-        _pending(args.namespace)
-        return 3
+        _pending(args.namespace)  # 정상: Agent가 Namespace와 함께 연결을 만든다
     return 0
 
 
@@ -351,6 +378,9 @@ def cmd_delete(args, kubectl: Kubectl) -> int:
     """RBAC와 SA Namespace(토큰도 무효)를 지운다. cmp-data-tunnel은 데이터 정리가 맡아 남긴다."""
     gone = "--ignore-not-found"
     kubectl(["delete", "rolebinding,role", DB_ROLE, "-n", args.namespace, gone])
+    kubectl(
+        ["delete", "clusterrole", DB_ROLE, gone]
+    )  # Agent가 만든 다른 Namespace의 연결은 효력을 잃는다
     kubectl(["delete", "rolebinding,role", TUNNEL_ROLE, "-n", TUNNEL_NAMESPACE, gone])
     kubectl(["delete", "clusterrolebinding,clusterrole", CLUSTER_ROLE, gone])
     kubectl(["delete", "namespace", SA_NAMESPACE, gone])

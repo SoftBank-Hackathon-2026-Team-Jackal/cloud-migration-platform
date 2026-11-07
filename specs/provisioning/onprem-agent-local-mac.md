@@ -92,8 +92,8 @@ kubectl --context k3d-cmp-local -n cmp-system exec deploy/cmp-onprem-agent -c tu
 ```bash
 python3 infra/onprem-agent/make-data-kubeconfig.py apply --context k3d-cmp-local --namespace cmp-app \
   --server https://<중계 서버 사설 IP>:<포트> --ref onprem-k3d --duration 36h
-# Namespace가 아직 없으면 kubeconfig만 쓰고 종료 코드 3(APP_NAMESPACE_PENDING)이다. 앱 배포 뒤:
-python3 infra/onprem-agent/make-data-kubeconfig.py bind --context k3d-cmp-local --namespace cmp-app --wait-namespace 900
+# cmp-app이 아직 없어도 된다. Agent가 롤아웃에서 cmp-app을 만들 때 DB 권한을 연결한다(티켓 84).
+# Agent Chart가 84 이전이면 배포 뒤 bind를 실행해야 한다. 환경을 지우고 다시 만들 때마다 필요해지므로 Chart를 올린다.
 ```
 
 `--duration`을 주지 않으면 토큰이 짧게 만료된다. 시연 시각까지 남도록 준다. 파일(`~/.config/cmp/data-migration/onprem-k3d.yaml`, 0600)은 데모 서버에 root 소유 0600으로 둔다. 기존 파일은 백업한다. 확인:

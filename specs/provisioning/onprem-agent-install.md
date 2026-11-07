@@ -74,7 +74,7 @@ kubectl -n cmp-system logs deploy/cmp-onprem-agent
 
 ## 4. 권한 (H2)
 
-ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create/delete(list는 17 터널 전달 대상 찾기, delete는 52 정리 작업의 `delete_data`), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·삭제·검사 동사(get/list/create/update/patch/delete), ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기(get/list), `pods` delete(51: 실패 Revision에 묶인 Ready가 아닌 DB Pod 정리), `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스). `watch`는 없다(52: 51 이후 Agent가 Helm `--wait` 없이 직접 기다린다). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기와 Namespace 삭제 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경·삭제하지 않는다(`NAMESPACE_NOT_OWNED`). RBAC는 라벨로 범위를 좁힐 수 없고, Agent가 Namespace마다 Role을 만들려면 자기 권한 이상을 줄 수 없어(권한 상승 방지) 같은 클러스터 권한이나 `escalate`가 필요하다. 그래서 대상 Namespace를 설치 때 미리 선언하는 Namespace 한정 모드는 후속으로 둔다(52 D16).
+ClusterRole은 와일드카드 없이 다음만 허용한다: Namespace get/list/create/delete(list는 17 터널 전달 대상 찾기, delete는 52 정리 작업의 `delete_data`), StorageClass get, Secret·Service·PVC·StatefulSet·Deployment의 Helm 설치·삭제·검사 동사(get/list/create/update/patch/delete), ReplicaSet·Pod·Endpoints·EndpointSlice·Event 읽기(get/list), `pods` delete(51: 실패 Revision에 묶인 Ready가 아닌 DB Pod 정리), `pods/exec` create(`pg_isready`), `services/proxy` get(앱 헬스), `rolebindings` get·create와 ClusterRole `cmp-data-migration-db` 하나에 대한 `bind`(84: 데이터 이전 DB 권한을 Namespace와 함께 연결). `watch`는 없다(52: 51 이후 Agent가 Helm `--wait` 없이 직접 기다린다). 배포 Namespace가 실행 시점에 생기므로 클러스터 범위 권한이 필요하다. **클러스터 전체 Secret 읽기·쓰기와 Namespace 삭제 권한이 포함된다.** Agent는 `cmp.dev/environment-id` 주석이 맞지 않는 기존 Namespace를 변경·삭제하지 않는다(`NAMESPACE_NOT_OWNED`). RBAC는 라벨로 범위를 좁힐 수 없고, Agent가 Namespace마다 Role을 만들려면 자기 권한 이상을 줄 수 없어(권한 상승 방지) 같은 클러스터 권한이나 `escalate`가 필요하다. 그래서 대상 Namespace를 설치 때 미리 선언하는 Namespace 한정 모드는 후속으로 둔다(52 D16).
 
 **Network Preflight (MNP-01 N3, #51):** `networkPreflight.image`는 기본값이 `docker.io/library/postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab`(공식 postgres 16.15-alpine3.24 multi-arch, amd64·arm64, 52 D12)다. 그래서 기본 설치에서 ClusterRole에 `pods` create/delete와 `pods/log` get이 추가되고 Agent가 `NETWORK_PREFLIGHT` 작업을 실행한다. Docker Hub에 닿지 못하는 곳은 같은 이미지를 미러에 올리고 그 Digest로 덮어쓴다. `--set networkPreflight.image=""`로 비우면 이 권한이 없고 작업은 `PREFLIGHT_NOT_CONFIGURED`로 거절된다. 검사 Pod는 복제 Namespace의 일반 Pod 한 개와 같은 노드의 읽기 전용 `hostNetwork` Pod(`ip route get`만) 한 개이며, 끝나면 지운다. Agent는 `cmp.dev/environment-id` 주석이 있는 Namespace에서만 만든다(없으면 Pod를 만들지 않고 `NAMESPACE_NOT_OWNED`). Pod 생성 권한은 클러스터 범위라 `hostNetwork` Pod도 만들 수 있다(K3s 기본에는 Pod Security 제한이 없다). 이미 클러스터 전체 Secret·`pods/exec` 권한이 있어 신뢰 범위가 크게 늘지는 않지만, 필요 없으면 비워 둔다. 허용 이미지는 `networkPreflight.allowedImages`(비우면 `image` 하나)이며 작업이 이미지를 고를 수 없다.
 
@@ -152,13 +152,14 @@ UDP가 막힌 네트워크(행사장 Wi-Fi 등) 대체 터널은 아직 없다(T
 
 ## 8. 데이터 이전 kubeconfig (75, ADR-007 2안 5단계)
 
-데이터 이전 worker가 대상 K3s에서 `kubectl exec … psql`과 데이터 게이트웨이(`cmp-data-tunnel`)를 다룰 때 쓰는 좁힌 ServiceAccount `cmp-data-migration/cmp-data-migration`과 kubeconfig를 사용자 맥에서 만든다. Agent Chart와 별개다(Chart 연동은 후속). 권한 표와 결정 R1~R11은 [75 티켓](../../tickets/provisioning/75-data-migration-kubeconfig.md)에 있다. 와일드카드와 Namespace 생성 권한이 없고, 대상 앱 Namespace에는 Pod 조회·삭제·exec, Secret get·create, NetworkPolicy만 준다.
+데이터 이전 worker가 대상 K3s에서 `kubectl exec … psql`과 데이터 게이트웨이(`cmp-data-tunnel`)를 다룰 때 쓰는 좁힌 ServiceAccount `cmp-data-migration/cmp-data-migration`과 kubeconfig를 사용자 맥에서 만든다. DB 권한은 ClusterRole `cmp-data-migration-db`에 있고, **Agent가 롤아웃에서 앱 Namespace를 준비할 때 그 Namespace에 RoleBinding을 만든다**([84 티켓](../../tickets/provisioning/84-data-rbac-with-namespace.md)). 그래서 Namespace를 지우고 다시 만들어도 `bind`를 다시 실행할 필요가 없다. 권한 표와 결정 R1~R11은 [75 티켓](../../tickets/provisioning/75-data-migration-kubeconfig.md)에 있다. 와일드카드와 Namespace 생성 권한이 없고, 대상 앱 Namespace에는 Pod 조회·삭제·exec, Secret get·create, NetworkPolicy만 준다.
 
 ```bash
-# 1. Agent가 앱을 배포해 대상 Namespace가 생긴 뒤(없으면 kubeconfig만 쓰고 종료 코드 3 → 배포 뒤 bind)
+# 1. 앱 Namespace가 아직 없어도 된다(Agent가 만들 때 DB 권한을 연결한다, 84)
 python3 infra/onprem-agent/make-data-kubeconfig.py apply --context k3d-cmp-local \
   --namespace <대상 앱 Namespace> --server https://<중계 서버 사설 IP>:<16400+터널 IP 마지막 옥텟> --ref <kubeconfig_ref> --duration 12h
-python3 infra/onprem-agent/make-data-kubeconfig.py bind --context k3d-cmp-local --namespace <ns> --wait-namespace 900
+# 84 이전 Agent Chart를 쓰거나 75 방식(Role) 연결이 남은 Namespace만: bind로 ClusterRole 연결로 옮긴다
+python3 infra/onprem-agent/make-data-kubeconfig.py bind --context k3d-cmp-local --namespace <ns>
 # 2. 권한이 표만큼인지(impersonation)
 python3 infra/onprem-agent/make-data-kubeconfig.py verify --context k3d-cmp-local --namespace <ns>
 # 3. 끝나면 SA·RBAC 삭제(토큰 즉시 무효). cmp-data-tunnel은 데이터 정리가 비운 뒤 직접 지운다
