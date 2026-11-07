@@ -674,7 +674,8 @@ class CutoverPlanRehearsal(WebModel):
 
 class CutoverPlanPrecondition(WebModel):
     id: str
-    state: Literal["pass", "wait", "fail"]
+    # `warn`·`skip`은 그림자 리허설 줄(`id: shadow`, Provisioning 84)만 쓴다. 경고 전용이다.
+    state: Literal["pass", "wait", "fail", "warn", "skip"]
     value: str | None = Field(default=None)
     evidence: str | None = Field(default=None)
     proposal: bool | None = Field(default=None)
@@ -886,6 +887,61 @@ class SandboxRedteamData(WebModel):
     withheld: int = Field(ge=0)
 
 
+class ShadowProgressData(WebModel):
+    """그림자 리허설 진행(Provisioning 84). 관찰 전용: 아무것도 막거나 고치지 않는다."""
+
+    run_id: str
+    compared: int = Field(ge=0)
+    match: int = Field(ge=0)
+    mismatch: int = Field(ge=0)
+    elapsed_s: float = Field(ge=0)
+    window_s: int = Field(ge=1)
+
+
+class ShadowDiffItem(WebModel):
+    pointer: str
+    origin: Any = Field(default=None, json_schema_extra=NULLABLE)
+    target: Any = Field(default=None, json_schema_extra=NULLABLE)
+
+
+class ShadowSampleItem(WebModel):
+    method: str
+    path: str
+    status_origin: int | None
+    status_target: int | None
+    diff: list[ShadowDiffItem]
+
+
+class ShadowAi(WebModel):
+    category: Literal["noise", "data", "env", "code"]
+    summary: str
+    hypotheses: list[str]
+
+
+class ShadowResultData(WebModel):
+    """그림자 리허설 결과(Provisioning 84). 경고·표시만 한다. `ai`는 불일치가 있을 때의 설명(없으면 null)."""
+
+    run_id: str
+    state: Literal["pass", "warn", "skipped", "stopped"]
+    compared: int = Field(ge=0)
+    match: int = Field(ge=0)
+    mismatch: int = Field(ge=0)
+    match_ratio: float | None
+    target_5xx: int = Field(ge=0)
+    p99_ratio: float | None
+    reason: (
+        Literal[
+            "SHADOW_NO_TRAFFIC",
+            "SHADOW_UNAVAILABLE",
+            "SHADOW_STOPPED_REPLICATION",
+            "SHADOW_DISABLED",
+        ]
+        | None
+    )
+    samples: list[ShadowSampleItem]  # 최대 5개(cmp_data.shadow.samples_for_event)
+    ai: ShadowAi | None
+
+
 DATA_MODELS: dict[str, type[WebModel]] = {
     "analysis.finding": AnalysisFindingData,
     "analysis.scan": AnalysisScanData,
@@ -926,6 +982,8 @@ DATA_MODELS: dict[str, type[WebModel]] = {
     "sandbox.attempt": SandboxAttemptData,
     "sandbox.done": SandboxDoneData,
     "sandbox.redteam": SandboxRedteamData,
+    "shadow.progress": ShadowProgressData,
+    "shadow.result": ShadowResultData,
 }
 # Types whose `data` has a second accepted shape (web `oneOf`), chosen when `data.changes` is a list (web `isBackendPreview`).
 ALTERNATE_MODELS: dict[str, tuple[str, type[WebModel]]] = {

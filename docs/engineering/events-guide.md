@@ -123,6 +123,18 @@ Helm heartbeat 문자열(`started`·`running`·`connect`·`helm:<name>`)은 Temp
 
 데이터 복제 진행·검증(Provisioning 63, 데이터 범위 대행): `data.progress`는 새 DB 조회 없이 `dm_sample`이 읽은 같은 샘플로 계산해 샘플마다 한 번 낸다(멱등 키 `progress:{step}:{rows}`, `ready`면 status done). 바이트는 계약에 없어 `data.lsn.lag_bytes`로만 간다. `data.verify`는 복제 중에는 정확한 비교가 없어(n_live_tup 근사치) 내지 않고, 전환 뒤 실제 비교 결과를 웹 `DATA_VERIFY_TIMELINE` 순서로 낸다(결과가 한 번에 오므로 running은 결과 직전에 함께 나간다). 테이블 이름·행 수·상태만 담고 비밀번호·연결 문자열은 담지 않는다.
 
+### 그림자 리허설 (Provisioning 84, 데이터 범위 대행) — `phase: data_copy`
+
+입력 `data_migration.shadow.enabled`(기본 꺼짐)일 때만 낸다. 복제가 streaming이 된 뒤 DB 전환 승인 전에 `DataMigrationWorkflow`가 중계 큐의 `shadow_*` Activity(83)로 실제 GET 요청을 대상에도 복사해 비교하고, Workflow가 `emit_migration_event`로 낸다. **관찰 전용**: 결과가 무엇이든 전환 승인·전환을 막지 않고, 아무것도 고치지 않는다.
+
+| 보낼 이벤트 | 어디서 | 값 | 예시 |
+| --- | --- | --- | --- |
+| `shadow.progress` | 관찰 창(`window_s`) 동안 감시 주기마다(`shadow_summary` 뒤), status `running` | `run_id`, 지금까지 `compared`·`match`·`mismatch`, `elapsed_s`, `window_s` | `{"run_id":"shadow-1a2b3c4d5e6f","compared":120,"match":119,"mismatch":1,"elapsed_s":30.0,"window_s":180}` |
+| `shadow.result` | 관찰이 끝나고 `shadow_stop` 뒤 한 번, status `done`(warn도 실패가 아니다) | `state` pass·warn·skipped·stopped, `match_ratio`(compared 0이면 null), `target_5xx`, `p99_ratio`(대상/원본, 모르면 null), `reason`(`SHADOW_NO_TRAFFIC`·`SHADOW_UNAVAILABLE`·`SHADOW_STOPPED_REPLICATION`, 웹 표시용 `SHADOW_DISABLED`), 불일치 표본 최대 5개(차이 5개, 값 200자), `ai`(불일치가 있을 때 `{category: noise·data·env·code, summary, hypotheses}`, 실패·20초 초과·모델 꺼짐이면 null) | `{"run_id":"…","state":"warn","compared":1240,"match":1238,"mismatch":2,"match_ratio":0.9984,"target_5xx":0,"p99_ratio":1.2,"reason":null,"samples":[…],"ai":null}` |
+| `cutover.plan` `preconditions[]`의 `shadow` 줄 | 리허설을 한 실행의 `dm_announce_cutover` | `{"id":"shadow","state":"pass"·"warn"·"skip","value":"1238/1240","evidence":"match >= 0.99 · target 5xx 0" 또는 이유 코드}`. 하지 않았으면 줄이 없다. 전환 준비 판정(`ready`)에 넣지 않는다 | — |
+
+판정: 수집 실패·시작 거절·중계 큐 없음 → skipped(`SHADOW_UNAVAILABLE`), `compared < min_requests` → skipped(`SHADOW_NO_TRAFFIC`), 관찰 중 `dm_sample`이 streaming이 아니거나 실패 → stopped(`SHADOW_STOPPED_REPLICATION`), `match/compared >= pass_ratio`이고 `target_5xx == 0` → pass, 그 밖 → warn. 취소·끝 신호가 오면 그때까지의 요약으로 판정한다. AI 설명(`shadow_explain`, Provisioning 큐)은 비밀 같은 키 값을 통째로, 나머지는 `cmp_scanners.masking`으로 가린 표본만 모델에 보낸다.
+
 ### 트래픽 (상헌님) — `phase: traffic`
 
 플랫폼 Activity(`shift_traffic`)는 스캐폴드다. 필드는 웹 `[가정]` 그대로이며 #61–#63 필드가 정해지면 맞춘다. PoC 중계는 HAProxy다(Envoy 코드 없음).

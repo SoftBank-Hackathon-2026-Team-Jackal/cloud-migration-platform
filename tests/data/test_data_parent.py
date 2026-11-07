@@ -169,6 +169,56 @@ def test_start_input_carries_validated_data_migration_settings() -> None:
                           data_migration_json=json.dumps(GIVEN | {"password": "x"}))  # fmt: skip
 
 
+@workflow.defn(name="ShadowParentProbe")
+class ShadowParentProbe(MigrationWorkflow):
+    @workflow.run
+    async def run(self, given: dict) -> str:
+        self.plan = {"plan_id": "plan-1", "revision": 2}
+        return (await self._data_migration(given, "relay-x")) or "continue"
+
+
+async def child_input(given: dict) -> dict:
+    """Provisioning 84: 부모가 자식에게 넘긴 입력(시작 이벤트)을 읽고 둘 다 끝낸다."""
+    from temporalio.converter import DataConverter
+
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(
+            env.client,
+            task_queue=WORKFLOW_QUEUE,
+            workflows=[ShadowParentProbe, DataMigrationWorkflow],
+        ),  # fmt: skip
+        Worker(env.client, task_queue=MIGRATION_QUEUE, activities=Fakes().activities()),
+        handoff_worker(env.client, READY_VIEW),
+    ):
+        pid = f"migration-{uuid.uuid4()}"
+        handle = await env.client.start_workflow(
+            ShadowParentProbe.run, given, id=pid, task_queue=WORKFLOW_QUEUE
+        )
+        child = env.client.get_workflow_handle(f"data-{pid}")
+        for _ in range(200):
+            try:
+                history = await child.fetch_history()
+                break
+            except Exception:  # noqa: BLE001 - 자식이 아직 없다
+                await asyncio.sleep(0.05)
+        started = history.events[0].workflow_execution_started_event_attributes
+        [args] = await DataConverter.default.decode(started.input.payloads)
+        await handle.terminate()
+        await child.terminate()
+        return args
+
+
+async def test_parent_passes_shadow_and_the_relay_queue_only_when_enabled() -> None:
+    shadow = {"enabled": True, "window_s": 60, "allow_paths": ["/api/"]}
+    on = await child_input(GIVEN | {"shadow": shadow})
+    assert on["relay_queue"] == "relay-x"
+    assert on["shadow"]["enabled"] and on["shadow"]["min_requests"] == 50  # 계약 기본값
+    off = await child_input(GIVEN | {"shadow": {"enabled": False}})
+    assert "shadow" not in off and "relay_queue" not in off
+    assert set(off) == set(await child_input(GIVEN))
+
+
 @workflow.defn(name="GateProbe")
 class GateProbe(MigrationWorkflow):
     @workflow.run

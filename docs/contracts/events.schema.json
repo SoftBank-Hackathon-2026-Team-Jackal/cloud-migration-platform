@@ -120,6 +120,12 @@
       "$ref": "#/$defs/event:sandbox.redteam"
     },
     {
+      "$ref": "#/$defs/event:shadow.progress"
+    },
+    {
+      "$ref": "#/$defs/event:shadow.result"
+    },
+    {
       "$ref": "#/$defs/event:snapshot"
     }
   ],
@@ -3460,7 +3466,9 @@
           "enum": [
             "pass",
             "wait",
-            "fail"
+            "fail",
+            "warn",
+            "skip"
           ],
           "type": "string"
         },
@@ -4937,6 +4945,12 @@
         },
         {
           "$ref": "#/$defs/event:sandbox.redteam"
+        },
+        {
+          "$ref": "#/$defs/event:shadow.progress"
+        },
+        {
+          "$ref": "#/$defs/event:shadow.result"
         }
       ]
     },
@@ -5424,6 +5438,317 @@
         "status",
         "code",
         "withheld"
+      ],
+      "additionalProperties": false
+    },
+    "model:ShadowDiffItem": {
+      "additionalProperties": false,
+      "properties": {
+        "pointer": {
+          "type": "string"
+        },
+        "origin": {},
+        "target": {}
+      },
+      "required": [
+        "pointer"
+      ],
+      "title": "ShadowDiffItem",
+      "type": "object"
+    },
+    "model:ShadowSampleItem": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "status_origin": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status_target": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff": {
+          "items": {
+            "$ref": "#/$defs/model:ShadowDiffItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "path",
+        "status_origin",
+        "status_target",
+        "diff"
+      ],
+      "title": "ShadowSampleItem",
+      "type": "object"
+    },
+    "model:ShadowAi": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "noise",
+            "data",
+            "env",
+            "code"
+          ],
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "hypotheses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "category",
+        "summary",
+        "hypotheses"
+      ],
+      "title": "ShadowAi",
+      "type": "object"
+    },
+    "data:shadow.progress": {
+      "additionalProperties": false,
+      "description": "그림자 리허설 진행(Provisioning 84). 관찰 전용: 아무것도 막거나 고치지 않는다.",
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "compared": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "match": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mismatch": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "elapsed_s": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "window_s": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "compared",
+        "match",
+        "mismatch",
+        "elapsed_s",
+        "window_s"
+      ],
+      "title": "ShadowProgressData",
+      "type": "object"
+    },
+    "event:shadow.progress": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "shadow.progress"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:shadow.progress"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "data:shadow.result": {
+      "additionalProperties": false,
+      "description": "그림자 리허설 결과(Provisioning 84). 경고·표시만 한다. `ai`는 불일치가 있을 때의 설명(없으면 null).",
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "pass",
+            "warn",
+            "skipped",
+            "stopped"
+          ],
+          "type": "string"
+        },
+        "compared": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "match": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mismatch": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "match_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_5xx": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "p99_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "SHADOW_NO_TRAFFIC",
+                "SHADOW_UNAVAILABLE",
+                "SHADOW_STOPPED_REPLICATION",
+                "SHADOW_DISABLED"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "samples": {
+          "items": {
+            "$ref": "#/$defs/model:ShadowSampleItem"
+          },
+          "type": "array"
+        },
+        "ai": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/model:ShadowAi"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run_id",
+        "state",
+        "compared",
+        "match",
+        "mismatch",
+        "match_ratio",
+        "target_5xx",
+        "p99_ratio",
+        "reason",
+        "samples",
+        "ai"
+      ],
+      "title": "ShadowResultData",
+      "type": "object"
+    },
+    "event:shadow.result": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "shadow.result"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:shadow.result"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
       ],
       "additionalProperties": false
     }

@@ -353,11 +353,12 @@ async def _emit(migration_id: str, drafts: list[ce.Draft], run: str) -> None:
 async def dm_announce_cutover(payload: dict) -> dict:
     """두 번째 승인 화면용 전환 계획(cutover.plan)과, 요청하면 승인 요청(approval.required gate=cutover).
 
-    payload: request, app, settings, sample, readiness, last_steps?, approval(bool)."""
+    payload: request, app, settings, sample, readiness, last_steps?, approval(bool),
+    shadow?(그림자 리허설 줄, Provisioning 84 — 표시만, 준비 판정에 넣지 않는다)."""
     req, app, settings = _parse(payload)
     sample, readiness = payload.get("sample") or {}, payload.get("readiness") or {}
     plan = ce.plan_data(req, app, settings, sample=sample, readiness=readiness,
-                        last_steps=payload.get("last_steps"))  # fmt: skip
+                        last_steps=payload.get("last_steps"), shadow=payload.get("shadow"))  # fmt: skip
     run = f"{time.time()}"
     await emit_event_async(req.migration_id, "cutover.plan", PHASE, "waiting", plan,
                            idempotency_key=f"{run}:plan")  # fmt: skip

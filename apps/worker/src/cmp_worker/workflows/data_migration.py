@@ -18,12 +18,18 @@ continue-as-new로 상태를 넘긴다. Traffic의 DB 게이트는 `db_gate` Que
 원본이 쓰기 주체이고 복제가 streaming이면 웹 두 번째 승인 화면용 `cutover.plan`과
 `approval.required`(gate=cutover)를 낸다. 웹 승인(`POST /migrations/{id}/approve?gate=cutover`)은
 API가 이 Workflow에 `switchover` 신호로 보낸다.
+
+Provisioning 84(그림자 리허설): 입력 `shadow.enabled`면 streaming 도달 뒤 앱 연결·전환 계획 알림 전에
+중계 큐(`relay_queue`)의 `shadow_start` → 창(window) 동안 `shadow_summary`·`dm_sample` 감시 → 판정 →
+`shadow_stop`(항상)을 한다. 결과는 `shadow.*` 이벤트와 `cutover.plan`의 `shadow` 줄로만 남는다. 어떤 결과·
+오류든 다음 단계로 간다(막지 않고, 고치지 않는다). 꺼져 있으면 아무것도 부르지 않는다.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import timedelta
 
 from temporalio import workflow
@@ -32,7 +38,8 @@ from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     from cmp_contracts.network_preflight import NetworkPreflightRequest, NetworkPreflightResult
-    from cmp_contracts.queues import MIGRATION_QUEUE
+    from cmp_contracts.queues import MIGRATION_QUEUE, PROVISIONING_QUEUE
+    from cmp_data import shadow as sh
     from cmp_providers.network_preflight import may_start_data_migration
 
     from cmp_worker.activities import data_cutover as dc
@@ -47,6 +54,12 @@ FAILURE_CLEANUP_PATCH = "data-failure-cleanup-v1"  # Provisioning 72: 복제 실
 PREFLIGHT_PATCH = "data-network-preflight-v1"  # Provisioning 76: 복제 전 MNP 게이트
 TUNNEL_CLEANUP_PATCH = "data-tunnel-cleanup-v1"  # Provisioning 76: 끝날 때 터널(NLB) 정리
 EARLY_CUTOVER_PATCH = "data-early-cutover-install-v1"  # PgBouncer 설치를 복사와 함께
+SHADOW_PATCH = "shadow-rehearsal-v1"  # Provisioning 84: 전환 승인 전 그림자 리허설(관찰 전용)
+SHADOW_CALL_S = (
+    15  # shadow_* Activity 한 번의 실행 제한(중계 워커가 없어도 schedule_to_close로 끝난다)
+)
+SHADOW_EXPLAIN_S = 20  # AI 설명 전체 제한. 넘으면 ai=null
+QUEUE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 SWITCH_FROM = {"switchover": "source", "rollback": "target"}
 
 
@@ -73,6 +86,9 @@ class DataMigrationWorkflow:
         self.tunnel_made = False  # 끝날 때 dm_tunnel_cleanup을 부를지(Provisioning 76)
         self.tunnel_cleanup_code: str | None = None
         self.preflight: dict | None = None  # {status, may_start, blocked_by, input_fingerprint}
+        self.shadow: dict | None = None  # Provisioning 84: shadow.result 값(샘플·AI 제외)
+        self.shadow_line: dict | None = None  # cutover.plan.preconditions의 shadow 줄
+        self._shadow_call_s = SHADOW_CALL_S
 
     # ---- 신호·조회 ----
 
@@ -103,6 +119,7 @@ class DataMigrationWorkflow:
             "failure_code": self.failure_code,
             "tunnel": self.tunnel,
             "preflight": self.preflight,
+            "shadow": self.shadow,
         }
 
     @workflow.query
@@ -183,9 +200,129 @@ class DataMigrationWorkflow:
         if stopped:
             await self._settle(install)
             return stopped
+        if (args.get("shadow") or {}).get("enabled") and workflow.patched(SHADOW_PATCH):
+            await self._shadow(args)
         await (install if install is not None else self._install_cutover(args))
         await self._call(dc.dm_route_app, self._cutover_payload(args), timeout_s=600)
         return None
+
+    # ---- 그림자 리허설(Provisioning 84) ----
+
+    async def _short_call(self, name: str, payload: dict, queue: str, seconds: float,
+                          attempts: int = 2):  # fmt: skip
+        """무한 대기가 없게 schedule_to_close로 묶는다(큐에 워커가 없어도 끝난다)."""
+        return await workflow.execute_activity(
+            name,
+            payload,
+            task_queue=queue,
+            schedule_to_close_timeout=timedelta(seconds=seconds * attempts + 5),
+            start_to_close_timeout=timedelta(seconds=seconds),
+            retry_policy=RetryPolicy(maximum_attempts=attempts),
+        )
+
+    async def _shadow_event(self, migration_id: str, event_type: str, data: dict, key: str) -> None:
+        request = {"migration_id": migration_id,
+                   "type": event_type, "phase": "data_copy",
+                   "status": "done" if event_type == "shadow.result" else "running",
+                   "data": data, "idempotency_key": key}  # fmt: skip
+        try:
+            await self._short_call("emit_migration_event", request, PROVISIONING_QUEUE, 30, 1)
+        except ActivityError:
+            workflow.logger.info("shadow event not emitted")
+
+    async def _shadow(self, args: dict) -> None:
+        """관찰만 한다. 예외는 삼키고 결과 이벤트로 남긴다. `shadow_stop`은 항상 부른다."""
+        settings = sh.ShadowSettings(enabled=True)  # 입력이 틀리면 기본값으로 결과만 남긴다
+        req = self._req(args)
+        queue = args.get("relay_queue") or MIGRATION_QUEUE
+        run_id = f"shadow-{workflow.uuid4().hex[:12]}"
+        self._shadow_call_s = float(args.get("shadow_call_s", SHADOW_CALL_S))
+        state, reason, summary = "skipped", sh.UNAVAILABLE, None
+        try:
+            settings = sh.ShadowSettings.model_validate(args["shadow"])
+            if not isinstance(queue, str) or not QUEUE_NAME.fullmatch(queue):
+                raise ValueError("invalid relay queue")
+            state, reason, summary = await self._shadow_observe(args, settings, req, queue, run_id)
+        except Exception:  # noqa: BLE001 - 관찰 실패는 다음 단계를 막지 않는다
+            state, reason = "skipped", sh.UNAVAILABLE
+        finally:
+            if isinstance(queue, str) and QUEUE_NAME.fullmatch(queue):
+                try:
+                    await self._short_call(
+                        "shadow_stop", {"run_id": run_id}, queue, self._shadow_call_s
+                    )
+                except ActivityError:
+                    workflow.logger.info("shadow_stop failed")
+        ai = None
+        if state in ("pass", "warn") and (summary or {}).get("mismatch"):
+            ai = await self._shadow_explain(req["migration_id"], summary)
+        result = sh.result_data(run_id, state, reason, summary, ai)
+        self.shadow = {k: v for k, v in result.items() if k not in ("samples", "ai")}
+        self.shadow_line = sh.precondition(result, settings)
+        await self._shadow_event(
+            req["migration_id"], "shadow.result", result, f"shadow:{run_id}:result"
+        )
+
+    async def _shadow_observe(self, args, settings, req, queue, run_id):
+        """→ (상태, 이유, 마지막 요약). 복제가 streaming을 벗어나면 즉시 멈춘다."""
+        started = workflow.now()
+        payload = {"migration_id": req["migration_id"], "run_id": run_id,
+                   "allow_paths": settings.allow_paths, "percent": settings.percent,
+                   "rate_per_sec": settings.rate_per_sec}  # fmt: skip
+        try:
+            begun = await self._short_call("shadow_start", payload, queue, self._shadow_call_s)
+        except ActivityError:
+            return "skipped", sh.UNAVAILABLE, None
+        if not (begun or {}).get("ok"):
+            return "skipped", sh.UNAVAILABLE, None
+        interval = max(float(args.get("monitor_interval_s", 5)), 1)
+        summary, rounds = None, 0
+        while True:
+            elapsed = (workflow.now() - started).total_seconds()
+            if elapsed >= settings.window_s:
+                break
+            await workflow.sleep(min(interval, settings.window_s - elapsed))
+            try:
+                self.last_sample = await self._call(dm.dm_sample, req, timeout_s=60, attempts=1)
+            except ActivityError:
+                return "stopped", sh.STOPPED_REPLICATION, summary
+            if self.last_sample.get("phase") != "streaming":
+                return "stopped", sh.STOPPED_REPLICATION, summary
+            try:
+                summary = await self._short_call(
+                    "shadow_summary", {"run_id": run_id}, queue, self._shadow_call_s
+                )
+            except ActivityError:
+                return "skipped", sh.UNAVAILABLE, None
+            rounds += 1
+            elapsed = (workflow.now() - started).total_seconds()
+            await self._shadow_event(
+                req["migration_id"],
+                "shadow.progress",
+                sh.progress_data(run_id, summary, elapsed, settings.window_s),
+                f"shadow:{run_id}:progress:{rounds}",
+            )
+            if self.requested is not None:
+                break  # 취소·끝 신호는 기다리게 하지 않는다(지금까지의 요약으로 판정)
+        state, reason = sh.judge(summary, settings)
+        return state, reason, summary
+
+    async def _shadow_explain(self, migration_id: str, summary: dict | None) -> dict | None:
+        """불일치 표본의 분류·원인 가설(제안만). 실패하거나 20초를 넘기면 None."""
+        payload = {"migration_id": migration_id, "samples": sh.samples_for_event(summary),
+                   "counts": {k: (summary or {}).get(k) for k in
+                              ("compared", "match", "mismatch", "target_5xx")}}  # fmt: skip
+        try:
+            raw = await workflow.execute_activity(
+                "shadow_explain",
+                payload,
+                task_queue=PROVISIONING_QUEUE,
+                schedule_to_close_timeout=timedelta(seconds=SHADOW_EXPLAIN_S),
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+        except ActivityError:
+            return None
+        return sh.valid_ai(raw)
 
     async def _install_cutover(self, args: dict) -> dict:
         return await self._call(dc.dm_install_cutover, self._cutover_payload(args), timeout_s=600)
@@ -286,6 +423,8 @@ class DataMigrationWorkflow:
         payload = {**self._cutover_payload(args), "sample": sample,
                    "readiness": self.last_readiness, "last_steps": self.last_steps,
                    "approval": self.announced is None or self.announced[1] != key[1]}  # fmt: skip
+        if self.shadow_line is not None:
+            payload["shadow"] = self.shadow_line  # Provisioning 84: 경고 전용 줄
         try:
             await self._call(dc.dm_announce_cutover, payload, timeout_s=60)
         except ActivityError:
@@ -335,13 +474,14 @@ class DataMigrationWorkflow:
     @workflow.run
     async def run(self, args: dict) -> dict:
         """args: {request, app, settings, sample_interval_s?, monitor_interval_s?, sync_timeout_s?,
-        state?(continue-as-new)}"""
+        shadow?, relay_queue?, shadow_call_s?(시험용), state?(continue-as-new)}"""
         state = args.get("state")
         if state:
             self.phase, self.active = state["phase"], state["active"]
             self.switches, self.requested = state["switches"], state.get("requested")
             self.last_steps, self.announced = state.get("last_steps"), state.get("announced")
             self.tunnel_made = state.get("tunnel_made", False)
+            self.shadow_line = state.get("shadow_line")
         else:
             try:
                 outcome = await self._replicate(args)
@@ -379,6 +519,8 @@ class DataMigrationWorkflow:
         state = {"phase": self.phase, "active": self.active, "switches": self.switches,
                  "requested": self.requested, "last_steps": self.last_steps,
                  "announced": self.announced, "tunnel_made": self.tunnel_made}  # fmt: skip
+        if self.shadow_line is not None:
+            state["shadow_line"] = self.shadow_line
         workflow.continue_as_new({**args, "state": state})
         raise ApplicationError("unreachable")  # continue_as_new does not return
 

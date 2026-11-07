@@ -20,6 +20,7 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 
 from . import tunnel as wg
 from .contracts import DbEndpoint, Strict
+from .shadow import ShadowSettings
 
 # k3s 기본 대역. 대상 쪽에서 원본 DB는 게이트웨이 Service(ClusterIP, 10.43/16)로 보인다.
 K3S_POD_CIDR, K3S_SERVICE_CIDR = "10.42.0.0/16", "10.43.0.0/16"
@@ -71,6 +72,8 @@ class DataMigrationInput(Strict):
     tunnel: wg.WireGuardTunnel | None = None
     # Provisioning 76: 복제 전 네트워크 사전 점검(MNP). `tunnel`이 있어야 한다(검사 주소가 게이트웨이다)
     network_preflight: NetworkPreflightSettings | None = None
+    # Provisioning 84: 그림자 리허설(관찰 전용). 없거나 꺼져 있으면 지금 동작 그대로
+    shadow: ShadowSettings | None = None
 
     @model_validator(mode="before")
     @classmethod
