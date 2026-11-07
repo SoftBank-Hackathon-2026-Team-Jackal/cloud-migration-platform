@@ -12,6 +12,8 @@
 | Chart | `infra/helm/onprem-agent` — ServiceAccount, ClusterRole/Binding, 등록 토큰 Secret, (선택) CA ConfigMap, Deployment(`agent` + `tunnel` 컨테이너) |
 | 릴리스 | 태그 `agent-vX.Y.Z` → `.github/workflows/agent-release.yml`: GHCR 이미지(amd64·arm64), OCI Chart(이미지 Digest 고정), GitHub Release, 익명 pull 점검(비공개면 경고, 42) |
 
+데모 환경에서 발표자 맥을 대상으로 연결한 실제 순서(GHCR이 비공개일 때 소스 빌드, 데이터 이전 kubeconfig, 데모 서버 `.env`, 중계 서버 지표 보고기)는 [맥을 온프레미스 대상으로 연결하기](onprem-agent-local-mac.md)에 있다.
+
 ## 1. 운영자: 등록 토큰 발급
 
 `cluster_uid`는 생략할 수 있다. 생략하면 Agent가 최초 등록 때 조회한 kube-system Namespace UID로 고정된다(H3). 토큰은 일회용이고 기본 10분(최대 1시간) 뒤 만료된다.
