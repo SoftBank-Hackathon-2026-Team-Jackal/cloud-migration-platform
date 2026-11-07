@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -66,11 +67,28 @@ OPEN_CLUSTER = open_cluster  # 시험에서 가짜로 바꾼다
 SLEEP = time.sleep
 
 
+# Provisioning 82: establish/cleanup은 asyncio.to_thread 안에서 돈다. temporalio의 async Activity heartbeat는
+# 이벤트 루프에서 task를 만들므로 스레드에서 부르면 보내지지 않고 "never awaited" 경고만 남는다. 루프로 넘긴다.
+_LOOP: contextvars.ContextVar[asyncio.AbstractEventLoop | None] = contextvars.ContextVar(
+    "data_tunnel_loop", default=None
+)
+
+
 def _beat(detail: str) -> None:
+    loop = _LOOP.get()
     try:
-        activity.heartbeat(detail)
-    except RuntimeError:  # 시험처럼 Activity 밖에서 부를 때
+        if loop is None:
+            activity.heartbeat(detail)
+        else:
+            ctx = contextvars.copy_context()  # Activity 문맥을 루프 쪽 호출에도 넘긴다
+            loop.call_soon_threadsafe(ctx.run, activity.heartbeat, detail)
+    except RuntimeError:  # 시험처럼 Activity 밖에서 부를 때, 루프가 이미 닫혔을 때
         pass
+
+
+async def _in_thread(fn, *args):
+    _LOOP.set(asyncio.get_running_loop())  # to_thread가 문맥을 복사하므로 스레드에서 보인다
+    return await asyncio.to_thread(fn, *args)
 
 
 def _fail(code: str, *, retryable: bool = False) -> ApplicationError:
@@ -97,6 +115,7 @@ def _release(target: DbEndpoint) -> str:
 
 def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
     base = wg.name(req.migration_id)
+    lb_service = tunnel.endpoint_service or f"{base}-endpoint"
     selector = f"cmp.dev/data-tunnel={base}"
     if not req.source.local_host or not req.target.local_host:
         raise _fail("TUNNEL_DB_ADDRESS_MISSING")
@@ -128,6 +147,7 @@ def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
                         req.migration_id,
                         tunnel.egress_cidrs,
                         ingress=ingress,
+                        standing=tunnel.standing_ingress,
                     )
                 )
             if side == "target":
@@ -143,7 +163,7 @@ def establish(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
         clusters[ingress].apply(gateway(ingress, None))
         endpoint_deadline = time.monotonic() + tunnel.endpoint_timeout_s
         address = None
-        while not (address := clusters[ingress].lb_address(wg.NAMESPACE, f"{base}-endpoint")):
+        while not (address := clusters[ingress].lb_address(wg.NAMESPACE, lb_service)):
             if time.monotonic() > endpoint_deadline:
                 raise _fail("TUNNEL_ENDPOINT_TIMEOUT", retryable=True)
             _beat(f"waiting for the {ingress} UDP load balancer")
@@ -176,12 +196,14 @@ def cleanup(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
     """복제·롤백·PgBouncer가 터널을 더 이상 쓰지 않을 때 명시적으로 호출한다.
 
     입구 Service 삭제가 실패하면 나머지 리소스를 보존한다. 공유 Namespace는 삭제하지 않는다.
+    고정 입구(`standing_ingress`, Provisioning 82)는 다음 실행이 쓰도록 남긴다(게이트웨이가 없어 아무 Pod도 받지 않음).
     """
     base = wg.name(req.migration_id)
     with OPEN_CLUSTER(req.source) as source, OPEN_CLUSTER(req.target) as target:
-        ingress = source if tunnel.ingress == "source" else target
-        _beat("deleting the UDP load balancer Service")
-        ingress.delete(wg.NAMESPACE, "service", f"{base}-endpoint")
+        if not tunnel.standing_ingress:
+            ingress = source if tunnel.ingress == "source" else target
+            _beat("deleting the UDP load balancer Service")
+            ingress.delete(wg.NAMESPACE, "service", f"{base}-endpoint")
         for cluster in (source, target):
             for kind, resource in (
                 ("deployment", base),
@@ -201,7 +223,7 @@ async def dm_tunnel_cleanup(payload: dict) -> dict:
     req = DataMigrationRequest.model_validate(payload["request"])
     tunnel = wg.WireGuardTunnel.model_validate(payload["tunnel"])
     try:
-        return await asyncio.to_thread(cleanup, req, tunnel)
+        return await _in_thread(cleanup, req, tunnel)
     except CommandError as exc:
         raise _fail("TUNNEL_CLEANUP_FAILED", retryable=True) from exc
 
@@ -214,7 +236,7 @@ async def dm_tunnel(payload: dict) -> dict:
     # Provisioning 77: the web sees the (minutes-long) tunnel step, like dm_precheck's "preflight".
     await dm._phase(req, "tunnel")
     try:
-        return await asyncio.to_thread(establish, req, tunnel)
+        return await _in_thread(establish, req, tunnel)
     except CommandError as exc:
         raise ApplicationError("TUNNEL_COMMAND_FAILED", type="TUNNEL_COMMAND_FAILED") from exc
 

@@ -1,4 +1,5 @@
-.PHONY: setup infra-up infra-down api workers worker lint test check openapi smoke-temporal
+.PHONY: setup infra-up infra-down api workers worker lint test check openapi smoke-temporal \
+	data-tunnel-nlb-up data-tunnel-nlb-status data-tunnel-nlb-down
 
 setup:
 	uv sync --extra dev --locked
@@ -32,3 +33,13 @@ openapi:
 
 smoke-temporal:
 	uv run python scripts/smoke_temporal.py
+
+# Provisioning 82: 데이터 터널 고정 원본 NLB(standing_ingress). CONTEXT=원본 EKS kubectl context, CIDR=맥 공인 IP/32
+data-tunnel-nlb-up:
+	uv run python scripts/data_tunnel_nlb.py up --context $(CONTEXT) --cidr $(CIDR)
+
+data-tunnel-nlb-status:
+	uv run python scripts/data_tunnel_nlb.py status --context $(CONTEXT)
+
+data-tunnel-nlb-down:
+	uv run python scripts/data_tunnel_nlb.py down --context $(CONTEXT)

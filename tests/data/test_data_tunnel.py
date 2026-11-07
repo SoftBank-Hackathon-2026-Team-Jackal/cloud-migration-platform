@@ -354,6 +354,10 @@ def test_source_endpoint_uses_public_lbc_nlb_with_cross_zone_and_tcp_health() ->
         f"{prefix}attributes": "load_balancing.cross_zone.enabled=true",
         f"{prefix}healthcheck-protocol": "tcp",
         f"{prefix}healthcheck-port": "8080",
+        f"{prefix}healthcheck-interval": "5",
+        f"{prefix}healthcheck-timeout": "4",
+        f"{prefix}healthcheck-healthy-threshold": "2",
+        f"{prefix}healthcheck-unhealthy-threshold": "2",
     }
     legacy = wg.endpoint_manifest(MID, TUNNEL["source_egress_cidrs"])
     assert "loadBalancerClass" not in legacy["spec"]

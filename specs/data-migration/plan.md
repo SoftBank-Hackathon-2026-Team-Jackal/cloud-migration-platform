@@ -75,7 +75,7 @@ NAT 뒤 K3s 대상은 [ADR-007](../../docs/decisions/ADR-007.md)을 따른다. `
 
 ## 입구 방향 옵션 구현 (#297, Provisioning 67)
 
-- 입력: `WireGuardTunnel.ingress: "target" | "source" = "target"`. target는 `source_egress_cidrs`, source는 `target_egress_cidrs`가 필요하다. 반대편 CIDR 필드는 생략/null만 가능하다. 빈 목록·동시 지정·IPv6·/16보다 넓은 범위·호스트 비트가 있는 CIDR·9개 이상은 거절한다.
+- 입력: `WireGuardTunnel.ingress: "target" | "source" = "target"`. target는 `source_egress_cidrs`, source는 `target_egress_cidrs`가 필요하다. 반대편 CIDR 필드는 생략/null만 가능하다. `standing_ingress: bool = false`는 `source` 입구에서만 허용한다(Provisioning 82: 고정 원본 NLB 재사용, 정리 시 보존). 빈 목록·동시 지정·IPv6·/16보다 넓은 범위·호스트 비트가 있는 CIDR·9개 이상은 거절한다.
 - 원본 입구 Service: `loadBalancerClass: service.k8s.aws/nlb`; `service.beta.kubernetes.io/aws-load-balancer-` 접두사의 annotation은 `scheme=internet-facing`, `nlb-target-type=ip`, `attributes=load_balancing.cross_zone.enabled=true`, `healthcheck-protocol=tcp`, `healthcheck-port=8080`이다. in-tree `type: nlb` annotation은 쓰지 않는다. 헬스 포트는 원본 Pod에만 열고 공개 Service에는 UDP 51820만 둔다.
 - 원본 입구 모드에서 대상 게이트웨이는 `PEER_ENDPOINT=<NLB DNS>:51820`, keepalive 25를 쓴다. 기본 target 입구의 15초 keepalive는 보존한다. 양쪽 DB 프록시 포트(5432), Secret 키 `private`, 리소스 이름 및 대상 DB NetworkPolicy는 그대로다.
 - Activity 순서: 양쪽 Namespace·키 준비 → 선택한 입구의 게이트웨이·LB → **같은 클러스터**의 주소 대기 → 반대편 게이트웨이 → rollout → **접속하는 쪽**에서 handshake 확인. 대상 DB 허용 정책은 항상 대상 게이트웨이와 함께 적용한다. 재시도는 기존 Secret의 키를 재사용한다.

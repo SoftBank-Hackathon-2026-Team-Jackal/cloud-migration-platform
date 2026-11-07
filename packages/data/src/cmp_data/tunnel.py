@@ -13,6 +13,9 @@ Namespace에 게이트웨이 Pod 하나를 둔다.
 - 기본 입구는 대상 LoadBalancer(UDP)다. 원본 NAT 공인 IP(`source_egress_cidrs`)만 받는다.
 - `ingress="source"`는 원본 EKS의 공개 NLB를 쓰고 대상 NAT 공인 IP(`target_egress_cidrs`)만 받는다.
   대상 게이트웨이가 접속하며 keepalive 25초, 원본 Pod의 TCP 8080으로 NLB 상태를 확인한다.
+- `standing_ingress`(Provisioning 82)는 원본 NLB Service를 고정 이름(`cmp-wg-standing-endpoint`)으로 재사용한다.
+  NLB 생성(2~3분)을 실행 전에 끝내 두고, 실행마다 selector(이번 게이트웨이)와 허용 IP만 바꾼다. 정리 때
+  이 Service는 지우지 않는다. 게이트웨이·키·정책은 지금처럼 실행마다 새로 만든다. 한 번에 한 실행만 쓴다.
 - 양쪽 Service 이름이 같아서, 원본·대상 `peer_host`가 모두 `<name>-peer-db.cmp-data-tunnel.svc.cluster.local`이다.
   원본 DB에서 보면 대상 DB, 대상 DB에서 보면 원본 DB로 이어진다.
 - 대상 Namespace에는 Provisioning의 기본 차단 정책이 있다. 게이트웨이를 별도 Namespace에 두고, 대상 DB
@@ -39,6 +42,9 @@ HEALTH_PORT = 8080
 ADDRESSES = {"source": "10.210.0.1", "target": "10.210.0.2"}
 LABELS = {"app.kubernetes.io/managed-by": "cmp-data-migration"}
 SECRET_KEY = "private"
+# Provisioning 82: 원본 클러스터의 cmp-data-tunnel Namespace에 하나만 둔다. 미리 만들 때는 아무 Pod도 고르지 않는다.
+STANDING_ENDPOINT = "cmp-wg-standing-endpoint"
+STANDING_IDLE = "standing-idle"
 Side = Literal["source", "target"]
 
 # Provisioning 81: 컨테이너가 재시작하면 같은 Pod 네트워크에 이전 wg0이 남는다(먼저 지운다). 막 생긴 NLB의
@@ -81,6 +87,8 @@ class WireGuardTunnel(Strict):
     # LB 주소 대기. source 입구는 이 예산 안에서 NLB healthy/handshake도 기다린다.
     endpoint_timeout_s: int = Field(default=600, ge=30, le=1800)
     handshake_timeout_s: int = Field(default=180, ge=10, le=900)
+    # Provisioning 82: 원본 NLB를 고정 이름으로 재사용한다(ingress="source"만).
+    standing_ingress: bool = False
 
     @field_validator("source_egress_cidrs", "target_egress_cidrs")
     @classmethod
@@ -101,7 +109,14 @@ class WireGuardTunnel(Strict):
         forbidden = "source_egress_cidrs" if self.ingress == "source" else "target_egress_cidrs"
         if not getattr(self, required) or getattr(self, forbidden) is not None:
             raise ValueError(f"ingress={self.ingress} requires {required} and forbids {forbidden}")
+        if self.standing_ingress and self.ingress != "source":
+            raise ValueError("standing_ingress requires ingress=source")
         return self
+
+    @property
+    def endpoint_service(self) -> str | None:
+        """고정 입구 Service 이름. 실행별 입구면 None(`<name>-endpoint`)."""
+        return STANDING_ENDPOINT if self.standing_ingress else None
 
     @property
     def egress_cidrs(self) -> list[str]:
@@ -217,17 +232,26 @@ def gateway_manifests(
 
 
 def endpoint_manifest(
-    migration_id: str, source_egress_cidrs: list[str], *, ingress: Side = "target"
+    migration_id: str,
+    source_egress_cidrs: list[str],
+    *,
+    ingress: Side = "target",
+    standing: bool = False,
 ) -> dict[str, Any]:
     """선택한 쪽의 UDP 입구. CIDR 인자는 접속하는 반대편의 송신 공인 IP다.
 
-    기존 위치/키워드 인자 이름은 호환성을 위해 보존한다.
+    기존 위치/키워드 인자 이름은 호환성을 위해 보존한다. `standing`이면 고정 이름이고 실행별 라벨이 없다.
     """
     base = name(migration_id)
+    if standing:
+        metadata = {"name": STANDING_ENDPOINT, "namespace": NAMESPACE,
+                    "labels": {**LABELS, "cmp.dev/data-tunnel-standing": "true"}}  # fmt: skip
+    else:
+        metadata = _meta(f"{base}-endpoint", migration_id)
     service = {
         "apiVersion": "v1",
         "kind": "Service",
-        "metadata": _meta(f"{base}-endpoint", migration_id),
+        "metadata": metadata,
         "spec": {
             "type": "LoadBalancer",
             "loadBalancerSourceRanges": list(source_egress_cidrs),
@@ -244,8 +268,21 @@ def endpoint_manifest(
             f"{prefix}attributes": "load_balancing.cross_zone.enabled=true",
             f"{prefix}healthcheck-protocol": "tcp",
             f"{prefix}healthcheck-port": str(HEALTH_PORT),
+            # Provisioning 82: 새 게이트웨이 Pod가 대상으로 등록된 뒤 healthy까지 기본 30초 → 약 10초.
+            # NLB 허용 범위: 간격 5~300초, 제한 시간 2~120초, 임계값 2~10.
+            f"{prefix}healthcheck-interval": "5",
+            f"{prefix}healthcheck-timeout": "4",
+            f"{prefix}healthcheck-healthy-threshold": "2",
+            f"{prefix}healthcheck-unhealthy-threshold": "2",
         }
         service["spec"]["loadBalancerClass"] = "service.k8s.aws/nlb"
+    return service
+
+
+def standing_endpoint_manifest(target_egress_cidrs: list[str]) -> dict[str, Any]:
+    """시연 전에 미리 만드는 원본 NLB. 아무 게이트웨이도 고르지 않고, 실행이 selector를 바꾼다."""
+    service = endpoint_manifest(STANDING_IDLE, target_egress_cidrs, ingress="source", standing=True)
+    service["spec"]["selector"] = {"cmp.dev/data-tunnel": STANDING_IDLE}
     return service
 
 
