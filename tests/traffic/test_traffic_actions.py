@@ -407,12 +407,25 @@ class FakeData:
         await workflow.wait_condition(lambda: self.done)
 
 
-def stabilize_workers(env, store: Store, relay: Relay):
+@workflow.defn(name="DataMigrationWorkflow")
+class FakeDataOnSource(FakeData):
+    """DB를 아직 전환하지 않은 데이터 이전: 쓰기 주체가 원본이다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writer = "source"
+
+    @workflow.run
+    async def run(self) -> None:
+        await workflow.wait_condition(lambda: self.done)
+
+
+def stabilize_workers(env, store: Store, relay: Relay, data=FakeData):
     return (
         Worker(
             env.client,
             task_queue=WORKFLOW_QUEUE,
-            workflows=[TrafficShiftWorkflow, FakeData],
+            workflows=[TrafficShiftWorkflow, data],
             activities=[*store.activities(), traffic_activities.traffic_db_gate],
         ),
         relay.worker(env.client),
@@ -505,3 +518,65 @@ async def test_without_stabilize_seconds_the_shift_ends_at_100_percent_as_before
     result = await run_to_end(Relay([GOOD] * 3), store, body())
     assert result["status"] == "DONE"
     assert all(e["data"]["phase"] != "stabilizing" for e in store.of("traffic.snapshot"))
+
+
+SHORT = {**STABILIZE, "stabilize_seconds": 3, "stabilize_hold_seconds": 3}
+IDLE = {"requests": 5, "failed": 0, "p99_ms": 50.0}
+
+
+async def run_stabilizing(windows, policy, data=None) -> tuple[dict, Store, list[str]]:
+    store, relay = Store(READINESS), Relay([GOOD] * 3 + windows, pace=0.01)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        main, relay_worker = stabilize_workers(env, store, relay, data or FakeData)
+        async with main, relay_worker:
+            child = None
+            if data is not None:
+                child = await env.client.start_workflow(
+                    data.run, id="data-migration-1", task_queue=WORKFLOW_QUEUE
+                )
+            handle = await env.client.start_workflow(
+                TrafficShiftWorkflow.run,
+                body(policy=policy, retry_wait_seconds=1),
+                id=f"traffic-{uuid.uuid4()}",
+                task_queue=WORKFLOW_QUEUE,
+            )
+            if data is not None:
+                await until(handle, lambda s: (s["snapshot"].get("health") or {}).get("breach"))
+                await handle.signal(TrafficShiftWorkflow.request_rollback)
+            result = await handle.result()
+            history = await handle.fetch_history()
+            seen = await child.query(FakeData.seen) if child else []
+            if child:
+                await child.signal(FakeData.finish)
+    await Replayer(workflows=[TrafficShiftWorkflow]).replay_workflow(history)
+    return result, store, seen
+
+
+async def test_window_end_while_alerting_does_not_finalize_and_falls_back_to_origin() -> None:
+    result, store, _ = await run_stabilizing([FAULTY] * 2000, SHORT)
+    assert result["status"] == "ROLLED_BACK"
+    assert "결정 없음" in result["events"][-1]["reason"]
+    assert not any(e.get("decision") == "finalize" for e in result["events"])
+    assert all(e["data"]["phase"] != "complete" for e in store.of("traffic.snapshot")[-5:])
+
+
+async def test_window_end_without_any_judged_window_waits_then_finalizes_as_no_traffic() -> None:
+    result, store, _ = await run_stabilizing([IDLE] * 2000, SHORT)
+    assert result["status"] == "DONE"
+    assert result["events"][-1] == {"step": 100, "decision": "finalize", "reason": "no_traffic"}
+    stabilizing = [e for e in store.of("traffic.snapshot") if e["data"]["phase"] == "stabilizing"]
+    assert any(
+        e["data"]["stabilize_left_seconds"] == 0 for e in stabilizing
+    )  # 구간 뒤에도 기다렸다
+    assert store.of("traffic.alert") == []
+
+
+async def test_stabilizing_rollback_leaves_the_db_alone_when_it_was_never_switched() -> None:
+    policy = {**STABILIZE, "stabilize_seconds": 60}
+    result, store, seen = await run_stabilizing([FAULTY] * 2000, policy, FakeDataOnSource)
+    assert result["status"] == "ROLLED_BACK"
+    assert seen == []  # 쓰기 주체가 원본이면 롤백 신호를 보내지 않는다
+    assert not any(
+        {"key": "dbRollback"} in (e["data"].get("notes") or [])
+        for e in store.of("traffic.snapshot")
+    )
