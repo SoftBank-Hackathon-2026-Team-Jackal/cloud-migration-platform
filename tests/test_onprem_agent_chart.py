@@ -121,6 +121,20 @@ def test_rbac_is_explicit_without_wildcards(tmp_path):
     assert pod_verbs == {"get", "list", "create", "delete"}
     # Ticket 29 (I8): pull Secret linked to the default ServiceAccount; no delete/update.
     assert granted[("", "serviceaccounts")] == {"get", "create", "patch"}
+    # Provisioning 84: binds only the data migration ClusterRole, and cannot change bindings.
+    assert granted[("rbac.authorization.k8s.io", "rolebindings")] == {"get", "create"}
+    [bind] = [r for r in role["rules"] if "bind" in r["verbs"]]
+    assert bind == {
+        "apiGroups": ["rbac.authorization.k8s.io"],
+        "resources": ["clusterroles"],
+        "verbs": ["bind"],
+        "resourceNames": ["cmp-data-migration-db"],
+    }
+    assert not any(
+        {"roles", "clusterroles", "clusterrolebindings"} & set(r["resources"])
+        and set(r["verbs"]) - {"bind"}
+        for r in role["rules"]
+    )
     [binding] = [doc for (kind, _), doc in docs.items() if kind == "ClusterRoleBinding"]
     assert binding["roleRef"]["name"] == role["metadata"]["name"]
     assert binding["subjects"][0]["namespace"] == "cmp-system"

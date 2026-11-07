@@ -53,9 +53,12 @@ def _flatten(manifests: list[dict]) -> set[tuple]:
         if m["kind"] not in ("Role", "ClusterRole"):
             continue
         ns = m["metadata"].get("namespace")
-        scope = (
-            "cluster" if m["kind"] == "ClusterRole" else ("tunnel" if ns == wg.NAMESPACE else "app")
-        )
+        if m["metadata"]["name"] == mk.DB_ROLE:
+            scope = "app"  # ClusterRole이지만 앱 Namespace의 RoleBinding으로만 효력이 있다
+        elif m["kind"] == "ClusterRole":
+            scope = "cluster"
+        else:
+            scope = "tunnel" if ns == wg.NAMESPACE else "app"
         for rule in m["rules"]:
             names = rule.get("resourceNames") or [None]
             for group in rule["apiGroups"]:
@@ -68,6 +71,44 @@ def _flatten(manifests: list[dict]) -> set[tuple]:
 
 def test_rbac_matches_permission_table_exactly():
     assert _flatten(mk.rbac_manifests(APP)) == EXPECTED
+
+
+def test_db_permissions_reach_only_namespaces_with_the_binding():
+    """Provisioning 84: DB 권한은 ClusterRole에 있지만 ClusterRoleBinding은 없다."""
+    manifests = mk.rbac_manifests(APP)
+    [role] = [m for m in manifests if m["metadata"]["name"] == mk.DB_ROLE and "rules" in m]
+    assert role["kind"] == "ClusterRole" and role["rules"] == mk.DB_RULES
+    cluster_bindings = [m for m in manifests if m["kind"] == "ClusterRoleBinding"]
+    assert all(b["roleRef"]["name"] != mk.DB_ROLE for b in cluster_bindings)
+    [binding] = [m for m in manifests if m["kind"] == "RoleBinding"
+                 and m["roleRef"]["name"] == mk.DB_ROLE]  # fmt: skip
+    assert binding == mk.db_binding(APP)
+    assert binding["metadata"]["namespace"] == APP
+
+
+def test_agent_creates_the_same_binding_as_the_script():
+    """Agent가 Namespace를 만들 때 만드는 연결과 이름·대상·roleRef가 같아야 한다(라벨만 다르다)."""
+    from cmp_providers import onprem_agent
+
+    script = mk.db_binding(APP)
+    assert onprem_agent.DATA_MIGRATION_ROLE == mk.DB_ROLE
+    assert [onprem_agent.DATA_MIGRATION_SUBJECT] == script["subjects"]
+
+    applied = []
+
+    class Target:
+        def get(self, kind, name, namespace=None):
+            return None
+
+        def apply(self, document):
+            applied.append(document)
+
+    runner = onprem_agent.RolloutRunner(Target(), fetch=None)
+    runner._bind_data_migration(APP)
+    [agent] = applied
+    assert agent["roleRef"] == script["roleRef"] and agent["subjects"] == script["subjects"]
+    assert agent["metadata"]["name"] == script["metadata"]["name"]
+    assert agent["metadata"]["namespace"] == APP
 
 
 def test_rbac_has_no_wildcards_and_binds_only_the_service_account():
@@ -99,9 +140,11 @@ def test_rbac_creates_service_account_and_tunnel_namespace_but_not_app_namespace
     assert order.index("Namespace") < order.index("ServiceAccount") < order.index("Role")
 
 
-def test_rbac_without_app_namespace_skips_db_role():
-    flat = _flatten(mk.rbac_manifests(None))
-    assert flat == EXPECTED - DB_POD - DB_EXEC - DB_SECRET - DB_POLICY
+def test_rbac_without_app_namespace_keeps_db_role_but_skips_binding():
+    manifests = mk.rbac_manifests(None)
+    assert _flatten(manifests) == EXPECTED  # ClusterRole은 Namespace가 없어도 만든다
+    assert not [m for m in manifests if m["kind"] == "RoleBinding"
+                and m["roleRef"]["name"] == mk.DB_ROLE]  # fmt: skip
 
 
 @pytest.mark.parametrize("bad", ["Bad", "-x", "kube-system", "cmp-data-tunnel", "a" * 64])
@@ -188,14 +231,15 @@ def test_apply_tightens_existing_file_permissions(tmp_path):
     assert TOKEN in path.read_text()
 
 
-def test_apply_without_app_namespace_writes_kubeconfig_but_reports_pending(tmp_path, capsys):
+def test_apply_without_app_namespace_succeeds_and_leaves_binding_to_the_agent(tmp_path, capsys):
+    """Provisioning 84: 앱 Namespace가 아직 없어도 할 일이 끝난다. Agent가 Namespace를 만들 때 연결한다."""
     fake = FakeKubectl(namespaces=())
-    assert _run(tmp_path, fake) == 3
+    assert _run(tmp_path, fake) == 0
     assert (tmp_path / "onprem-demo.yaml").exists()
     applied = [json.loads(s) for a, s in fake.calls if a[:2] == ["apply", "--server-side"]]
     assert applied[0]["items"] == mk.rbac_manifests(None)
     out = capsys.readouterr().out
-    assert "APP_NAMESPACE_PENDING" in out and "bind" in out
+    assert "APP_NAMESPACE_PENDING" in out and "Agent" in out
 
 
 @pytest.mark.parametrize("ref", [".hidden", "a/b", "x y", ""])
@@ -217,6 +261,29 @@ def test_bind_applies_rbac_without_issuing_token(tmp_path):
     assert [a[:2] for a, _ in fake.calls if a[0] == "apply"] == [["apply", "--server-side"]]
 
 
+class RoleBoundKubectl(FakeKubectl):
+    """Provisioning 84 이전 `bind`가 앱 Namespace에 Role로 연결해 둔 클러스터."""
+
+    def __call__(self, args, stdin=None):
+        if args[:2] == ["get", "rolebinding"]:
+            self.calls.append((args, stdin))
+            return b"Role"
+        return super().__call__(args, stdin)
+
+
+def test_bind_replaces_an_old_namespaced_role_binding():
+    fake = RoleBoundKubectl()
+    assert mk.main(["bind", "--context", "c", "--namespace", APP], kubectl=fake) == 0
+    steps = [a[:2] for a, _ in fake.calls if a[0] in ("delete", "apply")]
+    assert steps == [["delete", "rolebinding,role"], ["apply", "--server-side"]]  # roleRef는 불변
+
+
+def test_bind_keeps_a_cluster_role_binding():
+    fake = FakeKubectl()
+    assert mk.main(["bind", "--context", "c", "--namespace", APP], kubectl=fake) == 0
+    assert not [a for a, _ in fake.calls if a[0] == "delete"]
+
+
 def test_delete_removes_rbac_and_service_account_namespace_only():
     fake = FakeKubectl()
     assert mk.main(["delete", "--context", "c", "--namespace", APP], kubectl=fake) == 0
@@ -225,6 +292,7 @@ def test_delete_removes_rbac_and_service_account_namespace_only():
     assert f"namespace {mk.SA_NAMESPACE}" in flat
     assert f"namespace {wg.NAMESPACE}" not in flat  # 터널 자원은 데이터 정리가 지운다
     assert f"namespace {APP}" not in flat
+    assert f"clusterrole {mk.DB_ROLE}" in flat  # Agent가 만든 연결도 효력을 잃는다
     assert all("--ignore-not-found" in a for a in deleted)
 
 

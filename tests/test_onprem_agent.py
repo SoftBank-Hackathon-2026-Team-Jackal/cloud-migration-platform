@@ -12,6 +12,7 @@ import pytest
 from cmp_contracts.onprem_rollout import ProductionRolloutJob, rollout_job_id
 from cmp_providers.artifacts import sha256_bytes
 from cmp_providers.onprem_agent import (
+    DATA_MIGRATION_ROLE,
     ENVIRONMENT,
     ClusterUnavailable,
     RolloutAgent,
@@ -161,12 +162,41 @@ def test_fresh_rollout_installs_db_then_app_and_reports_ready():
     )
     assert cluster.mutations == [
         ("apply", "Namespace"),
+        ("apply", "RoleBinding"),
         ("apply", "Secret"),
         ("helm", "demo-db"),
         ("helm", "demo-app"),
     ]
     namespace = cluster.objects[("namespace", "demo")]
     assert namespace["metadata"]["annotations"] == {ENVIRONMENT: "onprem-prod-001"}
+
+
+def test_rollout_binds_the_data_migration_role_in_its_namespace():
+    """Provisioning 84: the worker's database access is created with the Namespace, so a Namespace
+    deleted by teardown and created again by the next rollout never comes back without it."""
+    cluster = FakeCluster()
+    del cluster.objects[("namespace", "demo")]
+    cluster.objects[("secret", "demo-app-env")] = None
+    run(cluster, job(application=job().application.model_dump() | {"secret_refs": []}))
+    binding = cluster.objects[("rolebinding", DATA_MIGRATION_ROLE)]
+    assert binding["metadata"]["namespace"] == "demo"
+    assert binding["roleRef"] == {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "cmp-data-migration-db",
+    }
+    assert binding["subjects"] == [
+        {"kind": "ServiceAccount", "name": "cmp-data-migration", "namespace": "cmp-data-migration"}
+    ]
+
+
+def test_rollout_keeps_an_existing_data_migration_binding():
+    cluster = FakeCluster()
+    made_by_hand = {"metadata": {"name": DATA_MIGRATION_ROLE}, "roleRef": {"kind": "Role"}}
+    cluster.objects[("rolebinding", DATA_MIGRATION_ROLE)] = made_by_hand
+    assert run(cluster) == ("SUCCEEDED", "READY")
+    assert ("apply", "RoleBinding") not in cluster.mutations  # roleRef cannot change in place
+    assert cluster.objects[("rolebinding", DATA_MIGRATION_ROLE)] is made_by_hand
 
 
 def test_reclaimed_job_with_applied_bytes_is_verified_without_reinstall():
