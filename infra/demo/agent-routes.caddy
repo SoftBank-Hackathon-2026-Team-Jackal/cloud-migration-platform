@@ -24,6 +24,15 @@ handle @migration_events {
 		flush_interval -1
 	}
 }
+# Server pulse report (origin/target servers push CPU and memory; X-Pulse-Token required, off while
+# PULSE_REPORT_TOKEN is empty). Only this POST is public: GET /system/pulse stays internal.
+@pulse_report {
+	method POST
+	path /system/pulse/report
+}
+handle @pulse_report {
+	reverse_proxy {$CMP_API_UPSTREAM}
+}
 @backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*
 handle @backend {
 	reverse_proxy {$CMP_API_UPSTREAM}

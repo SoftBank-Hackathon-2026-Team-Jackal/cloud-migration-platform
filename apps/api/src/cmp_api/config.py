@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     agent_chat_enabled: bool = False
     agent_model: str = "claude-haiku-5-5"
     agent_caption_model: str | None = None
+    # 원본·이전 서버가 CPU·메모리를 보내는 `POST /system/pulse/report`의 공유 토큰. 비면 수신을 끈다(503).
+    pulse_report_token: str = ""
     llm_ledger_path: str | None = None
     llm_kill_switch_path: str | None = None
     approval_admin_key: str | None = None

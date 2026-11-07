@@ -127,6 +127,7 @@ services:
       # Off unless /opt/cmp/.env sets AGENT_CHAT_ENABLED=true. It shares the worker's spend ledger and
       # kill switch (`touch /opt/cmp/data/llm/disabled`), so one budget covers every model call.
       AGENT_CHAT_ENABLED: ${AGENT_CHAT_ENABLED:-false}
+      PULSE_REPORT_TOKEN: ${PULSE_REPORT_TOKEN:-}
       AGENT_MODEL: ${AGENT_CHAT_MODEL:-claude-haiku-5-5}
       AGENT_CAPTION_MODEL: ${AGENT_CHAT_CAPTION_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
