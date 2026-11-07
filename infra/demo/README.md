@@ -212,7 +212,7 @@ docker exec cmp-demo-worker-1 aws sts get-caller-identity --profile cmp-demo-dat
 
 ## 온프레미스 k3d API 경로: 중계 서버 TCP 전달 (티켓 74, ADR-007 4단계)
 
-데모 서버 worker가 맥 k3d API에 닿는 경로다. 트래픽 영역(중계 서버)을 Provisioning이 대행했다(이상헌님 공유 필요). 사용자 HTTP 경로 Envoy(8080·9901)는 바꾸지 않고, 중계 서버에 **전달 전용 Envoy**(`envoy-kube`, 관리 127.0.0.1:9902)를 하나 더 둔다.
+데모 서버 worker가 맥 k3d API에 닿는 경로다. 트래픽 영역(중계 서버)을 Provisioning이 대행했다(이상헌님 공유 필요). 사용자 HTTP 경로 Envoy(8080·9901)는 바꾸지 않고, 중계 서버에 **전달 전용 Envoy**(`envoy-kube`, 관리 127.0.0.1:9902)를 하나 더 둔다. 같은 호스트 네트워크에서 사용자 Envoy와 hot-restart 도메인 소켓이 겹치지 않게 `--base-id 1`로 띄운다(없으면 `errno=98`로 재시작 반복).
 
 ```text
 worker(172.31.15.223) → 중계 서버 사설 IP:16400+터널 호스트 번호 → Agent 터널 IP:kube_api_port(6443) → kubernetes.default.svc:443

@@ -13,6 +13,7 @@
 #   - 서버의 /opt/cmp/lib(cmp_traffic)이 이 기능이 들어간 커밋이어야 한다. peer-sync가 돌고 있어야 한다.
 #   - 플랫폼 TUNNEL_EXPOSE_KUBE_API=true, Agent Chart tunnel.exposeKubeApi=true (티켓 73).
 #   - 보안 그룹: relay-stack.yaml 의 KubeApiForwardSourceSecurityGroupId(또는 …SourceCidr)로 데모 서버만 허용(README 참고).
+# 같은 호스트 네트워크의 사용자 Envoy가 hot-restart base-id 0을 쓰므로 --base-id 1(없으면 errno=98로 재시작 반복, 78).
 # 되돌리기: docker rm -f envoy-kube; /etc/cmp/peer-sync.env 의 KUBE_FORWARD_* 줄을 지우고 systemctl restart peer-sync
 # 사용: sudo ./enable-kube-api-forward.sh                    # 사설 IP는 IMDSv2에서 읽는다
 #       sudo BIND_IP=172.31.2.84 ./enable-kube-api-forward.sh
@@ -50,7 +51,7 @@ PY
 
 docker rm -f envoy-kube >/dev/null 2>&1 || true
 docker run -d --name envoy-kube --restart unless-stopped --network host \
-  -v "$DIR:$DIR" "$ENVOY_IMAGE" -c "$DIR/bootstrap.yaml" --log-level warn >/dev/null
+  -v "$DIR:$DIR" "$ENVOY_IMAGE" -c "$DIR/bootstrap.yaml" --base-id 1 --log-level warn >/dev/null
 
 sed -i '/^KUBE_FORWARD_BIND_IP=/d' "$ENV_FILE"
 echo "KUBE_FORWARD_BIND_IP=$BIND_IP" >> "$ENV_FILE"
