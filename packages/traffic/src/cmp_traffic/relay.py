@@ -165,6 +165,27 @@ def to_dynamic_bootstrap(bootstrap_yaml: str, cds_path: str) -> tuple[str, str]:
     return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), json.dumps(cds)
 
 
+SHADOW_COLLECTOR_PORT = 18090  # cmp_traffic.shadow 복사본 수신 포트(루프백)
+
+
+def add_shadow_cluster(bootstrap_yaml: str, port: int = SHADOW_COLLECTOR_PORT) -> str:
+    """깔린 bootstrap에 그림자 수집기 클러스터(`cluster_shadow`, 127.0.0.1)를 정적으로 더한다(83).
+
+    CDS 파일은 릴레이 워커가 `cluster_target` 하나로 통째로 덮어쓰므로 거기에 두지 않는다. 이미 있으면 그대로.
+    헬스 체크는 두지 않는다: 복사본은 응답을 기다리지 않고 버려지며, 수집기가 없으면 복사만 실패한다.
+    """
+    doc = yaml.safe_load(bootstrap_yaml)
+    clusters = doc["static_resources"]["clusters"]
+    if any(c.get("name") == "cluster_shadow" for c in clusters):
+        return bootstrap_yaml
+    shadow = _cluster("cluster_shadow", "127.0.0.1", port, "/")
+    shadow.pop("health_checks")
+    shadow["type"] = "STATIC"
+    shadow["connect_timeout"] = "0.25s"
+    clusters.append(shadow)
+    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+
+
 def render_wireguard(
     address: str,
     peer_allowed_ips: str,

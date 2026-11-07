@@ -1,0 +1,21 @@
+# 그림자 리허설 수집기(Provisioning 83, #362). 중계 Envoy가 복사한 GET을 원본 2번·대상 1번으로 다시 보내 비교한다.
+# 127.0.0.1:18090(복사본 수신)·127.0.0.1:18091(제어 API)에만 연다. 보안 그룹에 열 포트가 없다.
+# enable-shadow.sh가 설치한다. 직접 쓰려면 /etc/systemd/system/ 에 복사해 `systemctl enable --now shadow-collector`.
+# 선택 환경(/etc/cmp/shadow-collector.env): ENVOY_ADMIN_URL(기본 http://127.0.0.1:9901),
+#   TRAFFIC_TARGET_HOST(relay-worker와 같은 값. Envoy가 대상에 쓰는 Host를 똑같이 쓴다).
+# 트래픽 영역(이상헌님 담당)을 Provisioning이 대행해 만든 파일이다. 아직 실제 서버에서 돌려 보지 않았다.
+[Unit]
+Description=CMP shadow rehearsal collector (loopback only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/cmp/shadow-collector.env
+Environment=PYTHONPATH=/opt/cmp/lib
+ExecStart=/usr/bin/python3.11 -m cmp_traffic.shadow
+Restart=always
+RestartSec=5
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

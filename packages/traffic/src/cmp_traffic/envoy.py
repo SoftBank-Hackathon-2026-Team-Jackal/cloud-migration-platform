@@ -18,6 +18,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -91,16 +92,49 @@ def check_stream_prefixes(prefixes: Sequence[str]) -> tuple[str, ...]:
     return tuple(out)
 
 
+SHADOW_CLUSTER = "cluster_shadow"  # 127.0.0.1:18090 그림자 수집기(relay.add_shadow_cluster)
+
+
+@dataclass(frozen=True)
+class ShadowMirror:
+    """그림자 리허설 복사 설정(Provisioning 83). 허용 경로(prefix)의 GET만 `percent`%를 복사한다.
+
+    허용 목록은 기본 거부다(빈 목록은 받지 않는다). 막힌 경로·`/`처럼 그것을 품는 경로는 거절한다.
+    """
+
+    allow_paths: tuple[str, ...]
+    percent: int = 100
+
+    def __post_init__(self) -> None:
+        paths = tuple(self.allow_paths)
+        if not paths:
+            raise ValueError("그림자 허용 경로가 비어 있습니다.")
+        for prefix in paths:
+            if not prefix.startswith("/"):
+                raise ValueError(f"그림자 허용 경로는 /로 시작해야 합니다: {prefix!r}")
+            if any(prefix.startswith(b) or b.startswith(prefix) for b in BLOCKED_PREFIXES):
+                raise ValueError(f"그림자 허용 경로가 막힌 경로와 겹칩니다: {prefix!r}")
+        if not 1 <= int(self.percent) <= 100:
+            raise ValueError("그림자 복사 비율은 1~100이어야 합니다.")
+        object.__setattr__(self, "allow_paths", tuple(dict.fromkeys(paths)))
+        object.__setattr__(self, "percent", int(self.percent))
+
+
 def build_route_config(
     weights: dict[str, int],
     version: int,
     target_host: str | None = None,
     stream_prefixes: Sequence[str] = (),
+    shadow: ShadowMirror | None = None,
 ) -> dict[str, Any]:
     """가중치 라우트 설정(RDS). `stream_prefixes`는 SSE 같은 오래 열린 연결의 경로다(#294).
 
     그 경로는 `/`와 같은 가중치로 나누되 제한시간을 끄고(`0s`) 재시도하지 않는다. 전체 제한시간(5초)에
     끊기면 `upstream_rq_timeout`으로 세어 전환 판정이 실패로 보고 롤백한다. 빈 값이면 출력이 예전과 같다.
+
+    `shadow`(83)가 있으면 `/` 바로 앞에 허용 경로마다 `:method == GET` 라우트를 두고 `/`와 같은 동작에
+    `request_mirror_policies`만 더한다. 사용자 응답은 그대로이고 복사본의 응답은 버려진다. None이면 출력이
+    예전과 바이트 단위로 같다.
     """
     streams = check_stream_prefixes(stream_prefixes)
     origin, target = weights["origin"], weights["target"]
@@ -121,6 +155,18 @@ def build_route_config(
     if target_host:
         clusters[1]["host_rewrite_literal"] = target_host
     forbidden = {"status": 403, "body": {"inline_string": "forbidden\n"}}
+    default_action = {
+        "weighted_clusters": {"clusters": clusters},
+        "timeout": "5s",
+        # 연결 실패는 요청이 나가기 전이라 다시 보내도 중복이 생기지 않는다.
+        # 실제 WAN 시험에서 새 연결의 1~2%가 연결 제한에 걸려 오탐 롤백이 났다.
+        "retry_policy": {
+            "retry_on": "connect-failure",
+            "num_retries": 2,
+            "per_try_timeout": "3s",
+        },
+    }
+    mirrors = [] if shadow is None else _shadow_routes(shadow, default_action)
     routes = [  # 공개 경로로 관리·내부 경로에 접근하지 못하게 가장 먼저 막는다
         {"match": {"prefix": "/admin"}, "direct_response": forbidden},
         {"match": {"prefix": "/__cmp"}, "direct_response": forbidden},
@@ -131,20 +177,8 @@ def build_route_config(
             }
             for prefix in streams
         ),
-        {
-            "match": {"prefix": "/"},
-            "route": {
-                "weighted_clusters": {"clusters": clusters},
-                "timeout": "5s",
-                # 연결 실패는 요청이 나가기 전이라 다시 보내도 중복이 생기지 않는다.
-                # 실제 WAN 시험에서 새 연결의 1~2%가 연결 제한에 걸려 오탐 롤백이 났다.
-                "retry_policy": {
-                    "retry_on": "connect-failure",
-                    "num_retries": 2,
-                    "per_try_timeout": "3s",
-                },
-            },
-        },
+        *mirrors,
+        {"match": {"prefix": "/"}, "route": default_action},
     ]
     return {
         "version_info": str(version),
@@ -156,6 +190,39 @@ def build_route_config(
             }
         ],
     }
+
+
+GET_ONLY = [{"name": ":method", "string_match": {"exact": "GET"}}]
+
+
+def _shadow_routes(shadow: ShadowMirror, action: dict[str, Any]) -> list[dict[str, Any]]:
+    policy = {
+        "cluster": SHADOW_CLUSTER,
+        "runtime_fraction": {
+            "default_value": {"numerator": shadow.percent, "denominator": "HUNDRED"}
+        },
+    }
+    return [
+        {
+            "match": {"prefix": prefix, "headers": GET_ONLY},
+            "route": {**action, "request_mirror_policies": [policy]},
+        }
+        for prefix in shadow.allow_paths
+    ]
+
+
+def route_shadow(doc: dict[str, Any]) -> ShadowMirror | None:
+    """라우트 설정에 깔린 그림자 복사 설정. 없으면 None."""
+    paths: list[str] = []
+    percent = None
+    for route in doc["resources"][0]["virtual_hosts"][0]["routes"]:
+        for policy in route.get("route", {}).get("request_mirror_policies", []):
+            if policy.get("cluster") == SHADOW_CLUSTER:
+                paths.append(route["match"]["prefix"])
+                percent = policy["runtime_fraction"]["default_value"]["numerator"]
+    if not paths or percent is None:
+        return None
+    return ShadowMirror(allow_paths=tuple(paths), percent=int(percent))
 
 
 class EnvoyProxy:
@@ -236,6 +303,32 @@ class EnvoyProxy:
         doc = build_route_config(weights, version, self.target_host, self.stream_prefixes)
         self._publish(self.rds_path, doc, version, RDS_STAT)
 
+    def set_shadow(self, shadow: ShadowMirror | None) -> bool:
+        """지금 가중치는 그대로 두고 그림자 복사만 켜거나 끈다(83). 파일을 바꿨으면 True.
+
+        이미 꺼져 있는데 끄라고 하면 파일을 다시 쓰지 않는다(멱등). 라우트 파일을 읽지 못하면 가중치를 모르므로
+        켜지 않는다(RuntimeError). 이 뒤의 `apply`(가중치 Activity)는 복사를 모르므로 다시 쓰면 복사가 꺼진다.
+        """
+        try:
+            current = route_shadow(json.loads(self.rds_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            current = None
+        if shadow is None and current is None:
+            return False
+        weight = self.target_weight()
+        if weight is None:
+            raise RuntimeError("cannot read the current route weights")
+        version = self._next_version()
+        doc = build_route_config(
+            {"origin": 100 - weight, "target": weight},
+            version,
+            self.target_host,
+            self.stream_prefixes,
+            shadow=shadow,
+        )
+        self._publish(self.rds_path, doc, version, RDS_STAT)
+        return True
+
     def target_weight(self) -> int | None:
         """지금 라우트 파일에서 대상으로 가는 가중치(%). 읽지 못하면 None."""
         try:
@@ -294,7 +387,12 @@ def parse_cluster_stats(data: dict[str, Any], side: str) -> dict[str, float]:
 
 
 def cluster_target_address(config_dump: dict[str, Any]) -> tuple[str, int] | None:
-    """Envoy `/config_dump`의 `cluster_target`이 가리키는 (주소, 포트). 없으면 None.
+    """Envoy `/config_dump`의 `cluster_target`이 가리키는 (주소, 포트). 없으면 None."""
+    return cluster_address(config_dump, "cluster_target")
+
+
+def cluster_address(config_dump: dict[str, Any], name: str) -> tuple[str, int] | None:
+    """Envoy `/config_dump`의 클러스터 `name`이 가리키는 (주소, 포트). 없으면 None.
 
     정적(static_clusters)이든 파일로 바꾸는 동적(dynamic_active_clusters, 이미 활성화된 것만)이든 읽는다.
     DNS 이름은 풀기 전 설정값 그대로라서 핸드오버의 external_host와 같은 글자로 비교할 수 있다.
@@ -305,7 +403,7 @@ def cluster_target_address(config_dump: dict[str, Any]) -> tuple[str, int] | Non
             *section.get("dynamic_active_clusters", []),
         ]:
             cluster = item.get("cluster", {})
-            if cluster.get("name") != "cluster_target":
+            if cluster.get("name") != name:
                 continue
             for group in cluster.get("load_assignment", {}).get("endpoints", []):
                 for entry in group.get("lb_endpoints", []):
