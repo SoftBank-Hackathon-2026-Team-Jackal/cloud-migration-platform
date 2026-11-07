@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """서버의 CPU·메모리 사용률을 플랫폼 `POST /system/pulse/report`로 3초마다 보낸다(웹 상단 위젯의 원본·이전 서버 값).
 
 표준 라이브러리만 쓴다. Linux는 /proc, macOS는 top·vm_stat·sysctl로 읽는다. 읽은 값(퍼센트와 MB)만 보내고
