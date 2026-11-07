@@ -60,6 +60,20 @@ for attempt in {1..30}; do
   if [[ "$worker_running" == true && "$platform_db_health" == healthy && "$temporal_db_health" == healthy ]] && curl --fail --silent http://127.0.0.1:8000/health | grep -q '"status":"ok"' \
     && docker exec cmp-demo-worker-1 sh -c 'git --version && terraform version && helm version --short && kubectl version --client && aws --version && gcloud --version && docker version && docker buildx version' >/dev/null 2>&1; then
     echo "CMP demo API healthy"
+    if grep -q '^CMP_PUBLIC_HOST=.' /opt/cmp/.env; then
+      # The public entry must answer too (edge TLS -> web). A 5xx or
+      # no answer fails the release, so activate.sh rolls back instead of leaving a dead page behind.
+      host="$(grep -m1 '^CMP_PUBLIC_HOST=' /opt/cmp/.env | cut -d= -f2- | tr -d '\r" ')"
+      public_ok=false
+      for public_attempt in {1..45}; do
+        code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 \
+          --resolve "$host:443:127.0.0.1" "https://$host/" 2>/dev/null || true)"
+        if [[ "$code" =~ ^[234][0-9][0-9]$ ]]; then public_ok=true; break; fi
+        sleep 2
+      done
+      [[ "$public_ok" == true ]] || { echo "Public entry https://$host/ did not answer (last: ${code:-none})" >&2; "${compose[@]}" ps; exit 1; }
+      echo "CMP demo public entry healthy ($code)"
+    fi
     "${compose[@]}" ps
     exit 0
   fi

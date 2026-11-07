@@ -18,6 +18,15 @@ bash infra/demo/release.sh HEAD
 
 수동 워크플로의 `revision`에 이전 `main` 커밋 SHA를 넣으면 해당 소스를 재배포할 수 있다. 실행 중에는 동일 EC2의 다른 배포를 잠금으로 막는다. 새 릴리스의 API·Worker·DB 상태 확인이 실패하면 서버에 보관한 이전 릴리스로 복구를 시도하고 워크플로는 실패로 표시한다. DB 마이그레이션은 자동으로 되돌리지 않으므로 대회 기간에는 이전 코드와 호환되는 스키마 변경만 사용한다. API 컨테이너 교체 중 짧은 연결 중단은 발생할 수 있다. 실제 Terraform Apply가 Worker에 연결되면 실행 중인 Apply를 확인하고 안전하게 Worker를 교체하는 절차가 추가로 필요하다.
 
+같은 커밋을 배포하면 같은 결과가 나오도록 다음 규칙을 둔다.
+
+- **main만 배포한다.** `release.sh`는 로컬에서도 `origin/main`에 들어간 커밋만 받는다. 서버의 배포 스크립트(`activate.sh`)도 작업 브랜치가 아니라 main에 있는 것을 올린다. 꼭 필요할 때만 `CMP_ALLOW_UNMERGED=1`로 예외를 둔다(로컬 전용).
+- **실행 중인 이전이 있으면 배포하지 않는다.** 배포는 worker를 다시 시작하고, 그러면 실행 중인 Activity가 취소된다. `activate.sh`는 Temporal에 `Running` 워크플로가 있으면 아무것도 바꾸지 않고 그 ID를 출력한 뒤 실패한다. 그래도 배포하려면 워크플로 입력 `force`를 켜거나 로컬에서 `CMP_DEPLOY_FORCE=1`을 준다.
+- **배포는 서로 기다린다.** `activate.sh`와 `release-web.sh`는 `/opt/cmp/deploy.lock`을 최대 15분 기다린다.
+- **실패 원인을 남긴다.** 실패한 배포의 로그는 롤백 전에 `/opt/cmp/failed-deploy-<rev>-<시각>.log`로 복사된다(최근 5개). 모든 시도는 `/opt/cmp/deploy-history.log`에 한 줄씩 남는다: 시각, 플랫폼 리비전, 웹 리비전, `.env`·`web.env`의 sha256 앞 12자(값이 아니라 지문), 결과. 지문이 바뀌었다면 코드가 아니라 서버 설정이 바뀐 것이다.
+- **공개 입구까지 확인한다.** `CMP_PUBLIC_HOST`가 있으면 `start.sh`는 `https://<host>/`가 5xx 없이 응답해야 성공으로 본다.
+- 성공하면 이름 없는 옛 이미지(`docker image prune -f`)를 지운다. 서버 빌드마다 1.4~1.8GB씩 남기 때문이다.
+
 서버에서는 Docker Compose로 FastAPI, 전체 Worker, Temporal, 업무 PostgreSQL, Temporal PostgreSQL, Temporal UI를 실행한다. DB 비밀번호와 Agent 운영자 키는 처음 기동할 때 `/opt/cmp/.env`에 생성하고 재배포 시 보존한다. DB 데이터는 루트 EBS의 `/opt/cmp/data/`에 있고, Worker에는 향후 Plan 산출물용 `/opt/cmp/data/plans`를 마운트한다. 서비스에는 `restart: unless-stopped`가 설정돼 있다. 이 배포는 대회용 단일 호스트이며 고가용성이나 운영용 Temporal 구성이 아니다. 실제 Terraform Plan/Apply 및 승인 API 연결은 후속 구현이다.
 
 ### 이미지 기반 배포 (옵트인, `CMP_DEPLOY_MODE=image`)

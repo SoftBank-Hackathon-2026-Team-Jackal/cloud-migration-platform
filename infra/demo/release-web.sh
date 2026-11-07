@@ -70,7 +70,12 @@ command = (
     "find /opt/cmp/web -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\\n' | sort -rn | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf; "
     "release=/opt/cmp/releases/$(cat /opt/cmp/current-revision); cd $release; "
     "docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml --profile public up -d --build --no-deps web; "
-    "sleep 5; docker inspect --format '{{.State.Running}}' cmp-demo-web-1 | grep -q true"
+    "sleep 5; docker inspect --format '{{.State.Running}}' cmp-demo-web-1 | grep -q true; "
+    # Same ledger as activate.sh: which web revision went live with which .env/web.env (fingerprints only).
+    f"printf '%s web-only rev=%s web={revision} env=%s web_env=%s result=success\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" "
+    "\"$(cat /opt/cmp/current-revision)\" \"$(sha256sum /opt/cmp/.env | cut -c1-12)\" "
+    "\"$( (sha256sum /opt/cmp/web.env 2>/dev/null || echo absent) | cut -c1-12)\" >>/opt/cmp/deploy-history.log; "
+    "docker image prune -f >/dev/null 2>&1 || true"
 )
 with open(path, "w", encoding="utf-8") as target:
     json.dump({"InstanceIds": [instance], "DocumentName": "AWS-RunShellScript", "Parameters": {"commands": [command]}}, target)
