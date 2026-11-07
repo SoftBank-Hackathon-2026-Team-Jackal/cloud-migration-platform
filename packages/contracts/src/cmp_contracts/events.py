@@ -493,6 +493,7 @@ class TrafficSnapshotNotesItem(WebModel):
         "inject",
         "drained",
         "restart",
+        "idleProbe",
     ]
     params: dict[str, str | float] | None = Field(default=None)
     activity: str | None = Field(default=None)
