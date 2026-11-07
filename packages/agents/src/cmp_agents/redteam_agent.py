@@ -189,6 +189,10 @@ class LoopResult(BaseModel):
     stopped_reason: Literal["DONE", "TURN_LIMIT", "TIME_LIMIT", "EXECUTOR_ERROR"]
     turns_used: int
     observations: list[ObservedResult]
+    # The call behind each observation, in the same order. A refused call is here too (its
+    # observation is the refusal code), so a Finding's reproduction can be checked against what
+    # was actually sent and not against what a model says it sent.
+    calls: list[ToolCall] = Field(default_factory=list)
 
 
 def run_loop(
@@ -205,23 +209,33 @@ def run_loop(
     `call=None` ends the run as `DONE` instead of hitting a limit."""
     deadline = clock() + budget.max_seconds
     history: list[ObservedResult] = []
+    sent: list[ToolCall] = []
     turns = 0
     while True:
         if turns >= budget.max_turns:
-            return LoopResult(stopped_reason="TURN_LIMIT", turns_used=turns, observations=history)
+            return LoopResult(
+                stopped_reason="TURN_LIMIT", turns_used=turns, observations=history, calls=sent
+            )
         if clock() >= deadline:
-            return LoopResult(stopped_reason="TIME_LIMIT", turns_used=turns, observations=history)
+            return LoopResult(
+                stopped_reason="TIME_LIMIT", turns_used=turns, observations=history, calls=sent
+            )
         decision = decide(history)
         turns += 1
         if decision.call is None:
-            return LoopResult(stopped_reason="DONE", turns_used=turns, observations=history)
+            return LoopResult(
+                stopped_reason="DONE", turns_used=turns, observations=history, calls=sent
+            )
         refusal = allowed.check(decision.call)
         if refusal is not None:
             history.append(ObservedResult.from_raw(refusal))
+            sent.append(decision.call)
             continue
         try:
-            history.append(dispatch(decision.call))
+            observed = dispatch(decision.call)
+            history.append(observed)
+            sent.append(decision.call)
         except Exception:  # noqa: BLE001 — a dead executor ends the run, it never crashes it
             return LoopResult(
-                stopped_reason="EXECUTOR_ERROR", turns_used=turns, observations=history
+                stopped_reason="EXECUTOR_ERROR", turns_used=turns, observations=history, calls=sent
             )

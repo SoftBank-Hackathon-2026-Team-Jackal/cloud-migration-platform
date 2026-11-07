@@ -7,6 +7,7 @@ here; the source stays in the workspace on this worker.
 
 from typing import Any, Literal
 
+from cmp_agents.redteam_agent import Endpoint
 from cmp_contracts.analysis import AnalysisReport
 from cmp_contracts.provisioning import ContentRef, Image
 from cmp_contracts.provisioning_v2 import RequirementsV2
@@ -17,6 +18,7 @@ from cmp_testsuite.standard import AppApi, standard_cases
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cmp_worker.artifact_store import ArtifactRef, LocalArtifactStore
+from cmp_worker.redteam_safeguards import Intensity
 
 # Official postgres:16 pinned by digest (D-11 is still open: nobody owns the choice yet).
 POSTGRES_16 = Image(
@@ -49,6 +51,12 @@ class SandboxSettings(BaseModel):
     # the per-run approval of ticket 34, so on its own this setting starts nothing.
     redteam: bool = False
     redteam_consent_ref: str | None = None
+    # Ticket 38: what a run is given. The routes are the grey-box input (ADR-008 R7); the first
+    # cycle takes them from the demo app's own list, not from the analysis.
+    redteam_endpoints: list[Endpoint] = Field(default_factory=list)
+    redteam_intensity: Intensity = Intensity.PASSIVE
+    redteam_time_budget_seconds: int = Field(default=300, ge=30, le=3600)
+    redteam_max_turns: int = Field(default=20, ge=1, le=100)
     write_path: str | None = None
     read_path: str | None = None
     # The app's write API shape (ticket 27); see `AppApi`. Left out, the original shape is used.
@@ -63,6 +71,8 @@ class SandboxSettings(BaseModel):
     def _redteam_needs_consent(self) -> "SandboxSettings":
         if self.redteam and not self.redteam_consent_ref:
             raise ValueError("REDTEAM_CONSENT_MISSING")
+        if self.redteam and not self.redteam_endpoints:
+            raise ValueError("REDTEAM_ENDPOINTS_MISSING")
         return self
 
 
@@ -145,6 +155,20 @@ def assemble_sandbox_input(
         "keep_hosts": [*keep_hosts(report, settings.region), *settings.extra_keep_hosts],
         "source_hosts": settings.source_hosts,
         **({"ai_tests": True} if settings.ai_tests else {}),
+        **(
+            {
+                "redteam": {
+                    "intensity": settings.redteam_intensity.value,
+                    "time_budget_seconds": settings.redteam_time_budget_seconds,
+                    "target_resource_id": apps[0].id,
+                    "consent_ref": settings.redteam_consent_ref,
+                    "endpoints": [e.model_dump() for e in settings.redteam_endpoints],
+                    "max_turns": settings.redteam_max_turns,
+                }
+            }
+            if settings.redteam
+            else {}
+        ),
         "analysis_report_ref": report_ref,
         "review_ref": review.get("review_ref"),
     }

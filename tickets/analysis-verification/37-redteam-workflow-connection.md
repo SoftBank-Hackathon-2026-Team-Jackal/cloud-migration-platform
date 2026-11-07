@@ -51,6 +51,7 @@ Blocked by: 33, 34, 35, 36 (병합됨)
 ## 티켓과 달라진 점·알려진 한계
 - **기존 옵트인(`SandboxSettings.redteam`·동의 참조)과 파이프라인은 아직 이어지지 않았다.** 이 티켓의 입력 `SandboxInput.redteam`은 같은 동의 참조(`consent_ref`)를 요구하지만, `MigrationWorkflow`가 `SandboxSettings`에서 이 입력을 만들어 주지는 않는다(경로 목록·대상 리소스의 출처가 ADR-008 R7에서 미정). 그래서 전체 파이프라인 실행은 레드팀 없이 기존과 똑같이 돈다
 - **승인은 Signal 하나로 시작한다.** 화면·API는 승인 화면 담당과 합의 전이다(ADR-008 결정 9). `redteam_state` Query가 승인 화면에 보일 내용을 준다
+- **(티켓 38에서 해소)** 아래 두 항목(키트 배선, 설정→입력)은 [티켓 38](38-redteam-execution-wiring.md)(#355)에서 채웠다.
 - **`RedTeamKit`을 만드는 운영 배선이 없다.** `build_sandbox_loop`는 아직 키트를 넘기지 않아 운영 Worker에서 이 단계는 `SKIPPED`로 남는다. 모델 호출·도구 실행·판단은 다음 작업이다
 - **승인 장부는 메모리형이다**(`InMemoryApprovalLedger`). Worker가 여러 대이면 업무 DB 기반으로 바꿔야 한다
 - **재확인 승인도 매번 받는다.** 수정 뒤 확인마다 사용자에게 답을 요청하므로, 승인 한 번으로 재확인까지 묶을지는 사용자 결정이 필요하다

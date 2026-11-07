@@ -249,7 +249,14 @@ def test_nothing_changes_for_existing_output_when_red_team_is_off():
 
 
 def isolation(
-    tmp_path, *, verdicts=None, labels=NS_LABELS, running="", phase="Succeeded", **runner_kw
+    tmp_path,
+    *,
+    verdicts=None,
+    labels=NS_LABELS,
+    running="",
+    phase="Succeeded",
+    ready="true",
+    **runner_kw,
 ):
     verdicts = {name: name == "app" for name in ALL_CHECKS} | (verdicts or {})
     log = "\n".join(json.dumps({"check": k, "reachable": v}) for k, v in verdicts.items())
@@ -259,6 +266,7 @@ def isolation(
             "get pods -A": running.encode(),
             "logs cmp-redteam-vf": log.encode(),
             "jsonpath={.status.phase}": phase.encode(),
+            "containerStatuses[0].ready": ready.encode(),
             "service kubernetes": b"10.43.0.1",
             "service kube-dns": b"10.43.0.10",
             "service cmp-egress-proxy": b"10.43.0.30",
@@ -307,6 +315,43 @@ def test_a_proven_isolation_hands_out_an_executor_and_removes_everything_afterwa
     assert any("networkpolicy cmp-redteam-egress" in c for c in text)
     dns = [d for d in applied(runner) if d["metadata"]["name"] == "cmp-allow-dns"]
     assert dns[-1]["spec"]["podSelector"] == {}  # the original DNS policy is back
+
+
+def test_the_executor_is_handed_out_only_once_its_container_is_ready(tmp_path):
+    # Found on the real cluster: the Pod is created at once but its container starts later, and a
+    # tool run in between fails with "container not found".
+    guard, plan, runner = isolation(tmp_path)
+    with guard.session(plan, target_resource_id="orders-api") as executor:
+        ready_checks = [
+            i for i, (a, _) in enumerate(runner.calls) if any("containerStatuses" in x for x in a)
+        ]
+        assert ready_checks and executor.name in " ".join(runner.calls[ready_checks[0]][0])
+
+
+def test_an_executor_that_never_becomes_ready_is_not_handed_out_and_is_cleaned_up(tmp_path):
+    guard, plan, runner = isolation(tmp_path, ready="false")
+    assert refused(guard, plan) == "REDTEAM_EXECUTOR_NOT_READY"
+    assert any("pod cmp-redteam-" in c for c in deleted(runner))
+
+
+def test_a_headless_database_service_is_checked_by_the_address_of_its_pod(tmp_path):
+    # The real database chart exposes a headless Service (`clusterIP: None`): there is no cluster
+    # address, so the check must use the Pod address behind it, or the isolation is unprovable.
+    guard, plan, runner = isolation(
+        tmp_path, outputs={"service db-": b"None", "endpoints db-": b"10.42.0.77"}
+    )
+    with guard.session(plan, target_resource_id="orders-api"):
+        pass
+    verifier = next(
+        d for d in applied(runner) if d["kind"] == "Pod" and "redteam-vf" in d["metadata"]["name"]
+    )
+    assert "10.42.0.77" in json.dumps(verifier)
+    assert any("get endpoints" in " ".join(a) for a, _ in runner.calls)
+
+
+def test_a_headless_service_with_no_ready_pod_makes_the_isolation_unprovable(tmp_path):
+    guard, plan, _ = isolation(tmp_path, outputs={"service db-": b"None", "endpoints db-": b""})
+    assert refused(guard, plan) == "REDTEAM_ISOLATION_NOT_ENFORCED"
 
 
 @pytest.mark.parametrize("forbidden", FORBIDDEN)
@@ -423,4 +468,10 @@ def test_red_team_is_off_by_default_and_needs_a_consent_reference_to_turn_on():
     assert SandboxSettings().redteam is False
     with pytest.raises(ValidationError):
         SandboxSettings(redteam=True)
-    assert SandboxSettings(redteam=True, redteam_consent_ref="approval-1").redteam is True
+    routes = [{"method": "GET", "path": "/items"}]  # ticket 38: the grey-box input is required too
+    assert (
+        SandboxSettings(
+            redteam=True, redteam_consent_ref="approval-1", redteam_endpoints=routes
+        ).redteam
+        is True
+    )

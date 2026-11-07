@@ -642,6 +642,7 @@ class SandboxLoopActivities:
             suite_sha256=ArtifactRef.model_validate(payload["suite_ref"]).sha256,
             requirements_text=canonical_requirements(requirements)[0].decode(),
             previous=payload.get("previous_findings") or [],
+            migration_id=inp.migration_id,
         )
 
     @activity.defn(name="sbx_ai_tests")

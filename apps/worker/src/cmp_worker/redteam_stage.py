@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from cmp_agents.redteam_agent import (
     AgentInput,
@@ -75,24 +75,34 @@ class RedTeamInput(BaseModel):
     max_turns: int = Field(default=20, ge=1, le=100)
 
 
+class Brain(Protocol):
+    """The model's part (see `cmp_worker.redteam_brain.Brain`)."""
+
+    error: str | None
+
+    def decide(self, agent_input: AgentInput) -> Callable[[list[ObservedResult]], Decision]: ...
+
+    def detect(self, agent_input: AgentInput, loop: LoopResult) -> list[dict[str, Any]]: ...
+
+    def reproduces(self, finding: Finding, observed: ObservedResult) -> bool: ...
+
+
 @dataclass(frozen=True)
 class RedTeamKit:
     """Everything a run needs that is not decided by the safeguards themselves.
 
-    `decide(input)` returns the per-turn model call; `dispatch(executor)` returns the function that
-    runs one allowed tool in that executor; `detect` turns what the loop saw into candidate
-    Findings (dicts with `category`, `severity`, `endpoint`, `summary`, `repro_summary`,
-    `evidence` and `repro: {tool, path}`); `reproduces` says whether one stored reproduction still
-    works on a new image. `known_secrets` are the values the Sandbox Secret holds, for masking.
+    `brain(migration_id)` gives one run's model calls (the spend is booked against that
+    migration); `dispatch(executor, secrets)` returns the function that runs one allowed tool in
+    that executor, masking the app's own secret values from what it returns. `detect` drafts are
+    dicts with `category`, `severity`, `endpoint`, `summary`, `repro_summary`, `evidence` and
+    `repro: {tool, path}`. `known_secrets` are the values the Sandbox Secret holds.
     """
 
     runner: RedTeamRunner
     store: ArtifactStore
     allowed: AllowList
-    decide: Callable[[AgentInput], Callable[[list[ObservedResult]], Decision]]
-    dispatch: Callable[[Executor], Callable[[ToolCall], ObservedResult]]
-    detect: Callable[[AgentInput, LoopResult], list[dict[str, Any]]]
-    reproduces: Callable[[Finding, ObservedResult], bool]
+    brain: Callable[[str], Brain]
+    dispatch: Callable[[Executor, list[str]], Callable[[ToolCall], ObservedResult]]
     known_secrets: Callable[[SandboxPlan], list[str]] = lambda plan: []
 
 
@@ -135,6 +145,7 @@ def run_stage(
     suite_sha256: str,
     requirements_text: str,
     previous: list[dict],
+    migration_id: str = "",
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> dict:
     """One approved run. First time (`previous` empty) the Agent explores; with `previous` it only
@@ -151,6 +162,7 @@ def run_stage(
         return _skipped(NOT_APPROVED, previous)
     config = RunConfig(intensity=red.intensity, time_budget_seconds=red.time_budget_seconds)
     secrets = kit.known_secrets(plan)
+    brain = kit.brain(migration_id)
     found: list[Finding] = []
     repros: dict[str, dict] = {}
     withheld: list[dict] = []
@@ -162,9 +174,9 @@ def run_stage(
         with kit.runner.run(
             plan, target_resource_id=red.target_resource_id, config=config, approval=approved
         ) as run:
-            dispatch = kit.dispatch(run.executor)
+            dispatch = kit.dispatch(run.executor, secrets)
             if previous:
-                found, resolved, stopped = _recheck(kit, dispatch, previous, digest, clock)
+                found, resolved, stopped = _recheck(brain, dispatch, previous, digest, clock)
                 repros = {f["finding_id"]: f["repro"] for f in previous}
             else:
                 agent_input = build_input(
@@ -173,7 +185,7 @@ def run_stage(
                     known_secrets=secrets,
                 )
                 loop = run_loop(
-                    kit.decide(agent_input),
+                    brain.decide(agent_input),
                     dispatch,
                     allowed=kit.allowed,
                     budget=TurnBudget(
@@ -183,7 +195,7 @@ def run_stage(
                 )
                 stopped = loop.stopped_reason
                 found, repros, withheld = _findings(
-                    kit, kit.detect(agent_input, loop), digest, suite_sha256, red.intensity,
+                    kit, brain.detect(agent_input, loop), digest, suite_sha256, red.intensity,
                     secrets, clock,
                 )  # fmt: skip
             ran = True
@@ -198,7 +210,7 @@ def run_stage(
     return {
         "status": status, "code": code,
         "open": [{**f.model_dump(mode="json"), "repro": repros[f.finding_id]} for f in found],
-        "resolved": resolved, "withheld": withheld,
+        "resolved": resolved, "withheld": withheld, "model_error": brain.error,
         "summary": summarize(found).model_dump(mode="json"), "stopped_reason": stopped,
     }  # fmt: skip
 
@@ -237,7 +249,7 @@ def _findings(
 
 
 def _recheck(
-    kit: RedTeamKit,
+    brain: Brain,
     dispatch: Callable[[ToolCall], ObservedResult],
     previous: list[dict],
     digest: str,
@@ -254,7 +266,7 @@ def _recheck(
         call = ToolCall.model_validate(entry["repro"])
 
         def reproduce(f: Finding, _digest: str, call: ToolCall = call) -> bool:
-            return kit.reproduces(f, dispatch(call))
+            return brain.reproduces(f, dispatch(call))
 
         try:
             record = revalidate(finding, digest, reproduce=reproduce, ledger=ledger)

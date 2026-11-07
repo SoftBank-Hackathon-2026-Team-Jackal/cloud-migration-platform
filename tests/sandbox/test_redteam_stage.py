@@ -73,16 +73,25 @@ class Env:
             ledger or InMemoryApprovalLedger(), clock=lambda: at(self.plan, left),
         )  # fmt: skip
 
-        def decide(agent_input):
-            def turn(history):
-                env.decided += 1
-                if env.decided > 1:
-                    return Decision(call=None)
-                return Decision(call={"tool": "probe_get", "path": "/items?id=2"})
+        class FakeBrain:
+            error = None
 
-            return turn
+            def decide(self, agent_input):
+                def turn(history):
+                    env.decided += 1
+                    if env.decided > 1:
+                        return Decision(call=None)
+                    return Decision(call={"tool": "probe_get", "path": "/items?id=2"})
 
-        def dispatch(executor):
+                return turn
+
+            def detect(self, agent_input, loop):
+                return list(env.drafts)
+
+            def reproduces(self, finding, observed):
+                return env.still_reproduces
+
+        def dispatch(executor, secrets):
             def call(tool_call):
                 env.events.append("dispatch")
                 if env.dispatch_fails:
@@ -96,10 +105,8 @@ class Env:
             runner=runner,
             store=self.store,
             allowed=AllowList({"probe_get"}),
-            decide=decide,
+            brain=lambda migration_id: FakeBrain(),
             dispatch=dispatch,
-            detect=lambda agent_input, loop: list(env.drafts),
-            reproduces=lambda finding, observed: env.still_reproduces,
             known_secrets=lambda plan: [SECRET],
         )
 
