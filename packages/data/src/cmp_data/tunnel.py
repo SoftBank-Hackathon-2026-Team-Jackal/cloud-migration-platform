@@ -41,21 +41,29 @@ LABELS = {"app.kubernetes.io/managed-by": "cmp-data-migration"}
 SECRET_KEY = "private"
 Side = Literal["source", "target"]
 
+# Provisioning 81: 컨테이너가 재시작하면 같은 Pod 네트워크에 이전 wg0이 남는다(먼저 지운다). 막 생긴 NLB의
+# DNS 이름은 몇 분 뒤에 풀리므로 endpoint는 풀릴 때까지 다시 시도한다. 상한은 dm_tunnel의 handshake 대기다.
 START_SCRIPT = """set -eu
 apk add --no-cache wireguard-tools wireguard-go socat iproute2 >/dev/null
+ip link del wg0 2>/dev/null || true
 if ! ip link add wg0 type wireguard 2>/dev/null; then
   mkdir -p /dev/net; [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
   WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1 wireguard-go wg0
 fi
 wg set wg0 private-key /etc/wg/private listen-port 51820 \\
-  peer "$PEER_PUBLIC_KEY" allowed-ips "$PEER_IP/32" persistent-keepalive "${KEEPALIVE:-15}" \\
-  ${PEER_ENDPOINT:+endpoint "$PEER_ENDPOINT"}
+  peer "$PEER_PUBLIC_KEY" allowed-ips "$PEER_IP/32" persistent-keepalive "${KEEPALIVE:-15}"
 ip addr add "$WG_IP/24" dev wg0
 ip link set mtu 1420 up dev wg0
 socat TCP-LISTEN:5432,bind="$WG_IP",fork,reuseaddr TCP:"$LOCAL_DB":5432 &
 socat TCP-LISTEN:5432,bind="$POD_IP",fork,reuseaddr TCP:"$PEER_IP":5432 &
 if [ -n "${HEALTH_PORT:-}" ]; then
   socat TCP-LISTEN:"$HEALTH_PORT",bind="$POD_IP",fork,reuseaddr SYSTEM:true &
+fi
+if [ -n "${PEER_ENDPOINT:-}" ]; then
+  (until wg set wg0 peer "$PEER_PUBLIC_KEY" endpoint "$PEER_ENDPOINT"; do
+    echo "PEER_ENDPOINT_UNRESOLVED $PEER_ENDPOINT; retrying in 5s" >&2
+    sleep 5
+  done) &
 fi
 touch /tmp/started
 wait
