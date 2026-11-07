@@ -72,11 +72,11 @@ EOF
   fi
 fi
 
-# relay worker가 쓰는 파일만: cmp_traffic 전체 + cmp_worker의 relay 경로(workers/relay.py → activities/traffic.py, config.py)
+# relay worker가 쓰는 파일만: cmp_traffic 전체 + cmp_worker의 relay 경로(workers/relay.py → activities/traffic.py·traffic_shadow.py, config.py)
 mkdir -p "$work/lib"
 git archive "$REF" packages/traffic/src/cmp_traffic | tar -x -C "$work"
 mv "$work/packages/traffic/src/cmp_traffic" "$work/lib/"
-for f in __init__.py config.py activities/__init__.py activities/traffic.py workers/__init__.py workers/relay.py; do
+for f in __init__.py config.py activities/__init__.py activities/traffic.py activities/traffic_shadow.py workers/__init__.py workers/relay.py; do
   mkdir -p "$work/lib/cmp_worker/$(dirname "$f")"
   git show "$REF:apps/worker/src/cmp_worker/$f" > "$work/lib/cmp_worker/$f"
 done
