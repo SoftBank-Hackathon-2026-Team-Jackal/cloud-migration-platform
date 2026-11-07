@@ -23,7 +23,7 @@ PROV-009, 017, 021, DM-011, ADR-007, [16](16-tunnel-config-exchange.md), [63 pee
 
 | ID | 항목 | 결정 | 근거·대안 |
 | --- | --- | --- | --- |
-| R1 | 전달기 | **별도 Envoy**(`envoy-kube`, 호스트 네트워크, 관리 포트 127.0.0.1:9902)가 `/etc/envoy-kube/{lds,cds}.json` 파일을 감시(동적, 파일 방식) | 기존 동적 대상(CDS 파일)과 같은 방식. 사용자 Envoy에 LDS를 더하려면 bootstrap 교체·재시작이 필요하고, 그 CDS 파일은 relay-worker가 `cluster_target` 하나로 통째로 덮어써 함께 쓸 수 없다. 정적 설정은 Agent마다 재시작이 필요해 버림 |
+| R1 | 전달기 | **별도 Envoy**(`envoy-kube`, 호스트 네트워크, 관리 포트 127.0.0.1:9902, `--base-id 1`)가 `/etc/envoy-kube/{lds,cds}.json` 파일을 감시(동적, 파일 방식) | 기존 동적 대상(CDS 파일)과 같은 방식. 사용자 Envoy에 LDS를 더하려면 bootstrap 교체·재시작이 필요하고, 그 CDS 파일은 relay-worker가 `cluster_target` 하나로 통째로 덮어써 함께 쓸 수 없다. 정적 설정은 Agent마다 재시작이 필요해 버림 |
 | R2 | 누가 파일을 쓰나 | peer 동기화(`PeerSyncer(forwards=…)`)가 wg peer 적용 **뒤** 같은 목록으로 쓴다. 목록이 잘못되면(중복·범위 밖) 아무 파일도 바꾸지 않는다 | 이미 목록을 폴링·검증하는 상시 프로세스. 새 폴러를 두지 않는다 |
 | R3 | 리슨 주소 | 중계 서버 **사설 IP 하나**(`KUBE_FORWARD_BIND_IP`, 스크립트는 IMDSv2 `local-ipv4`). 0.0.0.0·공인·루프백·터널 대역(10.200.0.0/24)은 거부 | 공인 노출 금지. 터널 대역에 열면 Agent 쪽에서 닿는다 |
 | R4 | 리슨 포트 | `16400 + (터널 IP − 10.200.0.0)` → 10.200.0.2 = **16402**, 최대 16654. `KUBE_FORWARD_BASE_PORT`로 바꿀 수 있다 | 터널 IP는 키를 바꿔도 유지된다(16 T4). 다른 Agent·순서와 무관하고 75번이 터널 IP만으로 계산한다. "순번" 방식은 Agent 추가·폐기 때 포트가 밀린다 |
@@ -70,6 +70,7 @@ KubeForwardFiles(directory, bind_ip, tunnel_cidr, base_port).apply(listing)
 - [x] 0.0.0.0·공인·루프백·터널 대역 bind 거부, 파일을 쓰기 전에 거부
 - [x] 폐기·미노출·허용 포트 밖이면 리스너·클러스터 제거, 잘못된 목록이면 파일 그대로
 - [x] 사용자 HTTP 경로 Envoy 설정·코드 변화 없음(별도 Envoy, 9902)
+- [x] envoy-kube는 `--base-id 1`: 같은 호스트 네트워크의 사용자 Envoy가 hot-restart 도메인 소켓 base-id 0을 써서, 없으면 `errno=98`로 재시작을 반복한다(2026-11-07 실서버 반영 때 발견, #314)
 - [x] Envoy v1.32 컨테이너에서 생성 파일 로드·리스너 추가·제거 확인(로컬, 2026-11-07)
 - [ ] 실측: 중계 서버 반영 뒤 데모 서버에서 `kubectl --kubeconfig … get --raw /readyz` (75 kubeconfig 뒤, 승인 필요)
 

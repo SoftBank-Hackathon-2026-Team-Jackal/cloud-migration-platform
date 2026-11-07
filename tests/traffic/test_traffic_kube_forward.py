@@ -256,3 +256,15 @@ def test_enable_script_runs_the_python_that_has_pydantic() -> None:
     assert 'PYTHON="${PYTHON:-python3.11}"' in script
     assert 'PYTHONPATH="$LIB" "$PYTHON" -' in script
     assert 'PYTHONPATH="$LIB" python3 -' not in script
+
+
+def test_enable_script_gives_envoy_kube_its_own_base_id() -> None:
+    # Provisioning 78: two Envoys on the host network collide on the hot-restart domain socket
+    # (base-id 0, errno=98) and envoy-kube restarts forever. The user-path Envoy keeps 0.
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[2] / "infra/relay/enable-kube-api-forward.sh"
+    ).read_text()
+    run = next(line for line in script.splitlines() if '"$ENVOY_IMAGE"' in line)
+    assert "--base-id 1" in run
