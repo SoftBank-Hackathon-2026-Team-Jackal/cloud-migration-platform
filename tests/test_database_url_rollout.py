@@ -48,7 +48,12 @@ def test_fresh_rollout_creates_the_url_secret_from_the_generated_password():
     assert unquote(url.username) == "appuser" and unquote(url.path[1:]) == "app db"
     assert unquote(url.password) == password_of(cluster)
     # Password Secret first, then the URL Secret, then Helm.
-    assert cluster.mutations[:2] == [("apply", "Secret"), ("apply", "Secret")]
+    # the data migration RoleBinding (Provisioning 84) comes first, then the two Secrets
+    assert cluster.mutations[:3] == [
+        ("apply", "RoleBinding"),
+        ("apply", "Secret"),
+        ("apply", "Secret"),
+    ]
 
 
 def test_user_provided_password_is_used_and_a_stale_url_is_refreshed():
