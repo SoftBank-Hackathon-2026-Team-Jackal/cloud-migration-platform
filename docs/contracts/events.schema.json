@@ -117,6 +117,9 @@
       "$ref": "#/$defs/event:sandbox.done"
     },
     {
+      "$ref": "#/$defs/event:sandbox.redteam"
+    },
+    {
       "$ref": "#/$defs/event:snapshot"
     }
   ],
@@ -4931,6 +4934,9 @@
         },
         {
           "$ref": "#/$defs/event:sandbox.done"
+        },
+        {
+          "$ref": "#/$defs/event:sandbox.redteam"
         }
       ]
     },
@@ -5229,6 +5235,195 @@
         "type",
         "status",
         "data"
+      ],
+      "additionalProperties": false
+    },
+    "event:sandbox.redteam": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "sandbox.redteam"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:sandbox.redteam"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false,
+      "description": "[가정: 이벤트 계약 없음] 샌드박스 레드팀(능동 공격 검증) 진행. 동의는 이전 시작 때 한 번 받고 중간 승인은 없다(승철님 결정). 시험 통과 직후 공격 → 보안 수정 → 다시 확인 → 끝. 승철님 이벤트 계약이 정해지면 맞춘다."
+    },
+    "data:sandbox.redteam": {
+      "type": "object",
+      "properties": {
+        "phase": {
+          "enum": [
+            "RUNNING",
+            "FIXING",
+            "DONE"
+          ]
+        },
+        "consent": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "intensity": {
+                  "enum": [
+                    "PASSIVE",
+                    "ACTIVE"
+                  ]
+                },
+                "time_budget_seconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "test_data_is_reset_afterwards": {
+                  "type": "boolean"
+                },
+                "outside_calls_are_cut_meanwhile": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "target",
+                "scope",
+                "intensity",
+                "time_budget_seconds",
+                "test_data_is_reset_afterwards",
+                "outside_calls_are_cut_meanwhile"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "[가정] 이전을 시작할 때 동의한 범위. 동의 없이 건너뛴 실행은 null"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "[가정] 보안 수정 회차(기능 수정 횟수와 따로 센다)"
+        },
+        "max_rounds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "severity": {
+                "enum": [
+                  "INFO",
+                  "LOW",
+                  "MEDIUM",
+                  "HIGH",
+                  "CRITICAL"
+                ]
+              },
+              "endpoint": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "repro_summary": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "OPEN",
+                  "FIXED",
+                  "STILL_OPEN"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "category",
+              "severity",
+              "endpoint",
+              "summary",
+              "repro_summary",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "status": {
+          "enum": [
+            "CLEAN",
+            "FIXED",
+            "OPEN",
+            "STILL_OPEN",
+            "SKIPPED",
+            "ERROR",
+            null
+          ]
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "[가정] 건너뜀·오류 사유(REDTEAM_DECLINED 등)"
+        },
+        "withheld": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "[가정] 증거에 비밀이 남아 저장하지 않은 약점 수"
+        }
+      },
+      "required": [
+        "phase",
+        "consent",
+        "round",
+        "max_rounds",
+        "findings",
+        "status",
+        "code",
+        "withheld"
       ],
       "additionalProperties": false
     }

@@ -852,6 +852,40 @@ class SandboxDoneData(WebModel):
     digest: str | None
 
 
+class RedTeamConsentData(WebModel):
+    """What the user agreed to when the migration started (web `data:sandbox.redteam.consent`)."""
+
+    target: str
+    scope: str
+    intensity: Literal["PASSIVE", "ACTIVE"]
+    time_budget_seconds: int = Field(ge=1)
+    test_data_is_reset_afterwards: bool
+    outside_calls_are_cut_meanwhile: bool
+
+
+class RedTeamFindingData(WebModel):
+    """A weakness as the screen shows it. No request, no evidence reference: those stay in the artifact."""
+
+    id: str
+    category: str
+    severity: Literal["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    endpoint: str
+    summary: str
+    repro_summary: str
+    state: Literal["OPEN", "FIXED", "STILL_OPEN"]
+
+
+class SandboxRedteamData(WebModel):
+    phase: Literal["RUNNING", "FIXING", "DONE"]
+    consent: RedTeamConsentData | None
+    round: int = Field(ge=0)
+    max_rounds: int = Field(ge=1)
+    findings: list[RedTeamFindingData]
+    status: Literal["CLEAN", "FIXED", "OPEN", "STILL_OPEN", "SKIPPED", "ERROR"] | None
+    code: str | None
+    withheld: int = Field(ge=0)
+
+
 DATA_MODELS: dict[str, type[WebModel]] = {
     "analysis.finding": AnalysisFindingData,
     "analysis.scan": AnalysisScanData,
@@ -891,6 +925,7 @@ DATA_MODELS: dict[str, type[WebModel]] = {
     "sandbox.tests": SandboxTestsData,
     "sandbox.attempt": SandboxAttemptData,
     "sandbox.done": SandboxDoneData,
+    "sandbox.redteam": SandboxRedteamData,
 }
 # Types whose `data` has a second accepted shape (web `oneOf`), chosen when `data.changes` is a list (web `isBackendPreview`).
 ALTERNATE_MODELS: dict[str, tuple[str, type[WebModel]]] = {

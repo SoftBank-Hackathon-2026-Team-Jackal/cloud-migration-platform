@@ -13,6 +13,7 @@ with workflow.unsafe.imports_passed_through():
     from cmp_worker.review_gate import ReapprovalGate
     from cmp_worker.sandbox_deploy import sandbox_namespace
     from cmp_worker.sandbox_events import attempt_data, context, event_key, image_digest
+    from cmp_worker.sandbox_redteam_events import consent_view, finding_view, redteam_data
 
 # Provisioning 59: the loop emits `build.*`/`sandbox.*`. Histories without this marker replay as
 # before (no events context, no `sbx_emit`).
@@ -20,6 +21,9 @@ SANDBOX_EVENTS_PATCH = "sandbox-events-v1"
 # Ticket 37: the red-team step. Only a run whose input asks for it ever reaches this marker, so
 # histories that never had the field replay exactly as before.
 REDTEAM_PATCH = "redteam-v1"
+# The user agrees once, when the migration starts (the consent is part of the input); nothing waits
+# for a person in the middle of a run. Histories that already waited for the signal replay as before.
+REDTEAM_CONSENT_PATCH = "redteam-consent-v1"
 
 
 @workflow.defn
@@ -277,6 +281,44 @@ class SandboxVerificationWorkflow:
         def red_report(status: str, code: str | None, open_: list[dict], **more) -> dict:
             return {"status": status, "code": code, "open": open_, **more}
 
+        consent_given = red_on and workflow.patched(REDTEAM_CONSENT_PATCH)
+        red_consent: dict | None = None  # what the user agreed to, as the screen shows it
+        red_seen: dict[str, tuple[dict, str]] = {}  # every weakness found, with its latest state
+        red_withheld = 0
+
+        async def emit_redteam(phase: str, status: str | None = None, code: str | None = None):
+            if not consent_given:
+                return
+            payload = redteam_data(
+                phase,
+                consent=red_consent,
+                round_no=min(sec_attempts, MAX_SECURITY_ATTEMPTS),
+                max_rounds=MAX_SECURITY_ATTEMPTS,
+                findings=[finding_view(f, state) for f, state in red_seen.values()],
+                status=status,
+                code=code,
+                withheld=red_withheld,
+            )
+            await emit(
+                (
+                    "sandbox.redteam",
+                    "done" if phase == "DONE" else "running",
+                    payload,
+                    event_key(run, self.attempt, "redteam", f"{phase}-{sec_attempts}"),
+                )
+            )
+
+        def note_findings(report: dict, open_state: str) -> None:
+            """Remember what one red-team run found: what it resolved is fixed, what is still
+            open gets `open_state`. A Finding keeps the text it was first seen with."""
+            nonlocal red_withheld
+            red_withheld += len(report.get("withheld", []))
+            for item in report.get("open", []):
+                red_seen[item["finding_id"]] = (item, open_state)
+            for fid in report.get("resolved", []):
+                if fid in red_seen:
+                    red_seen[fid] = (red_seen[fid][0], "FIXED")
+
         async def redteam_round(plan, digest, previous: list[dict]) -> dict:
             """Ask a person, wait for the answer inside the Sandbox's life, then run once. A
             refusal of any kind is a report, not a failure: the run has already passed (R3)."""
@@ -284,20 +326,39 @@ class SandboxVerificationWorkflow:
             asked = await act("sbx_redteam_request", {"input": data, "plan": plan})
             if asked["wait_seconds"] <= 0:
                 return {"status": "SKIPPED", "code": "REDTEAM_TIME_INSUFFICIENT", "open": previous}
-            self.redteam_request, self.redteam_approval = asked["request"], None
-            self.redteam_declined = False
-            self.redteam_phase, self.phase = "WAITING_FOR_APPROVAL", "REDTEAM_APPROVAL_PENDING"
-            await self._tell_parent(True)
-            try:
-                await workflow.wait_condition(
-                    lambda: self.redteam_approval is not None or self.redteam_declined,
-                    timeout=timedelta(seconds=asked["wait_seconds"]),
-                )
-            except TimeoutError:
-                pass
-            await self._tell_parent(False)
-            approval, declined = self.redteam_approval, self.redteam_declined
-            self.redteam_phase = "NONE"
+            nonlocal red_consent
+            if consent_given:
+                # The user agreed when the migration started: that consent is the approval for this
+                # run. Its id names the run and the round, so it can be used up only once.
+                red_cfg = data["redteam"]
+                self.redteam_request = asked["request"]
+                red_consent = consent_view(asked["request"])
+                approval = {
+                    "approval_id": f"{mid}:{data['run_id']}:{self.redteam_round}",
+                    "approver": red_cfg["consent_ref"],
+                    "approved_at": workflow.now().isoformat(),
+                    "run_id": data["run_id"],
+                    "intensity": red_cfg["intensity"],
+                    "time_budget_seconds": red_cfg["time_budget_seconds"],
+                }
+                declined = False
+                if self.redteam_round == 1:
+                    await emit_redteam("RUNNING")
+            else:
+                self.redteam_request, self.redteam_approval = asked["request"], None
+                self.redteam_declined = False
+                self.redteam_phase, self.phase = "WAITING_FOR_APPROVAL", "REDTEAM_APPROVAL_PENDING"
+                await self._tell_parent(True)
+                try:
+                    await workflow.wait_condition(
+                        lambda: self.redteam_approval is not None or self.redteam_declined,
+                        timeout=timedelta(seconds=asked["wait_seconds"]),
+                    )
+                except TimeoutError:
+                    pass
+                await self._tell_parent(False)
+                approval, declined = self.redteam_approval, self.redteam_declined
+                self.redteam_phase = "NONE"
             if approval is None:
                 code = "REDTEAM_DECLINED" if declined else "REDTEAM_APPROVAL_TIMEOUT"
                 return {"status": "SKIPPED", "code": code, "open": previous}
@@ -453,6 +514,7 @@ class SandboxVerificationWorkflow:
                         if report["status"] == "DONE":
                             fixed_before = bool(red_open)
                             red_open = report["open"]
+                            note_findings(report, "OPEN")
                             state = "CLEAN" if not fixed_before else "FIXED"
                             red_result = red_report(
                                 state if not red_open else "OPEN", report.get("code"), red_open,
@@ -462,13 +524,20 @@ class SandboxVerificationWorkflow:
                             )  # fmt: skip
                             if red_open and sec_attempts < MAX_SECURITY_ATTEMPTS:
                                 security_round = True
+                                await emit_redteam("FIXING")
                             elif red_open:
                                 red_result["status"] = "STILL_OPEN"
+                                note_findings({"open": red_open}, "STILL_OPEN")
+                                await emit_redteam("DONE", "STILL_OPEN", report.get("code"))
+                            else:
+                                await emit_redteam("DONE", state, report.get("code"))
                         else:
                             red_result = red_report(
                                 report["status"], report.get("code"), red_open,
                                 withheld=report.get("withheld", []),
                             )  # fmt: skip
+                            note_findings(report, "OPEN")
+                            await emit_redteam("DONE", report["status"], report.get("code"))
                 if self.verdict["passed"] and not security_round:
                     self.attempts.append({"attempt": self.attempt, "passed": True})
                     outcome = "PASSED"
