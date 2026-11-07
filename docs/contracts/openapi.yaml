@@ -2471,6 +2471,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /system/traffic-health:
+    get:
+      tags:
+      - system
+      summary: Origin/target 5xx rate and p99 measured at the relay Envoy
+      operationId: get_traffic_health_system_traffic_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficHealth'
+  /system/traffic-health/report:
+    post:
+      tags:
+      - system
+      summary: Relay reports one window of origin/target request metrics
+      operationId: post_traffic_health_system_traffic_health_report_post
+      parameters:
+      - name: x-pulse-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Pulse-Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthReport'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Health
@@ -3798,6 +3841,24 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HealthReport:
+      properties:
+        window_seconds:
+          type: number
+          maximum: 600.0
+          exclusiveMinimum: 0.0
+          title: Window Seconds
+        origin:
+          $ref: '#/components/schemas/SideWindow'
+        target:
+          $ref: '#/components/schemas/SideWindow'
+      additionalProperties: false
+      type: object
+      required:
+      - window_seconds
+      - origin
+      - target
+      title: HealthReport
     ImagePullCredential:
       properties:
         registry:
@@ -5792,6 +5853,85 @@ components:
       - nodes
       - age_seconds
       title: Side
+    SideSummary:
+      properties:
+        requests:
+          type: integer
+          title: Requests
+        failed:
+          type: integer
+          title: Failed
+        error_rate:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Error Rate
+        p99_ms:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: P99 Ms
+        rps:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Rps
+      type: object
+      required:
+      - requests
+      - failed
+      - error_rate
+      - p99_ms
+      - rps
+      title: SideSummary
+    SideWindow:
+      properties:
+        requests:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Requests
+        errors_5xx:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Errors 5Xx
+        timeouts:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Timeouts
+        failed:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Failed
+        error_rate:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Error Rate
+        rps:
+          type: number
+          minimum: 0.0
+          title: Rps
+        p99_ms:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: P99 Ms
+      additionalProperties: false
+      type: object
+      required:
+      - requests
+      - errors_5xx
+      - timeouts
+      - failed
+      - rps
+      title: SideWindow
     StartSource:
       properties:
         kind:
@@ -6017,6 +6157,42 @@ components:
       - action
       - signal
       title: TrafficActionAccepted
+    TrafficHealth:
+      properties:
+        at:
+          type: string
+          title: At
+        fresh:
+          type: boolean
+          title: Fresh
+        age_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Age Seconds
+        summary:
+          additionalProperties:
+            $ref: '#/components/schemas/SideSummary'
+          propertyNames:
+            enum:
+            - origin
+            - target
+          type: object
+          title: Summary
+        series:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Series
+      type: object
+      required:
+      - at
+      - fresh
+      - age_seconds
+      - summary
+      - series
+      title: TrafficHealth
     Transfer:
       properties:
         bytes:

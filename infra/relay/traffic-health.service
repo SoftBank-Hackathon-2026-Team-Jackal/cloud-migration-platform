@@ -1,0 +1,22 @@
+# 중계 서버 Envoy에서 원본·대상의 5xx 비율과 p99를 5초마다 재서 플랫폼에 보내는 상시 프로세스.
+# 사용: /etc/cmp/traffic-health.env 에 TRAFFIC_HEALTH_URL(https://<플랫폼 호스트>/system/traffic-health/report),
+#       PULSE_TOKEN(플랫폼 PULSE_REPORT_TOKEN과 같은 값)을 적고(권한 600),
+#       이 파일을 /etc/systemd/system/ 에 복사해 `systemctl enable --now traffic-health`.
+#       선택: ENVOY_ADMIN_URL(기본 http://127.0.0.1:9901), TRAFFIC_HEALTH_INTERVAL(기본 5초).
+# 먼저 서버의 /opt/cmp/lib(cmp_traffic)가 이 기능이 들어간 커밋이어야 한다.
+# 단서: 로컬 traffic-lab Envoy에서만 확인했고, 실제 중계 서버에서는 아직 돌려 보지 않았다.
+[Unit]
+Description=Report origin/target 5xx rate and p99 from the relay Envoy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/cmp/traffic-health.env
+Environment=PYTHONPATH=/opt/cmp/lib
+ExecStart=/usr/bin/python3 -m cmp_traffic.health
+Restart=always
+RestartSec=5
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

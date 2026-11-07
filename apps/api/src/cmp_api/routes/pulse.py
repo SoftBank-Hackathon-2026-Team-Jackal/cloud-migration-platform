@@ -15,7 +15,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from cmp_api import pulse
+from cmp_api import pulse, traffic_health
 from cmp_api.config import settings
 from cmp_api.routes.migrations import get_event_sessions
 
@@ -91,4 +91,78 @@ async def post_pulse_report(
     if body.mem_used_mb > body.mem_total_mb:
         raise HTTPException(status_code=422, detail="PULSE_MEMORY_INVALID")
     reports.put(body.role, body.node, body.cpu_percent, body.mem_used_mb, body.mem_total_mb)
+    return Response(status_code=204)
+
+
+class SideWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requests: int = Field(ge=0, le=10_000_000)
+    errors_5xx: int = Field(ge=0, le=10_000_000)
+    timeouts: int = Field(ge=0, le=10_000_000)
+    failed: int = Field(ge=0, le=10_000_000)
+    error_rate: float | None = Field(default=None, ge=0, le=1)
+    rps: float = Field(ge=0)
+    p99_ms: float | None = Field(default=None, ge=0)
+
+
+class HealthReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    window_seconds: float = Field(gt=0, le=600)
+    origin: SideWindow
+    target: SideWindow
+
+
+class SideSummary(BaseModel):
+    requests: int
+    failed: int
+    error_rate: float | None
+    p99_ms: float | None
+    rps: float | None
+
+
+class TrafficHealth(BaseModel):
+    at: str
+    fresh: bool
+    age_seconds: float | None
+    summary: dict[Literal["origin", "target"], SideSummary]
+    series: list[dict]
+
+
+def get_health_store() -> traffic_health.HealthStore:
+    return traffic_health.STORE
+
+
+def _check_token(token: str, given: str | None) -> None:
+    if not token:
+        raise HTTPException(status_code=503, detail="PULSE_REPORT_DISABLED")
+    if not given or not hmac.compare_digest(given.encode(), token.encode()):
+        raise HTTPException(status_code=403, detail="PULSE_TOKEN_INVALID")
+
+
+@router.get(
+    "/traffic-health",
+    response_model=TrafficHealth,
+    summary="Origin/target 5xx rate and p99 measured at the relay Envoy",
+)
+async def get_traffic_health(
+    store: Annotated[traffic_health.HealthStore, Depends(get_health_store)],
+) -> dict:
+    return store.view()
+
+
+@router.post(
+    "/traffic-health/report",
+    status_code=204,
+    summary="Relay reports one window of origin/target request metrics",
+)
+async def post_traffic_health(
+    body: HealthReport,
+    store: Annotated[traffic_health.HealthStore, Depends(get_health_store)],
+    token: Annotated[str, Depends(get_report_token)],
+    x_pulse_token: Annotated[str | None, Header()] = None,
+) -> Response:
+    _check_token(token, x_pulse_token)
+    store.put(body.model_dump())
     return Response(status_code=204)
