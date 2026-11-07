@@ -19,13 +19,15 @@ def enc(text):
     return base64.b64encode(text.encode()).decode()
 
 
-def test_switching_the_red_team_on_needs_consent_and_a_route_list():
+def test_switching_the_red_team_on_needs_consent_at_settings_time():
     ok = SandboxSettings(redteam=True, redteam_consent_ref="c-1", redteam_endpoints=ROUTES)
     assert ok.redteam_intensity.value == "PASSIVE" and ok.redteam_time_budget_seconds == 300
     with pytest.raises(ValueError, match="REDTEAM_CONSENT_MISSING"):
         SandboxSettings(redteam=True, redteam_endpoints=ROUTES)
-    with pytest.raises(ValueError, match="REDTEAM_ENDPOINTS_MISSING"):
-        SandboxSettings(redteam=True, redteam_consent_ref="c-1")
+    # A route list is no longer required here: a Go app's own scanned routes can fill it in at
+    # assemble time (`assemble_sandbox_input`, see tests/analysis/test_sandbox_input.py). Only if
+    # neither source has one does assembling the input itself raise REDTEAM_ENDPOINTS_MISSING.
+    SandboxSettings(redteam=True, redteam_consent_ref="c-1")
     SandboxSettings()  # off by default, and nothing else is asked for
 
 

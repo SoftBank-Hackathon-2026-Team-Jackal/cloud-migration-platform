@@ -71,8 +71,10 @@ class SandboxSettings(BaseModel):
     def _redteam_needs_consent(self) -> "SandboxSettings":
         if self.redteam and not self.redteam_consent_ref:
             raise ValueError("REDTEAM_CONSENT_MISSING")
-        if self.redteam and not self.redteam_endpoints:
-            raise ValueError("REDTEAM_ENDPOINTS_MISSING")
+        # Ticket 38 follow-up: `redteam_endpoints` is no longer required here. A Go app's routes
+        # (`scan_go_routes` -> `assembly["http_routes"]`) can fill this in at assemble time
+        # (`assemble_sandbox_input`); only there, once both sources have had their say, does an
+        # empty list become `REDTEAM_ENDPOINTS_MISSING`.
         return self
 
 
@@ -92,6 +94,30 @@ def default_run_id(migration_id: str) -> str:
     import hashlib
 
     return "r" + hashlib.sha256(migration_id.encode()).hexdigest()[:10]
+
+
+def _grey_box_endpoints(http_routes: list[dict[str, Any]]) -> list[Endpoint]:
+    """The analysis's own statically-scanned routes (ticket 27, `scan_go_routes`), turned into
+    the red-team's grey-box input (ADR-008 R7) when nobody supplied `redteam_endpoints` by hand.
+
+    Only GET routes: the one fixed tool a run has is `probe_get` (ticket 38). A route with no
+    `method` answers every method, GET included, so it is kept too. Parameter names are not
+    found by this scan, so `params` is always empty here -- a human can still add them by setting
+    `redteam_endpoints` explicitly, which this function is never asked to improve on.
+    """
+    seen: dict[str, Endpoint] = {}
+    for route in http_routes:
+        method = route.get("method")
+        if method not in (None, "GET"):
+            continue
+        path = route.get("path")
+        if not path or path in seen:
+            continue
+        try:
+            seen[path] = Endpoint(method="GET", path=path, params=[])
+        except ValueError:
+            continue  # a scanned path that fails the red-team's own path check is dropped, not raised
+    return list(seen.values())
 
 
 def assemble_sandbox_input(
@@ -133,9 +159,14 @@ def assemble_sandbox_input(
     suite_ref = store.put(dump_bundle(suite), ref_id=f"suite-{migration_id}", kind="test-suite")
     review = analysis.get("review") or {}
     env_plan_ref = None
+    http_routes: list[dict[str, Any]] = []
     if analysis.get("assembly_ref"):
         assembly = store.get_json(ArtifactRef.model_validate(analysis["assembly_ref"]))
         env_plan_ref = assembly.get("env_plan_ref")  # ENV-05: set when `.env` came by reference
+        http_routes = assembly.get("http_routes") or []
+    red_endpoints = settings.redteam_endpoints or _grey_box_endpoints(http_routes)
+    if settings.redteam and not red_endpoints:
+        raise ValueError("REDTEAM_ENDPOINTS_MISSING")
     return {
         "migration_id": migration_id,
         "run_id": settings.run_id or default_run_id(migration_id),
@@ -162,7 +193,7 @@ def assemble_sandbox_input(
                     "time_budget_seconds": settings.redteam_time_budget_seconds,
                     "target_resource_id": apps[0].id,
                     "consent_ref": settings.redteam_consent_ref,
-                    "endpoints": [e.model_dump() for e in settings.redteam_endpoints],
+                    "endpoints": [e.model_dump() for e in red_endpoints],
                     "max_turns": settings.redteam_max_turns,
                 }
             }
