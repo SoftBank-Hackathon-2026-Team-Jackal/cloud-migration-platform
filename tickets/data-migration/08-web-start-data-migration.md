@@ -35,5 +35,5 @@ DONE(PR #254 병합). 데모 서버에 값을 넣는 일과 worker의 클러스�
 
 - 데모 서버 값: `WEB_START_DATA_MIGRATION`의 `source.peer_host`와 `target_peer_host`는 원본과 대상 사이 WireGuard 경로(ticket 06)가 정해져야 채울 수 있다. 결선 데모 기본 대상이 ON_PREM(`onprem-k3s-basic`)이면 `target_kubeconfig_ref`도 넣는다.
 - worker 실행 환경: 데이터 Activity는 worker에서 kubectl로 원본·대상 DB Pod에 붙는다. 데모 worker 이미지에 kubectl, 원본 EKS 자격 증명(`aws eks update-kubeconfig`), 대상 접근(GKE면 gcloud, ON_PREM이면 `DATA_MIGRATION_KUBECONFIG_DIR`)이 있어야 한다.
-- 웹 완료 판정: 웹과 플랫폼은 `cutover.handover`로 완료를 판단하지만 이 이벤트를 내는 곳이 없다. 트래픽 담당과 발행 주체를 정한다.
+- ~~웹 완료 판정~~ 정리(2026-11-07): 결선 데모에서는 `cutover.handover`를 발행하지 않는다. API `migration_status`는 Temporal 조회가 되면 `scaffold_complete`로 완료를 판정하고 `cutover.handover`(access done)는 조회가 안 될 때의 대체 경로에서만 본다. 웹은 cloud-migration-web#34부터 전환 계획 `handover`가 `[]`이면 인계 이벤트 없이 완료로 본다. 인계 항목(dns·origin·access)을 실제로 다루게 되면 Traffic 담당과 발행 주체를 다시 정한다.
 - 트래픽 단계의 `traffic` 입력도 같은 이유로 웹 시작에서 빠져 있다(Traffic 담당 영역).
