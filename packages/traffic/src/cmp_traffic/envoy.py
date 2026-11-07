@@ -387,7 +387,12 @@ def parse_cluster_stats(data: dict[str, Any], side: str) -> dict[str, float]:
 
 
 def cluster_target_address(config_dump: dict[str, Any]) -> tuple[str, int] | None:
-    """Envoy `/config_dump`의 `cluster_target`이 가리키는 (주소, 포트). 없으면 None.
+    """Envoy `/config_dump`의 `cluster_target`이 가리키는 (주소, 포트). 없으면 None."""
+    return cluster_address(config_dump, "cluster_target")
+
+
+def cluster_address(config_dump: dict[str, Any], name: str) -> tuple[str, int] | None:
+    """Envoy `/config_dump`의 클러스터 `name`이 가리키는 (주소, 포트). 없으면 None.
 
     정적(static_clusters)이든 파일로 바꾸는 동적(dynamic_active_clusters, 이미 활성화된 것만)이든 읽는다.
     DNS 이름은 풀기 전 설정값 그대로라서 핸드오버의 external_host와 같은 글자로 비교할 수 있다.
@@ -398,7 +403,7 @@ def cluster_target_address(config_dump: dict[str, Any]) -> tuple[str, int] | Non
             *section.get("dynamic_active_clusters", []),
         ]:
             cluster = item.get("cluster", {})
-            if cluster.get("name") != "cluster_target":
+            if cluster.get("name") != name:
                 continue
             for group in cluster.get("load_assignment", {}).get("endpoints", []):
                 for entry in group.get("lb_endpoints", []):
