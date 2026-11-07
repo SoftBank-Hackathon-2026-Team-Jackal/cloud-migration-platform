@@ -9,10 +9,10 @@ import base64
 import binascii
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from cmp_api import pulse
+from cmp_api import agent_egress, pulse
 from cmp_api.agent_registry import AgentRegistrationError, authenticate_agent
 from cmp_api.routes.agents import CredentialDep, SessionDep, require_admin
 from cmp_api.tunnels import (
@@ -161,9 +161,17 @@ def get_tunnel_config(agent_id: str, session: SessionDep, credential: Credential
 
 @router.post("/agents/{agent_id}/tunnel/status", status_code=202)
 def post_tunnel_status(
-    agent_id: str, report: TunnelStatusReport, session: SessionDep, credential: CredentialDep
+    agent_id: str,
+    report: TunnelStatusReport,
+    session: SessionDep,
+    credential: CredentialDep,
+    request: Request,
 ):
     _agent(session, agent_id, credential)
+    # 인증된 Agent의 요청이 에지(Caddy)를 거쳐 온 출발지 = 그 온프레의 NAT 공인 IP. 터널 허용 IP 자동 채움에 쓴다.
+    egress = agent_egress.client_ip(request.headers.get("x-forwarded-for"))
+    if egress is not None:
+        agent_egress.EGRESS.put(agent_id, egress)
     fields = report.model_dump()
     pulse_fields = {k: fields.pop(k) for k in ("cpu_percent", "mem_used_mb", "mem_total_mb")}
     try:
@@ -194,6 +202,21 @@ def put_relay(relay_id: Name, request: RelayRegistration, session: SessionDep, r
         "relay_id": relay.id,
         "credential": credential,
         "config_version": config_version(session),
+    }
+
+
+@router.get(
+    "/tunnel-admin/agents/{agent_id}/egress",
+    dependencies=[Depends(require_admin)],
+    summary="Public IP the Agent last reached the platform from (data tunnel allow-list)",
+)
+def get_agent_egress(agent_id: str) -> dict:
+    """운영자 확인용: 이 Agent의 마지막 접속 출발지 IP와 몇 초 전 값인지. 값이 없으면 `egress_ip`는 null이다.
+    `auto_target_egress`가 켜진 이전은 시작할 때 이 값을 터널 허용 목록에 더한다. 오래된(10분 넘은) 값은 쓰지 않는다."""
+    return {
+        "agent_id": agent_id,
+        "egress_ip": agent_egress.EGRESS.get(agent_id),
+        "age_seconds": agent_egress.EGRESS.age(agent_id),
     }
 
 

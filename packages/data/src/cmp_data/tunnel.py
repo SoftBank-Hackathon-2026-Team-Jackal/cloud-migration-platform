@@ -141,6 +141,10 @@ class WireGuardTunnel(Strict):
     handshake_timeout_s: int = Field(default=180, ge=10, le=900)
     # Provisioning 82: 원본 NLB를 고정 이름으로 재사용한다(ingress="source"만).
     standing_ingress: bool = False
+    # 온프레 대상(ingress="source")의 송신 공인 IP를 사람이 적는 대신, 시작할 때 그 대상 에이전트가 서버에 접속한
+    # 출발지 IP를 허용 목록에 더한다(API가 시작 입력을 만들 때 채우고, 워커에 가는 입력에서는 꺼진다).
+    # 와이파이가 바뀌어도(집·회장·핫스팟) 따로 설정하지 않게 한다. `target_egress_cidrs`는 같이 주면 그대로 남는다.
+    auto_target_egress: bool = False
 
     @field_validator("source_egress_cidrs", "target_egress_cidrs")
     @classmethod
@@ -159,7 +163,13 @@ class WireGuardTunnel(Strict):
     def _ingress_cidrs(self) -> WireGuardTunnel:
         required = "target_egress_cidrs" if self.ingress == "source" else "source_egress_cidrs"
         forbidden = "source_egress_cidrs" if self.ingress == "source" else "target_egress_cidrs"
-        if not getattr(self, required) or getattr(self, forbidden) is not None:
+        if self.auto_target_egress and self.ingress != "source":
+            raise ValueError("auto_target_egress requires ingress=source")
+        # 자동이면 고정 CIDR 없이도 입력으로 받는다(API가 시작할 때 채운다). 비어 있으면 워커가 입구를 만들지 않는다.
+        if (
+            not (getattr(self, required) or self.auto_target_egress)
+            or getattr(self, forbidden) is not None
+        ):
             raise ValueError(f"ingress={self.ingress} requires {required} and forbids {forbidden}")
         if self.standing_ingress and self.ingress != "source":
             raise ValueError("standing_ingress requires ingress=source")
@@ -282,6 +292,9 @@ def endpoint_manifest(
 
     기존 위치/키워드 인자 이름은 호환성을 위해 보존한다. `standing`이면 고정 이름이고 실행별 라벨이 없다.
     """
+    # 비어 있으면 쿠버네티스는 모든 주소를 허용한다. 허용 IP 없이 입구를 만들지 않는다.
+    if not source_egress_cidrs:
+        raise ValueError("EGRESS_CIDRS_REQUIRED")
     base = name(migration_id)
     if standing:
         metadata = {"name": STANDING_ENDPOINT, "namespace": NAMESPACE,

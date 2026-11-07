@@ -1472,6 +1472,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /tunnel-admin/agents/{agent_id}/egress:
+    get:
+      tags:
+      - tunnels
+      summary: Public IP the Agent last reached the platform from (data tunnel allow-list)
+      description: '운영자 확인용: 이 Agent의 마지막 접속 출발지 IP와 몇 초 전 값인지. 값이 없으면 `egress_ip`는
+        null이다.
+
+        `auto_target_egress`가 켜진 이전은 시작할 때 이 값을 터널 허용 목록에 더한다. 오래된(10분 넘은) 값은 쓰지 않는다.'
+      operationId: get_agent_egress_tunnel_admin_agents__agent_id__egress_get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: x-enrollment-admin-key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Enrollment-Admin-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Agent Egress Tunnel Admin Agents  Agent Id  Egress
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /relays/{relay_id}/agents:
     get:
       tags:
