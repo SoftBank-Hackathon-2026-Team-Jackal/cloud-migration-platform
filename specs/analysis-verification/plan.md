@@ -298,6 +298,7 @@ NetworkPolicy(Sandbox 워커 생성):
 
 - `judge`는 결정적 함수: 필수 테스트 결과, 앱 로그의 미지원 호출 패턴, 프록시 차단 기록, 매핑 대조 → `Verdict{passed, reasons[]}`.
 - `classify_failure` 순서: (0) Sandbox 환경 자체가 실패했으면 `INFRA`: 클러스터 API 접근 불가, 노드 NotReady, 레지스트리 접근·인증 실패로 이미지를 못 받음, Helm·Kubernetes API 시간 초과인데 앱 Pod 이벤트·로그에 앱 원인이 없음. 앱이나 요구사항을 고쳐서 풀리는 문제가 아니므로 Fixer를 부르지 않는다 (1) 렌더 결과가 요구사항과 필드 단위로 다르면 `RENDER` (2) 빌드 실패면 `BUILD` (3) 프록시 차단이 있으면 `SPEC`(의도 누락) (4) 테스트 실패 + 스택트레이스가 앱 코드면 `CODE` (5) 나머지 `SPEC`. 애매하면 Fixer가 원인 후보를 제안하고 다음 시도의 결과로 확인한다.
+- 레드팀 Finding이 열려 있으면 `SECURITY`로 분류한다(INFRA 다음, RENDER 앞). Workflow는 이 경우 보안 수정 횟수(3회)를 기능 수정과 따로 세고, 수정한 이미지에서 그 Finding의 요청만 다시 확인한다(티켓 36·37, ADR-008 R3·R4).
 
 ### 2.9 에이전트 (Mapper·Tester·Fixer)
 

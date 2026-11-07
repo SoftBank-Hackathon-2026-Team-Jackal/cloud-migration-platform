@@ -153,6 +153,9 @@ class FixInput:
     requirements_json: str = ""
     logs: str = ""  # application and proxy logs; masked again here
     tests: dict[str, str] = field(default_factory=dict)  # read-only test definitions by id
+    # Ticket 37: red-team Findings as summaries (category, severity, endpoint, text). Never the
+    # attack request or the evidence: the Fixer reads what is wrong, not how to exploit it.
+    findings: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -186,6 +189,21 @@ def _task(data: FixInput, skill_names: Sequence[str] = ()) -> str:
             "",
             "## Tests (read only)",
             *[f"- {case_id}" for case_id in sorted(data.tests)],
+            *(
+                [
+                    "",
+                    "## Security findings to fix (masked summaries; do not weaken any protection)",
+                    *[
+                        mask_text(
+                            f"- [{f.get('severity')}] {f.get('category')} {f.get('endpoint')}: "
+                            f"{f.get('summary')} ({f.get('repro_summary')})"
+                        )
+                        for f in data.findings
+                    ],
+                ]
+                if data.findings
+                else []
+            ),
             *(
                 [
                     "",
