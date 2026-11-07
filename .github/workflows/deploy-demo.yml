@@ -7,6 +7,11 @@ on:
         description: 'main commit SHA to deploy; leave empty for current main'
         required: false
         type: string
+      force:
+        description: 'Deploy even while migrations are running (restarting the worker cancels them)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,4 +37,5 @@ jobs:
       - name: Deploy selected main revision
         env:
           CMP_REQUESTED_REVISION: ${{ inputs.revision }}
+          CMP_DEPLOY_FORCE: ${{ inputs.force && '1' || '' }}
         run: bash infra/demo/release.sh "${CMP_REQUESTED_REVISION:-HEAD}"

@@ -21,12 +21,29 @@ if [[ "$requested" != HEAD && ! "$requested" =~ ^[0-9a-f]{7,40}$ ]]; then
 fi
 revision="$(git rev-parse --verify "$requested^{commit}")"
 git cat-file -e "$revision:infra/demo/start.sh"
-git cat-file -e HEAD:infra/demo/activate.sh
+# Only main is deployed, from Actions and from a laptop alike, and the control script (activate.sh)
+# always comes from main: a feature-branch checkout must not change how the host activates releases.
+# CMP_ALLOW_UNMERGED=1 deploys a revision that is not on main (a deliberate, local-only exception).
 if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
-  git merge-base --is-ancestor "$revision" HEAD || { echo "Revision is not on main" >&2; exit 1; }
+  main_ref=HEAD
+else
+  git fetch --quiet origin main
+  main_ref=origin/main
 fi
+if ! git merge-base --is-ancestor "$revision" "$main_ref"; then
+  if [[ "${GITHUB_ACTIONS:-}" != true && "${CMP_ALLOW_UNMERGED:-}" == 1 ]]; then
+    echo "warning: deploying $revision, which is not on main (CMP_ALLOW_UNMERGED=1)" >&2
+  else
+    echo "Revision is not on main" >&2
+    exit 1
+  fi
+fi
+git cat-file -e "$main_ref:infra/demo/activate.sh"
 short_revision="${revision:0:12}"
-control_revision="$(git rev-parse --short=12 HEAD)"
+control_revision="$(git rev-parse --short=12 "$main_ref")"
+# CMP_DEPLOY_FORCE=1 deploys even while Temporal has running workflows (activate.sh refuses otherwise).
+activate_mode=""
+[[ "${CMP_DEPLOY_FORCE:-}" == 1 ]] && activate_mode=force
 
 instance="$(aws cloudformation describe-stacks --region "$region" --stack-name "$stack" --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue|[0]' --output text)"
 bucket="$(aws cloudformation describe-stacks --region "$region" --stack-name "$stack" --query 'Stacks[0].Outputs[?OutputKey==`DeployBucket`].OutputValue|[0]' --output text)"
@@ -37,7 +54,10 @@ request="$(mktemp /tmp/cmp-demo-ssm.XXXXXXXX.json)"
 trap 'rm -f "$archive" "$request"' EXIT
 git archive "$revision" | gzip >"$archive"
 aws s3 cp "$archive" "s3://$bucket/releases/$short_revision.tar.gz" --region "$region" --only-show-errors
-aws s3 cp infra/demo/activate.sh "s3://$bucket/releases/control-$control_revision.sh" --region "$region" --only-show-errors
+control_file="$(mktemp /tmp/cmp-demo-control.XXXXXXXX.sh)"
+trap 'rm -f "$archive" "$request" "$control_file"' EXIT
+git show "$main_ref:infra/demo/activate.sh" >"$control_file"
+aws s3 cp "$control_file" "s3://$bucket/releases/control-$control_revision.sh" --region "$region" --only-show-errors
 
 for attempt in {1..60}; do
   status="$(aws ssm describe-instance-information --region "$region" --filters "Key=InstanceIds,Values=$instance" --query 'InstanceInformationList[0].PingStatus' --output text)"
@@ -46,11 +66,11 @@ for attempt in {1..60}; do
 done
 [[ "$status" == Online ]] || { echo "Instance is not connected to SSM" >&2; exit 1; }
 
-python3 - "$request" "$instance" "$bucket" "$short_revision" "$control_revision" <<'PY'
+python3 - "$request" "$instance" "$bucket" "$short_revision" "$control_revision" "$activate_mode" <<'PY'
 import json
 import sys
 
-path, instance, bucket, revision, control_revision = sys.argv[1:]
+path, instance, bucket, revision, control_revision, mode = sys.argv[1:]
 release = f"/opt/cmp/releases/{revision}"
 control = f"/opt/cmp/deploy-control/{control_revision}/activate.sh"
 command = (
@@ -59,7 +79,7 @@ command = (
     f"aws s3 cp s3://{bucket}/releases/{revision}.tar.gz /tmp/cmp-release.tar.gz --only-show-errors; "
     f"aws s3 cp s3://{bucket}/releases/control-{control_revision}.sh {control} --only-show-errors; "
     f"tar -xzf /tmp/cmp-release.tar.gz -C {release}; "
-    f"bash {control} {revision}"
+    f"bash {control} {revision} {mode}".rstrip()
 )
 with open(path, "w", encoding="utf-8") as target:
     json.dump({"InstanceIds": [instance], "DocumentName": "AWS-RunShellScript", "Parameters": {"commands": [command]}}, target)

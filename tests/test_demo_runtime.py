@@ -943,3 +943,41 @@ def test_build_images_workflow_is_main_only_and_uses_only_the_github_token():
     assert workflow["permissions"] == {"contents": "read", "packages": "write"}
     assert "secrets.GITHUB_TOKEN" in text and text.count("secrets.") == 1
     assert "GITHUB_SHA:0:12" in text
+
+
+def test_activate_waits_for_the_lock_and_refuses_while_workflows_run():
+    script = (DEMO / "activate.sh").read_text()
+    assert "flock -w 900 9" in script and "flock -n" not in script
+    # The running-workflow guard comes before start.sh, so a refused deploy touches nothing.
+    assert 'ExecutionStatus="Running"' in script
+    assert script.index("ExecutionStatus") < script.index('bash "$release_dir/infra/demo/start.sh"')
+    assert '"$mode" != force' in script
+    syntax = subprocess.run(["bash", "-n", str(DEMO / "activate.sh")], check=False)
+    assert syntax.returncode == 0
+
+
+def test_activate_keeps_failure_logs_and_a_fingerprint_ledger_without_values():
+    script = (DEMO / "activate.sh").read_text()
+    # The failed log is copied before the rollback overwrites the shared log files.
+    assert script.index("failed-deploy-") < script.index("last-rollback.log")
+    assert "deploy-history.log" in script and "sha256sum" in script
+    assert "docker image prune -f" in script and "prune -a" not in script
+    web = (DEMO / "release-web.sh").read_text()
+    assert "deploy-history.log" in web and "prune -a" not in web
+
+
+def test_release_deploys_only_main_with_the_control_script_from_main():
+    script = (DEMO / "release.sh").read_text()
+    assert 'git merge-base --is-ancestor "$revision" "$main_ref"' in script
+    assert "main_ref=origin/main" in script and "CMP_ALLOW_UNMERGED" in script
+    assert 'git show "$main_ref:infra/demo/activate.sh"' in script
+    assert "aws s3 cp infra/demo/activate.sh" not in script  # never the working tree's copy
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "deploy-demo.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert triggers["workflow_dispatch"]["inputs"]["force"]["default"] is False
+
+
+def test_start_script_gates_on_the_public_entry_when_it_is_enabled():
+    start = (DEMO / "start.sh").read_text()
+    assert '--resolve "$host:443:127.0.0.1"' in start
+    assert start.index('echo "CMP demo API healthy"') < start.index("CMP demo public entry healthy")
