@@ -91,3 +91,78 @@ def test_without_a_token_nothing_is_sent() -> None:
 def test_a_refused_switch_is_a_failure_exit() -> None:
     env = {"FAULT_TOKEN": "t", "FAULT_TARGET_URL": "http://app:8080"}
     assert main(["on"], env=env, send=Recorder(status=403)) == 1
+
+
+class Target:
+    """대상 앱 `/__cmp/fault`를 흉내 낸다: 받은 요청을 기록하고 상태를 바꾼다."""
+
+    def __init__(self, status: int = 200) -> None:
+        self.calls: list = []
+        self.status = status
+        self.on: dict | None = None
+
+    def __call__(self, method, url, headers, body):
+        self.calls.append((method, url, headers.get("X-Fault-Token")))
+        if self.status != 200:
+            return self.status, {}
+        if method == "POST":
+            data = json.loads(body)
+            self.on = {**data, "until": "2026-11-07T10:05:00Z"}
+        elif method == "DELETE":
+            self.on = None
+        return 200, {"active": self.on is not None, "fault": self.on or {}}
+
+
+def make_sync(target: Target):
+    from cmp_traffic.health import FaultSync
+
+    return FaultSync("tok", {"FAULT_TARGET_URL": "http://app:8080"}, send=target)
+
+
+def test_sync_applies_a_new_command_once() -> None:
+    target = Target()
+    sync = make_sync(target)
+    command = {"id": "a1", "action": "on", "error_rate": 0.5, "delay_ms": 800, "duration_s": 300}
+    sync.apply(command)
+    sync.apply(command)
+    posts = [c for c in target.calls if c[0] == "POST"]
+    assert posts == [("POST", "http://app:8080/__cmp/fault", "tok")]
+    assert sync.applied_id == "a1"
+    sync.apply({"id": "b2", "action": "off"})
+    assert target.calls[-1][0] == "DELETE" and sync.applied_id == "b2"
+
+
+def test_sync_ignores_no_command_and_retries_after_a_failure() -> None:
+    target = Target(status=503)
+    sync = make_sync(target)
+    sync.apply(None)
+    assert target.calls == []
+    sync.apply({"id": "a1", "action": "off"})
+    assert sync.applied_id is None and sync.error == "status 503"
+    target.status = 200
+    sync.apply({"id": "a1", "action": "off"})
+    assert sync.applied_id == "a1" and sync.error is None
+
+
+def test_sync_reports_what_the_target_actually_has() -> None:
+    from datetime import datetime
+
+    target = Target()
+    sync = make_sync(target)
+    assert sync.state()["active"] is False
+    sync.apply({"id": "a1", "action": "on", "error_rate": 0.5, "delay_ms": 800, "duration_s": 300})
+    now = datetime.fromisoformat("2026-11-07T10:00:00+00:00").timestamp()
+    state = sync.state(clock=lambda: now)
+    assert state == {
+        "applied_id": "a1",
+        "error": None,
+        "active": True,
+        "error_rate": 0.5,
+        "delay_ms": 800,
+        "remaining_s": 300,
+    }
+
+
+def test_sync_says_unknown_when_the_target_cannot_be_read() -> None:
+    sync = make_sync(Target(status=403))
+    assert sync.state()["active"] is None

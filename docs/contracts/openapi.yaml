@@ -2539,14 +2539,67 @@ paths:
             schema:
               $ref: '#/components/schemas/HealthReport'
       responses:
-        '204':
+        '200':
           description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportAnswer'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /system/fault:
+    get:
+      tags:
+      - system
+      summary: 'Demo fault switch: desired vs observed'
+      operationId: get_fault_system_fault_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultView'
+    post:
+      tags:
+      - system
+      summary: 'Demo fault switch: inject on the target'
+      operationId: post_fault_system_fault_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaultRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - system
+      summary: 'Demo fault switch: clear'
+      operationId: delete_fault_system_fault_delete
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultView'
   /health:
     get:
       summary: Health
@@ -3787,6 +3840,110 @@ components:
       - code
       - recoverability
       title: Failure
+    FaultObserved:
+      properties:
+        active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Active
+        error_rate:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Error Rate
+        delay_ms:
+          anyOf:
+          - type: integer
+            maximum: 60000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Delay Ms
+        remaining_s:
+          anyOf:
+          - type: integer
+            maximum: 86400.0
+            minimum: 0.0
+          - type: 'null'
+          title: Remaining S
+        applied_id:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Applied Id
+        error:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+      - active
+      title: FaultObserved
+      description: 리포터가 대상 앱 `/__cmp/fault`에서 읽은 실제 상태. active가 None이면 읽지 못했다.
+    FaultRequest:
+      properties:
+        error_rate:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Error Rate
+          default: 0.5
+        delay_ms:
+          type: integer
+          maximum: 10000.0
+          minimum: 0.0
+          title: Delay Ms
+          default: 800
+        duration_s:
+          type: integer
+          maximum: 900.0
+          minimum: 1.0
+          title: Duration S
+          default: 300
+      additionalProperties: false
+      type: object
+      title: FaultRequest
+    FaultView:
+      properties:
+        at:
+          type: string
+          title: At
+        desired:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Desired
+        observed:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Observed
+        observed_age_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Observed Age Seconds
+        applied:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Applied
+      type: object
+      required:
+      - at
+      - desired
+      - observed
+      - observed_age_seconds
+      - applied
+      title: FaultView
     GcpConnectionSummary:
       properties:
         connection_id:
@@ -3885,6 +4042,10 @@ components:
           $ref: '#/components/schemas/SideWindow'
         target:
           $ref: '#/components/schemas/SideWindow'
+        fault:
+          anyOf:
+          - $ref: '#/components/schemas/FaultObserved'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -5144,6 +5305,18 @@ components:
       - job_id
       - accepted
       title: ReportAck
+    ReportAnswer:
+      properties:
+        fault:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Fault
+      type: object
+      required:
+      - fault
+      title: ReportAnswer
     ReportStage:
       properties:
         id:

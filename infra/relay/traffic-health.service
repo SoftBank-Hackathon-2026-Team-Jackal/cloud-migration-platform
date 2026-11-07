@@ -3,6 +3,8 @@
 #       PULSE_TOKEN(플랫폼 PULSE_REPORT_TOKEN과 같은 값)을 적고(권한 600),
 #       이 파일을 /etc/systemd/system/ 에 복사해 `systemctl enable --now traffic-health`.
 #       선택: ENVOY_ADMIN_URL(기본 http://127.0.0.1:9901), TRAFFIC_HEALTH_INTERVAL(기본 5초).
+#       선택: FAULT_TOKEN(대상 앱의 FAULT_TOKEN과 같은 값)을 적으면 Tools 화면의 장애 스위치 명령을 보고 응답으로
+#       받아 대상 앱 /__cmp/fault에 적용하고 실제 상태를 함께 보낸다. 플랫폼은 DEMO_TOOLS_ENABLED=true여야 한다.
 # 먼저 서버의 /opt/cmp/lib(cmp_traffic)가 이 기능이 들어간 커밋이어야 한다.
 # 단서: 로컬 traffic-lab Envoy에서만 확인했고, 실제 중계 서버에서는 아직 돌려 보지 않았다.
 [Unit]

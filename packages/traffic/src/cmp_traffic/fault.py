@@ -56,17 +56,29 @@ def target_url(env: dict[str, str], fetch: Callable[[str], dict] = http_get_json
     return f"http://{address[0]}:{address[1]}"
 
 
-def request_for(args: argparse.Namespace) -> tuple[str, bytes | None]:
-    if args.command == "on":
-        body = {
-            "error_rate": args.error_rate,
-            "delay_ms": args.delay_ms,
-            "duration_s": args.duration,
-        }
+def command(action: str, error_rate: float = 0.5, delay_ms: int = 800, duration_s: int = 300):
+    """장애 스위치에 보낼 (메서드, 본문). on은 켜기, off는 끄기, 그 밖은 상태 읽기."""
+    if action == "on":
+        body = {"error_rate": error_rate, "delay_ms": delay_ms, "duration_s": duration_s}
         return "POST", json.dumps(body).encode("utf-8")
-    if args.command == "off":
+    if action == "off":
         return "DELETE", None
     return "GET", None
+
+
+def call(
+    base: str, token: str, action: str, send: Send = http_send, **settings: Any
+) -> tuple[int, dict[str, Any]]:
+    """대상 앱 `/__cmp/fault`에 한 번 보낸다. 토큰은 헤더로만 보내고 돌려주지 않는다."""
+    method, body = command(action, **settings)
+    headers = {"X-Fault-Token": token, "Content-Type": "application/json"}
+    return send(method, base + PATH, headers, body)
+
+
+def request_for(args: argparse.Namespace) -> tuple[str, bytes | None]:
+    if args.command == "on":
+        return command("on", args.error_rate, args.delay_ms, args.duration)
+    return command(args.command)
 
 
 def parse(argv: list[str]) -> argparse.Namespace:

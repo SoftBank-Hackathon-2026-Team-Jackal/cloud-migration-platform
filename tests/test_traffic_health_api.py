@@ -59,7 +59,7 @@ def test_report_needs_the_shared_token(client) -> None:
     http, _ = client
     assert post(http, body(), token=None).status_code == 403
     assert post(http, body(), token="wrong").status_code == 403
-    assert post(http, body()).status_code == 204
+    assert post(http, body()).status_code == 200
 
 
 def test_report_is_refused_while_the_token_is_not_configured() -> None:
