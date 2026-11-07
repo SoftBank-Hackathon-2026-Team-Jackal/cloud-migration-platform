@@ -205,7 +205,8 @@ def onprem_ready(db):
 def handoff(db, consumer, clock=None):
     return asyncio.run(
         ActivityEnvironment().run(
-            ApprovalActivities(db, clock=clock).get_migration_handoff,
+            # Ticket 80: no in-Activity wait here; each read is the view at that moment.
+            ApprovalActivities(db, clock=clock, wait_seconds=0).get_migration_handoff,
             {"plan_id": "plan-001", "revision": 1, "consumer": consumer},
         )
     )

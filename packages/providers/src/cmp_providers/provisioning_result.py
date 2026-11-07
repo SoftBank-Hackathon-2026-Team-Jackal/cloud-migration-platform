@@ -537,6 +537,33 @@ def after_rollout(converted: TrafficHandoff, tunnel: dict | None, recorded_at: i
     )
 
 
+# Ticket 80 (#319): the Data counterpart of ticket 67. Blocks that clear by themselves once the
+# Agent's tunnel container reports this rollout's DB reachable over the tunnel.
+TUNNEL_DB_WAIT_BLOCKS = frozenset({"TUNNEL_DB_NOT_VERIFIED", "TUNNEL_STATUS_STALE"})
+
+
+def tunnel_db_wait_needed(view: dict) -> bool:
+    """True when an ON_PREM Data view is blocked only by tunnel evidence that is not there yet."""
+    blocked = set(view.get("blocked_by") or [])
+    provider = (view.get("common") or {}).get("provider")
+    return provider == "ON_PREM" and bool(blocked) and blocked <= TUNNEL_DB_WAIT_BLOCKS
+
+
+def data_after_rollout(view: dict, tunnel: dict | None, recorded_at: int) -> dict:
+    """A proceeding ON_PREM Data view counts only with a tunnel report from after the rollout.
+
+    Same rule as `after_rollout` (ticket 67): an older report checked an earlier DB, so the view
+    is held as `TUNNEL_STATUS_STALE` without the tunnel endpoint (pure; the input is kept).
+    """
+    if (view.get("common") or {}).get("provider") != "ON_PREM" or not view.get("proceed"):
+        return view
+    reported_at = (tunnel or {}).get("reported_at")
+    if reported_at is not None and reported_at >= recorded_at:
+        return view
+    database = {**(view.get("database") or {}), "tunnel_endpoint": None}
+    return {**view, "database": database, "proceed": False, "blocked_by": ["TUNNEL_STATUS_STALE"]}
+
+
 def public_summary(result: ProvisioningResult) -> dict:
     """R8: the user-facing summary. No DB section, internal endpoints, releases or IDs."""
     app = result.application
