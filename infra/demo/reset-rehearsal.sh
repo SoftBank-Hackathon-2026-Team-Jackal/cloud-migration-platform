@@ -128,12 +128,17 @@ if src -n "$TUNNEL_NS" get svc cmp-wg-standing-endpoint >/dev/null 2>&1; then
     "$ranges") | src apply --server-side --field-manager cmp-data-migration --force-conflicts -f - >/dev/null
 fi
 
-echo "5) 대상 DB 비우기(복제 객체와 public 표)"
+echo "5) 대상 DB 비우기(복제 객체, public 표와 시퀀스)"
 drop_replication "$TARGET_CONTEXT" "$TGT_NS" "$TGT_DB_POD"
 psql_in "$TARGET_CONTEXT" "$TGT_NS" "$TGT_DB_POD" >/dev/null <<'SQL'
 DO $$ DECLARE r record; BEGIN
   FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
     EXECUTE format('DROP TABLE IF EXISTS public.%I CASCADE', r.tablename);
+  END LOOP;
+  -- 주인 표가 없는 시퀀스(예: 덤프에 따로 들어온 cmp_switchover_marker_id_seq)는 표를 지워도 남아서
+  -- 다음 스키마 복원을 "already exists"로 멈춘다.
+  FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' LOOP
+    EXECUTE format('DROP SEQUENCE IF EXISTS public.%I CASCADE', r.sequencename);
   END LOOP;
 END $$;
 SQL
@@ -173,4 +178,4 @@ ssm_run "$relay" "$work/relay.sh"
 echo "8) 확인"
 echo "  source $SRC_APP ready: $(src -n "$SRC_NS" get deploy "$SRC_APP" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}')"
 echo "  source pub/sub: $(echo "select count(*) from pg_publication; select count(*) from pg_subscription;" | psql_in "$SOURCE_CONTEXT" "$SRC_NS" "$SRC_DB_POD" | tr '\n' ' ')"
-echo "  target public tables: $(echo "select count(*) from pg_tables where schemaname='public';" | psql_in "$TARGET_CONTEXT" "$TGT_NS" "$TGT_DB_POD")"
+echo "  target public tables/sequences: $(echo "select count(*) from pg_tables where schemaname='public'; select count(*) from pg_sequences where schemaname='public';" | psql_in "$TARGET_CONTEXT" "$TGT_NS" "$TGT_DB_POD" | tr '\n' ' ')"
