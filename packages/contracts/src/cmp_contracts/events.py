@@ -496,6 +496,7 @@ class TrafficSnapshotNotesItem(WebModel):
         "finalized",
         "dbRollback",
         "idleProbe",
+        "awaitNext",
     ]
     params: dict[str, str | float] | None = Field(default=None)
     activity: str | None = Field(default=None)
