@@ -36,9 +36,14 @@ class Price:
     cache_write: float = 0.0
 
 
-# Anthropic first-party rates, checked 2026-11-05. Update when the price list changes.
+# Anthropic first-party rates, checked 2026-11-05 (claude-sonnet-5 and claude-opus-5-5 added
+# 2026-11-08). Update when the price list changes.
 PRICES: dict[str, Price] = {
     "claude-sonnet-5-5": Price(input=2.0, output=10.0, cache_read=0.20, cache_write=2.50),
+    "claude-sonnet-5": Price(input=2.0, output=10.0, cache_read=0.20, cache_write=2.50),
+    # cache_write is not separately confirmed for this model; carried over at the same ratio
+    # (1.25x input) every other current-generation price in this table uses.
+    "claude-opus-5-5": Price(input=4.0, output=20.0, cache_read=0.20, cache_write=5.00),
 }
 
 
