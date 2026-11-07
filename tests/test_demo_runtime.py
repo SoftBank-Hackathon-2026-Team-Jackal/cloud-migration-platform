@@ -158,6 +158,8 @@ def test_edge_sends_agent_relay_and_migration_routes_to_the_api():
         "handle @migration_events {",
         "reverse_proxy {$CMP_API_UPSTREAM} {",
         "flush_interval -1",
+        "lb_try_duration 15s",
+        "lb_try_interval 250ms",
         "}",
         "}",
         "@pulse_report {",
@@ -165,18 +167,27 @@ def test_edge_sends_agent_relay_and_migration_routes_to_the_api():
         "path /system/pulse/report",
         "}",
         "handle @pulse_report {",
-        "reverse_proxy {$CMP_API_UPSTREAM}",
+        "reverse_proxy {$CMP_API_UPSTREAM} {",
+        "lb_try_duration 15s",
+        "lb_try_interval 250ms",
+        "}",
         "}",
         "@traffic_health_report {",
         "method POST",
         "path /system/traffic-health/report",
         "}",
         "handle @traffic_health_report {",
-        "reverse_proxy {$CMP_API_UPSTREAM}",
+        "reverse_proxy {$CMP_API_UPSTREAM} {",
+        "lb_try_duration 15s",
+        "lb_try_interval 250ms",
+        "}",
         "}",
         "@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*",
         "handle @backend {",
-        "reverse_proxy {$CMP_API_UPSTREAM}",
+        "reverse_proxy {$CMP_API_UPSTREAM} {",
+        "lb_try_duration 15s",
+        "lb_try_interval 250ms",
+        "}",
         "}",
         "handle {",
         "reverse_proxy {$CMP_WEB_UPSTREAM}",
@@ -249,7 +260,7 @@ def test_release_web_script_uploads_only_under_releases_and_checks_the_account()
     assert "releases/web-" in script
     assert "ln -sfn" in script and "/opt/cmp/web/current" in script
     # The web is rebuilt with the active release's compose file, so its build args apply.
-    assert "-f infra/demo/compose.yaml --profile public up -d --build web" in script
+    assert "-f infra/demo/compose.yaml --profile public up -d --build --no-deps web" in script
     syntax = subprocess.run(["bash", "-n", str(DEMO / "release-web.sh")], check=False)
     assert syntax.returncode == 0
 
@@ -883,3 +894,52 @@ def test_api_gets_the_tunnel_kube_api_switch_off_by_default():
     assert env["TUNNEL_EXPOSE_KUBE_API"] == "${TUNNEL_EXPOSE_KUBE_API:-false}"
     assert env["TUNNEL_KUBE_API_PORT"] == "${TUNNEL_KUBE_API_PORT:-6443}"
     assert "TUNNEL_EXPOSE_KUBE_API" not in _env("worker")
+
+
+def test_api_and_worker_images_are_settable_and_default_to_the_local_build_names():
+    """Image deploy: CMP_*_IMAGE selects the registry tag; unset keeps the name compose gives a local build."""
+    services = _compose()["services"]
+    assert services["api"]["image"] == "${CMP_API_IMAGE:-cmp-demo-api}"
+    assert services["worker"]["image"] == "${CMP_WORKER_IMAGE:-cmp-demo-worker}"
+    assert "image" not in services["web"]  # the web is always built on the host
+    assert "healthcheck" in services["api"]  # `up --wait` gates the api swap on it
+
+
+def test_start_script_branches_to_image_mode_only_when_opted_in():
+    start = (DEMO / "start.sh").read_text()
+    assert "^CMP_DEPLOY_MODE=image" in start
+    assert "start-image.sh" in start
+    # The branch comes after secrets/guard setup and before the build flow, which stays as is.
+    assert (
+        start.index("build-binfmt.sh")
+        < start.index("start-image.sh")
+        < start.index("build api worker")
+    )
+
+
+def test_image_start_script_pulls_before_touching_anything_and_guards_the_worker():
+    script = (DEMO / "start-image.sh").read_text()
+    assert "pull --quiet api worker" in script
+    assert script.index("pull --quiet api worker") < script.index("up -d platform-db")
+    assert script.index("alembic upgrade head") < script.index("up -d --no-build --wait")
+    assert "ExecutionStatus" in script and "CMP_WORKER_SWAP" in script
+    assert "set -euo pipefail" in script
+    assert ". /opt/cmp/.env" not in script and "set -a" not in script  # .env is never sourced
+    syntax = subprocess.run(["bash", "-n", str(DEMO / "start-image.sh")], check=False)
+    assert syntax.returncode == 0
+
+
+def test_release_web_takes_the_deploy_lock():
+    script = (DEMO / "release-web.sh").read_text()
+    assert "/opt/cmp/deploy.lock" in script and "flock" in script
+    assert script.index("flock -w") < script.index("docker compose --env-file")
+
+
+def test_build_images_workflow_is_main_only_and_uses_only_the_github_token():
+    text = (ROOT / ".github" / "workflows" / "build-images.yml").read_text()
+    workflow = yaml.safe_load(text)
+    triggers = workflow.get("on", workflow.get(True))
+    assert triggers["push"]["branches"] == ["main"] and "workflow_dispatch" in triggers
+    assert workflow["permissions"] == {"contents": "read", "packages": "write"}
+    assert "secrets.GITHUB_TOKEN" in text and text.count("secrets.") == 1
+    assert "GITHUB_SHA:0:12" in text

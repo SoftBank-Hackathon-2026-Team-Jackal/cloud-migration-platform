@@ -17,11 +17,15 @@
 handle @temporal {
 	reverse_proxy h2c://{$CMP_TEMPORAL_UPSTREAM}
 }
+# lb_try_duration/lb_try_interval: while the api container is swapped (image deploy, a few seconds) the edge
+# retries the connection instead of answering 502, so clients see a slow request rather than an error.
 # Migration event stream (SSE): forwarded without response buffering.
 @migration_events path /migrations/*/events
 handle @migration_events {
 	reverse_proxy {$CMP_API_UPSTREAM} {
 		flush_interval -1
+		lb_try_duration 15s
+		lb_try_interval 250ms
 	}
 }
 # Server pulse report (origin/target servers push CPU and memory; X-Pulse-Token required, off while
@@ -31,7 +35,10 @@ handle @migration_events {
 	path /system/pulse/report
 }
 handle @pulse_report {
-	reverse_proxy {$CMP_API_UPSTREAM}
+	reverse_proxy {$CMP_API_UPSTREAM} {
+		lb_try_duration 15s
+		lb_try_interval 250ms
+	}
 }
 # Relay traffic health report (the relay Envoy's origin/target 5xx and p99 per window; same
 # X-Pulse-Token). Only this POST is public: GET /system/traffic-health stays internal.
@@ -40,11 +47,17 @@ handle @pulse_report {
 	path /system/traffic-health/report
 }
 handle @traffic_health_report {
-	reverse_proxy {$CMP_API_UPSTREAM}
+	reverse_proxy {$CMP_API_UPSTREAM} {
+		lb_try_duration 15s
+		lb_try_interval 250ms
+	}
 }
 @backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*
 handle @backend {
-	reverse_proxy {$CMP_API_UPSTREAM}
+	reverse_proxy {$CMP_API_UPSTREAM} {
+		lb_try_duration 15s
+		lb_try_interval 250ms
+	}
 }
 handle {
 	reverse_proxy {$CMP_WEB_UPSTREAM}
