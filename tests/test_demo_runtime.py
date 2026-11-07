@@ -540,8 +540,8 @@ def test_runtime_example_values_point_at_the_mounted_worker_paths():
     example, worker, api = _runtime_example(), _env("worker"), _env("api")
     targets = _mount_targets("worker")
     for name in example:
-        # ticket 57 and data-migration ticket 08: API only
-        consumer = api if name.startswith("WEB_START_") else worker
+        # ticket 57, data-migration ticket 08 and the agent chat: API only
+        consumer = api if name.startswith(("WEB_START_", "AGENT_CHAT_")) else worker
         assert f"${{{name}:-" in str(consumer.get(name)), name  # every example line is consumed
     # Planning reads the analysis results from the same store (runbook: same directory).
     assert example["ANALYSIS_ARTIFACT_STORE_DIR"] == worker["ARTIFACT_STORE_DIR"]

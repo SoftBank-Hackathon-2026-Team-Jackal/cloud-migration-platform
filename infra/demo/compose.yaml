@@ -123,8 +123,18 @@ services:
       # Off unless /opt/cmp/.env sets TUNNEL_EXPOSE_KUBE_API=true.
       TUNNEL_EXPOSE_KUBE_API: ${TUNNEL_EXPOSE_KUBE_API:-false}
       TUNNEL_KUBE_API_PORT: ${TUNNEL_KUBE_API_PORT:-6443}
+      # Agent chat (`POST /agent/ask`, called only by the web server; the public edge does not route it).
+      # Off unless /opt/cmp/.env sets AGENT_CHAT_ENABLED=true. It shares the worker's spend ledger and
+      # kill switch (`touch /opt/cmp/data/llm/disabled`), so one budget covers every model call.
+      AGENT_CHAT_ENABLED: ${AGENT_CHAT_ENABLED:-false}
+      AGENT_MODEL: ${AGENT_CHAT_MODEL:-claude-haiku-5-5}
+      AGENT_CAPTION_MODEL: ${AGENT_CHAT_CAPTION_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_LEDGER_PATH: /opt/cmp/llm/ledger.json
+      LLM_KILL_SWITCH_PATH: /opt/cmp/llm/disabled
     volumes:
       - /opt/cmp/data/artifact-store:/opt/cmp/artifact-store
+      - /opt/cmp/data/llm:/opt/cmp/llm
       - /opt/cmp/data/plans:/opt/cmp/plans
       - /opt/cmp/data/env-files:/opt/cmp/env-files
       - /opt/cmp/secrets/aws:/run/cmp/aws:ro
