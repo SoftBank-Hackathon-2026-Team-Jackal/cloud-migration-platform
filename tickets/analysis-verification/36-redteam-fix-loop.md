@@ -1,7 +1,7 @@
 # Ticket 36 — Finding을 수정 루프에 연결하고 재검증
 
 ## 상태
-DRAFT — 사용자 검토 대기. Issue #335. 선행: 34, 35. 결정: [ADR-008](../../docs/decisions/ADR-008.md) R3(게이트), R4(시도 횟수).
+IN_REVIEW — Issue #335. 단위 시험과 lint 통과(로컬). 실제 Fixer·클러스터 연계는 대기. 선행: 34, 35(병합 전, 같은 브랜치 계열). 결정: ADR-008 R3(게이트, 표시만)·R4(별도 시도 횟수) 확정.
 
 ## 목적
 찾은 Finding을 기존 수정 루프(14A·14B, Fixer)로 넘겨 앱을 고치고, 고친 이미지로 **같은 시험만 다시** 해서 해소를 확인한다. 보안을 낮추는 방향의 수정은 거절한다.
@@ -38,3 +38,26 @@ Blocked by: 34, 35, 14B·31(병합됨)
 
 ## 문서
 plan §2.8·§2.9, spec AV-024, tasks.md를 같은 PR에서 갱신한다.
+
+## 구현 요약 (`cmp_worker.redteam_fixloop`, `cmp_worker.failure_classifier`)
+- **상태 전이** (`RevalidationLedger`): Finding마다 마지막으로 확인한 Digest와 상태를 기록한다. `record(finding_id, digest, reproduces=...)`가 재현되면 이전에 `FIXED`였던 경우만 `REGRESSED`, 아니면 `STILL_OPEN`. 재현되지 않으면 `FIXED`. `status_for(finding_id, digest)`는 **그 Digest에서 확인한 상태만** 돌려준다 — 다른 Digest에서는 `None`(P-10, 다른 Digest의 결과를 재사용하지 않음).
+- **재검증** (`revalidate`): 그 Finding의 재현 요청만 새 Digest에 다시 돌린다. 이미 그 Digest에서 확인된 상태가 있으면 다시 돌리지 않는다.
+- **보호 약화 거절** (`ProtectionSignals`, `weakens_protection`): 인증 제거·접근 제어 확대·암호화 제거 중 하나라도 있으면 `SECURITY_LOWERED_BY_FIX:<종류>`로 거절하고 재검증을 시도조차 하지 않는다(P-12). 기존 `security_guard.py`(29-B, 분석 측정값 비교)와 코드 네임스페이스(`SECURITY_LOWERED_BY_FIX`)는 같지만, 이 모듈은 레드팀 Finding 전용 신호를 받는 별도 함수다.
+- **시도 횟수** (`MAX_SECURITY_FIX_ATTEMPTS = 3`): `sandbox_events.MAX_ATTEMPTS`(기능 수정 루프)와 분리된 상수다(R4).
+- **루프** (`run_fix_loop`): 수정 → 약화 검사 → 재검증을 반복한다. `FIXED`·`REGRESSED`·거절 중 하나가 나오면 즉시 멈추고, 상한에 닿으면 `STILL_OPEN`으로 멈춘다.
+- **`classify_failure` 확장**: `AttemptSignals.open_security_findings`(기본 빈 튜플, 기존 호출부에 영향 없음)가 있으면 `SECURITY` 분류와 `FINDING:<id>` 사유를 낸다. INFRA보다는 아래, RENDER·BUILD·CODE·SPEC보다는 위에 둔다(환경이 깨진 게 아니면 Finding이 있다는 사실이 다른 분류보다 더 구체적인 원인이다).
+
+## 티켓과 달라진 점
+- **게이트는 R3 확정대로 표시만이다.** `run_fix_loop`는 거절·상한 소진 모두 호출자에게 결과로 돌려줄 뿐, Provisioning 승인을 막는 코드는 이 티켓에 없다(§범위 "제외"와 일치).
+- **Fixer·실행기 연동은 아직 가짜 함수다.** `fix`와 `reproduce`는 호출하는 쪽이 준다. 실제 14A/14B Fixer 입력으로 Finding 요약을 넘기는 연결과, 실제 레드팀 실행기(33)로 재현을 다시 돌리는 연결은 Workflow 통합 때 한다.
+- **보호 약화 판정은 신호 기반이다.** 실제 코드 diff를 파싱해 `ProtectionSignals`를 만드는 부분은 이 티켓 범위가 아니다(기존 `security_guard.py`도 같은 선례: 플레인텍스트 패턴만 본다).
+- **데모 리허설 수용 기준(발견율·소요 시간 3회 측정, 배포 흐름 확인)은 실제 클러스터와 Fixer 연동이 끝난 뒤에만 가능하다.** 아직 하지 않았다.
+
+## 검증 (2026-11-07, Windows)
+- `tests/sandbox/test_redteam_fixloop.py` 21개, 기존 `test_classifier.py` 포함 `tests/sandbox` 전체(`test_workflow.py` 제외, 기존 `fcntl` 문제) 398개 통과·10개 skip. 실패 17개는 전부 기존 `fcntl`/`cp949` Windows 문제(이 변경과 무관, `test_worker_wiring.py`·`test_publish.py` 등)로 확인했다.
+- `ruff check`, `ruff format --check` 통과.
+
+## 미검증
+- 실제 Fixer 연동과 Finding 요약 전달.
+- 실제 레드팀 실행기로의 재검증 디스패치.
+- 데모 리허설(발견율·소요 시간 측정, 수정 후 배포 확인).
