@@ -36,6 +36,7 @@ from cmp_api.start_request import (
     load_scope,
     load_target_profiles,
     planning_settings,
+    resolve_target_egress,
     sandbox_settings,
     scope_analysis_fields,
     start_input,
@@ -132,6 +133,8 @@ def _real_start_input(
                 scope_fields = scope_analysis_fields(scope, credential_ref(source_connection))
         sandbox = sandbox_settings(settings.web_start_sandbox_settings)
         data_migration = data_migration_settings(settings.web_start_data_migration, target.provider)
+        # `auto_target_egress`: 그 대상 Agent가 서버에 접속한 출발지 IP를 터널 허용 목록에 더한다(꺼져 있으면 그대로).
+        data_migration = resolve_target_egress(data_migration, target.agent_id)
         traffic = traffic_settings(settings.web_start_traffic)
     except StartRefused as exc:
         raise _refused(exc.code, exc.status) from None

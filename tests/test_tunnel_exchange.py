@@ -609,3 +609,49 @@ def test_node_metrics_are_range_checked(client, db, bad):
     headers = agent(db)
     put_key(client, "agent-001", headers)
     assert report(client, headers, **bad).status_code == 422
+
+
+def test_agent_status_remembers_its_public_ip_for_the_data_tunnel_allow_list(client, db):
+    from cmp_api.agent_egress import EGRESS
+
+    EGRESS._items.clear()
+    try:
+        headers = agent(db)
+        put_key(client, "agent-001", headers)
+        look = lambda: client.get("/tunnel-admin/agents/agent-001/egress", headers=ADMIN).json()
+        assert look()["egress_ip"] is None
+        # 에지(Caddy)가 붙인 출발지가 Agent의 NAT 공인 IP다.
+        sent = {**headers, "X-Forwarded-For": "223.38.86.12"}
+        assert (
+            client.post(
+                "/agents/agent-001/tunnel/status", json=status_body(), headers=sent
+            ).status_code
+            == 202
+        )
+        assert look()["egress_ip"] == "223.38.86.12" and look()["age_seconds"] is not None
+        # 사설·잘못된 값은 버리고 마지막 공인 IP를 그대로 둔다.
+        for junk in ("10.0.0.5", "not-an-ip", ""):
+            sent = {**headers, "X-Forwarded-For": junk}
+            assert (
+                client.post(
+                    "/agents/agent-001/tunnel/status", json=status_body(), headers=sent
+                ).status_code
+                == 202
+            )
+        assert look()["egress_ip"] == "223.38.86.12"
+    finally:
+        EGRESS._items.clear()
+
+
+def test_agent_egress_read_is_operator_only(client, db):
+    assert client.get("/tunnel-admin/agents/agent-001/egress").status_code in (401, 403)
+    headers = agent(db)  # Agent 자격 증명으로도 읽을 수 없다
+    assert client.get("/tunnel-admin/agents/agent-001/egress", headers=headers).status_code in (
+        401,
+        403,
+    )
+
+
+def status_body() -> dict:
+    return {"tunnel_ip": "10.200.0.2", "last_handshake_at": int(time.time()), "app_health_ok": True,
+            "db_connect_ok": True}  # fmt: skip

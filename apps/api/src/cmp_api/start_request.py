@@ -25,6 +25,7 @@ from cmp_traffic import TrafficShiftInput
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session
 
+from cmp_api.agent_egress import EGRESS, MAX_CIDRS, EgressStore
 from cmp_api.agent_registry import RegisteredAgent
 from cmp_api.connections import PROFILE_PREFIX, EnvironmentConnection, credential_ref
 from cmp_api.plan_inputs import CLOUD_TEMPLATES
@@ -288,6 +289,27 @@ def data_migration_settings(value: str | None, provider: str | None = None) -> d
     if provider == "ON_PREM" and reverse and parsed.network_preflight is None:
         raise StartRefused("DATA_MIGRATION_PREFLIGHT_REQUIRED", 503)
     return parsed.model_dump(mode="json")
+
+
+def resolve_target_egress(
+    data_migration: dict | None, agent_id: str | None, store: EgressStore = EGRESS
+) -> dict | None:
+    """온프레 터널의 `auto_target_egress`를 시작할 때 채운다(워커에는 고정된 CIDR만 간다).
+
+    그 대상 Agent가 서버에 접속한 출발지 IP(`agent_egress`)를 `/32`로 `target_egress_cidrs`에 더한다. 설정에
+    적어 둔 CIDR은 그대로 남는다(자동 값이 없으면 그것만으로 진행하고, 둘 다 없으면 시작하지 않는다).
+    자동을 켜지 않았으면 입력을 그대로 돌려준다."""
+    tunnel = (data_migration or {}).get("tunnel")
+    if not tunnel or not tunnel.get("auto_target_egress"):
+        return data_migration
+    cidrs = list(tunnel.get("target_egress_cidrs") or [])
+    observed = store.get(agent_id) if agent_id else None
+    if observed and f"{observed}/32" not in cidrs:
+        cidrs.append(f"{observed}/32")
+    if not cidrs:
+        raise StartRefused("TARGET_EGRESS_UNKNOWN", 409)
+    resolved = {**tunnel, "target_egress_cidrs": cidrs[-MAX_CIDRS:], "auto_target_egress": False}
+    return {**data_migration, "tunnel": resolved}
 
 
 def traffic_settings(value: str | None) -> dict | None:

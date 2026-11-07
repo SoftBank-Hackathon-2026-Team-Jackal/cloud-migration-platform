@@ -270,6 +270,8 @@ make data-tunnel-nlb-status CONTEXT=cmp-demo-source                       # 쓰�
 # /opt/cmp/.env WEB_START_DATA_MIGRATION의 tunnel: {"ingress":"source","target_egress_cidrs":["<맥 공인 IP>/32"],"standing_ingress":true}
 ```
 
+**온프레 공인 IP를 자동으로 허용하기 (`auto_target_egress`)**: 와이파이(집·회장·핫스팟)가 바뀌면 온프레의 NAT 공인 IP도 바뀌어서 위처럼 IP를 적어 두면 데이터 터널(UDP 51820)이 막힌다. `WEB_START_DATA_MIGRATION`의 `tunnel`에 `"auto_target_egress": true`를 더하면, 시작할 때 **그 대상 Agent가 서버에 접속한 출발지 IP**(Agent가 몇 초마다 `POST /agents/{id}/tunnel/status`를 HTTPS로 보내고, 에지가 붙인 `X-Forwarded-For`)를 `/32`로 `target_egress_cidrs`에 **더한다**(적어 둔 CIDR은 그대로 남고 최대 8개). Agent는 자격 증명으로 인증돼 IP를 위조하기 어렵고, 그 IP는 UDP 터널이 나가는 NAT와 같다. 값은 API 메모리에만 있고(API를 다시 띄우면 Agent가 곧 다시 보낸다) 10분 넘게 소식이 없으면 쓰지 않는다. 자동 값이 없으면 적어 둔 CIDR만으로 진행하고, 둘 다 없으면 `409 TARGET_EGRESS_UNKNOWN`으로 시작하지 않는다(입구는 허용 IP 없이 만들지 않는다: 빈 `loadBalancerSourceRanges`는 모두 허용이다). 확인은 `GET /tunnel-admin/agents/{agent_id}/egress`(운영자 키)로 한다. 이 값이 NLB에 반영되는 것은 이전을 시작한 뒤이므로, 시연 전에 미리 열어 두는 `make data-tunnel-nlb-up`의 `CIDR`은 첫 허용 IP일 뿐이다. 한계: HTTPS와 UDP가 서로 다른 NAT·프록시로 나가는 환경에서는 어긋날 수 있으니 그때는 `target_egress_cidrs`에 직접 적는다.
+
 시연 뒤 `make data-tunnel-nlb-down CONTEXT=cmp-demo-source`로 지운다(NLB 시간당 비용). 실행이 고정 게이트웨이를 쓰고 있으면 `up`·`down`은 거절한다(`--force`로 덮어씀). 맥 공인 IP가 바뀌면 `up`을 다시 하거나 실행 입력의 `target_egress_cidrs`만 바꾼다(실행이 맞춘다).
 
 ## 환경 연결 Launch Stack (#205, 티켓 23b)

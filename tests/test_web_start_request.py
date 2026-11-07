@@ -763,6 +763,62 @@ def test_on_prem_reverse_tunnel_without_preflight_refuses_the_start(
     assert temporal.started == []
 
 
+# --- 온프레 터널 허용 IP 자동 채움(auto_target_egress): 대상 Agent가 서버에 접속한 출발지 IP -----------------
+
+
+@pytest.fixture
+def seen_egress():
+    """대상 Agent(`office-seoul-01`)가 서버에 접속한 출발지 IP를 흉내 낸다(시험 뒤 비운다)."""
+    from cmp_api.agent_egress import EGRESS
+
+    EGRESS._items.clear()
+    yield lambda ip, agent_id="office-seoul-01": EGRESS.put(agent_id, ip)
+    EGRESS._items.clear()
+
+
+def test_auto_target_egress_adds_the_agents_current_ip_to_the_tunnel(
+    api, env_ref, agent, monkeypatch, seen_egress
+):
+    from cmp_data.handoff import DataMigrationInput
+
+    auto = {**ONPREM_DATA_MIGRATION,
+            "tunnel": {**ONPREM_DATA_MIGRATION["tunnel"], "auto_target_egress": True}}  # fmt: skip
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(auto))
+    seen_egress("223.38.86.12")
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    given = DataMigrationInput.model_validate(temporal.started[0]["data"]["data_migration"])
+    assert given.tunnel.target_egress_cidrs == ["203.0.113.7/32", "223.38.86.12/32"]
+    assert given.tunnel.auto_target_egress is False  # 워커에는 고정된 목록만 간다
+
+
+def test_auto_target_egress_without_any_ip_refuses_the_start(
+    api, env_ref, agent, monkeypatch, seen_egress
+):
+    only_auto = {
+        **ONPREM_DATA_MIGRATION,
+        "tunnel": {"ingress": "source", "auto_target_egress": True},
+    }
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(only_auto))
+    client, temporal = api
+    response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
+    assert (response.status_code, code_of(response)) == (409, "TARGET_EGRESS_UNKNOWN")
+    assert temporal.started == []  # 허용 IP 없이는 입구를 만들지 않는다
+
+
+def test_the_configured_cidr_alone_still_works_when_auto_is_off(
+    api, env_ref, agent, monkeypatch, seen_egress
+):
+    from cmp_data.handoff import DataMigrationInput
+
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(ONPREM_DATA_MIGRATION))
+    seen_egress("223.38.86.12")  # 꺼져 있으면 쓰지 않는다
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    given = DataMigrationInput.model_validate(temporal.started[0]["data"]["data_migration"])
+    assert given.tunnel.target_egress_cidrs == ["203.0.113.7/32"]
+
+
 TRAFFIC = {"relay_queue": "relay-1", "policy": {"observe_seconds": 20, "min_requests": 10}}
 
 
