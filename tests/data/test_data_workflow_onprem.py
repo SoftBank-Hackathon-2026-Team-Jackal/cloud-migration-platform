@@ -190,9 +190,10 @@ async def test_without_tunnel_nothing_is_cleaned():
 
 
 async def test_history_from_before_the_patches_replays(monkeypatch):
-    """패치 전 코드로 만든 이력(사전 점검·터널 정리 없음)을 새 코드가 그대로 재생한다."""
+    """패치 전 코드로 만든 이력(사전 점검·터널 정리 없음, PgBouncer 설치는 streaming 뒤)을 새 코드가
+    그대로 재생한다."""
     real = workflow.patched
-    new = {dmw.PREFLIGHT_PATCH, dmw.TUNNEL_CLEANUP_PATCH}
+    new = {dmw.PREFLIGHT_PATCH, dmw.TUNNEL_CLEANUP_PATCH, dmw.EARLY_CUTOVER_PATCH}
     monkeypatch.setattr(workflow, "patched", lambda pid: False if pid in new else real(pid))
     fakes = OnPremFakes()
     async with await WorkflowEnvironment.start_time_skipping() as env:
