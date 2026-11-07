@@ -12,7 +12,7 @@ from cmp_worker.activities import sandbox
 from cmp_worker.activities.k8s_workloads_cli import CommandRunner
 from cmp_worker.activities.sandbox_loop import SandboxLoopActivities, make_proxy_suite_runner
 from cmp_worker.artifact_store import LocalArtifactStore
-from cmp_worker.build_request import InMemoryBuildStore
+from cmp_worker.build_request import FileBuildStore
 from cmp_worker.build_wiring import BuildSettings, ImageBuildAdapter, upload_suite
 from cmp_worker.prebuilt_builder import PrebuiltImages
 from cmp_worker.sandbox_deploy import SANDBOX_CONTEXT, SandboxCluster, SandboxService
@@ -69,7 +69,8 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
         build = ImageBuildAdapter(
             build_settings,
             archive_store=AwsCliArchiveStore(profile=build_settings.aws_profile),
-            build_store=InMemoryBuildStore(),
+            # Reuse a build of the same source across worker restarts (redeploys clear memory).
+            build_store=FileBuildStore(Path(config.analysis_artifact_store_dir) / "build-cache"),
         )
     uploader = None
     pull_registry = minter = None

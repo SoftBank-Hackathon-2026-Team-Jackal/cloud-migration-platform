@@ -40,7 +40,7 @@ fixture 아카이브로 Digest 고정 이미지 참조가 나오고 실패 코�
 
 ## 한계와 미검증
 - 실제 Build 모듈(ECR·Docker)을 부르지 않았다. 가짜 빌더로만 확인했고, "로컬 Registry 1회 실제 빌드" 기록은 Docker와 로컬 Registry가 있는 환경에서 따로 남겨야 한다. 실제 ECR 권한과 빌드 시간은 검증하지 못했다.
-- 결과 저장은 메모리 구현(`InMemoryBuildStore`)이다. 실제 불변 저장 위치와 정규화 Activity 담당은 D-02이다. 호출 Worker(권한 배치)와 전체 시간 상한은 D-12이다.
+- 결과 저장은 메모리 구현(`InMemoryBuildStore`)이다. 2026-11-07부터 Sandbox Worker는 성공 결과를 `ANALYSIS_ARTIFACT_STORE_DIR/build-cache`에도 남기는 `FileBuildStore`를 써서, Worker를 재배포해도 같은 소스(리소스·소스 묶음 SHA-256·플랫폼)는 다시 빌드하지 않는다. 실제 불변 저장 위치와 정규화 Activity 담당은 D-02이다. 호출 Worker(권한 배치)와 전체 시간 상한은 D-12이다.
 - `EXTERNAL_COMMAND_FAILED` 재시도 외의 재시도 횟수(`ECR_*`·로그 업로드는 연속 2회면 사람 검토)는 14의 루프가 센다. 이 티켓은 분류와 다음 행동만 낸다.
 - 02의 Activity 연결(Heartbeat 포함)과 09 아카이브 결과를 넘기는 통합은 별도 작업이다. 플랫폼은 대상 capabilities에서 가져오는 연결이 아직 없다.
 

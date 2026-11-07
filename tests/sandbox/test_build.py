@@ -4,6 +4,7 @@ import pytest
 from cmp_contracts.provisioning_v2 import BuildEvidenceV2, S3ArchiveRef
 from cmp_worker.build_request import (
     BuildTarget,
+    FileBuildStore,
     InMemoryBuildStore,
     classify_failure,
     make_attempt_id,
@@ -206,3 +207,22 @@ def test_saved_results_are_immutable():
     with pytest.raises(ValueError):
         store.save(changed)
     store.save(first)  # saving the identical result again is harmless
+
+
+def test_a_file_store_reuses_a_build_after_the_worker_restarts(tmp_path):
+    first, calls = run([None], store=FileBuildStore(tmp_path))
+    # A new store over the same directory stands for a restarted worker (memory is gone).
+    second, _ = run([None], store=FileBuildStore(tmp_path), calls=calls, attempt=2)
+    assert len(calls) == 1
+    assert second.reused is True
+    assert second.image_uri == first.image_uri
+
+
+def test_a_file_store_never_persists_failures_and_ignores_unreadable_files(tmp_path):
+    run(["DOCKERFILE_MISSING"], store=FileBuildStore(tmp_path))
+    assert list(tmp_path.iterdir()) == []
+    run([None], store=FileBuildStore(tmp_path))
+    for path in tmp_path.iterdir():
+        path.write_text("not json")
+    _, calls = run([None], store=FileBuildStore(tmp_path), attempt=2)
+    assert len(calls) == 1  # the unreadable file is a miss, so it builds again
