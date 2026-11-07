@@ -2428,6 +2428,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /system/pulse:
+    get:
+      tags:
+      - system
+      summary: Server CPU/memory use and recent errors
+      operationId: get_pulse_system_pulse_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pulse'
   /health:
     get:
       summary: Health
@@ -4735,6 +4748,62 @@ components:
       title: ProvisioningResultSummary
       description: 'Ticket 13 R8: user-facing summary. DB access, internal endpoints
         and IDs stay internal.'
+    Pulse:
+      properties:
+        at:
+          type: string
+          title: At
+        cpu_percent:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Cpu Percent
+        mem_percent:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Mem Percent
+        mem_used_mb:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Mem Used Mb
+        mem_total_mb:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Mem Total Mb
+        load1:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Load1
+        cores:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cores
+        errors_5m:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Errors 5M
+        window_seconds:
+          type: integer
+          title: Window Seconds
+      additionalProperties: false
+      type: object
+      required:
+      - at
+      - cpu_percent
+      - mem_percent
+      - mem_used_mb
+      - mem_total_mb
+      - load1
+      - cores
+      - errors_5m
+      - window_seconds
+      title: Pulse
     QueuedWork:
       properties:
         kind:
