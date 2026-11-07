@@ -42,6 +42,6 @@ aws cloudformation deploy \
     AmiId="$ami" SubnetId="$subnet" VpcId="$vpc" \
     StateBucketName="cmp-demo-${account}-apne2-state" \
     DeployBucketName="cmp-demo-${account}-apne2-deploy" \
-    InstanceType=t3.large
+    InstanceType="${CMP_DEMO_INSTANCE_TYPE:-m7i.2xlarge}"
 
 bash infra/demo/release.sh "${1:-HEAD}"
