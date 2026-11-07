@@ -338,6 +338,20 @@ class EnvoyObserver:
         except (OSError, ValueError):
             return None
 
+    def target_healthy(self) -> bool | None:
+        """대상 클러스터에 Envoy 헬스 체크를 통과한 멤버가 있는지. 읽지 못하면 None(모름)."""
+        query = urllib.parse.urlencode(
+            {"format": "json", "filter": r"cluster\.cluster_target\.membership_healthy$"}
+        )
+        try:
+            stats = self.fetch(f"{self.admin_url}/stats?{query}").get("stats", [])
+        except (OSError, ValueError):
+            return None
+        for item in stats:
+            if item.get("name") == "cluster.cluster_target.membership_healthy":
+                return int(item.get("value") or 0) > 0
+        return None
+
     def _read(self) -> dict[str, Any]:
         query = urllib.parse.urlencode({"format": "json", "filter": CLUSTER_STAT})
         return self.fetch(f"{self.admin_url}/stats?{query}")
