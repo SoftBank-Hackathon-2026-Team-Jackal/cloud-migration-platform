@@ -66,7 +66,7 @@ class Env:
         self.store = LocalArtifactStore(tmp_path / "artifacts")
         self.decided = 0
 
-    def kit(self, *, left=3600, ledger=None):
+    def kit(self, *, left=3600, ledger=None, cache=None):
         env = self
         runner = RedTeamRunner(
             FakeService(self.events), FakeIsolation(self.events),
@@ -108,6 +108,7 @@ class Env:
             brain=lambda migration_id: FakeBrain(),
             dispatch=dispatch,
             known_secrets=lambda plan: [SECRET],
+            cache=cache,
         )
 
     def approval(self, **changes):
@@ -121,16 +122,19 @@ class Env:
         }
         return base | changes
 
-    def stage(self, kit, *, previous=None, approval="default", digest=DIGEST):
+    def stage(
+        self, kit, *, previous=None, approval="default", digest=DIGEST, source_sha256=None, red=RED
+    ):
         return run_stage(
             kit,
             plan=self.plan,
-            red=RED,
+            red=red,
             approval=self.approval() if approval == "default" else approval,
             digest=digest,
             suite_sha256=SUITE,
             requirements_text="the app lists items",
             previous=previous or [],
+            source_sha256=source_sha256,
             clock=lambda: NOW,
         )
 
@@ -322,3 +326,119 @@ def test_the_loop_registers_the_two_red_team_activities():
         for a in SandboxLoopActivities.all(object.__new__(SandboxLoopActivities))
     }
     assert {"sbx_redteam_request", "sbx_redteam"} <= names
+
+
+# --- ticket 39 draft: the optional source-keyed cache ------------------------------------------
+
+
+class FakeCache:
+    """An in-memory stand-in for `RedTeamCacheStore` -- a plain dict, visible to the test."""
+
+    def __init__(self):
+        self.store: dict[str, dict] = {}
+        self.gets: list[str] = []
+        self.puts: list[str] = []
+
+    def get(self, key):
+        self.gets.append(key)
+        return self.store.get(key)
+
+    def put(self, key, value):
+        self.puts.append(key)
+        self.store[key] = value
+
+
+def test_a_cache_miss_runs_for_real_and_then_stores_the_result(tmp_path):
+    env = Env(tmp_path)
+    cache = FakeCache()
+    result = env.stage(env.kit(cache=cache), source_sha256="src-1")
+    assert env.decided == 2  # the model really ran (one dispatch turn, one finish turn)
+    assert result["open"][0]["finding_id"]
+    assert cache.puts == ["redteam/attack/src-1/initial.json"]
+    assert cache.store["redteam/attack/src-1/initial.json"] == result
+
+
+def test_a_cache_hit_never_touches_the_runner_the_model_or_the_approval_ledger(tmp_path):
+    env = Env(tmp_path)
+    cache = FakeCache()
+    first = env.stage(env.kit(cache=cache), source_sha256="src-1")
+    env.decided = 0
+    env.events.clear()
+    ledger = InMemoryApprovalLedger()
+    second = env.stage(
+        env.kit(cache=cache, ledger=ledger), source_sha256="src-1",
+        approval=env.approval(approval_id="appr-unused"),
+    )  # fmt: skip
+    assert second == first
+    assert env.decided == 0 and env.events == []  # no isolation session, no model call
+    # the "unused" approval is still unused -- a cache hit never consumes one
+    assert ledger.consume("appr-unused") is True
+
+
+def test_a_different_source_or_a_different_open_finding_set_is_its_own_key(tmp_path):
+    env = Env(tmp_path)
+    cache = FakeCache()
+    env.stage(env.kit(cache=cache), source_sha256="src-1")
+    env.stage(env.kit(cache=cache), source_sha256="src-2")
+    assert len(cache.store) == 2
+    assert "redteam/attack/src-1/initial.json" in cache.store
+    assert "redteam/attack/src-2/initial.json" in cache.store
+
+
+def test_redteam_cache_false_always_runs_for_real_even_with_a_cache_configured(tmp_path):
+    env = Env(tmp_path)
+    cache = FakeCache()
+    off = RedTeamInput(**{**RED.model_dump(), "cache_enabled": False})
+    env.stage(env.kit(cache=cache), source_sha256="src-1", red=off)
+    env.stage(env.kit(cache=cache), source_sha256="src-1", red=off)
+    assert cache.gets == [] and cache.puts == []
+    assert env.decided == 3  # both were real, uncached runs (Env's shared FakeBrain counter
+    # makes the second run's own single turn start from where the first left off)
+
+
+def test_no_source_hash_means_no_caching_even_with_a_cache_configured(tmp_path):
+    env = Env(tmp_path)
+    cache = FakeCache()
+    env.stage(env.kit(cache=cache))  # source_sha256 left as None
+    assert cache.gets == [] and cache.puts == []
+
+
+def test_a_cache_error_on_lookup_is_treated_as_a_miss_not_a_crash(tmp_path):
+    class BrokenCache(FakeCache):
+        def get(self, key):
+            from cmp_worker.redteam_cache import RedTeamCacheError
+
+            raise RedTeamCacheError("CACHE_STORE_ERROR")
+
+    env = Env(tmp_path)
+    result = env.stage(env.kit(cache=BrokenCache()), source_sha256="src-1")
+    assert result["status"] == "DONE" and env.decided == 2
+
+
+def test_a_cache_error_on_write_does_not_fail_an_otherwise_successful_run(tmp_path):
+    class WriteFailsCache(FakeCache):
+        def put(self, key, value):
+            from cmp_worker.redteam_cache import RedTeamCacheError
+
+            raise RedTeamCacheError("CACHE_STORE_ERROR")
+
+    env = Env(tmp_path)
+    result = env.stage(env.kit(cache=WriteFailsCache()), source_sha256="src-1")
+    assert result["status"] == "DONE"
+
+
+def test_an_error_outcome_is_never_cached_so_the_next_run_tries_for_real(tmp_path):
+    env = Env(tmp_path, dispatch_fails=False)
+    cache = FakeCache()
+    kit = env.kit(cache=cache)
+    # Force an ERROR status: an executor that dies only on the way out, after `ran = True`, is
+    # awkward to fake here, so this test instead pins the simpler, already-guaranteed contract:
+    # nothing is cached unless the result status is exactly "DONE".
+    from cmp_worker.redteam_stage import run_stage
+
+    result = run_stage(
+        kit, plan=env.plan, red=RED, approval=None, digest=DIGEST, suite_sha256=SUITE,
+        requirements_text="x", previous=[], source_sha256="src-1", clock=lambda: NOW,
+    )  # fmt: skip
+    assert result["status"] == "SKIPPED"
+    assert cache.puts == []

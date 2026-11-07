@@ -34,6 +34,7 @@ from cmp_agents.redteam_agent import (
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cmp_worker.artifact_store import ArtifactStore
+from cmp_worker.redteam_cache import RedTeamCacheError, RedTeamCacheStore, cache_key
 from cmp_worker.redteam_fixloop import (
     MAX_SECURITY_FIX_ATTEMPTS,
     RevalidationLedger,
@@ -73,6 +74,10 @@ class RedTeamInput(BaseModel):
     consent_ref: str = Field(min_length=1)  # the same consent `SandboxSettings.redteam` needs
     endpoints: list[Endpoint]  # grey-box input (R7): method, path, parameter names
     max_turns: int = Field(default=20, ge=1, le=100)
+    # Ticket 39 draft: redeploying the exact same source replays the last real attack's result
+    # instead of spending another one. On by default; a toggle the settings screen can turn off
+    # per run (e.g. a rehearsal that wants a fresh, uncached pass).
+    cache_enabled: bool = True
 
 
 class Brain(Protocol):
@@ -104,6 +109,9 @@ class RedTeamKit:
     brain: Callable[[str], Brain]
     dispatch: Callable[[Executor, list[str]], Callable[[ToolCall], ObservedResult]]
     known_secrets: Callable[[SandboxPlan], list[str]] = lambda plan: []
+    # Ticket 39 draft: optional. None (the default -- no bucket configured) makes every cache
+    # lookup a clean, silent miss; this never gates whether a run may start.
+    cache: RedTeamCacheStore | None = None
 
 
 def request_for(plan: SandboxPlan, red: RedTeamInput, *, now: float | None = None) -> dict:
@@ -146,6 +154,7 @@ def run_stage(
     requirements_text: str,
     previous: list[dict],
     migration_id: str = "",
+    source_sha256: str | None = None,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> dict:
     """One approved run. First time (`previous` empty) the Agent explores; with `previous` it only
@@ -153,6 +162,12 @@ def run_stage(
 
     Never raises for a refused or failed run: the reason is returned, because the Sandbox run this
     belongs to has already passed and a refusal here must not undo that (R3: shown, not a gate).
+
+    `source_sha256` (ticket 39 draft) is the build step's own hash of the source -- never
+    `digest`, which is not stable across rebuilds of identical source (the Go toolchain embeds a
+    build ID). When given, `red.cache_enabled` and `kit.cache` are set, a result already recorded
+    for this exact source and this exact set of Findings is replayed with no attack dispatched and
+    no approval spent; a fresh result is cached the same way afterward.
     """
     if kit is None:
         return _skipped(NOT_CONFIGURED, previous)
@@ -160,6 +175,15 @@ def run_stage(
         approved = Approval.model_validate(approval) if approval else None
     except ValidationError:
         return _skipped(NOT_APPROVED, previous)
+    cache_entry_key = None
+    if source_sha256 and red.cache_enabled and kit.cache is not None:
+        cache_entry_key = cache_key(source_sha256, (f["finding_id"] for f in previous))
+        try:
+            cached = kit.cache.get(cache_entry_key)
+        except RedTeamCacheError:
+            cached = None  # an unreachable cache is a miss, never a reason to fail the run
+        if cached is not None:
+            return cached
     config = RunConfig(intensity=red.intensity, time_budget_seconds=red.time_budget_seconds)
     secrets = kit.known_secrets(plan)
     brain = kit.brain(migration_id)
@@ -207,12 +231,20 @@ def run_stage(
             return _skipped(exc.code, previous)
         code = exc.code
     status = "ERROR" if code else "DONE"
-    return {
+    result = {
         "status": status, "code": code,
         "open": [{**f.model_dump(mode="json"), "repro": repros[f.finding_id]} for f in found],
         "resolved": resolved, "withheld": withheld, "model_error": brain.error,
         "summary": summarize(found).model_dump(mode="json"), "stopped_reason": stopped,
     }  # fmt: skip
+    # Only a clean, real DONE is worth replaying later -- a partial failure (ERROR) must be
+    # retried for real next time, not handed back from the cache.
+    if cache_entry_key is not None and status == "DONE":
+        try:
+            kit.cache.put(cache_entry_key, result)
+        except RedTeamCacheError:
+            pass  # best-effort: a cache write failing must not fail a run that already succeeded
+    return result
 
 
 def _findings(

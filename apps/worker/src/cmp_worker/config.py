@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     build_log_bucket: str | None = None
     build_platform: str | None = None
     build_aws_profile: str | None = None
+    # Ticket 39 draft: an optional cache of past red-team attack results, keyed by source hash
+    # (never the built image's digest). None (unset) means no cache at all -- `SandboxSettings.
+    # redteam_cache_enabled` only has an effect when this is also set.
+    redteam_cache_bucket: str | None = None
+    redteam_cache_prefix: str = ""
     # Ticket 10: gcloud configuration and the expected Google ADC principal for GCP Apply.
     provisioning_gcloud_configuration: str | None = None
     provisioning_gcp_adc_email: str | None = None

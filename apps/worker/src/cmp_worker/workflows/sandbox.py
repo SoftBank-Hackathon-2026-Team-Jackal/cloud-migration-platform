@@ -375,6 +375,9 @@ class SandboxVerificationWorkflow:
                         "approval": approval,
                         "previous_findings": previous,
                         "digest": digest,
+                        # Ticket 39 draft: the cache key, when a cache is configured. Never the
+                        # digest -- see redteam_stage.run_stage's docstring for why.
+                        "source_sha256": built_sha,
                         **ctx(run, self.attempt),
                     },
                     # The attack's own budget plus what it needs to put things back.
