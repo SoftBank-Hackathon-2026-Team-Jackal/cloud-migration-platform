@@ -61,9 +61,17 @@ def default_deny(namespace: str, labels: dict[str, str]) -> dict:
     )
 
 
-def allow_dns(namespace: str, labels: dict[str, str]) -> dict:
+def allow_dns(namespace: str, labels: dict[str, str], *, exclude_label: str | None = None) -> dict:
+    # DNS is open to every Pod by default. A Pod that carries `exclude_label` (the Sandbox red-team
+    # executor, ticket 33) is left out: names of other apps must not be visible to it and DNS must
+    # not become a way out. Without the argument the policy is exactly what it always was.
+    pods: dict[str, Any] = (
+        {}
+        if exclude_label is None
+        else {"matchExpressions": [{"key": exclude_label, "operator": "DoesNotExist"}]}
+    )
     return policy(namespace, "cmp-allow-dns", labels, {
-        "podSelector": {}, "policyTypes": ["Egress"],
+        "podSelector": pods, "policyTypes": ["Egress"],
         "egress": [{
             # GKE NodeLocal DNSCache(1.36 신규 클러스터 기본값, Dataplane V2)는 kube-dns Service로 가는
             # 질의를 노드의 node-local-dns Pod가 받는다. 둘 다 허용하지 않으면 Namespace 안 DNS가 모두 막힌다
@@ -116,10 +124,12 @@ def base_policies(
     labels: dict[str, str],
     releases: Mapping[str, str],
     intents: Sequence[Mapping[str, Any]],
+    *,
+    dns_exclude_label: str | None = None,
 ) -> list[dict]:
     return [
         default_deny(namespace, labels),
-        allow_dns(namespace, labels),
+        allow_dns(namespace, labels, exclude_label=dns_exclude_label),
         *intent_edges(namespace, labels, releases, intents),
     ]
 

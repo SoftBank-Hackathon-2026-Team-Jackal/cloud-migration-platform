@@ -97,6 +97,14 @@ DB 쓰기·읽기와 재시작 후 유지 테스트는 앱이 쓰기를 받는 �
 
 `--sandbox '{"security_probes": true}'`(웹 시작이면 서버의 Sandbox 기본 설정)로 켜면 표준 묶음에 DB 접근 프로브가 더해진다. 요구사항의 통신 의도에서 만들어지고(앱 전용 값 없음), Sandbox가 시험 Pod로 접속을 시도해 판정한다: 의도에 적힌 출발지는 DB에 연결되고, 그 밖의 Pod는 차단되어야 통과한다. 케이스 ID는 `sec-db-allowed-<출발 리소스>-<DB>`, `sec-db-outsider-<DB>`이고 결과에 `PROBE_MISMATCH expected=… actual=…`(기대와 다름)나 `PROBE_UNAVAILABLE`(시험을 못 돌림, 통과가 아님)이 사유로 실린다. 시험 Pod(`cmp-probe-…`)는 끝나면 지워지고 남아 있으면 Sandbox 정리 때 Namespace와 함께 사라진다. 이 클러스터는 NetworkPolicy를 적용하는 CNI여야 의미가 있다(k3d 기본은 적용). 평문 DB 거절과 운영용 경로 차단 프로브는 아직 없다(대상 DB에 SSL이 없고 운영 경로는 사용자 확정이 없음).
 
+### 레드팀 실행기 격리 (티켓 33)
+
+실행기는 `RedTeamIsolation(service.cluster).session(plan, target_resource_id=…)`로만 얻는다(`cmp_worker/sandbox_isolation.py`). 아직 Workflow에 연결되지 않았고 실행마다 승인(티켓 34)이 붙기 전에는 자동으로 시작되지 않는다. 시작 전에 `apply_network`가 끝나 있어야 한다(프록시와 기본 차단 정책이 있어야 격리를 증명할 수 있다).
+
+- 사유 코드: `REDTEAM_TARGET_NOT_ALLOWED`(다른 실행의 Namespace·`APPLICATION`이 아닌 대상), `REDTEAM_CONCURRENCY_LIMIT`(다른 실행기가 이미 있음), `REDTEAM_ISOLATION_NOT_ENFORCED`(막혀야 할 곳이 열렸거나 판정할 수 없음), `REDTEAM_TARGET_UNREACHABLE`(앱이 응답하지 않음). 앞의 둘은 아무것도 만들기 전에, 뒤의 둘은 확인 Pod 뒤에 정리까지 하고 끝난다.
+- 남은 Pod 찾기: `kubectl get pods -A -l cmp.sandbox/role=redteam-executor`. 이름은 `cmp-redteam-<해시>`(실행기), `cmp-redteam-vf-<해시>`(확인). 둘 다 종료 시한이 있고 Sandbox Namespace와 함께 지워진다.
+- 이 클러스터는 NetworkPolicy를 적용하는 CNI여야 하고, 아니면 `REDTEAM_ISOLATION_NOT_ENFORCED`로 멈춘다(k3d 기본은 적용). EKS·GKE에서의 실제 강제는 확인되지 않았다.
+
 ### AI 생성 테스트
 
 `--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다(실제 Claude 호출이므로 비용 승인이 먼저다. 모델이 설정되지 않았으면 `LLM_NOT_CONFIGURED`로 건너뛴다).
