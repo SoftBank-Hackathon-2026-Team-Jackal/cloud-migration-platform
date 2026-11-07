@@ -6,7 +6,8 @@
 #       선택: FAULT_TOKEN(대상 앱의 FAULT_TOKEN과 같은 값)을 적으면 Tools 화면의 장애 스위치 명령을 보고 응답으로
 #       받아 대상 앱 /__cmp/fault에 적용하고 실제 상태를 함께 보낸다. 플랫폼은 DEMO_TOOLS_ENABLED=true여야 한다.
 # 먼저 서버의 /opt/cmp/lib(cmp_traffic)가 이 기능이 들어간 커밋이어야 한다.
-# 단서: 로컬 traffic-lab Envoy에서만 확인했고, 실제 중계 서버에서는 아직 돌려 보지 않았다.
+# 중계 서버의 python3(3.9)에는 pydantic이 없어 relay-worker·peer-sync와 같은 python3.11로 실행한다.
+# 2026-11-07 데모 중계 서버(cmp-demo-relay)에 설치해 플랫폼이 5초마다 보고를 받는 것까지 확인했다.
 [Unit]
 Description=Report origin/target 5xx rate and p99 from the relay Envoy
 After=network-online.target
@@ -15,7 +16,7 @@ Wants=network-online.target
 [Service]
 EnvironmentFile=/etc/cmp/traffic-health.env
 Environment=PYTHONPATH=/opt/cmp/lib
-ExecStart=/usr/bin/python3 -m cmp_traffic.health
+ExecStart=/usr/bin/python3.11 -m cmp_traffic.health
 Restart=always
 RestartSec=5
 DynamicUser=yes

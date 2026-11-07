@@ -308,6 +308,7 @@ Most design documents are written in Korean.
 - [Events guide](docs/engineering/events-guide.md)
 - [`.env` reference guide](docs/engineering/env-file-guide.md)
 - [On-premises Agent installation and operation](specs/provisioning/onprem-agent-install.md)
+- [Connecting a Mac as the on-prem target (demo runbook)](specs/provisioning/onprem-agent-local-mac.md)
 - [Demo server operation](infra/demo/README.md)
 
 <!-- TODO: team -->
