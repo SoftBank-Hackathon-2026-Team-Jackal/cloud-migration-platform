@@ -272,6 +272,7 @@ Verifier(정해진 검사기)가 판정한다. 통과 조건: 필수 테스트 �
 - **결과(Finding):** 이미지 Digest와 묶음 SHA-256이 항상 붙고, 엔드포인트는 앱 안의 경로뿐이며, 증거는 앱의 실제 비밀 값과 비밀로 보이는 문자열을 지운 뒤에만 저장한다. 지울 수 없으면 저장하지 않는다(`SECRET_IN_EVIDENCE`). Workflow 이력에는 개수와 id만 남는다.
 - **Agent의 Tool 경계(티켓 35):** 레드팀 Agent가 내는 모든 호출은 도구 이름과 대상 앱 안의 경로만 가진다. 호스트·URL·IP를 담을 필드가 없어 33의 실행기가 이미 바인딩한 주소 밖으로 나갈 방법이 없다. 호출은 코드로 강제한 허용 목록에 있는 이름만 실행되고(`OUT_OF_SCOPE_TARGET`), Agent 입력은 그레이박스(경로 목록 + 마스킹한 요구사항)뿐이며 소스·`.env`·정답지는 들어가지 않는다(남으면 `SECRET_IN_INPUT`). 대상 앱의 응답은 마스킹한 뒤 데이터로만 전달되어 지시로 해석되지 않는다. 턴·시간 상한에 닿으면 그때까지의 결과를 보존하고 멈춘다.
 - **수정과 재검증(티켓 36):** Finding의 상태는 `OPEN → FIXED/STILL_OPEN/REGRESSED`로 Digest별로 기록되고, 다른 Digest에서 확인한 결과는 재사용하지 않는다(P-10). 재검증은 그 Finding의 재현 요청만 다시 돌린다. 수정이 인증 제거·접근 제어 확대·암호화 제거 중 하나면 재검증 전에 거절하고 사람 검토로 보낸다(P-12, `SECURITY_LOWERED_BY_FIX:<종류>`). 보안 수정 시도 횟수는 기능 수정 루프와 별도로 센다. `classify_failure`는 열린 Finding을 `SECURITY` 분류로 낸다. 1차는 표시와 승인 기록까지이고 승인 차단은 하지 않는다(D-17과 같은 원칙).
+- **Workflow 연결(티켓 37):** `SandboxInput.redteam`(동의 참조 필수, 호스트·URL 필드 없음)을 준 실행에서, 시험을 통과한 Sandbox에 사용자 승인 Signal을 받은 뒤 공격 한 번과 이전 Finding만의 재확인을 한다. 거절·시간 초과·시작 거부는 공격하지 않고 사유를 결과에 남기며 실행은 통과로 끝난다(표시만, R3). 열린 Finding은 `SECURITY`로 분류해 마스킹한 요약만 Fixer에 주고, 재빌드한 이미지에서 그 Finding의 요청만 다시 보낸다. 승인은 실행(재확인 포함)마다 새로 받는다. Worker에 모델·도구·판단(`RedTeamKit`)이 없으면 `REDTEAM_NOT_CONFIGURED`로 건너뛰며, 운영 배선은 아직 키트를 넘기지 않는다.
 - **제외:** 시험 도구와 Finding(34), Agent(35), 수정 연계(36), Namespace 전체의 Pod Security `enforce`와 ResourceQuota(앱·DB 차트와 데이터 초기화 재시작에 영향을 줄 수 있어 실행기 Pod 검사와 실행기 개수 제한으로 대체), EKS·GKE에서의 실제 강제 확인.
 
 ### 보안과 실행 안정성

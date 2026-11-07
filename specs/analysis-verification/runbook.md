@@ -214,3 +214,13 @@ result = run_suite(
 ## 9. 아직 없는 것
 
 실제 AWS에서의 빌드 실행(S3·ECR·Docker, D-06·D-12·승인), 인계 후 실제 계획 게시 확인, `make smoke-temporal`, 승인 API·화면, 수정 패치의 push·PR 자동 생성(후순위), 원본 쪽 테스트 자원(있으면 AI 테스트의 추가 검증, D-09), 실제 Claude로 만든 AI 테스트의 품질(비용 승인 후 1회 확인). 목록과 이유는 [티켓 목록](tasks.md)의 결정 대기와 각 티켓을 따른다.
+
+### 레드팀 Workflow 연결 (티켓 37)
+
+`SandboxInput.redteam`을 넣은 실행에서만 동작한다(없으면 기존과 같다). 시험을 통과한 Sandbox에서 `sbx_redteam_request` → 사용자 승인 Signal → `sbx_redteam` 순서로 돈다.
+
+- 승인: Workflow Signal `approve_redteam`(승인 내용은 `Approval`)·`decline_redteam`. 무엇을 승인받는지는 Query `redteam_state`의 `request`가 보여 준다(`waiting_since`가 같은 값이면 같은 승인 대기). 승인은 공격·재확인마다 새로 받는다.
+- 결과: 실행 결과의 `redteam`에 `status`(`CLEAN`·`FIXED`·`OPEN`·`STILL_OPEN`·`SKIPPED`·`ERROR`), `code`, `open`(남은 Finding과 재현 요청), `withheld`(증거에 비밀이 남아 저장하지 않은 것)가 들어간다. 표시와 기록만 하고 게시를 막지 않는다(ADR-008 R3).
+- 건너뜀 사유: `REDTEAM_NOT_CONFIGURED`(Worker에 `RedTeamKit`이 없음 — 현재 운영 배선의 기본값), `REDTEAM_DECLINED`, `REDTEAM_APPROVAL_TIMEOUT`, `REDTEAM_TIME_INSUFFICIENT`, 그리고 티켓 33·34의 사유 코드.
+- 열린 Finding이 있으면 `SECURITY`로 분류해 Fixer에 마스킹한 요약을 주고, 재빌드한 이미지에서 그 Finding의 요청만 다시 보낸다. 보안 수정은 3회까지이고 기능 수정 횟수와 따로 센다.
+- `ERROR`는 공격은 끝났지만 마무리(예: 데이터 복원)가 실패한 경우다. 이때도 찾은 Finding은 버리지 않는다.

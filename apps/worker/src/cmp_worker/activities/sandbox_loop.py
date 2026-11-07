@@ -67,6 +67,7 @@ from cmp_worker.planning_handoff import (
     check_with_planning,
 )
 from cmp_worker.prebuilt_builder import BuildUnavailable
+from cmp_worker.redteam_stage import RedTeamInput, RedTeamKit, request_for, run_stage
 from cmp_worker.sandbox_deploy import (
     SandboxCapabilities,
     SandboxError,
@@ -120,6 +121,7 @@ class SandboxInput(BaseModel):
     )
     analysis_report_ref: ArtifactRef | None = None  # the analysis version a person approved
     review_ref: ArtifactRef | None = None  # its stored ReviewRecord
+    redteam: RedTeamInput | None = None  # ticket 37: attack the passed Sandbox (needs a yes)
 
 
 def stack_in_app_code(logs: str, workspace: Path | str | None) -> bool:
@@ -225,7 +227,9 @@ class SandboxLoopActivities:
         target_fetcher: Callable[[SandboxPlan], AbstractContextManager[Fetch]] | None = None,
         reset_data: Callable[[SandboxPlan], Any] | None = None,
         skills_root: Path | str | None = None,
+        redteam: RedTeamKit | None = None,
     ) -> None:
+        self.redteam = redteam  # ticket 37: None attacks nothing and says REDTEAM_NOT_CONFIGURED
         self.target_fetcher = target_fetcher or make_proxy_fetcher(service)  # ticket 27-B
         self.reset_data = reset_data  # default: the service's own, looked up when needed
         self.skills_root = Path(skills_root) if skills_root else None  # where `test-authoring` is
@@ -491,6 +495,7 @@ class SandboxLoopActivities:
             build_failure_class=payload.get("build_failure_class"),
             verdict=Verdict.model_validate(verified["verdict"]),
             stack_in_app_code=verified.get("stack_in_app_code", False),
+            open_security_findings=tuple(payload.get("open_findings") or ()),
         )
         result = classify_failure(signals)
         return {
@@ -515,6 +520,7 @@ class SandboxLoopActivities:
                 requirements_json=canonical_requirements(requirements)[0].decode(),
                 logs=logs,
                 tests={c.id: c.model_dump(mode="json") for c in suite.cases},
+                findings=payload.get("findings") or [],
             ),
             llm=self.llm_factory(payload["migration_id"], "fixer"),
             workspace=workspace,
@@ -608,6 +614,35 @@ class SandboxLoopActivities:
             await emit(ctx, "build.fix", data, step="fix", state=fix_id)
             ids.append(fix_id)
         return {"fix_ids": ids}
+
+    @activity.defn(name="sbx_redteam_request")
+    async def sbx_redteam_request(self, payload: dict) -> dict:
+        """What a person is asked to approve, and how long the Sandbox's life leaves for the answer."""
+        inp = SandboxInput.model_validate(payload["input"])
+        plan = SandboxPlan.model_validate(payload["plan"])
+        assert inp.redteam is not None
+        return request_for(plan, inp.redteam)
+
+    @activity.defn(name="sbx_redteam")
+    async def sbx_redteam(self, payload: dict) -> dict:
+        """One approved attack, or the re-check of earlier Findings on a new image (ticket 37).
+
+        Findings come back with their own reproduction so the Workflow can hand them back for the
+        re-check; the Fixer is given the summary only (see the Workflow)."""
+        inp = SandboxInput.model_validate(payload["input"])
+        plan = SandboxPlan.model_validate(payload["plan"])
+        assert inp.redteam is not None
+        requirements = self._requirements(payload["requirements_ref"])
+        return run_stage(
+            self.redteam,
+            plan=plan,
+            red=inp.redteam,
+            approval=payload.get("approval"),
+            digest=payload["digest"],
+            suite_sha256=ArtifactRef.model_validate(payload["suite_ref"]).sha256,
+            requirements_text=canonical_requirements(requirements)[0].decode(),
+            previous=payload.get("previous_findings") or [],
+        )
 
     @activity.defn(name="sbx_ai_tests")
     async def sbx_ai_tests(self, payload: dict) -> dict:
@@ -914,6 +949,6 @@ class SandboxLoopActivities:
     def all(self) -> list[Callable]:
         return [
             self.sbx_build, self.sbx_prepare, self.sbx_apply, self.sbx_verify,
-            self.sbx_classify, self.sbx_fix, self.sbx_ai_tests, self.sbx_plan_assemble, self.sbx_plan_publish, self.sbx_publish,
+            self.sbx_classify, self.sbx_fix, self.sbx_redteam_request, self.sbx_redteam, self.sbx_ai_tests, self.sbx_plan_assemble, self.sbx_plan_publish, self.sbx_publish,
             self.sbx_teardown, self.sbx_cleanup_expired,
         ]  # fmt: skip

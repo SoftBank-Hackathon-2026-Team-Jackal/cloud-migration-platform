@@ -9,6 +9,7 @@ with workflow.unsafe.imports_passed_through():
     from cmp_contracts.queues import SANDBOX_QUEUE
 
     from cmp_worker.activities import sandbox
+    from cmp_worker.redteam_stage import MAX_SECURITY_ATTEMPTS
     from cmp_worker.review_gate import ReapprovalGate
     from cmp_worker.sandbox_deploy import sandbox_namespace
     from cmp_worker.sandbox_events import attempt_data, context, event_key, image_digest
@@ -16,6 +17,9 @@ with workflow.unsafe.imports_passed_through():
 # Provisioning 59: the loop emits `build.*`/`sandbox.*`. Histories without this marker replay as
 # before (no events context, no `sbx_emit`).
 SANDBOX_EVENTS_PATCH = "sandbox-events-v1"
+# Ticket 37: the red-team step. Only a run whose input asks for it ever reaches this marker, so
+# histories that never had the field replay exactly as before.
+REDTEAM_PATCH = "redteam-v1"
 
 
 @workflow.defn
@@ -31,6 +35,13 @@ class SandboxVerificationWorkflow:
         self.reapproval: ReapprovalGate | None = None
         self.early_rejections: list[dict[str, str]] = []
         self.ai_tests: dict | None = None
+        # Ticket 37: the red-team step's waiting room and last report.
+        self.redteam_phase = "NONE"
+        self.redteam_round = 0
+        self.redteam_request: dict | None = None
+        self.redteam_approval: dict | None = None
+        self.redteam_declined = False
+        self.redteam_rejections: list[dict[str, str]] = []
 
     @workflow.query
     def status(self) -> dict:
@@ -64,6 +75,31 @@ class SandboxVerificationWorkflow:
         view = self.reapproval.view()
         view["rejections"] = [*self.early_rejections, *view["rejections"]]
         return view
+
+    @workflow.signal
+    def approve_redteam(self, approval: dict) -> None:
+        """A person says yes to one attack on this Sandbox copy (R8). Each run needs its own."""
+        if self.redteam_phase != "WAITING_FOR_APPROVAL":
+            self.redteam_rejections.append({"signal": "approve_redteam", "code": "NOT_WAITING"})
+            return
+        self.redteam_approval = approval
+
+    @workflow.signal
+    def decline_redteam(self) -> None:
+        if self.redteam_phase != "WAITING_FOR_APPROVAL":
+            self.redteam_rejections.append({"signal": "decline_redteam", "code": "NOT_WAITING"})
+            return
+        self.redteam_declined = True
+
+    @workflow.query
+    def redteam_state(self) -> dict:
+        waiting = self.redteam_phase == "WAITING_FOR_APPROVAL"
+        return {
+            "phase": self.redteam_phase,
+            "waiting_since": self.redteam_round if waiting else 0,
+            "request": self.redteam_request if waiting else None,
+            "rejections": list(self.redteam_rejections),
+        }
 
     @workflow.signal
     def resolve_review(self) -> None:
@@ -169,14 +205,14 @@ class SandboxVerificationWorkflow:
             workflow.logger.info("parent could not be told about the review state")
 
     async def _run_integrated(self, data: dict) -> dict:
-        async def act(name, payload, *, minutes=3):
+        async def act(name, payload, *, minutes=3, attempts=2):
             return await workflow.execute_activity(
                 name,
                 payload,
                 task_queue=SANDBOX_QUEUE,
                 schedule_to_start_timeout=timedelta(minutes=5),
                 start_to_close_timeout=timedelta(minutes=minutes),
-                retry_policy=RetryPolicy(maximum_attempts=2),
+                retry_policy=RetryPolicy(maximum_attempts=attempts),
             )
 
         # Event plumbing (Provisioning 59). `run` counts `sbx_apply` calls (the screen's tracks);
@@ -232,6 +268,60 @@ class SandboxVerificationWorkflow:
             await emit(
                 ("sandbox.done", status, data, event_key(run, self.attempt, "done", cleanup))
             )
+
+        red_on = bool(data.get("redteam")) and workflow.patched(REDTEAM_PATCH)
+        red_open: list[dict] = []  # Findings still open on the last image (with their requests)
+        red_result: dict | None = None
+        sec_attempts = 0
+
+        def red_report(status: str, code: str | None, open_: list[dict], **more) -> dict:
+            return {"status": status, "code": code, "open": open_, **more}
+
+        async def redteam_round(plan, digest, previous: list[dict]) -> dict:
+            """Ask a person, wait for the answer inside the Sandbox's life, then run once. A
+            refusal of any kind is a report, not a failure: the run has already passed (R3)."""
+            self.redteam_round += 1
+            asked = await act("sbx_redteam_request", {"input": data, "plan": plan})
+            if asked["wait_seconds"] <= 0:
+                return {"status": "SKIPPED", "code": "REDTEAM_TIME_INSUFFICIENT", "open": previous}
+            self.redteam_request, self.redteam_approval = asked["request"], None
+            self.redteam_declined = False
+            self.redteam_phase, self.phase = "WAITING_FOR_APPROVAL", "REDTEAM_APPROVAL_PENDING"
+            await self._tell_parent(True)
+            try:
+                await workflow.wait_condition(
+                    lambda: self.redteam_approval is not None or self.redteam_declined,
+                    timeout=timedelta(seconds=asked["wait_seconds"]),
+                )
+            except TimeoutError:
+                pass
+            await self._tell_parent(False)
+            approval, declined = self.redteam_approval, self.redteam_declined
+            self.redteam_phase = "NONE"
+            if approval is None:
+                code = "REDTEAM_DECLINED" if declined else "REDTEAM_APPROVAL_TIMEOUT"
+                return {"status": "SKIPPED", "code": code, "open": previous}
+            self.phase = "sbx_redteam"
+            self.redteam_phase = "RUNNING"
+            try:
+                return await act(
+                    "sbx_redteam",
+                    {
+                        "input": data,
+                        "plan": plan,
+                        "requirements_ref": requirements_ref,
+                        "suite_ref": suite_ref,
+                        "approval": approval,
+                        "previous_findings": previous,
+                        "digest": digest,
+                        **ctx(run, self.attempt),
+                    },
+                    # The attack's own budget plus what it needs to put things back.
+                    minutes=int(data["redteam"]["time_budget_seconds"] / 60) + 15,
+                    attempts=1,  # a yes is used up by one run: a retry would only be refused
+                )
+            finally:
+                self.redteam_phase = "NONE"
 
         namespace = sandbox_namespace(data["migration_id"], data["run_id"])
         requirements_ref, source = data["requirements_ref"], data["source"]
@@ -352,42 +442,92 @@ class SandboxVerificationWorkflow:
                 tests_ran = tests_ran or applied.get("sandbox_error") is None
                 self.verdict = verified["verdict"]
                 checks = verified.get("checks")
+                security_round = False
                 if self.verdict["passed"]:
                     last_results = verified["results"]
+                    if red_on and digest is not None:
+                        # Ticket 37: the Sandbox passed its tests; now it is attacked, once per
+                        # image, and only with a yes. A Finding goes to the Fixer; the image it
+                        # produces is checked again for that Finding only.
+                        report = await redteam_round(plan, digest, red_open)
+                        if report["status"] == "DONE":
+                            fixed_before = bool(red_open)
+                            red_open = report["open"]
+                            state = "CLEAN" if not fixed_before else "FIXED"
+                            red_result = red_report(
+                                state if not red_open else "OPEN", report.get("code"), red_open,
+                                resolved=report.get("resolved", []),
+                                withheld=report.get("withheld", []),
+                                summary=report.get("summary"),
+                            )  # fmt: skip
+                            if red_open and sec_attempts < MAX_SECURITY_ATTEMPTS:
+                                security_round = True
+                            elif red_open:
+                                red_result["status"] = "STILL_OPEN"
+                        else:
+                            red_result = red_report(
+                                report["status"], report.get("code"), red_open,
+                                withheld=report.get("withheld", []),
+                            )  # fmt: skip
+                if self.verdict["passed"] and not security_round:
                     self.attempts.append({"attempt": self.attempt, "passed": True})
                     outcome = "PASSED"
                     await emit_attempt(run, self.attempt, self.verdict, None, checks)
                     break
-                self.phase = "sbx_classify"
-                classified = await act(
-                    "sbx_classify",
-                    {"plan": plan, "requirements_ref": requirements_ref, "verified": verified},
-                )
-                klass = classified["failure_class"]
-                self.attempts.append(
-                    {
-                        "attempt": self.attempt,
-                        "passed": False,
-                        "failure_class": klass,
-                        "reasons": classified["reasons"],
-                    }
-                )
-                reasons = classified["reasons"]
-                await emit_attempt(run, self.attempt, self.verdict, klass, checks)
-                if klass == "RENDER":
-                    outcome = "STOPPED_RENDER"
-                    break
-                if klass == "INFRA":
-                    infra_streak += 1
-                    if infra_streak >= 2:
-                        outcome = "NEEDS_REVIEW"
+                if security_round:
+                    # R4: a security fix has its own count, apart from the functional three.
+                    sec_attempts += 1
+                    self.phase = "sbx_classify"
+                    classified = await act(
+                        "sbx_classify",
+                        {
+                            "plan": plan,
+                            "requirements_ref": requirements_ref,
+                            "verified": verified,
+                            "open_findings": [f["finding_id"] for f in red_open],
+                        },
+                    )
+                    klass = classified["failure_class"]
+                    self.attempts.append(
+                        {
+                            "attempt": self.attempt,
+                            "passed": False,
+                            "failure_class": klass,
+                            "reasons": classified["reasons"],
+                        }
+                    )
+                    reasons = classified["reasons"]
+                else:
+                    self.phase = "sbx_classify"
+                    classified = await act(
+                        "sbx_classify",
+                        {"plan": plan, "requirements_ref": requirements_ref, "verified": verified},
+                    )
+                    klass = classified["failure_class"]
+                    self.attempts.append(
+                        {
+                            "attempt": self.attempt,
+                            "passed": False,
+                            "failure_class": klass,
+                            "reasons": classified["reasons"],
+                        }
+                    )
+                    reasons = classified["reasons"]
+                    await emit_attempt(run, self.attempt, self.verdict, klass, checks)
+                    if klass == "RENDER":
+                        outcome = "STOPPED_RENDER"
                         break
-                    continue
-                infra_streak = 0
-                if self.attempt >= 3:
-                    outcome = "NEEDS_REVIEW"
-                    review = True
-                    break
+                    if klass == "INFRA":
+                        infra_streak += 1
+                        if infra_streak >= 2:
+                            outcome = "NEEDS_REVIEW"
+                            break
+                        continue
+                    infra_streak = 0
+                    if self.attempt - sec_attempts >= 3:
+                        outcome = "NEEDS_REVIEW"
+                        review = True
+                        break
                 self.phase = "sbx_fix"
                 fix = await act(
                     "sbx_fix",
@@ -399,6 +539,20 @@ class SandboxVerificationWorkflow:
                         "source": source,
                         "analysis_report_ref": data.get("analysis_report_ref"),
                         "migration_id": data["migration_id"],
+                        **(
+                            {
+                                "findings": [
+                                    {
+                                        k: v
+                                        for k, v in f.items()
+                                        if k not in ("repro", "evidence_ref")
+                                    }
+                                    for f in red_open
+                                ]
+                            }
+                            if security_round
+                            else {}
+                        ),
                         **ctx(run, self.attempt),
                     },
                     minutes=20,
@@ -536,6 +690,7 @@ class SandboxVerificationWorkflow:
             "source": source,
             "published": published,
             **({"ai_tests": self.ai_tests} if self.ai_tests is not None else {}),
+            **({"redteam": red_result} if red_result is not None else {}),
             **({"builds_ref": builds_ref} if builds_ref is not None else {}),
             **({"suite_ref": suite_ref} if suite_ref != data["suite_ref"] else {}),
         }
