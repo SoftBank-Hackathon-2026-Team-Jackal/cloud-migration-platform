@@ -6524,6 +6524,27 @@ components:
           - type: boolean
           - type: 'null'
           title: Kube Api Ok
+        cpu_percent:
+          anyOf:
+          - type: number
+            maximum: 100.0
+            minimum: 0.0
+          - type: 'null'
+          title: Cpu Percent
+        mem_used_mb:
+          anyOf:
+          - type: integer
+            maximum: 10000000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Mem Used Mb
+        mem_total_mb:
+          anyOf:
+          - type: integer
+            maximum: 10000000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Mem Total Mb
       additionalProperties: false
       type: object
       required:

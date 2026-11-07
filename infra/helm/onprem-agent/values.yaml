@@ -63,7 +63,7 @@ tunnel:
   # auto: kernel WireGuard, else wireguard-go (needs /dev/net/tun). kernel | userspace to pin.
   mode: auto
   # Config poll, health checks and status report interval.
-  intervalSeconds: 15
+  intervalSeconds: 5
   # Ticket 73 (ADR-007 step 2): let the platform's data worker reach this cluster's K3s API
   # through the tunnel (port named by the platform, forwarded to `kubernetes.default.svc:443`,
   # relay address only). Off: the Agent ignores the port. TLS and authentication stay end to end.

@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from cmp_api import pulse
 from cmp_api.agent_registry import AgentRegistrationError, authenticate_agent
 from cmp_api.routes.agents import CredentialDep, SessionDep, require_admin
 from cmp_api.tunnels import (
@@ -86,6 +87,11 @@ class TunnelStatusReport(Strict):
     # Ticket 73: TCP connect to the K3s API port through the tunnel IP; null when not exposed.
     # Diagnostics only: it never changes `code` or the app/DB handoff checks.
     kube_api_ok: bool | None = None
+    # Node CPU/memory the Agent adds for the server-pulse widget (target side). Optional: an Agent
+    # without them, or a node it cannot read, simply leaves the target pulse empty.
+    cpu_percent: Annotated[float, Field(ge=0, le=100)] | None = None
+    mem_used_mb: Annotated[int, Field(ge=0, le=10_000_000)] | None = None
+    mem_total_mb: Annotated[int, Field(ge=1, le=10_000_000)] | None = None
 
 
 class RelayRegistration(Strict):
@@ -158,10 +164,21 @@ def post_tunnel_status(
     agent_id: str, report: TunnelStatusReport, session: SessionDep, credential: CredentialDep
 ):
     _agent(session, agent_id, credential)
+    fields = report.model_dump()
+    pulse_fields = {k: fields.pop(k) for k in ("cpu_percent", "mem_used_mb", "mem_total_mb")}
     try:
-        record_status(session, agent_id, **report.model_dump())
+        record_status(session, agent_id, **fields)
     except TunnelError as exc:
         raise _error(exc) from None
+    if all(value is not None for value in pulse_fields.values()):
+        # Authenticated Agent report -> the target side of the server pulse (no shared token).
+        pulse.REPORTS.put(
+            "target",
+            agent_id,
+            pulse_fields["cpu_percent"],
+            pulse_fields["mem_used_mb"],
+            pulse_fields["mem_total_mb"],
+        )
     return {"accepted": True}
 
 

@@ -854,3 +854,50 @@ def test_agent_forwards_the_kube_api_only_when_its_chart_allows_it():
     report = built.step()
     assert 6443 not in parts["forwarders"].applied[-1][2]
     assert "kube_api_ok" not in report and report["code"] is None
+
+
+# --- node CPU/memory on the status report (server-pulse widget, target side) -------------------
+
+METRICS = {"cpu_percent": 12.5, "mem_used_mb": 1024, "mem_total_mb": 4096}
+
+
+def test_report_carries_node_metrics_when_available_and_omits_them_when_not():
+    values = iter([METRICS, None])
+    built, parts = manager(metrics=lambda: next(values))
+    parts["link"].handshake = parts["clock"].now - 10
+    built.start()
+    first, second = built.step(), built.step()
+    assert parts["client"].reports[0] == first | METRICS
+    assert parts["client"].reports[1] == second and "cpu_percent" not in parts["client"].reports[1]
+
+
+def test_a_rejected_report_is_resent_without_metrics_and_they_stay_off_for_a_while():
+    clock = Clock()
+
+    class Strict(FakeClient):  # an older platform: unknown fields are rejected
+        def report_tunnel_status(self, *, agent_id, credential, report):
+            if "cpu_percent" in report:
+                raise AgentTransportError("PLATFORM_REQUEST_FAILED")
+            super().report_tunnel_status(agent_id=agent_id, credential=credential, report=report)
+
+    client = Strict()
+    built, parts = manager(client=client, clock=clock, metrics=lambda: METRICS)
+    parts["link"].handshake = clock.now - 10
+    built.start()
+    built.step()
+    assert len(client.reports) == 1 and "cpu_percent" not in client.reports[0]
+    built.step()  # still inside the retry window: no second rejected attempt
+    assert len(client.reports) == 2
+    clock.now += 301
+    built.step()  # window over: tried again (rejected again, resent without)
+    assert len(client.reports) == 3 and all("cpu_percent" not in r for r in client.reports)
+
+
+def test_an_unreadable_metrics_source_never_blocks_the_report():
+    def boom():
+        raise OSError("no /proc")
+
+    built, parts = manager(metrics=boom)
+    parts["link"].handshake = parts["clock"].now - 10
+    built.start()
+    assert built.step()["code"] is None and len(parts["client"].reports) == 1
