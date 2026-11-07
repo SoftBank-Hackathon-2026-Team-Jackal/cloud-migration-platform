@@ -14,7 +14,7 @@ _FORBIDDEN = re.compile(
 )
 
 
-class ForbiddenToolError(Exception):
+class ForbiddenToolError(ValueError):
     pass
 
 

@@ -113,6 +113,13 @@ DB 쓰기·읽기와 재시작 후 유지 테스트는 앱이 쓰기를 받는 �
 - 순서: 격리 증명 → 외부 차단 → 작업 → 차단 해제 → 실행기 제거 → (ACTIVE만) `reset_test_data`. 복원이 실패하면 오류로 남으니 그 Sandbox의 데이터는 믿지 말고 새로 만든다.
 - 증거는 `store_evidence`로만 저장한다. `SECRET_IN_EVIDENCE`가 나오면 그 증거는 저장되지 않은 것이다.
 
+### 레드팀 Agent의 Tool 경계 (티켓 35)
+
+`cmp_agents.redteam_agent`에 Workflow 연결과 독립적인 결정 경계가 있다. `build_input`으로 그레이박스 입력을 만들고, `run_loop(decide, dispatch, allowed=AllowList({...}), budget=TurnBudget(...))`로 한 턴씩 돈다. `decide`와 `dispatch`는 호출하는 쪽이 준다(아직 실제 LLM·실행기에 연결하지 않았다).
+
+- 거절 코드: `OUT_OF_SCOPE_TARGET`(허용 목록 밖 도구 또는 경로가 호스트를 담으려 함), `SECRET_IN_INPUT`(입력에서 비밀 값을 지울 수 없음). 종료 사유: `DONE`(모델이 끝냄), `TURN_LIMIT`, `TIME_LIMIT`, `EXECUTOR_ERROR`(dispatch가 예외를 냄) — 네 경우 모두 그때까지의 관찰이 보존된다.
+- 대상 앱의 응답은 항상 `ObservedResult.from_raw`로 감싼다. 직접 문자열을 이어붙여 모델에 보내지 않는다.
+
 ### AI 생성 테스트
 
 `--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다(실제 Claude 호출이므로 비용 승인이 먼저다. 모델이 설정되지 않았으면 `LLM_NOT_CONFIGURED`로 건너뛴다).

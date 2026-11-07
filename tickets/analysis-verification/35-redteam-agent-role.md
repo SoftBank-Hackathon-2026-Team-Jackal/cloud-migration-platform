@@ -1,7 +1,7 @@
 # Ticket 35 — 워커 쪽 레드팀 Agent 역할과 Tool 경계
 
 ## 상태
-DRAFT — 사용자 검토 대기. Issue #334. 선행: 33, 34. 결정: [ADR-008](../../docs/decisions/ADR-008.md) R1.
+IN_REVIEW — Issue #334. 단위 시험과 lint 통과(로컬). 실제 모델 1회, Finding 연계는 대기. 선행: 33(병합됨), 34.
 
 ## 목적
 레드팀 판단을 기존 에이전트 런타임(08A, Mapper·Tester·Fixer와 같은 구조) 안의 새 역할로 두고, **Tool 경계와 비용 상한 안에서만** 동작하게 한다. Pod는 실행기일 뿐 판단하지 않는다.
@@ -40,4 +40,24 @@ Blocked by: 33, 34, 08A·20(병합됨)
 - 놓치는 것: 실제 모델 판단 품질
 
 ## 문서
-plan §2.9 역할 표, spec AV-024, runbook, tasks.md를 같은 PR에서 갱신한다.
+spec AV-024, runbook, tasks.md를 같은 PR에서 갱신했다. plan §2.9 역할 표는 바꾸지 않았다(실제 모델 연결은 후속).
+
+## 구현 요약 (`cmp_agents.redteam_agent`)
+- **Tool 경계:** `ToolCall(tool, path)` — 필드가 이 둘뿐이라 호스트·URL·IP를 담을 곳이 없다. `path`는 스킴·`//`·IPv4로 보이는 세그먼트를 거절한다(`PATH_MUST_STAY_INSIDE_THE_TARGET`). `AllowList`는 등록 시점에 셸·네트워크로 보이는 이름을 거절하고(기존 `cmp_agents.tools._FORBIDDEN` 재사용), 목록 밖 호출은 `OUT_OF_SCOPE_TARGET`.
+- **입력:** `build_input`이 그레이박스 입력(`Endpoint` 목록 + 요구사항 텍스트)을 만든다. 모델에 전달하기 전 앱의 실제 비밀 값을 정확히 치환하고 `mask_text`를 더한 뒤, 그래도 남으면 `SECRET_IN_INPUT`으로 거절한다(34의 `redact`와 같은 원칙, 의존 방향이 반대라 이 모듈 안에 작게 다시 둠). `AgentInput`에는 소스·`.env`·정답지를 담을 필드가 없다.
+- **신뢰할 수 없는 응답:** `ObservedResult.from_raw`가 실행기 응답을 마스킹해 `<observed_data>` 태그로만 감싼다. 지시문처럼 보이는 텍스트가 들어 있어도 데이터 필드 밖으로 나가지 않는다.
+- **루프와 상한:** `TurnBudget(max_turns, max_seconds)`, `run_loop`가 한 턴씩 `decide` → 허용 목록 확인 → `dispatch`를 돌린다. 턴 상한, 시간 상한, 실행기 오류, 모델의 종료 신호(`call=None`) 네 가지로 끝나고 그때까지의 관찰 기록을 그대로 돌려준다.
+
+## 티켓과 달라진 점
+- 턴·시간 상한만 두고 토큰·비용 상한(ADR-004의 `cmp_agents.cost`)은 연결하지 않았다. `cost.py`가 `fcntl`(Unix 전용)을 써서 이 작업 환경(Windows)에서 불러올 수 없고, 실제 LLM 호출 연결 자체가 이 티켓 범위 밖(§범위 "제외")이라 상한 정책만 독립적으로 두고 실제 비용 원장 연결은 LLM 연동 시점으로 미뤘다.
+- Skill 형식(08A)·`network_intent` 경로 목록의 실제 출처는 연결하지 않았다. `build_input`은 호출하는 쪽이 만든 경로 목록을 받는다.
+- Pod와 모델 사이 직접 통신이 없다는 것은 33의 격리(모델 API로 나가는 egress 없음)로 이미 보장되고, 이 티켓은 그 경계를 벗어나는 호출을 모델 쪽에서 추가로 못 만들게 하는 것까지다.
+
+## 검증 (2026-11-07, Windows)
+- `tests/sandbox/test_redteam_agent.py`(11), `test_redteam_agent_input.py`(11), `test_redteam_agent_loop.py`(6) 통과. 33·34의 시험 포함 121개 통과(기존 `tests/agents/test_runtime.py`의 cp949 인코딩 실패 5개는 이 변경과 무관).
+- `ruff check`, `ruff format --check` 통과.
+
+## 미검증
+- 실제 모델 1회 호출(비용 승인 필요).
+- Finding과의 연계(36).
+- 실제 Kubernetes API를 통한 실행기 dispatch(지금은 가짜 `dispatch` 함수로만 검증).
