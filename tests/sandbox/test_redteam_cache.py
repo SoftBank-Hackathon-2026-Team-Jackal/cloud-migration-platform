@@ -40,7 +40,8 @@ def test_a_miss_returns_none_without_raising(tmp_path):
 
 def test_a_store_error_raises_without_leaking_the_cli_output(tmp_path):
     store = S3RedTeamCache(
-        bucket=BUCKET, aws_bin=fake_aws(tmp_path, 'echo "AccessDenied: secret-looking-text" >&2\nexit 254\n')
+        bucket=BUCKET,
+        aws_bin=fake_aws(tmp_path, 'echo "AccessDenied: secret-looking-text" >&2\nexit 254\n'),
     )
     with pytest.raises(RedTeamCacheError) as exc:
         store.get("redteam/attack/x/initial.json")
@@ -50,7 +51,9 @@ def test_a_store_error_raises_without_leaking_the_cli_output(tmp_path):
 def test_a_hit_returns_the_stored_json(tmp_path):
     store = S3RedTeamCache(
         bucket=BUCKET,
-        aws_bin=fake_aws(tmp_path, 'dest="${@: -1}"\necho \'{"status": "DONE", "open": []}\' > "$dest"\n'),
+        aws_bin=fake_aws(
+            tmp_path, 'dest="${@: -1}"\necho \'{"status": "DONE", "open": []}\' > "$dest"\n'
+        ),
     )
     assert store.get("redteam/attack/x/initial.json") == {"status": "DONE", "open": []}
 
@@ -64,7 +67,9 @@ def test_a_corrupt_object_is_a_miss_not_a_crash(tmp_path):
 
 def test_put_sends_the_value_as_the_body_file(tmp_path):
     log = tmp_path / "calls"
-    store = S3RedTeamCache(bucket=BUCKET, aws_bin=fake_aws(tmp_path, f'echo "$@" >> {log}\necho "{{}}"\n'))
+    store = S3RedTeamCache(
+        bucket=BUCKET, aws_bin=fake_aws(tmp_path, f'echo "$@" >> {log}\necho "{{}}"\n')
+    )
     store.put("redteam/attack/x/initial.json", {"status": "DONE", "open": []})
     call = log.read_text()
     assert "put-object --bucket cmp-test-redteam --key redteam/attack/x/initial.json" in call
@@ -80,7 +85,9 @@ def test_put_raises_on_failure(tmp_path):
 def test_a_prefix_is_prepended_to_every_key(tmp_path):
     log = tmp_path / "calls"
     store = S3RedTeamCache(
-        bucket=BUCKET, prefix="demo/", aws_bin=fake_aws(tmp_path, f'echo "$@" >> {log}\necho "{{}}"\n')
+        bucket=BUCKET,
+        prefix="demo/",
+        aws_bin=fake_aws(tmp_path, f'echo "$@" >> {log}\necho "{{}}"\n'),
     )
     store.put("redteam/attack/x/initial.json", {})
     assert "--key demo/redteam/attack/x/initial.json" in log.read_text()
@@ -89,7 +96,9 @@ def test_a_prefix_is_prepended_to_every_key(tmp_path):
 def test_the_profile_is_passed_through_not_hardcoded(tmp_path):
     log = tmp_path / "calls"
     store = S3RedTeamCache(
-        bucket=BUCKET, profile="cmp-aws-prod", aws_bin=fake_aws(tmp_path, f'echo "$@" >> {log}\necho "{{}}"\n')
+        bucket=BUCKET,
+        profile="cmp-aws-prod",
+        aws_bin=fake_aws(tmp_path, f'echo "$@" >> {log}\necho "{{}}"\n'),
     )
     store.put("k", {})
     assert "--profile cmp-aws-prod" in log.read_text()

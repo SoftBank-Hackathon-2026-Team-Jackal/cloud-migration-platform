@@ -122,7 +122,9 @@ class Env:
         }
         return base | changes
 
-    def stage(self, kit, *, previous=None, approval="default", digest=DIGEST, source_sha256=None, red=RED):
+    def stage(
+        self, kit, *, previous=None, approval="default", digest=DIGEST, source_sha256=None, red=RED
+    ):
         return run_stage(
             kit,
             plan=self.plan,
