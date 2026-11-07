@@ -2302,6 +2302,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /migrations/{migration_id}/traffic/finalize:
+    post:
+      tags:
+      - traffic actions
+      summary: Finalize Traffic
+      description: 100% 전환 뒤 안정화 구간에서 이전을 최종 확정하라고 요청한다.
+      operationId: finalize_traffic_migrations__migration_id__traffic_finalize_post
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficActionAccepted'
+        '404':
+          description: MIGRATION_NOT_FOUND
+        '409':
+          description: TRAFFIC_NOT_RUNNING or TRAFFIC_ACTION_NOT_ALLOWED
+        '503':
+          description: TRAFFIC_UNAVAILABLE
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /migrations/{migration_id}/analysis/review:
     get:
       tags:
@@ -2471,6 +2504,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /system/traffic-health:
+    get:
+      tags:
+      - system
+      summary: Origin/target 5xx rate and p99 measured at the relay Envoy
+      operationId: get_traffic_health_system_traffic_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficHealth'
+  /system/traffic-health/report:
+    post:
+      tags:
+      - system
+      summary: Relay reports one window of origin/target request metrics
+      operationId: post_traffic_health_system_traffic_health_report_post
+      parameters:
+      - name: x-pulse-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Pulse-Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthReport'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportAnswer'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /system/fault:
+    get:
+      tags:
+      - system
+      summary: 'Demo fault switch: desired vs observed'
+      operationId: get_fault_system_fault_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultView'
+    post:
+      tags:
+      - system
+      summary: 'Demo fault switch: inject on the target'
+      operationId: post_fault_system_fault_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaultRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - system
+      summary: 'Demo fault switch: clear'
+      operationId: delete_fault_system_fault_delete
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaultView'
   /health:
     get:
       summary: Health
@@ -3711,6 +3840,110 @@ components:
       - code
       - recoverability
       title: Failure
+    FaultObserved:
+      properties:
+        active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Active
+        error_rate:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Error Rate
+        delay_ms:
+          anyOf:
+          - type: integer
+            maximum: 60000.0
+            minimum: 0.0
+          - type: 'null'
+          title: Delay Ms
+        remaining_s:
+          anyOf:
+          - type: integer
+            maximum: 86400.0
+            minimum: 0.0
+          - type: 'null'
+          title: Remaining S
+        applied_id:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Applied Id
+        error:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+      - active
+      title: FaultObserved
+      description: 리포터가 대상 앱 `/__cmp/fault`에서 읽은 실제 상태. active가 None이면 읽지 못했다.
+    FaultRequest:
+      properties:
+        error_rate:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Error Rate
+          default: 0.5
+        delay_ms:
+          type: integer
+          maximum: 10000.0
+          minimum: 0.0
+          title: Delay Ms
+          default: 800
+        duration_s:
+          type: integer
+          maximum: 900.0
+          minimum: 1.0
+          title: Duration S
+          default: 300
+      additionalProperties: false
+      type: object
+      title: FaultRequest
+    FaultView:
+      properties:
+        at:
+          type: string
+          title: At
+        desired:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Desired
+        observed:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Observed
+        observed_age_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Observed Age Seconds
+        applied:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Applied
+      type: object
+      required:
+      - at
+      - desired
+      - observed
+      - observed_age_seconds
+      - applied
+      title: FaultView
     GcpConnectionSummary:
       properties:
         connection_id:
@@ -3798,6 +4031,28 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HealthReport:
+      properties:
+        window_seconds:
+          type: number
+          maximum: 600.0
+          exclusiveMinimum: 0.0
+          title: Window Seconds
+        origin:
+          $ref: '#/components/schemas/SideWindow'
+        target:
+          $ref: '#/components/schemas/SideWindow'
+        fault:
+          anyOf:
+          - $ref: '#/components/schemas/FaultObserved'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - window_seconds
+      - origin
+      - target
+      title: HealthReport
     ImagePullCredential:
       properties:
         registry:
@@ -5050,6 +5305,18 @@ components:
       - job_id
       - accepted
       title: ReportAck
+    ReportAnswer:
+      properties:
+        fault:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Fault
+      type: object
+      required:
+      - fault
+      title: ReportAnswer
     ReportStage:
       properties:
         id:
@@ -5792,6 +6059,85 @@ components:
       - nodes
       - age_seconds
       title: Side
+    SideSummary:
+      properties:
+        requests:
+          type: integer
+          title: Requests
+        failed:
+          type: integer
+          title: Failed
+        error_rate:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Error Rate
+        p99_ms:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: P99 Ms
+        rps:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Rps
+      type: object
+      required:
+      - requests
+      - failed
+      - error_rate
+      - p99_ms
+      - rps
+      title: SideSummary
+    SideWindow:
+      properties:
+        requests:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Requests
+        errors_5xx:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Errors 5Xx
+        timeouts:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Timeouts
+        failed:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Failed
+        error_rate:
+          anyOf:
+          - type: number
+            maximum: 1.0
+            minimum: 0.0
+          - type: 'null'
+          title: Error Rate
+        rps:
+          type: number
+          minimum: 0.0
+          title: Rps
+        p99_ms:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: 'null'
+          title: P99 Ms
+      additionalProperties: false
+      type: object
+      required:
+      - requests
+      - errors_5xx
+      - timeouts
+      - failed
+      - rps
+      title: SideWindow
     StartSource:
       properties:
         kind:
@@ -6005,6 +6351,7 @@ components:
           enum:
           - rollback
           - retry
+          - finalize
           title: Action
         signal:
           type: string
@@ -6017,6 +6364,42 @@ components:
       - action
       - signal
       title: TrafficActionAccepted
+    TrafficHealth:
+      properties:
+        at:
+          type: string
+          title: At
+        fresh:
+          type: boolean
+          title: Fresh
+        age_seconds:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Age Seconds
+        summary:
+          additionalProperties:
+            $ref: '#/components/schemas/SideSummary'
+          propertyNames:
+            enum:
+            - origin
+            - target
+          type: object
+          title: Summary
+        series:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Series
+      type: object
+      required:
+      - at
+      - fresh
+      - age_seconds
+      - summary
+      - series
+      title: TrafficHealth
     Transfer:
       properties:
         bytes:

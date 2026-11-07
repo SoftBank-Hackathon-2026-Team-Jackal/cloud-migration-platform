@@ -25,6 +25,7 @@ with workflow.unsafe.imports_passed_through():
         is_idle,
         p99_limit,
         probe_count,
+        stability_health,
         weights_for,
     )
     from cmp_traffic.snapshot import (
@@ -49,6 +50,12 @@ EVENT_STATUS = {"complete": "done", "rolledback": "failed"}  # everything else i
 ZERO = {"requests": 0, "failed": 0, "p99_ms": 0.0}
 QUEUE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 SHIFTING = frozenset({"applying", "observing", "gate"})
+STABILIZING = "stabilizing"
+DB_GATE_POLL_SECONDS = 5
+DB_GATE_WAIT_SECONDS = 600
+# 관찰에 실패하면 이만큼 쉬고 다시 잰다(실패가 이어질 때 이벤트가 쏟아지지 않게).
+OBSERVE_RETRY_SECONDS = 5
+DATA_WORKFLOW = "data-{}"
 RETRY_WAIT_SECONDS = 900
 MANUAL_NOTE = {
     "key": "manual",
@@ -59,6 +66,10 @@ MANUAL_NOTE = {
 
 class _ManualRollback(Exception):
     """사람이 롤백을 요청해 관찰 중인 단계를 끊는다(Workflow 내부 흐름 제어용)."""
+
+
+class _Finalized(Exception):
+    """안정화 구간에서 사람이 최종 확정을 요청해 관찰 창을 끊는다(Workflow 내부 흐름 제어용)."""
 
 
 @workflow.defn
@@ -74,6 +85,11 @@ class TrafficShiftWorkflow:
         self.queue = MIGRATION_QUEUE
         self.migration_id: str | None = None
         self.next_notes: list[dict] = []
+        self.finalize_requested = False
+        self.db_rolled_back = False  # 안정화 구간 롤백에서 DB도 원본으로 되돌렸는지
+        self.alerting = (
+            False  # 지금 안정화 구간 이상을 알린 상태인지(같은 이상을 반복해 알리지 않는다)
+        )
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -91,10 +107,17 @@ class TrafficShiftWorkflow:
         if self.waiting_retry:
             self.retry_requested = True
 
+    @workflow.signal
+    def request_finalize(self) -> None:
+        """안정화 구간(100% 뒤)에서 사람이 누른 최종 확정. 그 밖에는 무시한다(멱등)."""
+        if self.snapshot.get("phase") == STABILIZING and not self.rollback_requested:
+            self.finalize_requested = True
+
     def can_rollback(self) -> bool:
         return (
-            self.snapshot.get("phase") in SHIFTING
+            (self.snapshot.get("phase") in SHIFTING or self.snapshot.get("phase") == STABILIZING)
             and not self.rollback_requested
+            and not self.finalize_requested
             and not self.cancel_requested
             and not self.waiting_retry
         )
@@ -108,6 +131,9 @@ class TrafficShiftWorkflow:
             "actions": {
                 "rollback": self.can_rollback(),
                 "retry": self.waiting_retry and not self.retry_requested,
+                "finalize": self.snapshot.get("phase") == STABILIZING
+                and not self.finalize_requested
+                and not self.rollback_requested,
             },
         }
 
@@ -263,10 +289,14 @@ class TrafficShiftWorkflow:
             start_to_close_timeout=timedelta(seconds=seconds + 60),
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
-        await workflow.wait_condition(lambda: handle.done() or self.rollback_requested)
+        await workflow.wait_condition(
+            lambda: handle.done() or self.rollback_requested or self.finalize_requested
+        )
         if not handle.done():
             handle.cancel()
-            raise _ManualRollback()
+            if self.rollback_requested:
+                raise _ManualRollback()
+            raise _Finalized()
         return await handle
 
     @workflow.run
@@ -327,6 +357,16 @@ class TrafficShiftWorkflow:
                     # 재시도 기한이 지났다: 이제 이전 실패로 알린다.
                     await self._emit("rolledback", "failed")
                 return result
+            if self.db_rolled_back:
+                # 안정화 구간에서 DB까지 되돌렸다: DB를 다시 대상으로 전환하고 게이트가 열린 뒤 옮긴다.
+                if not await self._switch_db_again():
+                    # 전환 신호가 이미 갔을 수 있다. 트래픽은 원본에 있으므로 DB도 원본으로 맞춰 둔다
+                    # (쓰기 주체가 대상이 됐을 때만 되돌린다).
+                    await self._rollback_db()
+                    reason = "취소 요청" if self.cancel_requested else "DB 재전환 확인 실패"
+                    await self._emit("rolledback", "failed")
+                    return self._result("BLOCKED", weights_for(0), reason)
+                db_gate_ok = True
 
     async def _probe(self, handover, policy, count: int) -> Sample | None:
         """사용자 트래픽이 없을 때 중계 서버에서 대상으로 합성 요청을 보낸다. 못 보내면 None(예전처럼 보류)."""
@@ -440,4 +480,161 @@ class TrafficShiftWorkflow:
                 "complete" if decision == "done" else "gate", decision=decision,
             )  # fmt: skip
 
+        if policy.stabilize_seconds > 0 and self._actions_on():
+            return await self._stabilize(policy, baseline, current)
         return {"status": "DONE", "final_weights": current, "events": self.events}
+
+    async def _stabilize(self, policy, baseline, weights) -> dict:
+        """100% 뒤 최종 확정 전 안정화 구간. 자동으로 되돌리지 않는다.
+
+        관찰 창마다 대상의 오류율·p99를 스냅숏(`health`)으로 내고, 기준을 넘으면 `traffic.alert`로 한 번 알린다.
+        사람이 롤백하면 트래픽을 원본으로, DB도 원본으로 되돌린다(`rollback_db`). 사람이 확정하면 DONE.
+
+        구간이 끝나도 확정할 근거가 없으면 스스로 확정하지 않는다: 대상이 기준을 넘고 있거나(알림 중), 요청이 적어
+        한 번도 판정하지 못했으면(사용자 트래픽 없음) 사람의 결정을 `stabilize_hold_seconds` 더 기다린다.
+        그래도 결정이 없으면 알림 중일 때는 안전한 쪽(원본)으로 되돌리고, 판정만 못 했을 때는 확정한다.
+        """
+        step = policy.steps[-1]
+        began = workflow.time()
+        hold_until = began + policy.stabilize_seconds + policy.stabilize_hold_seconds
+        health: dict | None = None
+        judged_any = False
+        while True:
+            left = max(0.0, policy.stabilize_seconds - (workflow.time() - began))
+            if self.cancel_requested:
+                return await self._rollback(policy, baseline, step, "취소 요청")
+            if self.rollback_requested:
+                return await self._stabilize_rollback(policy, baseline, step, health)
+            if self.finalize_requested:
+                break
+            if left <= 0:
+                if not self.alerting and judged_any:
+                    break
+                if workflow.time() >= hold_until:
+                    if self.alerting:
+                        return await self._rollback(
+                            policy, baseline, step, "안정화 구간 결정 없음: 기준 초과 상태"
+                        )
+                    break
+            await self._publish(
+                policy, weights, step, baseline, None, 0, STABILIZING,
+                health=health, stabilize_left_seconds=round(left),
+            )  # fmt: skip
+            span = min(policy.stabilize_window_seconds, left) if left > 0 else None
+            try:
+                window = Sample.model_validate(
+                    await self._observe(span or policy.stabilize_window_seconds)
+                )
+            except _ManualRollback:
+                return await self._stabilize_rollback(policy, baseline, step, health)
+            except _Finalized:
+                break
+            except ActivityError:
+                # 관찰 실패로 되돌리지 않는다(사람이 판단한다). 잠깐 쉬고 다음 창에서 다시 잰다
+                await workflow.sleep(OBSERVE_RETRY_SECONDS)
+                continue
+            health = stability_health(policy, baseline, window)
+            judged_any = judged_any or bool(health["judged"])
+            await self._alert(health)
+        if self.finalize_requested:
+            reason = "manual"
+        elif judged_any:
+            reason = "window_elapsed"
+        else:
+            reason = "no_traffic"
+        self.events.append({"step": step, "decision": "finalize", "reason": reason})
+        await self._publish(
+            policy, weights, step, baseline, None, 0, "complete",
+            decision="done", health=health, notes=[{"key": "finalized", "params": {"by": reason}}],
+        )  # fmt: skip
+        return {"status": "DONE", "final_weights": weights, "events": self.events}
+
+    async def _alert(self, health: dict) -> None:
+        """기준을 넘기 시작할 때 한 번, 회복할 때 한 번 알린다(에이전트·웹이 받는다)."""
+        breached = bool(health["breach"])
+        if breached == self.alerting or not (breached or health["judged"]):
+            return
+        self.alerting = breached
+        await self._send(
+            "traffic.alert",
+            "running",
+            {"state": "breach" if breached else "recovered", "phase": STABILIZING, **health},
+        )
+
+    async def _stabilize_rollback(self, policy, baseline, step, health) -> dict:
+        reason = "안정화 구간 수동 롤백"
+        if health and health.get("breach"):
+            reason += ": " + ", ".join(b["code"] for b in health["breach"])
+        result = await self._rollback(policy, baseline, step, reason, manual=True)
+        if result["status"] == "ROLLED_BACK" and policy.rollback_db and self.migration_id:
+            self.db_rolled_back = await self._rollback_db()
+            if self.db_rolled_back:  # 웹이 "DB도 원본으로 되돌림"을 보이도록 한 번 더 알린다
+                await self._publish(
+                    policy, weights_for(0), step, baseline, None, 0, "rolledback",
+                    status="running", decision="rollback", notes=[{"key": "dbRollback"}],
+                )  # fmt: skip
+        self.alerting = False
+        return result
+
+    async def _signal_data(self, name: str) -> bool:
+        """같은 실행의 데이터 이전 Workflow에 신호를 보낸다. 데이터 이전이 없으면 False."""
+        handle = workflow.get_external_workflow_handle(DATA_WORKFLOW.format(self.migration_id))
+        try:
+            await handle.signal(name)
+        except Exception:  # noqa: BLE001 - this run has no data migration (or it has ended)
+            return False
+        return True
+
+    async def _db_writer(self) -> str | None:
+        """지금 DB 쓰기 주체(`source`/`target`). 읽지 못하면 None."""
+        try:
+            gate = await workflow.execute_activity(
+                traffic.traffic_db_gate,
+                {"migration_id": self.migration_id},
+                task_queue=WORKFLOW_QUEUE,
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
+        except ActivityError:
+            return None
+        writer = gate.get("writer") if isinstance(gate, dict) else None
+        return writer if isinstance(writer, str) else None
+
+    async def _rollback_db(self) -> bool:
+        """DB 쓰기 주체가 대상일 때만 원본으로 되돌리고, 원본이 쓰기 주체가 된 것을 확인하면 True.
+
+        쓰기 주체가 이미 원본이면(DB를 전환하지 않았다) 신호를 보내지 않는다: 보내지도 않은 롤백을 했다고
+        알리거나, 다시 전환할 때 아무도 원하지 않은 DB 전환을 하지 않게 한다.
+        """
+        if await self._db_writer() != "target":
+            return False
+        if not await self._signal_data("rollback"):
+            return False
+        deadline = workflow.time() + DB_GATE_WAIT_SECONDS
+        while workflow.time() < deadline:
+            if await self._db_writer() == "source":
+                return True
+            await workflow.sleep(DB_GATE_POLL_SECONDS)
+        return False
+
+    async def _switch_db_again(self) -> bool:
+        """DB를 다시 대상으로 전환하고(`switchover`) 쓰기 주체가 대상·역방향 복제 정상이 될 때까지 기다린다."""
+        if not await self._signal_data("switchover"):
+            return False
+        deadline = workflow.time() + DB_GATE_WAIT_SECONDS
+        while workflow.time() < deadline and not self.cancel_requested:
+            try:
+                gate = await workflow.execute_activity(
+                    traffic.traffic_db_gate,
+                    {"migration_id": self.migration_id},
+                    task_queue=WORKFLOW_QUEUE,
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+            except ActivityError:
+                gate = {}
+            if gate.get("writer") == "target" and gate.get("reverse_replication_ok"):
+                self.db_rolled_back = False
+                return True
+            await workflow.sleep(DB_GATE_POLL_SECONDS)
+        return False

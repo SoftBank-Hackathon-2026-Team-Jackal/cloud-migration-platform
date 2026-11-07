@@ -7,6 +7,9 @@
   호출 전에 최악 비용을 예약하고 끝나면 실제 비용으로 맞춘다. 한도에 걸리면 모델을 부르기 전에 거절한다.
 - 키는 SDK가 환경변수(ANTHROPIC_API_KEY)에서 읽는다. 이 모듈은 키를 읽지도 돌려주지도 않는다.
 - 실패하면 오류 코드만 내보낸다. 웹은 그때 예전 경로(웹 서버가 직접 묻기) 또는 규칙 기반 답으로 대신한다.
+- 판단 루프(`reasoner`, `cmp_api.agent_reasoning`)가 있으면 지표 도구와 skill을 쓰고 판단 근거를 함께 낸다:
+  `status`에 `skill`·`tool` 단계가 더해지고 `answer`에 `reasoning`(관찰·판단·권고)과 `skills`가 실린다. 루프가
+  제출 없이 끝나면(턴·시간 한도, 형식 오류) 단발 호출로 한 번 더 답한다. 모델 오류·비용 한도면 오류 코드로 끝낸다.
 """
 
 from __future__ import annotations
@@ -15,7 +18,10 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from cmp_api.agent_reasoning import Reasoner
 
 MAX_QUESTION = 300
 MAX_CONTEXT = 6000
@@ -165,11 +171,13 @@ class AgentChat:
         model: ModelClient | None = None,
         ledger: Ledger | None = None,
         has_key: Callable[[], bool] | None = None,
+        reasoner: Reasoner | None = None,
     ) -> None:
         self.settings = settings
         self.model = model or AnthropicChat()
         self.ledger = ledger
         self._has_key = has_key or (lambda: True)
+        self.reasoner = reasoner
 
     def ready(self) -> str | None:
         """쓸 수 없는 이유 코드, 쓸 수 있으면 None."""
@@ -209,26 +217,38 @@ class AgentChat:
             yield block("error", {"code": reason})
             return
         yield block("status", {"step": "reading_state", "chars": len(request.context)})
-        user = f"현재 상태:\n{request.context or '(없음)'}\n\n질문: {request.question}"
         yield block("status", {"step": "asking_model", "model": self.settings.model})
-        try:
-            answer = await asyncio.to_thread(
-                self._call, system_prompt(request.lang), user, self.settings.model
-            )
-        except AgentUnavailable as exc:
-            yield block("error", {"code": exc.code})
-            return
-        if not answer:
-            yield block("error", {"code": "EMPTY_ANSWER"})
-            return
-        payload: dict[str, Any] = {"answer": answer, "provider": "platform"}
+        payload: dict[str, Any] | None = None
+        if self.reasoner is not None:
+            outcome: dict[str, Any] = {}
+            async for item in self._reason(request, outcome):
+                yield item
+            if "error" in outcome:
+                yield block("error", {"code": outcome["error"]})
+                return
+            payload = outcome.get("payload")
+            if payload is None:
+                yield block("status", {"step": "fallback"})
+        if payload is None:
+            user = f"현재 상태:\n{request.context or '(없음)'}\n\n질문: {request.question}"
+            try:
+                answer = await asyncio.to_thread(
+                    self._call, system_prompt(request.lang), user, self.settings.model
+                )
+            except AgentUnavailable as exc:
+                yield block("error", {"code": exc.code})
+                return
+            if not answer:
+                yield block("error", {"code": "EMPTY_ANSWER"})
+                return
+            payload = {"answer": answer, "provider": "platform"}
         if request.caption_lang:
             yield block("status", {"step": "translating", "to": request.caption_lang})
             try:
                 caption = await asyncio.to_thread(
                     self._call,
                     caption_prompt(request.lang, request.caption_lang),
-                    answer,
+                    payload["answer"],
                     self.settings.caption_model or self.settings.model,
                 )
             except AgentUnavailable:
@@ -237,3 +257,55 @@ class AgentChat:
                 payload["caption"] = caption
         yield block("answer", payload)
         yield block("done", {})
+
+    async def _reason(self, request: AskRequest, outcome: dict[str, Any]) -> AsyncIterator[str]:
+        """판단 루프를 스레드에서 돌리며 진행 신호를 낸다. 결과는 `outcome`에 남긴다.
+
+        `outcome["payload"]`: 제출된 답. `outcome["error"]`: 모델 오류·비용 한도(단발로 다시 묻지 않는다).
+        둘 다 없으면 루프가 제출 없이 끝난 것이다(호출하는 쪽이 단발로 대신한다).
+        """
+        assert self.reasoner is not None
+        reasoner = self.reasoner
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+        def notify(step: str, detail: dict[str, Any]) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, ("status", {"step": step, **detail}))
+
+        def work() -> None:
+            try:
+                result: tuple[str, Any] = (
+                    "run",
+                    reasoner.run(
+                        request.question,
+                        request.context,
+                        request.lang,
+                        request.caption_lang or request.lang,
+                        notify,
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001 - 루프 밖 오류: 단발로 대신한다
+                result = ("crash", type(exc).__name__)
+            loop.call_soon_threadsafe(queue.put_nowait, result)
+
+        worker = asyncio.create_task(asyncio.to_thread(work))
+        while True:
+            kind, value = await queue.get()
+            if kind == "status":
+                yield block("status", value)
+                continue
+            break
+        await worker
+        if kind != "run":
+            return
+        run = value
+        if run.status == "SUBMITTED" and run.result is not None:
+            result = run.result
+            outcome["payload"] = {
+                "answer": result.answer.strip(),
+                "provider": "platform",
+                "reasoning": [t.model_dump() for t in result.reasoning],
+                "skills": list(run.record.skills_loaded),
+            }
+        elif run.fatal:
+            outcome["error"] = run.failure_reason or "LLM_UPSTREAM"

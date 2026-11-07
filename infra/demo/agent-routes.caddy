@@ -33,6 +33,15 @@ handle @migration_events {
 handle @pulse_report {
 	reverse_proxy {$CMP_API_UPSTREAM}
 }
+# Relay traffic health report (the relay Envoy's origin/target 5xx and p99 per window; same
+# X-Pulse-Token). Only this POST is public: GET /system/traffic-health stays internal.
+@traffic_health_report {
+	method POST
+	path /system/traffic-health/report
+}
+handle @traffic_health_report {
+	reverse_proxy {$CMP_API_UPSTREAM}
+}
 @backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*
 handle @backend {
 	reverse_proxy {$CMP_API_UPSTREAM}

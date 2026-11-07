@@ -74,7 +74,14 @@ def test_retry_after_a_rollback_signals_the_traffic_child(control) -> None:
     assert fake.signals == [("traffic-migration-1", "request_retry")]
 
 
-@pytest.mark.parametrize("action", ["rollback", "retry"])
+def test_finalize_while_stabilizing_signals_the_traffic_child(control) -> None:
+    fake = FakeControl(actions={"rollback": True, "retry": False, "finalize": True})
+    response = control(fake).post("/migrations/migration-1/traffic/finalize")
+    assert response.status_code == 202 and response.json()["signal"] == "request_finalize"
+    assert fake.signals == [("traffic-migration-1", "request_finalize")]
+
+
+@pytest.mark.parametrize("action", ["rollback", "retry", "finalize"])
 def test_unknown_migration_is_404(control, action) -> None:
     fake = FakeControl(exists=False)
     response = control(fake).post(f"/migrations/nope/traffic/{action}")
@@ -89,6 +96,8 @@ def test_unknown_migration_is_404(control, action) -> None:
         ("retry", None, "TRAFFIC_NOT_RUNNING"),
         ("rollback", {"rollback": False, "retry": True}, "TRAFFIC_ACTION_NOT_ALLOWED"),
         ("retry", {"rollback": True, "retry": False}, "TRAFFIC_ACTION_NOT_ALLOWED"),
+        # 안정화 구간이 아니면(전환 중) 확정할 수 없다
+        ("finalize", {"rollback": True, "retry": False}, "TRAFFIC_ACTION_NOT_ALLOWED"),
     ],
 )
 def test_wrong_state_is_409_with_a_code_and_no_signal(control, action, actions, code) -> None:
@@ -107,6 +116,7 @@ def test_routes_are_in_the_openapi_contract() -> None:
     paths = app.openapi()["paths"]
     assert "post" in paths["/migrations/{migration_id}/traffic/rollback"]
     assert "post" in paths["/migrations/{migration_id}/traffic/retry"]
+    assert "post" in paths["/migrations/{migration_id}/traffic/finalize"]
 
 
 # ---- 통합: 진짜 Temporal Signal ----
