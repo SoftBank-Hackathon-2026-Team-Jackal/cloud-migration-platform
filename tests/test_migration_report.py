@@ -304,7 +304,10 @@ OUTCOME_SWITCHED = {
     "result": "switched",
     "active": "target",
     "pause_ms": 110,
-    "steps": [{"id": "pause", "ms": 3, "window": "pause"}, {"id": "resume", "ms": 1, "window": "pause"}],
+    "steps": [
+        {"id": "pause", "ms": 3, "window": "pause"},
+        {"id": "resume", "ms": 1, "window": "pause"},
+    ],
     "replication": {"direction": "reverse", "lag_ms": None},
 }
 
