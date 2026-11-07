@@ -1,10 +1,18 @@
 name: Check
 on:
+  # 브랜치에 푸시하면 push와 pull_request가 둘 다 돌아 같은 검사가 두 번 쌓였다: PR이 있는 브랜치는 pull_request만 돈다.
   push:
+    branches: [main]
   pull_request:
+# 같은 PR·브랜치의 이전 실행은 새 푸시가 오면 취소한다. main은 커밋마다 결과를 남기려고 취소하지 않는다.
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   python:
     runs-on: ubuntu-latest
+    # 평소 4분 안팎이다. 시험이 멈추면 기본 6시간을 붙들고 있지 않도록 끊는다.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
