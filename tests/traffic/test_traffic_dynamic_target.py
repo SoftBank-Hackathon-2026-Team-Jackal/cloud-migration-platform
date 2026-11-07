@@ -79,8 +79,11 @@ def test_the_initial_cluster_file_rejects_unsafe_hosts(bad: str) -> None:
 
 
 class FakeEnvoy:
-    def __init__(self, rds: Path, cds: Path, *, reject_cds=False, never_active=False) -> None:
+    def __init__(
+        self, rds: Path, cds: Path, *, reject_cds=False, never_active=False, target_healthy=None
+    ) -> None:
         self.rds, self.cds = rds, cds
+        self.target_healthy = target_healthy  # None: Envoy가 값을 주지 않음
         self.reject_cds, self.never_active = reject_cds, never_active
         self.first_address = self._cds_address()
         self.cds_calls = 0
@@ -142,6 +145,11 @@ class FakeEnvoy:
                     },
                     {"name": "http.ingress.rds.local_route.update_rejected", "value": 0},
                 ]
+            }
+        if "membership_healthy" in pattern and self.target_healthy is not None:
+            value = 1 if self.target_healthy else 0
+            return {
+                "stats": [{"name": "cluster.cluster_target.membership_healthy", "value": value}]
             }
         return {"stats": []}  # observer counters: no traffic
 
@@ -327,6 +335,25 @@ async def test_a_target_that_is_already_receiving_traffic_is_never_changed(relay
     error = await refused()
     assert error.type == "TargetMismatch" and "already" in error.message
     assert address_in(relay.cds) == ORIGINAL
+
+
+@pytest.mark.parametrize("healthy", [True, None])
+async def test_a_live_or_unknown_target_with_traffic_is_never_changed(relay, healthy) -> None:
+    relay(target_healthy=healthy)
+    relay.state["proxy"].apply({"origin": 0, "target": 100})
+    error = await refused()
+    assert error.type == "TargetMismatch" and "already" in error.message
+    assert address_in(relay.cds) == ORIGINAL
+    assert relay.state["proxy"].target_weight() == 100
+
+
+async def test_a_dead_target_left_by_an_earlier_run_is_reset_to_origin_first(relay) -> None:
+    """앞선 실행이 대상 100%를 남겼고 그 대상이 죽었으면(정상 멤버 0) 원본 100%로 되돌린 뒤 새 대상으로 바꾼다."""
+    relay(target_healthy=False)
+    relay.state["proxy"].apply({"origin": 0, "target": 100})
+    await prepare()
+    assert address_in(relay.cds) == ("10.200.0.2", 8080)
+    assert relay.state["proxy"].target_weight() == 0
 
 
 async def test_a_new_target_envoy_never_activates_stops_the_shift(relay) -> None:

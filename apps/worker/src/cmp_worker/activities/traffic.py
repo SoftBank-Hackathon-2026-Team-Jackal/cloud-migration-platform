@@ -144,7 +144,9 @@ async def retarget(
     안전 조건(하나라도 아니면 `TargetMismatch`로 멈춘다, 재시도하지 않는다):
     - 동적 대상(CDS 경로)으로 깔려 있다. 정적 설정은 바꿀 수 없다.
     - 새 주소가 허용 범위 안의 IP다.
-    - 지금 대상으로 가는 트래픽이 0%다(전환 중인 대상을 바꾸지 않는다).
+    - 지금 대상으로 가는 트래픽이 0%다(전환 중인 대상을 바꾸지 않는다). 단, 앞선 실행이 대상 쪽 가중치를
+      남겨 두었고 그 대상이 이미 죽어 있으면(Envoy 헬스 체크 통과 멤버 0) 그 요청은 어차피 실패하고 있으므로
+      원본 100%로 먼저 되돌린 뒤 진행한다. 살아 있거나 상태를 모르면 지금처럼 멈춘다.
     """
 
     def refuse(why: str) -> ApplicationError:
@@ -158,8 +160,15 @@ async def retarget(
         raise refuse("static target")
     if not target_allowed(wanted[0]):
         raise refuse("target address not allowed")
-    if await asyncio.to_thread(proxy.target_weight) != 0:
-        raise refuse("traffic is already on the target")
+    weight = await asyncio.to_thread(proxy.target_weight)
+    if weight != 0:
+        healthy = await asyncio.to_thread(observer.target_healthy)
+        if weight is None or healthy is not False:
+            raise refuse("traffic is already on the target")
+        activity.logger.warning(
+            "relay held %s%% on a dead earlier target; resetting to origin", weight
+        )
+        await asyncio.to_thread(proxy.apply, weights_for(0))
     try:
         await asyncio.to_thread(proxy.set_target, wanted[0], wanted[1], health_path)
     except RuntimeError as exc:

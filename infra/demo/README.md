@@ -274,6 +274,30 @@ make data-tunnel-nlb-status CONTEXT=cmp-demo-source                       # 쓰�
 
 시연 뒤 `make data-tunnel-nlb-down CONTEXT=cmp-demo-source`로 지운다(NLB 시간당 비용). 실행이 고정 게이트웨이를 쓰고 있으면 `up`·`down`은 거절한다(`--force`로 덮어씀). 맥 공인 IP가 바뀌면 `up`을 다시 하거나 실행 입력의 `target_egress_cidrs`만 바꾼다(실행이 맞춘다). 온프레 NAT IP는 와이파이(집·회장·핫스팟)마다 바뀌므로 시연 서버는 `target_egress_cidrs: ["0.0.0.0/0"]`로 둔다. 다른 CIDR이나 `auto_target_egress`로 더한 `/32`와 함께 있으면 `0.0.0.0/0` 하나로 합친다. 열려 있어도 WireGuard는 등록된 공개키로 시작하지 않은 패킷에 응답하지 않고, DB는 터널 안쪽에만 있다.
 
+## 리허설 초기화와 중계 서버 코드 맞추기
+
+이전이 끝나거나 멈춘 뒤 남는 상태를 다음 실행이 물려받으면 결과가 실행마다 달라진다(2026-11-07 e2e에서 모두 재현).
+
+| 남는 것 | 다음 실행의 증상 |
+|---|---|
+| 끝나지 않는 `DataMigrationWorkflow`(전환 뒤 `finish`를 기다림) | 배포가 실행 중 이전 보호로 거절됨, 터널을 계속 붙잡음 |
+| 원본 앱 DB 주소가 PgBouncer(→ 터널 → 옛 대상)를 가리킴 | 터널이 바뀌면 원본 앱이 `connect timeout`으로 멈춤 |
+| 원본·대상 복제 객체, 대상 DB의 표 | `TARGET_SCHEMA_PARTIAL` |
+| 중계 서버 Envoy의 대상 100% 가중치 | `TRAFFIC_BLOCKED`(이제 옛 대상이 죽어 있으면 원본 100%로 되돌리고 진행한다) |
+| Namespace를 다시 만들며 사라진 사전 점검 Secret | `NETWORK_PREFLIGHT_UNKNOWN`(`PROBE_LOCATION_UNAVAILABLE`) |
+
+리허설 사이에는 초기화 스크립트를 돌린다(약 20초). 남은 데이터 이전 워크플로는 신호 없이 terminate한다(`rollback`·`finish`는 대상 DB를 건드린다).
+
+```sh
+SOURCE_CONTEXT=<원본 EKS kube context> TARGET_CONTEXT=<온프레 kube context> bash infra/demo/reset-rehearsal.sh
+```
+
+중계 서버의 relay worker(트래픽 전환 Activity)와 `traffic-health`는 `/opt/cmp/lib`의 코드를 쓴다. 이 경로는 데모 서버 배포에 들어 있지 않다. 트래픽 코드를 바꾼 커밋을 배포한 뒤에는 중계 서버도 같은 커밋으로 맞춘다. 실행 중인 트래픽 전환이 있으면 거절한다. 실패하면 백업(`/opt/cmp/lib-backups`, 최근 5개)으로 되돌린다. 맞춘 커밋은 `/opt/cmp/lib/REVISION`에 남는다.
+
+```sh
+bash infra/relay/sync-lib.sh          # origin/main
+```
+
 ## 환경 연결 Launch Stack (#205, 티켓 23b)
 
 AWS 연결 생성 응답의 `launch_stack_url`(ADR-005)은 api가 `CONNECTION_PLATFORM_PRINCIPAL_ARN`과 `CONNECTION_TEMPLATE_BASE_URL`을 모두 받아야 만들어진다. 둘 중 하나라도 비면 `null`이다(이전 동작).
