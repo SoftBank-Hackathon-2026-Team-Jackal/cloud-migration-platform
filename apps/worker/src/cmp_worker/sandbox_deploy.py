@@ -961,6 +961,15 @@ class SandboxService:
             self._restart(plan.namespace, app["release_name"])
         return {"reset": "OK"}
 
+    def baseline_exists(self, plan: SandboxPlan) -> bool:
+        """Whether `reset_test_data` would have something to restore (ticket 34 asks before an
+        ACTIVE red-team run, which may change the data and must be able to undo that)."""
+        try:
+            self._in_database(plan, f"test -s {BASELINE_PATH}")
+        except SandboxError:
+            return False
+        return True
+
     @staticmethod
     def _records(rendered: Any) -> dict[str, dict[str, str]]:
         return {

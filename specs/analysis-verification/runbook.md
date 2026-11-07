@@ -105,6 +105,14 @@ DB 쓰기·읽기와 재시작 후 유지 테스트는 앱이 쓰기를 받는 �
 - 남은 Pod 찾기: `kubectl get pods -A -l cmp.sandbox/role=redteam-executor`. 이름은 `cmp-redteam-<해시>`(실행기), `cmp-redteam-vf-<해시>`(확인). 둘 다 종료 시한이 있고 Sandbox Namespace와 함께 지워진다.
 - 이 클러스터는 NetworkPolicy를 적용하는 CNI여야 하고, 아니면 `REDTEAM_ISOLATION_NOT_ENFORCED`로 멈춘다(k3d 기본은 적용). EKS·GKE에서의 실제 강제는 확인되지 않았다.
 
+### 레드팀 시작 조건과 안전장치 (티켓 34)
+
+`RedTeamRunner(service, isolation, ledger).run(plan, target_resource_id=…, config=RunConfig(…), approval=Approval(…))`으로만 시작한다(`cmp_worker/redteam_safeguards.py`). 아직 Workflow에 연결되지 않았다. 승인을 받는 화면·API는 별도 합의 전이라, 지금은 호출하는 쪽이 `Approval`을 만들어 넘긴다.
+
+- 사유 코드: `REDTEAM_NOT_APPROVED`, `REDTEAM_APPROVAL_MISMATCH`(승인 때와 실행 설정이 다름), `REDTEAM_APPROVAL_USED`(한 번 쓴 승인), `REDTEAM_TIME_INSUFFICIENT`(Sandbox가 곧 만료), `REDTEAM_BASELINE_MISSING`(ACTIVE인데 복원할 기준선이 없음 — 먼저 `snapshot_baseline`), `REDTEAM_EXTERNAL_NOT_CUT`(외부 통신을 끊지 못함). 모두 아무것도 만들거나 바꾸기 전에 멈춘다(뒤의 하나는 격리 확인 뒤 실행기를 지우고 멈춘다).
+- 순서: 격리 증명 → 외부 차단 → 작업 → 차단 해제 → 실행기 제거 → (ACTIVE만) `reset_test_data`. 복원이 실패하면 오류로 남으니 그 Sandbox의 데이터는 믿지 말고 새로 만든다.
+- 증거는 `store_evidence`로만 저장한다. `SECRET_IN_EVIDENCE`가 나오면 그 증거는 저장되지 않은 것이다.
+
 ### AI 생성 테스트
 
 `--sandbox`에 `"ai_tests": true`를 주면 첫 Sandbox가 정상 기동한 직후 한 번 Tester를 부른다(실제 Claude 호출이므로 비용 승인이 먼저다. 모델이 설정되지 않았으면 `LLM_NOT_CONFIGURED`로 건너뛴다).
