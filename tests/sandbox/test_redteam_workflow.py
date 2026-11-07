@@ -24,13 +24,14 @@ RED = {
     "consent_ref": "consent-1",
     "endpoints": [{"method": "GET", "path": "/items", "params": ["id"]}],
 }
-APPROVAL = {
-    "approval_id": "ap-1",
-    "approver": "park",
-    "approved_at": "2026-11-07T00:00:00+00:00",
+REQUEST = {
     "run_id": "run1",
+    "target": "cmp-sbx-run1",
+    "scope": "this Sandbox copy of the application only",
     "intensity": "PASSIVE",
     "time_budget_seconds": 300,
+    "test_data_is_reset_afterwards": False,
+    "outside_calls_are_cut_meanwhile": True,
 }
 FINDING = {
     "finding_id": "f-1",
@@ -80,10 +81,7 @@ class RedScript(Script):
         @activity.defn(name="sbx_redteam_request")
         async def request(payload: dict) -> dict:
             script.record("sbx_redteam_request", payload)
-            return {
-                "request": {"run_id": "run1", "intensity": "PASSIVE", "time_budget_seconds": 300},
-                "wait_seconds": script.wait_seconds,
-            }
+            return {"request": REQUEST, "wait_seconds": script.wait_seconds}
 
         @activity.defn(name="sbx_redteam")
         async def redteam(payload: dict) -> dict:
@@ -106,7 +104,7 @@ class RedScript(Script):
         return [*base, classify, request, redteam]
 
 
-async def run(script, data, *, approve=True, decline=False):
+async def run(script, data):
     async with (
         await WorkflowEnvironment.start_time_skipping(
             test_server_existing_path=os.environ.get("CMP_TEST_SERVER_PATH")
@@ -117,23 +115,17 @@ async def run(script, data, *, approve=True, decline=False):
         handle = await env.client.start_workflow(
             "SandboxVerificationWorkflow", data, id="red-loop", task_queue=WORKFLOW_QUEUE
         )
-        # Polling (not awaiting the result) keeps the test server from skipping time past the
-        # approval wait while we are still deciding what to answer.
-        answered = 0
-        for _ in range(400):
-            if (await handle.describe()).status.name != "RUNNING":
-                break
-            state = await handle.query("redteam_state")
-            if state["phase"] == "WAITING_FOR_APPROVAL" and state["waiting_since"] != answered:
-                answered = state["waiting_since"]
-                if decline:
-                    await handle.signal("decline_redteam")
-                elif approve:
-                    await handle.signal("approve_redteam", APPROVAL)
-            elif state["phase"] == "WAITING_FOR_APPROVAL" and not approve and not decline:
-                break  # nobody answers: let the clock run out
-            await asyncio.sleep(0.02)
         return await asyncio.wait_for(handle.result(), timeout=20), await handle.query("status")
+
+
+def redteam_events(script):
+    return [
+        e["data"]
+        for n, p in script.calls
+        if n == "sbx_emit"
+        for e in p["events"]
+        if e["type"] == "sandbox.redteam"
+    ]
 
 
 @pytest.mark.asyncio
@@ -145,7 +137,7 @@ async def test_with_the_switch_off_no_red_team_step_runs_and_nothing_changes():
 
 
 @pytest.mark.asyncio
-async def test_a_clean_run_asks_a_person_then_attacks_once_in_the_passed_sandbox_before_publishing():
+async def test_a_clean_run_attacks_once_in_the_passed_sandbox_before_publishing_without_asking_anyone():
     script = RedScript([None], reports=[[]])
     result, _ = await run(script, {**INPUT, "redteam": RED})
     names = script.names()
@@ -156,27 +148,70 @@ async def test_a_clean_run_asks_a_person_then_attacks_once_in_the_passed_sandbox
     )
     assert names.count("sbx_redteam") == 1 and names.count("sbx_fix") == 0
     run_call = next(p for n, p in script.calls if n == "sbx_redteam")
-    assert run_call["approval"] == APPROVAL and run_call["previous_findings"] == []
+    # The consent given at the start is the approval: named after the run and the round.
+    assert run_call["approval"]["approval_id"] == "mig:run1:1"
+    assert run_call["approval"]["approver"] == "consent-1"
+    assert run_call["approval"]["run_id"] == "run1"
+    assert run_call["approval"]["intensity"] == "PASSIVE"
+    assert run_call["approval"]["time_budget_seconds"] == 300
+    assert run_call["previous_findings"] == []
     assert run_call["input"]["redteam"] == RED and run_call["digest"] == "sha256:" + "e" * 64
     assert result["status"] == "PASSED" and result["redteam"]["status"] == "CLEAN"
 
 
 @pytest.mark.asyncio
-async def test_a_declined_request_skips_the_attack_and_the_run_still_passes():
-    script = RedScript([None])
-    result, _ = await run(script, {**INPUT, "redteam": RED}, decline=True)
-    assert "sbx_redteam" not in script.names()
-    assert result["status"] == "PASSED"
-    assert result["redteam"]["status"] == "SKIPPED"
-    assert result["redteam"]["code"] == "REDTEAM_DECLINED" and result["redteam"]["open"] == []
+async def test_a_clean_run_tells_the_screen_it_started_and_that_it_found_nothing():
+    script = RedScript([None], reports=[[]])
+    await run(script, {**INPUT, "redteam": RED})
+    events = redteam_events(script)
+    assert [e["phase"] for e in events] == ["RUNNING", "DONE"]
+    assert events[0]["consent"] == {k: v for k, v in REQUEST.items() if k != "run_id"}
+    assert events[0]["findings"] == [] and events[0]["status"] is None
+    assert events[1]["status"] == "CLEAN" and events[1]["round"] == 0
+    names = [n for n, _ in script.calls]
+    last_redteam = max(
+        i
+        for i, (n, p) in enumerate(script.calls)
+        if n == "sbx_emit" and any(e["type"] == "sandbox.redteam" for e in p["events"])
+    )
+    first_done = min(
+        i
+        for i, (n, p) in enumerate(script.calls)
+        if n == "sbx_emit" and any(e["type"] == "sandbox.done" for e in p["events"])
+    )
+    assert last_redteam < first_done and names  # the screen's next step opens after the red team
 
 
 @pytest.mark.asyncio
-async def test_no_answer_in_time_skips_the_attack_and_the_run_still_passes():
-    script = RedScript([None], wait_seconds=30)
-    result, _ = await run(script, {**INPUT, "redteam": RED}, approve=False)
-    assert "sbx_redteam" not in script.names()
-    assert result["redteam"]["code"] == "REDTEAM_APPROVAL_TIMEOUT" and result["status"] == "PASSED"
+async def test_the_screen_follows_a_finding_through_its_fix_without_the_attack_request():
+    script = RedScript(
+        [None],
+        reports=[[FINDING], []],
+        fix={"kind": "CODE", "source": {"workspace": "/ws-fixed"}},
+    )
+    await run(script, {**INPUT, "redteam": RED})
+    events = redteam_events(script)
+    assert [e["phase"] for e in events] == ["RUNNING", "FIXING", "DONE"]
+    fixing, done = events[1], events[2]
+    assert fixing["round"] == 0 and [f["state"] for f in fixing["findings"]] == ["OPEN"]
+    assert done["status"] == "FIXED" and done["round"] == 1
+    assert [f["state"] for f in done["findings"]] == ["FIXED"]
+    finding = done["findings"][0]
+    assert finding["id"] == "f-1" and finding["endpoint"] == "/items"
+    assert "repro" not in finding and "evidence" not in finding
+
+
+@pytest.mark.asyncio
+async def test_a_finding_that_stays_open_ends_as_still_open_on_the_screen():
+    script = RedScript(
+        [None],
+        reports=[[FINDING]],
+        fix={"kind": "CODE", "source": {"workspace": "/ws-fixed"}},
+    )
+    await run(script, {**INPUT, "redteam": RED})
+    done = redteam_events(script)[-1]
+    assert done["phase"] == "DONE" and done["status"] == "STILL_OPEN"
+    assert [f["state"] for f in done["findings"]] == ["STILL_OPEN"]
 
 
 @pytest.mark.asyncio
@@ -214,7 +249,8 @@ async def test_an_open_finding_goes_through_the_fixer_a_new_build_and_only_its_o
     assert runs[0]["previous_findings"] == []
     assert [f["finding_id"] for f in runs[1]["previous_findings"]] == ["f-1"]
     assert runs[1]["digest"] == runs[0]["digest"]  # fake builds give the same digest here
-    assert script.names().count("sbx_redteam_request") == 2  # every run needs its own yes
+    ids = [p["approval"]["approval_id"] for n, p in script.calls if n == "sbx_redteam"]
+    assert ids == ["mig:run1:1", "mig:run1:2"]  # every run uses its own, once
     assert result["status"] == "PASSED" and result["source"] == {"workspace": "/ws-fixed"}
     assert result["redteam"]["status"] == "FIXED" and result["redteam"]["open"] == []
 
@@ -273,10 +309,7 @@ async def run_to_review(script):
             task_queue=WORKFLOW_QUEUE,
         )
         for _ in range(200):
-            state = await handle.query("redteam_state")
             status = await handle.query("status")
-            if state["phase"] == "WAITING_FOR_APPROVAL":
-                await handle.signal("approve_redteam", APPROVAL)
             if status["phase"] == "NEEDS_REVIEW":
                 await handle.signal("resolve_review")
                 break
@@ -290,9 +323,10 @@ async def run_to_review(script):
 @pytest.mark.asyncio
 async def test_a_sandbox_too_close_to_expiry_is_not_asked_about_at_all():
     script = RedScript([None], wait_seconds=0)
-    result, _ = await run(script, {**INPUT, "redteam": RED}, approve=False)
+    result, _ = await run(script, {**INPUT, "redteam": RED})
     assert "sbx_redteam" not in script.names()
     assert result["redteam"]["code"] == "REDTEAM_TIME_INSUFFICIENT" and result["status"] == "PASSED"
+    assert redteam_events(script)[-1]["status"] == "SKIPPED"
 
 
 def test_the_input_types_the_red_team_request():
