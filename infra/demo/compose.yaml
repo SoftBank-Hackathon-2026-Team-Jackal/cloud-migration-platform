@@ -52,6 +52,9 @@ services:
       - "127.0.0.1:8080:8080"
 
   api:
+    # Image mode (CMP_DEPLOY_MODE=image, start-image.sh) sets CMP_API_IMAGE to the prebuilt registry tag.
+    # Unset, this is the name compose already gives the locally built image, so build mode is unchanged.
+    image: ${CMP_API_IMAGE:-cmp-demo-api}
     build:
       context: ../..
       dockerfile: infra/demo/Dockerfile
@@ -145,6 +148,13 @@ services:
       # Ticket 46: no keys in it (ARNs, External IDs, profile names), so it lives with the data.
       - /opt/cmp/data/aws-connections:/run/cmp/aws-connections
       - /opt/cmp/config:/opt/cmp/config:ro
+    # Lets `docker compose up --wait` (image mode) gate the swap on a serving api.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     command: ["uvicorn", "cmp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     # Loopback only; the public edge forwards /agents/*, /relays/*, /migrations[/*] and /provisioning/*
     # on the internal network.
@@ -152,6 +162,8 @@ services:
       - "127.0.0.1:8000:8000"
 
   worker:
+    # Same as the api: CMP_WORKER_IMAGE in image mode, the local build name otherwise.
+    image: ${CMP_WORKER_IMAGE:-cmp-demo-worker}
     build:
       context: ../..
       dockerfile: infra/demo/Dockerfile

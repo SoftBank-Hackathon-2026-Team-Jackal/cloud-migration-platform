@@ -31,6 +31,12 @@ else
   sh infra/demo/build-binfmt.sh install || echo "warning: build-binfmt install failed" >&2
 fi
 
+# Opt-in image mode: api/worker images were built by GitHub Actions (build-images.yml); this host only
+# pulls and swaps. Without CMP_DEPLOY_MODE=image in /opt/cmp/.env the build below runs as before.
+if grep -q '^CMP_DEPLOY_MODE=image[[:space:]]*$' /opt/cmp/.env; then
+  exec bash infra/demo/start-image.sh "$release_dir"
+fi
+
 compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
 "${compose[@]}" up -d platform-db temporal-db temporal temporal-ui
 # Build first: the migration must run with the new release's code, not the previously built image.

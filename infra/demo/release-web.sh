@@ -5,8 +5,10 @@
 # - The git archive goes to s3://<deploy-bucket>/releases/web-<sha12>.tar.gz: the instance role may only
 #   read releases/*, so the web archive lives next to the platform releases.
 # - On the host it is extracted to /opt/cmp/web/<sha12>, /opt/cmp/web/current points at it, and the web
-#   service of the active platform release is rebuilt (docker compose, profile public). Only the three
-#   newest web releases are kept.
+#   service of the active platform release is rebuilt (docker compose, profile public, --no-deps so api
+#   and worker are never recreated, also in image mode). Only the three newest web releases are kept.
+# - Takes /opt/cmp/deploy.lock (waits up to 15 min), the lock activate.sh holds, so a web rebuild and a
+#   platform deployment never run compose at the same time.
 # - Needs AWS access to cmp-aws-prod (default AWS_PROFILE=cmp-aws-prod) with write access to the deploy
 #   bucket and ssm:SendCommand. Nothing secret is uploaded: GitHub OAuth values live on the host in
 #   /opt/cmp/web.env (0600), generated keys in /opt/cmp/.env.
@@ -57,6 +59,9 @@ path, instance, bucket, revision = sys.argv[1:]
 web = f"/opt/cmp/web/{revision}"
 command = (
     "set -euo pipefail; "
+    # Same lock as activate.sh: never touch compose while a platform deployment is running.
+    "exec 9>/opt/cmp/deploy.lock; "
+    "flock -w 900 9 || { echo 'Another demo deployment is running' >&2; exit 1; }; "
     f"mkdir -p {web}; "
     f"aws s3 cp s3://{bucket}/releases/web-{revision}.tar.gz /tmp/cmp-web.tar.gz --only-show-errors; "
     f"tar -xzf /tmp/cmp-web.tar.gz -C {web}; "
@@ -64,7 +69,7 @@ command = (
     "install -d -m 700 -o 1000 -g 1000 /opt/cmp/data/web-models /opt/cmp/data/web-cache; "
     "find /opt/cmp/web -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\\n' | sort -rn | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf; "
     "release=/opt/cmp/releases/$(cat /opt/cmp/current-revision); cd $release; "
-    "docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml --profile public up -d --build web; "
+    "docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml --profile public up -d --build --no-deps web; "
     "sleep 5; docker inspect --format '{{.State.Running}}' cmp-demo-web-1 | grep -q true"
 )
 with open(path, "w", encoding="utf-8") as target:

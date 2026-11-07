@@ -20,6 +20,18 @@ bash infra/demo/release.sh HEAD
 
 서버에서는 Docker Compose로 FastAPI, 전체 Worker, Temporal, 업무 PostgreSQL, Temporal PostgreSQL, Temporal UI를 실행한다. DB 비밀번호와 Agent 운영자 키는 처음 기동할 때 `/opt/cmp/.env`에 생성하고 재배포 시 보존한다. DB 데이터는 루트 EBS의 `/opt/cmp/data/`에 있고, Worker에는 향후 Plan 산출물용 `/opt/cmp/data/plans`를 마운트한다. 서비스에는 `restart: unless-stopped`가 설정돼 있다. 이 배포는 대회용 단일 호스트이며 고가용성이나 운영용 Temporal 구성이 아니다. 실제 Terraform Plan/Apply 및 승인 API 연결은 후속 구현이다.
 
+### 이미지 기반 배포 (옵트인, `CMP_DEPLOY_MODE=image`)
+
+서버에서 `docker compose build`(2코어, 약 4분)를 하지 않고, GitHub Actions가 미리 빌드한 이미지를 받아 컨테이너만 교체한다. 서버 쪽 목표는 약 30~60초(실측 전 추정)다. `/opt/cmp/.env`에 `CMP_DEPLOY_MODE=image`가 없으면 지금 방식(서버 빌드) 그대로다.
+
+- **이미지**: [`Build images`](../../.github/workflows/build-images.yml)가 `main` 푸시와 수동 실행에서 `ghcr.io/softbank-hackathon-2026-team-jackal/cmp-demo-api:<12자리 SHA>`, `cmp-demo-worker:<12자리 SHA>`를 push한다(`GITHUB_TOKEN`만 사용, 레이어 캐시는 같은 패키지의 `buildcache` 태그). 태그가 `release.sh`의 릴리스 이름과 같다. **배포 전에 해당 커밋의 `Build images`가 끝나 있어야 한다.** 없으면 pull 단계에서 실패하고 실행 중인 것은 건드리지 않는다.
+- **서버 흐름**(`start-image.sh`): `pull` → DB·Temporal 기동 → 새 이미지로 `alembic upgrade head`(교체 전) → api(와 조건이 맞으면 worker)를 `up -d --no-build --wait`로 교체 → web 빌드(공개 호스트 설정 시) → 상태 확인. 실패하면 0이 아닌 값으로 끝나 `activate.sh`가 이전 리비전의 `start.sh`를 다시 실행한다. 이전 리비전의 태그를 쓰므로 이전 이미지로 돌아간다(서버에 이전 1개 태그를 남기고 더 오래된 태그는 지운다).
+- **환경변수**(`/opt/cmp/.env`, 모두 이름만): `CMP_DEPLOY_MODE=image`, 선택 `CMP_IMAGE_REPO_API`/`CMP_IMAGE_REPO_WORKER`(기본은 위 GHCR 주소), `CMP_WORKER_SWAP=auto|force|skip`.
+- **worker 교체**: worker를 재시작하면 실행 중인 Activity가 취소된다(`graceful_shutdown_timeout`이 없고 `run_all`이 SIGTERM을 처리하지 않는다). 기본값 `auto`는 Temporal(`127.0.0.1:8080`)에 실행 중인 워크플로가 하나라도 있거나 조회가 안 되면 worker 교체만 건너뛰고 경고(`WORKER NOT REPLACED`)를 남긴다. 이때 worker는 이전 이미지로 계속 돌며, 다음 배포 때 교체된다. `force`는 항상 교체, `skip`은 교체하지 않는다. 승인 대기처럼 오래 `Running`인 워크플로가 있으면 건너뛰므로, 데모 직전에는 `force`로 한 번 맞춘다.
+- **GHCR 패키지가 비공개일 때**: 서버에서 `docker login ghcr.io`(`read:packages` 권한 토큰)를 한 번 해 둔다. 토큰은 서버의 Docker 설정에만 두고 저장소·로그·`.env`에 쓰지 않는다. 공개 패키지(에이전트 이미지처럼)는 로그인이 필요 없다. 새 패키지는 처음에 비공개이므로 첫 push 뒤 조직 소유자가 공개로 바꾸거나 위 로그인을 한다.
+- **롤아웃 순서**(각 단계 승인 필요): ① 이 변경을 `main`에 병합 → `Build images` 성공 확인 → ② 필요하면 서버에서 `docker login` → ③ `/opt/cmp/.env`에 `CMP_DEPLOY_MODE=image` 추가 → ④ 새 커밋을 `release.sh`/`Deploy demo`로 배포(첫 배포는 서버에 이미지가 없어 pull이 오래 걸린다) → ⑤ 공개 에지를 쓰면 라우트 파일이 바뀌므로 `docker compose restart edge` 한 번. 되돌리려면 `.env`에서 `CMP_DEPLOY_MODE=image`를 지우면 다음 배포부터 서버 빌드로 돌아간다.
+- **한계**: web은 `NEXT_PUBLIC_*` 빌드 인자 때문에 이번 범위에서 계속 서버에서 빌드한다(`release-web.sh`). api는 교체되는 몇 초 동안 끊긴다(추정 3~8초): 에지가 `lb_try_duration 15s`로 재시도해 외부에는 오류 대신 느린 응답으로 보이지만 로컬 `127.0.0.1:8000` 직접 호출은 실패할 수 있다. 완전 무중단(api 2슬롯 + 에지 전환)은 다음 단계다. DB 마이그레이션은 교체 전에 새 이미지로 돌므로 이전 코드와 호환되는 변경만 쓴다(롤백이 스키마를 되돌리지 않는다). `release-web.sh`는 이제 `activate.sh`와 같은 `/opt/cmp/deploy.lock`을 잡고, api·worker를 건드리지 않도록 `--no-deps`로 web만 올린다.
+
 ## Provisioning 실행 환경 (#100, ticket 21)
 
 worker 이미지는 `infra/demo/Dockerfile`의 `worker` 대상이며 Terraform 1.17.0, kubectl v1.37.1, Helm v4.3.1, AWS CLI 2.35.21, gcloud 588.0.0(+`gke-gcloud-auth-plugin`)을 버전·SHA-256으로 고정한다. 실제 분석이 소스를 가져오도록 배포판 `git`도 둔다(티켓 45). API는 도구가 없는 `api` 대상을 쓴다.
