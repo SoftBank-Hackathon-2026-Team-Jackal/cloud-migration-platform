@@ -53,6 +53,7 @@
 | [35 워커 쪽 레드팀 Agent 역할과 Tool 경계](../../tickets/analysis-verification/35-redteam-agent-role.md) | IN_REVIEW (로컬 완료, PR 리뷰·실제 모델 1회 대기) | 33, 34, 08A, 20 | AV-024(신규), AV-007, AV-020 | #334 | ☐ |
 | [36 Finding을 수정 루프에 연결하고 재검증](../../tickets/analysis-verification/36-redteam-fix-loop.md) | IN_REVIEW (로컬 완료, PR 리뷰·Fixer·클러스터 실연계 대기) | 34, 35, 14B, 31 | AV-024(신규), AV-015, AV-019 | #335 | ☐ |
 | [37 레드팀을 Sandbox Workflow와 수정 루프에 연결](../../tickets/analysis-verification/37-redteam-workflow-connection.md) | IN_REVIEW (로컬 완료, PR 리뷰·`make smoke-temporal`·실제 모델/도구/k3d 1회·승인 화면 합의 대기) | 33, 34, 35, 36 | AV-024(신규), AV-015, AV-019 | #352 | ☐ |
+| [38 레드팀 실행 배선(도구·모델·판단·설정)](../../tickets/analysis-verification/38-redteam-execution-wiring.md) | IN_REVIEW (로컬 완료, PR 리뷰·실제 모델 1회(비용 승인)·취약 데모 앱 대기) | 37 (병합됨) | AV-024(신규) | #355 | ☐ |
 
 ## 선행 관계
 

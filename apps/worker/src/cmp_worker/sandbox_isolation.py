@@ -46,6 +46,7 @@ from cmp_worker.sandbox_redteam import (
 from cmp_worker.sandbox_redteam import MANAGED_BY as REDTEAM_MANAGED_BY
 
 NOT_ALLOWED = "REDTEAM_TARGET_NOT_ALLOWED"
+EXECUTOR_NOT_READY = "REDTEAM_EXECUTOR_NOT_READY"
 CONCURRENCY_LIMIT = "REDTEAM_CONCURRENCY_LIMIT"
 _SANDBOX_NAMESPACE = re.compile(r"^cmp-sbx-[a-z0-9][a-z0-9-]*$")
 _MANAGED_BY_LABEL = "app.kubernetes.io/managed-by"
@@ -108,6 +109,7 @@ class RedTeamIsolation:
             if restricted_violations(pod):
                 raise SandboxError(NOT_ENFORCED)
             self._apply([pod])
+            self._await_ready(plan.namespace, names[0])
             yield Executor(name=names[0], namespace=plan.namespace, target_ip=ip, port=app["port"])
         finally:
             self._remove_pods(plan.namespace, names, wait=False)
@@ -159,7 +161,18 @@ class RedTeamIsolation:
             ).decode(errors="ignore")
         except SandboxError:
             return None
-        return out.strip() if is_address(out) else None
+        out = out.strip()
+        if out == "None":
+            # A headless Service (the database chart's) has no cluster address of its own. The
+            # check is about what a Pod can reach, so use the address of the Pod behind it.
+            try:
+                out = self.cluster.kubectl(
+                    "get", "endpoints", name, "-n", namespace, "-o",
+                    "jsonpath={.subsets[0].addresses[0].ip}",
+                ).decode(errors="ignore").strip()  # fmt: skip
+            except SandboxError:
+                return None
+        return out if is_address(out) else None
 
     def _addresses(self, plan: SandboxPlan, app: dict[str, Any]) -> dict[str, Any]:
         """Cluster IPs of what the verification Pod tries. Anything that cannot be found makes the
@@ -217,6 +230,25 @@ class RedTeamIsolation:
         code = isolation_verdict(parse_verdicts(log), checks)
         if code is not None:
             raise SandboxError(code)
+
+    def _await_ready(self, namespace: str, name: str) -> None:
+        """The executor Pod exists as soon as it is applied, but a tool can only run once its
+        container has started. Waiting here keeps that out of every caller."""
+        deadline = time.monotonic() + self._timeout
+        while True:
+            ready = (
+                self.cluster.kubectl(
+                    "get", "pod", name, "-n", namespace, "-o",
+                    "jsonpath={.status.containerStatuses[0].ready}",
+                )
+                .decode(errors="ignore")
+                .strip()
+            )  # fmt: skip
+            if ready == "true":
+                return
+            if time.monotonic() >= deadline:
+                raise SandboxError(EXECUTOR_NOT_READY)
+            time.sleep(self._pause)
 
     # ---------------------------------------------------------------------------- cluster
 

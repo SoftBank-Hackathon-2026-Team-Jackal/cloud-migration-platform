@@ -59,6 +59,9 @@ ADR-008 갱신, spec AV-024 추가, runbook, tasks.md를 같은 PR에서 갱신�
 - `tests/sandbox/test_redteam_isolation.py` 36개 통과(매니페스트·정책을 NetworkPolicy 평가기로 판정, 기록하는 `FakeRunner`로 세션 순서·정리·실패 경로). `ruff check`·`ruff format --check` 통과.
 - 이 PC에서는 전체 pytest가 `fcntl` 없음과 `cp949` 인코딩으로 일부 파일을 불러오지 못한다(기존 코드, 이 변경과 무관). 전체 회귀는 CI(`check.yml`, Ubuntu)로 확인한다.
 
+## 실제 k3d 실측 (티켓 38)
+실제 `cmp-sandbox`에서 처음 돌려 결함 3개를 찾아 고쳤다(headless DB Service 주소, 실행기 준비 전 반환, 환경변수 가정). 자세한 내용과 시험은 [티켓 38](38-redteam-execution-wiring.md). 이 시험으로 허용 경로(앱)와 차단 경로(DB·클러스터 API·메타데이터·인터넷·DNS), 느슨한 정책 주입 시 중단, 정리까지 확인했다. EKS·GKE는 확인하지 않았다.
+
 ## 미검증
 - 실제 k3d에서의 허용·차단 경로와 느슨한 정책 주입 시 중단(`tests/integration/sandbox -m k3d -k redteam`는 아직 없다). 이 PC에 Docker가 없어 만들지 못했다.
 - EKS·GKE Sandbox의 CNI 강제.

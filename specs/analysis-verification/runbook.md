@@ -224,3 +224,11 @@ result = run_suite(
 - 건너뜀 사유: `REDTEAM_NOT_CONFIGURED`(Worker에 `RedTeamKit`이 없음 — 현재 운영 배선의 기본값), `REDTEAM_DECLINED`, `REDTEAM_APPROVAL_TIMEOUT`, `REDTEAM_TIME_INSUFFICIENT`, 그리고 티켓 33·34의 사유 코드.
 - 열린 Finding이 있으면 `SECURITY`로 분류해 Fixer에 마스킹한 요약을 주고, 재빌드한 이미지에서 그 Finding의 요청만 다시 보낸다. 보안 수정은 3회까지이고 기능 수정 횟수와 따로 센다.
 - `ERROR`는 공격은 끝났지만 마무리(예: 데이터 복원)가 실패한 경우다. 이때도 찾은 Finding은 버리지 않는다.
+
+### 레드팀 실행 배선 (티켓 38)
+
+- 켜는 법: `SandboxSettings`에 `redteam: true`, `redteam_consent_ref`, `redteam_endpoints`(메서드·경로·파라미터 이름, 호스트 불가)를 넣고, Worker에 Claude를 켠다(`llm_enabled`, 장부 경로, `ANTHROPIC_API_KEY`; ADR-004). 모델이 꺼진 Worker는 `REDTEAM_NOT_CONFIGURED`로 건너뛴다. 시작은 그래도 `approve_redteam` Signal이 있어야 한다.
+- 비용: 공격 한 번은 (턴 수 + Finding 판단 1회)의 모델 호출이다. 재확인은 Finding마다 호출 1회. 상한은 마이그레이션당 $3 / 하루 $20 / 한 달 $100(기본)이고, 넘으면 실행이 일찍 끝나며 결과의 `model_error`에 코드가 남는다.
+- 실제 클러스터 확인(모델·키 없음): `CMP_SANDBOX_KUBECONFIG=~/.kube/cmp-sandbox.yaml uv run pytest tests/integration/sandbox/test_redteam_k3d.py -m k3d` (약 5분). 시험이 중간에 죽으면 `kubectl --kubeconfig ~/.kube/cmp-sandbox.yaml --context k3d-cmp-sandbox get ns | grep cmp-sbx`로 남은 Namespace를 확인한다.
+- `REDTEAM_EXECUTOR_NOT_READY`: 실행기 컨테이너가 제한 시간 안에 Ready가 되지 않음. 이미지를 받지 못했는지(`kubectl describe pod`) 본다. 실행기는 정리하고 끝난다.
+

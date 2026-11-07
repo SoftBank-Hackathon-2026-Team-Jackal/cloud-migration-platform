@@ -259,3 +259,28 @@ def test_the_suite_with_probes_has_the_same_hash_for_the_same_input(repo):
     one = assemble_sandbox_input(analysis, settings, pipeline.store)
     two = assemble_sandbox_input(analysis, settings, pipeline.store)
     assert one["suite_ref"] == two["suite_ref"]
+
+
+def test_the_red_team_stays_out_of_the_input_unless_it_was_switched_on(repo):
+    pipeline = make(repo)
+    result = assemble_sandbox_input(analysed(pipeline, repo), SandboxSettings(), pipeline.store)
+    assert "redteam" not in result
+
+
+def test_a_switched_on_red_team_reaches_the_input_aimed_at_the_application(repo):
+    from cmp_worker.activities.sandbox_loop import SandboxInput
+
+    pipeline = make(repo)
+    settings = SandboxSettings(
+        redteam=True,
+        redteam_consent_ref="consent-1",
+        redteam_endpoints=[{"method": "GET", "path": "/items", "params": ["id"]}],
+        redteam_time_budget_seconds=120,
+    )
+    result = assemble_sandbox_input(analysed(pipeline, repo), settings, pipeline.store)
+    red = result["redteam"]
+    assert red["consent_ref"] == "consent-1" and red["intensity"] == "PASSIVE"
+    assert red["time_budget_seconds"] == 120 and red["endpoints"][0]["path"] == "/items"
+    requirements = pipeline.store.get(ArtifactRef.model_validate(result["requirements_ref"]))
+    assert red["target_resource_id"] in requirements.decode()  # an APPLICATION of the requirements
+    assert SandboxInput.model_validate(result).redteam is not None  # and the loop accepts it
