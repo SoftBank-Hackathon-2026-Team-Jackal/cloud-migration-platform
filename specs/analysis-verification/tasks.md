@@ -50,7 +50,7 @@
 | [32 Sandbox 종료 지연 줄이기(정리 비동기화·만료 정리 Schedule·이미지 사전 적재)](../../tickets/analysis-verification/32-sandbox-speed.md) | IN_PROGRESS (구현 완료, PR 대기, 미확인: 실제 k3d 시간 측정) | 11, 21, 24 | AV-015, AV-016 | 미생성 | ☐ |
 | [33 레드팀 실행기 격리와 강제 확인](../../tickets/analysis-verification/33-redteam-isolation.md) | IN_REVIEW (로컬 완료, PR 리뷰·CI 전체 pytest·k3d 실측 대기) | 30, Provisioning 26 | AV-023, AV-024(신규) | #332 | ☐ |
 | [34 레드팀 안전장치와 Finding 계약](../../tickets/analysis-verification/34-redteam-safeguards-finding.md) | IN_REVIEW (로컬 완료, PR 리뷰·CI 전체 pytest 대기, 승인 받는 경로는 별도 합의) | 33, 11B, 13 | AV-024(신규), AV-020 | #333 | ☐ |
-| [35 워커 쪽 레드팀 Agent 역할과 Tool 경계](../../tickets/analysis-verification/35-redteam-agent-role.md) | DRAFT | 33, 34, 08A, 20 | AV-024(신규), AV-007, AV-020 | #334 | ☐ |
+| [35 워커 쪽 레드팀 Agent 역할과 Tool 경계](../../tickets/analysis-verification/35-redteam-agent-role.md) | IN_REVIEW (로컬 완료, PR 리뷰·실제 모델 1회 대기) | 33, 34, 08A, 20 | AV-024(신규), AV-007, AV-020 | #334 | ☐ |
 | [36 Finding을 수정 루프에 연결하고 재검증](../../tickets/analysis-verification/36-redteam-fix-loop.md) | DRAFT (ADR-008 R3·R4 결정 대기) | 34, 35, 14B, 31 | AV-024(신규), AV-015, AV-019 | #335 | ☐ |
 
 ## 선행 관계
