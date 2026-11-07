@@ -49,10 +49,14 @@ def test_a_store_error_raises_without_leaking_the_cli_output(tmp_path):
 
 
 def test_a_hit_returns_the_stored_json(tmp_path):
+    # `for dest; do :; done` is the POSIX way to get the last positional argument -- `${@: -1}`
+    # is a bash-only array slice and fails under `dash` (the CI runner's `/bin/sh`), even though
+    # it happens to work under macOS's default `/bin/sh`.
     store = S3RedTeamCache(
         bucket=BUCKET,
         aws_bin=fake_aws(
-            tmp_path, 'dest="${@: -1}"\necho \'{"status": "DONE", "open": []}\' > "$dest"\n'
+            tmp_path,
+            'for dest; do :; done\necho \'{"status": "DONE", "open": []}\' > "$dest"\n',
         ),
     )
     assert store.get("redteam/attack/x/initial.json") == {"status": "DONE", "open": []}
@@ -60,7 +64,8 @@ def test_a_hit_returns_the_stored_json(tmp_path):
 
 def test_a_corrupt_object_is_a_miss_not_a_crash(tmp_path):
     store = S3RedTeamCache(
-        bucket=BUCKET, aws_bin=fake_aws(tmp_path, 'dest="${@: -1}"\necho "not json" > "$dest"\n')
+        bucket=BUCKET,
+        aws_bin=fake_aws(tmp_path, 'for dest; do :; done\necho "not json" > "$dest"\n'),
     )
     assert store.get("redteam/attack/x/initial.json") is None
 
