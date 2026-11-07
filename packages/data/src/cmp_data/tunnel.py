@@ -33,7 +33,7 @@ import hashlib
 import ipaddress
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from .contracts import Strict
 
@@ -128,6 +128,9 @@ done
 """
 
 
+ANY_IPV4 = "0.0.0.0/0"  # target_egress_cidrs에서만 받는다(다른 CIDR과 함께면 이것 하나로 합친다)
+
+
 class WireGuardTunnel(Strict):
     """마이그레이션 입력의 `data_migration.tunnel`(운영자 값, 비밀값 없음)."""
 
@@ -148,9 +151,15 @@ class WireGuardTunnel(Strict):
 
     @field_validator("source_egress_cidrs", "target_egress_cidrs")
     @classmethod
-    def _cidrs(cls, value: list[str] | None) -> list[str] | None:
+    def _cidrs(cls, value: list[str] | None, info: ValidationInfo) -> list[str] | None:
         if value is None:
             return None
+        # 온프레 대상(ingress="source")은 NAT 공인 IP가 와이파이마다 바뀐다(집·회장·핫스팟). 그래서 원본 NLB의
+        # UDP 입구는 `0.0.0.0/0` 하나만으로 모두 열 수 있다. 열려도 WireGuard는 등록된 공개키로 시작하지 않은
+        # 패킷에 응답하지 않고, DB는 터널 안쪽에만 있다. 인증은 키가 맡고 IP 제한은 덧댄 방어일 뿐이다.
+        # 다른 CIDR(`auto_target_egress`가 더한 `/32` 포함)과 함께 오면 `0.0.0.0/0` 하나로 합친다.
+        if info.field_name == "target_egress_cidrs" and ANY_IPV4 in value:
+            return [ANY_IPV4]
         out = []
         for cidr in value:
             net = ipaddress.ip_network(cidr, strict=True)

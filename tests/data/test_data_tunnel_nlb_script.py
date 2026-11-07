@@ -116,7 +116,7 @@ def test_up_times_out_when_the_nlb_never_becomes_active() -> None:
                  resolves=fake.resolves, sleep=lambda s: None, clock=lambda: next(ticks))  # fmt: skip
 
 
-@pytest.mark.parametrize("cidr", ["0.0.0.0/0", "10.0.0.0/8", "::1/128"])
+@pytest.mark.parametrize("cidr", ["0.0.0.0/1", "10.0.0.0/8", "::1/128"])
 def test_wide_or_ipv6_cidrs_are_rejected(cidr) -> None:
     with pytest.raises(ValueError):
         main(["manifest", "--cidr", cidr], Fake())
