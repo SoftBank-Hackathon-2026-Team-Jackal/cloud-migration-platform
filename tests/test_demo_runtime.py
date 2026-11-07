@@ -246,12 +246,24 @@ def test_web_is_built_in_real_sse_mode_against_the_public_origin():
         # Ticket 77: the web's real-mode screens backed by platform APIs that exist (report #240,
         # traffic rollback/retry #245). sandbox.retry has no platform API and stays off.
         "NEXT_PUBLIC_SSE_CAPABILITIES": "${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry,traffic.finalize}",
+        # Temporal sidebar: next.config.ts rewrites are fixed at build time, /api/temporal reads it at run time.
+        "TEMPORAL_UI_URL": "http://temporal-ui:8080",
     }
     for name in web["build"]["args"]:
-        assert name not in web["environment"], name
+        if name.startswith("NEXT_PUBLIC_"):
+            assert name not in web["environment"], name
+    assert web["environment"]["TEMPORAL_UI_URL"] == web["build"]["args"]["TEMPORAL_UI_URL"]
     # An sse build would otherwise switch the web's connection screens to the real API, which
     # needs the operator key the public web does not hold; keep today's mock default.
     assert web["environment"]["PLATFORM_CONNECTIONS"] == "${WEB_PLATFORM_CONNECTIONS:-mock}"
+
+
+def test_temporal_ui_proxied_by_the_public_web_is_read_only():
+    # The web sidebar exposes the Temporal UI on the public host without a login, so the UI must not
+    # offer cancel/terminate/signal/reset. Operators use the temporal CLI instead (reset-rehearsal.sh).
+    ui = _compose()["services"]["temporal-ui"]
+    assert ui["environment"]["TEMPORAL_DISABLE_WRITE_ACTIONS"] == "true"
+    assert ui["ports"] == ["127.0.0.1:8080:8080"]
 
 
 def test_release_web_script_uploads_only_under_releases_and_checks_the_account():

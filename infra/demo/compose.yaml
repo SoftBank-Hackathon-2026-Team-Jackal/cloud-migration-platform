@@ -48,6 +48,9 @@ services:
       - temporal
     environment:
       TEMPORAL_ADDRESS: temporal:7233
+      # The web's Temporal sidebar proxies this UI on the public host (no login), so it is read-only there:
+      # no cancel/terminate/signal/reset from the browser. Operators use the temporal CLI (reset-rehearsal.sh).
+      TEMPORAL_DISABLE_WRITE_ACTIONS: "true"
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -279,11 +282,15 @@ services:
         # rollback|retry). sandbox.retry has no API yet. /opt/cmp/.env WEB_SSE_CAPABILITIES overrides
         # (comma list, `none` = all off); a change needs a web rebuild.
         NEXT_PUBLIC_SSE_CAPABILITIES: ${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry,traffic.finalize}
+        # Temporal sidebar (always on): next.config.ts rewrites unknown paths to this UI, fixed at build time.
+        TEMPORAL_UI_URL: http://temporal-ui:8080
     restart: unless-stopped
     profiles: ["public"]
     depends_on:
       - api
+      - temporal-ui
     environment:
+      TEMPORAL_UI_URL: http://temporal-ui:8080
       PLATFORM_API_BASE: http://api:8000
       PLATFORM_PUBLIC_URL: https://${CMP_PUBLIC_HOST:-localhost}
       AUTH_SECRET: ${WEB_AUTH_SECRET:-}
