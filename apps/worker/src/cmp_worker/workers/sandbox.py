@@ -15,6 +15,7 @@ from cmp_worker.artifact_store import LocalArtifactStore
 from cmp_worker.build_request import FileBuildStore
 from cmp_worker.build_wiring import BuildSettings, ImageBuildAdapter, upload_suite
 from cmp_worker.prebuilt_builder import PrebuiltImages
+from cmp_worker.redteam_cache import optional_s3_cache
 from cmp_worker.redteam_wiring import build_redteam_kit
 from cmp_worker.sandbox_deploy import SANDBOX_CONTEXT, SandboxCluster, SandboxService
 from cmp_worker.sandbox_events import sbx_emit
@@ -85,6 +86,15 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
         uploader = lambda bundle: upload_suite(archives, bucket, bundle)
     store = LocalArtifactStore(config.analysis_artifact_store_dir)
     llm_factory = build_llm_factory(config)
+    # Ticket 39 draft: None (no bucket configured) unless the operator sets one -- the same
+    # "off unless set" shape as `sandbox_prebuilt_images`. Reuses the Build module's own profile
+    # rather than defaulting to the environment's own: AGENTS.md asks that AWS access never be
+    # silent about which named profile it uses.
+    redteam_cache = optional_s3_cache(
+        config.redteam_cache_bucket,
+        prefix=config.redteam_cache_prefix,
+        profile=build_settings.aws_profile if build_settings is not None else None,
+    )
     return SandboxLoopActivities(
         suite_uploader=uploader,
         pull_registry=pull_registry,
@@ -98,7 +108,11 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
         llm_factory=llm_factory,
         # Ticket 38: the red team exists only where the model is switched on (ADR-004 limits and
         # key). A run still needs `redteam` in its input and a person's yes to start.
-        redteam=build_redteam_kit(service, store, llm_factory) if llm_factory else None,
+        redteam=(
+            build_redteam_kit(service, store, llm_factory, cache=redteam_cache)
+            if llm_factory
+            else None
+        ),
         skills_root=resources / "skills",  # ticket 27-B: the Tester's `test-authoring` skill
     )
 

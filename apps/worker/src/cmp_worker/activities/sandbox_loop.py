@@ -643,6 +643,7 @@ class SandboxLoopActivities:
             requirements_text=canonical_requirements(requirements)[0].decode(),
             previous=payload.get("previous_findings") or [],
             migration_id=inp.migration_id,
+            source_sha256=payload.get("source_sha256"),
         )
 
     @activity.defn(name="sbx_ai_tests")

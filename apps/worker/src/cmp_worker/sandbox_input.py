@@ -57,6 +57,10 @@ class SandboxSettings(BaseModel):
     redteam_intensity: Intensity = Intensity.PASSIVE
     redteam_time_budget_seconds: int = Field(default=300, ge=30, le=3600)
     redteam_max_turns: int = Field(default=20, ge=1, le=100)
+    # Ticket 39 draft: a per-run toggle for the settings screen (default on). Only takes effect
+    # when the Worker also has a cache configured (`REDTEAM_CACHE_BUCKET`); otherwise it is a
+    # silent no-op either way.
+    redteam_cache_enabled: bool = True
     write_path: str | None = None
     read_path: str | None = None
     # The app's write API shape (ticket 27); see `AppApi`. Left out, the original shape is used.
@@ -195,6 +199,7 @@ def assemble_sandbox_input(
                     "consent_ref": settings.redteam_consent_ref,
                     "endpoints": [e.model_dump() for e in red_endpoints],
                     "max_turns": settings.redteam_max_turns,
+                    "cache_enabled": settings.redteam_cache_enabled,
                 }
             }
             if settings.redteam

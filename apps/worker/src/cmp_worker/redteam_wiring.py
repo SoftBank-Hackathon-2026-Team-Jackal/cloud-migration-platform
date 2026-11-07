@@ -15,6 +15,7 @@ from cmp_agents.redteam_agent import AllowList
 
 from cmp_worker.artifact_store import ArtifactStore
 from cmp_worker.redteam_brain import Brain
+from cmp_worker.redteam_cache import RedTeamCacheStore
 from cmp_worker.redteam_safeguards import InMemoryApprovalLedger, RedTeamRunner
 from cmp_worker.redteam_stage import RedTeamKit
 from cmp_worker.redteam_tools import TOOL_NAMES, make_dispatch
@@ -52,10 +53,17 @@ def build_redteam_kit(
     service: SandboxService,
     store: ArtifactStore,
     llm_factory: Callable[[str, str], LLMClient],
+    *,
+    cache: RedTeamCacheStore | None = None,
 ) -> RedTeamKit:
     """The Worker's own pieces: the real isolation, the real tools, and the model through the
     shared spend ledger (ADR-004). The approval ledger is per process: a deployment with several
-    Sandbox Workers must keep it in the business database before it relies on one-use approvals."""
+    Sandbox Workers must keep it in the business database before it relies on one-use approvals.
+
+    `cache` (ticket 39 draft) is optional and off by default here -- pass one (e.g.
+    `optional_s3_cache(config.redteam_cache_bucket, ...)`) to let a redeploy of identical source
+    replay its last attack instead of paying for another one. Whether it actually gets used per
+    run is still `SandboxSettings.redteam_cache_enabled` (default on)."""
     return RedTeamKit(
         runner=RedTeamRunner(service, RedTeamIsolation(service.cluster), InMemoryApprovalLedger()),
         store=store,
@@ -65,4 +73,5 @@ def build_redteam_kit(
             service.cluster, executor, known_secrets=secrets
         ),
         known_secrets=lambda plan: sandbox_secret_values(service.cluster, plan),
+        cache=cache,
     )
