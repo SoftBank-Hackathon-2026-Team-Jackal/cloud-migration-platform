@@ -291,6 +291,17 @@ def data_migration_settings(value: str | None, provider: str | None = None) -> d
     return parsed.model_dump(mode="json")
 
 
+def check_target_agent(data_migration: dict | None, agent_id: str | None) -> None:
+    """데이터 이전 설정이 한 Agent의 클러스터를 가리키는데(`target_agent_id`) 다른 Agent를 골랐으면 시작하지 않는다.
+
+    데이터 이전은 서버 설정의 kubeconfig(`target_kubeconfig_ref`)로 대상 DB를 찾고, 앱은 화면에서 고른 Agent에
+    깔린다. 둘이 다르면 앱과 DB가 서로 다른 클러스터에 깔려 전환이 끝까지 가지 못한다(2026-11-07, 화면 기본값
+    jackal-home-01 + 설정 soulee-mac-02). `target_agent_id`가 없거나 Agent 대상이 아니면 확인하지 않는다."""
+    expected = (data_migration or {}).get("target_agent_id")
+    if expected and agent_id and agent_id != expected:
+        raise StartRefused("DATA_TARGET_AGENT_MISMATCH", 409)
+
+
 def resolve_target_egress(
     data_migration: dict | None, agent_id: str | None, store: EgressStore = EGRESS
 ) -> dict | None:

@@ -39,3 +39,9 @@ jobs:
           CMP_REQUESTED_REVISION: ${{ inputs.revision }}
           CMP_DEPLOY_FORCE: ${{ inputs.force && '1' || '' }}
         run: bash infra/demo/release.sh "${CMP_REQUESTED_REVISION:-HEAD}"
+      # 중계 서버(relay worker·traffic-health)도 같은 커밋으로 맞춘다. 데모 서버 배포와 따로 두면 트래픽 코드가 어긋난다.
+      - name: Sync relay host library
+        env:
+          CMP_REQUESTED_REVISION: ${{ inputs.revision }}
+          FORCE: ${{ inputs.force && '1' || '' }}
+        run: bash infra/relay/sync-lib.sh "${CMP_REQUESTED_REVISION:-HEAD}"

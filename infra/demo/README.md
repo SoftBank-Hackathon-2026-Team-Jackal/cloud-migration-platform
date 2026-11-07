@@ -286,13 +286,18 @@ make data-tunnel-nlb-status CONTEXT=cmp-demo-source                       # 쓰�
 | 중계 서버 Envoy의 대상 100% 가중치 | `TRAFFIC_BLOCKED`(이제 옛 대상이 죽어 있으면 원본 100%로 되돌리고 진행한다) |
 | Namespace를 다시 만들며 사라진 사전 점검 Secret | `NETWORK_PREFLIGHT_UNKNOWN`(`PROBE_LOCATION_UNAVAILABLE`) |
 
+이전 시작과 터널은 다음 경우를 시작 전에 거절한다.
+
+- `DATA_TARGET_AGENT_MISMATCH`(409): `WEB_START_DATA_MIGRATION.target_agent_id`를 적어 두면, 화면에서 다른 Agent를 고른 시작을 거절한다. 데이터 이전은 `target_kubeconfig_ref`의 클러스터로 가므로, 다른 Agent를 고르면 앱과 DB가 서로 다른 클러스터에 깔린다. 적지 않으면 확인하지 않는다.
+- `TUNNEL_IN_USE`: 고정 게이트웨이를 다른 실행이 쓰고 있으면(최근 5분 안에 handshake) 그 실행의 peer를 덮어쓰지 않고 멈춘다. 정리하지 못하고 끝난 실행(handshake 없음)이면 지금처럼 가져간다.
+
 리허설 사이에는 초기화 스크립트를 돌린다(약 20초). 남은 데이터 이전 워크플로는 신호 없이 terminate한다(`rollback`·`finish`는 대상 DB를 건드린다).
 
 ```sh
 SOURCE_CONTEXT=<원본 EKS kube context> TARGET_CONTEXT=<온프레 kube context> bash infra/demo/reset-rehearsal.sh
 ```
 
-중계 서버의 relay worker(트래픽 전환 Activity)와 `traffic-health`는 `/opt/cmp/lib`의 코드를 쓴다. 이 경로는 데모 서버 배포에 들어 있지 않다. 트래픽 코드를 바꾼 커밋을 배포한 뒤에는 중계 서버도 같은 커밋으로 맞춘다. 실행 중인 트래픽 전환이 있으면 거절한다. 실패하면 백업(`/opt/cmp/lib-backups`, 최근 5개)으로 되돌린다. 맞춘 커밋은 `/opt/cmp/lib/REVISION`에 남는다.
+중계 서버의 relay worker(트래픽 전환 Activity)와 `traffic-health`는 `/opt/cmp/lib`의 코드를 쓴다. Actions 배포(`deploy-demo.yml`)는 데모 서버를 배포한 뒤 중계 서버도 같은 커밋으로 맞춘다(역할 `cmp-demo-github-deploy`는 Name 태그가 `cmp-demo-relay`인 인스턴스에만 SSM 명령을 보낼 수 있다). 로컬에서 배포했으면 직접 돌린다. 실행 중인 트래픽 전환이 있으면 거절한다. 실패하면 백업(`/opt/cmp/lib-backups`, 최근 5개)으로 되돌린다. 맞춘 커밋은 `/opt/cmp/lib/REVISION`에 남는다.
 
 ```sh
 bash infra/relay/sync-lib.sh          # origin/main

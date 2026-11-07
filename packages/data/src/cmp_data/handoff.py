@@ -62,6 +62,9 @@ class DataMigrationInput(Strict):
     target_peer_port: int = Field(default=5432, ge=1, le=65535)
     # 대상 클러스터에 Worker가 kubeconfig로 붙어야 할 때(ON_PREM 등)
     target_kubeconfig_ref: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]+$")
+    # 그 kubeconfig가 가리키는 온프레 Agent. 있으면 API가 다른 Agent를 고른 시작을 거절한다(앱은 고른 Agent에,
+    # DB는 이 kubeconfig의 클러스터에 깔리는 일을 막는다). 없으면 확인하지 않는다(지금 동작).
+    target_agent_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]+$")
     sample_interval_s: float = Field(default=2, gt=0)
     monitor_interval_s: float = Field(default=5, gt=0)
     # ticket 10: 플랫폼이 두 클러스터 사이 WireGuard 경로를 만든다

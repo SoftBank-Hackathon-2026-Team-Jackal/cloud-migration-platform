@@ -216,6 +216,29 @@ def _wait_handshake(caller: TunnelCluster, selector: str, deadline: float) -> No
         SLEEP(1)
 
 
+# 고정 게이트웨이를 다른 실행이 쓰고 있다고 볼 handshake 나이. WireGuard는 트래픽(keepalive 25초 포함)이 있으면
+# 2분마다 다시 handshake하므로, 이보다 오래됐으면 그 터널은 끝났거나 버려진 것이다.
+STANDING_BUSY_HANDSHAKE_S = 300
+
+
+def _claim_standing(source: TunnelCluster, base: str) -> None:
+    """고정 게이트웨이는 한 번에 한 실행만 쓴다. 다른 실행이 지금 쓰고 있으면 `TUNNEL_IN_USE`로 멈춘다.
+
+    다른 실행의 peer를 덮어쓰면 그 실행의 복제와, 전환 뒤 PgBouncer로 그 터널을 쓰는 원본 앱이 끊긴다(2026-11-07
+    11:39 원본 chat-app이 그렇게 멈췄다). 쓰는 실행 이름은 고정 NLB의 주석에 있다. 주석이 다른 실행이어도 최근
+    handshake가 없으면(정리하지 못하고 끝난 실행) 지금처럼 가져간다. 게이트웨이가 아직 없으면 쓰는 실행도 없다.
+    """
+    owner = source.standing_run()
+    if owner in (None, wg.STANDING_IDLE, base):
+        return
+    try:
+        last = source.latest_handshake(wg.NAMESPACE, f"cmp.dev/data-tunnel={wg.STANDING_GATEWAY}")
+    except CommandError:
+        return
+    if last and time.time() - last < STANDING_BUSY_HANDSHAKE_S:
+        raise _fail("TUNNEL_IN_USE")
+
+
 def _establish_standing(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -> dict:
     """Provisioning 83: 원본 고정 NLB + 고정 게이트웨이. 원본은 peer 설정만 바꾸고, 대상 게이트웨이만 새로 띄운다.
 
@@ -226,6 +249,7 @@ def _establish_standing(req: DataMigrationRequest, tunnel: wg.WireGuardTunnel) -
     base = wg.name(req.migration_id)
     selector = f"cmp.dev/data-tunnel={base}"
     with OPEN_CLUSTER(req.target) as target, OPEN_CLUSTER(req.source) as source:
+        _claim_standing(source, base)
         for cluster in (target, source):
             cluster.apply([wg.namespace_manifest()])
         target_pub, source_pub = _key(target, base), _key(source, wg.STANDING_GATEWAY)
