@@ -10,6 +10,9 @@
   TRAFFIC_STREAM_PREFIXES  제한시간·재시도 없이 보낼 실시간 연결 경로(쉼표 구분, 선택, 예: /api/stream).
                        비어 있으면 라우트는 예전과 같다(#294).
 
+#idle-probe: `traffic_observe`는 같은 창의 원본 요청 수도 싣고, `traffic_probe`는 사용자 트래픽이 없을 때
+대상으로 합성 요청을 보내 판정에 쓸 값을 만든다.
+
 #234: `traffic_prepare`는 대상 헬스 확인 결과를 `checks`로 돌려주고, `traffic_readiness`는 같은 실행의
 데이터 이전(`data-<migration_id>`) 최근 값을 읽어 `traffic.ready`에 쓸 숫자를 돌려준다. 이벤트 발행은
 Workflow가 `emit_migration_event`로 한다(중계 서버 워커에는 이벤트 저장소가 없다).
@@ -20,13 +23,23 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import os
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse
 
-from cmp_traffic import Handover, Sample, TrafficPolicy, check_handover, weights_for
+from cmp_traffic import (
+    Handover,
+    Sample,
+    TrafficPolicy,
+    check_handover,
+    summarize_probe,
+    weights_for,
+)
 from cmp_traffic.envoy import EnvoyObserver, EnvoyProxy
+from cmp_traffic.probe import MAX_PROBE_REQUESTS
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -35,6 +48,7 @@ HEALTH_TIMEOUT_S = 3.0
 DEFAULT_ALLOWED_CIDRS = "10.200.0.0/24"  # 플랫폼 터널 대역(cmp_api.tunnels.TUNNEL_CIDR)
 RETARGET_CONFIRM_S = 15.0  # 새 대상이 Envoy에서 활성이 되기를 기다리는 시간(헬스 체크 한 번 포함)
 RETARGET_POLL_S = 0.5
+PROBE_WORKERS = 5  # 합성 요청을 동시에 보내는 수(대상에 부담을 주지 않는 작은 값)
 
 
 def handover_target(handover: Handover) -> tuple[str, int] | None:
@@ -202,10 +216,71 @@ async def traffic_set_weight(payload: dict) -> dict:
 
 @activity.defn
 async def traffic_observe(payload: dict) -> dict:
-    """대상 쪽 한 관찰 창의 요청·실패·p99를 돌려준다."""
+    """대상 쪽 한 관찰 창의 요청·실패·p99를 돌려준다. 같은 창의 원본 요청 수도 `origin_requests`로 싣는다.
+
+    원본 요청 수는 "사용자 트래픽이 없다"(원본·대상 모두 적음)와 "가중치가 안 먹었다"(원본엔 있는데 대상만 0)를
+    가르는 데 쓴다. 한 쪽만 읽는 관측기(옛 구현)이면 싣지 않고, 그러면 Workflow는 사용자 없음으로 단정하지 않는다.
+    """
     _, observer = build_ports()
-    sample: Sample = await asyncio.to_thread(observer.sample_target, payload["seconds"])
-    return sample.model_dump()
+    seconds = payload["seconds"]
+    pair = getattr(observer, "sample_pair", None)
+    if pair is None:
+        sample: Sample = await asyncio.to_thread(observer.sample_target, seconds)
+        return sample.model_dump()
+    origin, target = await asyncio.to_thread(pair, seconds)
+    return {**target.model_dump(), "origin_requests": origin.requests}
+
+
+def probe_once(host: str, port: int, path: str, timeout_s: float) -> tuple[int | None, float]:
+    """대상 헬스 경로에 합성 요청 한 번. (HTTP 상태 또는 None, 응답 ms). 중계 서버가 쓰는 길로 직접 보낸다."""
+    url = f"http://{host}:{port}{path if path.startswith('/') else '/' + path}"
+    request = urllib.request.Request(url, method="GET")
+    if os.environ.get("TRAFFIC_TARGET_HOST"):
+        request.add_header("Host", os.environ["TRAFFIC_TARGET_HOST"])
+    started = time.monotonic()
+    status: int | None
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            response.read(1024)
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except (OSError, ValueError):
+        status = None
+    return status, (time.monotonic() - started) * 1000
+
+
+@activity.defn
+async def traffic_probe(payload: dict) -> dict:
+    """사용자 트래픽이 없을 때 대상으로 합성 요청을 보내 요청·실패·p99를 돌려준다(Sample).
+
+    보내는 곳은 인계값의 대상뿐이고, 중계 서버가 이미 그곳으로 보내고 있거나 허용 범위(터널 대역) 안의 IP일
+    때만 보낸다(엉뚱한 곳을 두드리지 않는다). 읽기 전용 GET만, 동시에 몇 건만 보낸다.
+    """
+    handover = Handover.model_validate(payload["handover"])
+    wanted = handover_target(handover)
+    if wanted is None:
+        raise ApplicationError(
+            "probe target not found in the handover", type="TargetMismatch", non_retryable=True
+        )
+    _, observer = build_ports()
+    if not target_allowed(wanted[0]) and await asyncio.to_thread(observer.target_address) != wanted:
+        raise ApplicationError(
+            "probe target is outside the allowed range", type="TargetMismatch", non_retryable=True
+        )
+    count = max(1, min(MAX_PROBE_REQUESTS, int(payload["count"])))
+    timeout_s = float(payload.get("timeout_s") or 3.0)
+
+    def run() -> list[tuple[int | None, float]]:
+        with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
+            return list(
+                pool.map(
+                    lambda _: probe_once(wanted[0], wanted[1], handover.health_path, timeout_s),
+                    range(count),
+                )
+            )
+
+    return summarize_probe(await asyncio.to_thread(run)).model_dump()
 
 
 @activity.defn

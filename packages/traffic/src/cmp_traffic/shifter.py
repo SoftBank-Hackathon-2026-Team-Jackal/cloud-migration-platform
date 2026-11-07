@@ -66,21 +66,39 @@ def evaluate_step(
     base = {"step": 0, "weights": {}}
     if observed.failed > policy.max_failed_requests:
         reason = f"실패 요청 {observed.failed}건 (허용 {policy.max_failed_requests}건)"
-        return StepOutcome(**base, decision="rollback", reason=reason)
+        detail = {
+            "kind": "failed",
+            "failed": observed.failed,
+            "allowed": policy.max_failed_requests,
+        }
+        return StepOutcome(**base, decision="rollback", reason=reason, detail=detail)
     limit = p99_limit(policy, baseline)
     if observed.p99_ms > limit:
+        detail = {
+            "kind": "p99",
+            "p99_ms": round(observed.p99_ms),
+            "limit_ms": round(limit),
+            "baseline_ms": round(baseline.p99_ms),
+        }
         if p99_streak is not None and p99_streak < policy.p99_breach_windows:
-            return StepOutcome(**base, decision="hold", reason="p99 일시 초과, 다음 창 확인")
+            return StepOutcome(
+                **base, decision="hold", reason="p99 일시 초과, 다음 창 확인", detail=detail
+            )
         reason = (
             f"p99 {observed.p99_ms:.0f}ms > 기준 {limit:.0f}ms "
             f"(원본 {baseline.p99_ms:.0f}ms x {policy.max_p99_ratio}, 하한 {policy.p99_floor_ms:.0f}ms)"
         )
-        return StepOutcome(**base, decision="rollback", reason=reason)
+        return StepOutcome(**base, decision="rollback", reason=reason, detail=detail)
     if observed.requests < policy.min_requests:
+        detail = {
+            "kind": "requests",
+            "requests": observed.requests,
+            "min_requests": policy.min_requests,
+        }
         if elapsed_s > policy.max_step_seconds:
             reason = f"요청 {observed.requests}건뿐이라 판단 불가, 단계 시간 초과"
-            return StepOutcome(**base, decision="rollback", reason=reason)
-        return StepOutcome(**base, decision="hold", reason="관측 요청 수 부족")
+            return StepOutcome(**base, decision="rollback", reason=reason, detail=detail)
+        return StepOutcome(**base, decision="hold", reason="관측 요청 수 부족", detail=detail)
     return StepOutcome(**base, decision="advance")
 
 

@@ -29,6 +29,7 @@ def create_activity_worker(client: Client) -> Worker:
             traffic.traffic_prepare,
             traffic.traffic_set_weight,
             traffic.traffic_observe,
+            traffic.traffic_probe,
             traffic.traffic_rollback,
             preflight.run_network_preflight,  # MNP-01: call before initial copy/CDC
             # specs/data-migration: CDC (kubectl exec psql) and DB cutover (cmp-cutover Pod)
