@@ -131,6 +131,8 @@ services:
       DEMO_TOOLS_ENABLED: ${DEMO_TOOLS_ENABLED:-false}
       AGENT_MODEL: ${AGENT_CHAT_MODEL:-claude-haiku-5-5}
       AGENT_CAPTION_MODEL: ${AGENT_CHAT_CAPTION_MODEL:-}
+      # Judgement loop: reads live traffic health and skills/ops-*, answers with its reasoning. false = one call.
+      AGENT_REASONING: ${AGENT_REASONING:-true}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_LEDGER_PATH: /opt/cmp/llm/ledger.json
       LLM_KILL_SWITCH_PATH: /opt/cmp/llm/disabled
