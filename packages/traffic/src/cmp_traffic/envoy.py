@@ -349,21 +349,45 @@ class EnvoyObserver:
         assert self.fetch_text is not None
         return self.fetch_text(f"{self.admin_url}/stats/prometheus?{query}")
 
-    def _sample(self, side: str, seconds: float) -> Sample:
-        first = parse_cluster_stats(self._read(), side)
-        first_text = self._text() if self.fetch_text else ""
-        self.sleep(seconds)
-        last = parse_cluster_stats(self._read(), side)
-        requests = max(0, int(last["requests"] - first["requests"]))
+    def _window_sample(
+        self,
+        side: str,
+        first: dict[str, Any],
+        last: dict[str, Any],
+        first_text: str,
+        last_text: str | None,
+    ) -> Sample:
+        before = parse_cluster_stats(first, side)
+        after = parse_cluster_stats(last, side)
+        requests = max(0, int(after["requests"] - before["requests"]))
         if self.fetch_text:
-            p99 = window_p99(first_text, self._text(), side) if requests else 0.0
+            p99 = window_p99(first_text, last_text or "", side) if requests else 0.0
         else:
-            p99 = last["p99_ms"] if last["requests"] > first["requests"] else 0
+            p99 = after["p99_ms"] if after["requests"] > before["requests"] else 0
         return Sample(
             requests=requests,
-            failed=max(0, int(last["failed"] - first["failed"])),
+            failed=max(0, int(after["failed"] - before["failed"])),
             p99_ms=p99,
         )
+
+    def sample_pair(self, seconds: float) -> tuple[Sample, Sample]:
+        """한 관찰 창에서 (원본, 대상)을 같은 앞뒤 값으로 함께 잰다.
+
+        원본 요청 수가 있어야 "사용자 트래픽이 없다"와 "가중치가 안 먹었다"를 가른다(#idle-probe).
+        """
+        first = self._read()
+        first_text = self._text() if self.fetch_text else ""
+        self.sleep(seconds)
+        last = self._read()
+        last_text = self._text() if self.fetch_text else None
+        return (
+            self._window_sample("origin", first, last, first_text, last_text),
+            self._window_sample("target", first, last, first_text, last_text),
+        )
+
+    def _sample(self, side: str, seconds: float) -> Sample:
+        origin, target = self.sample_pair(seconds)
+        return origin if side == "origin" else target
 
     def sample_origin(self, seconds: float) -> Sample:
         return self._sample("origin", seconds)

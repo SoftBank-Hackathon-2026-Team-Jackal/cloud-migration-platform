@@ -8,6 +8,7 @@ from .contracts import (
     TrafficShiftInput,
 )
 from .handover import handover_from_result
+from .probe import is_idle, probe_count, summarize_probe
 from .shifter import (
     ObserverPort,
     ProxyPort,
@@ -32,6 +33,9 @@ __all__ = [
     "check_handover",
     "evaluate_step",
     "handover_from_result",
+    "is_idle",
     "p99_limit",
+    "probe_count",
+    "summarize_probe",
     "weights_for",
 ]

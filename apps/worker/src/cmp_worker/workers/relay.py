@@ -24,6 +24,7 @@ def create_relay_worker(client: Client, queue: str) -> Worker:
             traffic.traffic_prepare,
             traffic.traffic_set_weight,
             traffic.traffic_observe,
+            traffic.traffic_probe,
             traffic.traffic_rollback,
         ],
     )

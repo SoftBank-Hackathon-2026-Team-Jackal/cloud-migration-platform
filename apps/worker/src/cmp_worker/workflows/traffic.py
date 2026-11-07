@@ -22,7 +22,9 @@ with workflow.unsafe.imports_passed_through():
         TrafficPolicy,
         check_handover,
         evaluate_step,
+        is_idle,
         p99_limit,
+        probe_count,
         weights_for,
     )
     from cmp_traffic.snapshot import (
@@ -41,6 +43,8 @@ with workflow.unsafe.imports_passed_through():
 EVENTS_PATCH = "traffic-events-v1"
 # #234: traffic.prepare·traffic.ready events, manual rollback/retry Signals, wait for a retry.
 ACTIONS_PATCH = "traffic-actions-v1"
+# 사용자 트래픽이 없으면 롤백하지 않고 합성 요청으로 확인한 뒤 진행한다(진행 중인 이전은 예전 동작 그대로).
+IDLE_PROBE_PATCH = "traffic-idle-probe-v1"
 EVENT_STATUS = {"complete": "done", "rolledback": "failed"}  # everything else is `running`
 ZERO = {"requests": 0, "failed": 0, "p99_ms": 0.0}
 QUEUE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -202,13 +206,23 @@ class TrafficShiftWorkflow:
             self.events.append({"decision": "rollback", "reason": reason})
         return {"status": status, "final_weights": weights, "events": self.events}
 
-    async def _rollback(self, policy, baseline, step, reason: str, *, manual: bool = False) -> dict:
+    async def _rollback(
+        self,
+        policy,
+        baseline,
+        step,
+        reason: str,
+        *,
+        manual: bool = False,
+        detail: dict | None = None,
+    ) -> dict:
         safe = weights_for(0)
         try:
             await self._call(traffic.traffic_rollback, {}, timeout_s=60, attempts=5)
         except ActivityError as exc:
             return self._result("FAILED", safe, f"{reason}; rollback 실패: {exc.cause}")
-        note = MANUAL_NOTE if manual else {"key": "gateFail", "params": {}}
+        # 판정 근거(kind, 수치)를 같이 실어 웹과 자칼이 "왜 되돌렸는지" 말할 수 있게 한다. 없으면 빈 값이다.
+        note = MANUAL_NOTE if manual else {"key": "gateFail", "params": dict(detail or {})}
         # 사람이 재시도할 수 있으면 아직 이전 실패가 아니다(웹은 `failed`를 이전 실패로 본다).
         retry_open = self._actions_on()
         await self._publish(
@@ -305,7 +319,7 @@ class TrafficShiftWorkflow:
         await self._ready_event("waiting" if gate_blocks else "done")
 
         while True:
-            result = await self._shift(policy, baseline, db_gate_ok)
+            result = await self._shift(policy, baseline, db_gate_ok, handover)
             if result["status"] != "ROLLED_BACK" or not self._actions_on():
                 return result
             if not await self._wait_retry(wait_seconds):
@@ -314,8 +328,28 @@ class TrafficShiftWorkflow:
                     await self._emit("rolledback", "failed")
                 return result
 
-    async def _shift(self, policy, baseline, db_gate_ok) -> dict:
+    async def _probe(self, handover, policy, count: int) -> Sample | None:
+        """사용자 트래픽이 없을 때 중계 서버에서 대상으로 합성 요청을 보낸다. 못 보내면 None(예전처럼 보류)."""
+        per_batch = max(1, count // 5 + 1)  # 동시 5건씩 보내므로 걸리는 시간의 상한
+        try:
+            result = await self._call(
+                traffic.traffic_probe,
+                {
+                    "handover": handover.model_dump(),
+                    "count": count,
+                    "timeout_s": policy.idle_probe_timeout_s,
+                },
+                timeout_s=per_batch * policy.idle_probe_timeout_s + 30,
+                attempts=1,
+            )
+        except ActivityError:
+            return None
+        return Sample.model_validate(result)
+
+    async def _shift(self, policy, baseline, db_gate_ok, handover) -> dict:
         current = weights_for(0)
+        # 합성 요청 판정은 새 실행에서만 켠다(진행 중인 이전의 이력은 예전 흐름 그대로 재생된다).
+        idle_on = policy.idle_probe and workflow.patched(IDLE_PROBE_PATCH)
         for step in policy.steps:
             if step == policy.steps[-1] and policy.require_db_gate and db_gate_ok is not True:
                 return self._result("BLOCKED", current, "DB 게이트 미충족: 100% 단계 차단")
@@ -338,7 +372,9 @@ class TrafficShiftWorkflow:
                 )
 
             began = workflow.time()
-            total = Sample(requests=0, failed=0, p99_ms=0)
+            real = Sample(requests=0, failed=0, p99_ms=0)
+            total = real
+            origin_total: int | None = None
             streak = 0
             while True:
                 if self.rollback_requested:
@@ -347,17 +383,44 @@ class TrafficShiftWorkflow:
                     policy, weights, step, baseline, total, policy.observe_seconds, "observing"
                 )
                 try:
-                    window = Sample.model_validate(await self._observe(policy.observe_seconds))
+                    raw = await self._observe(policy.observe_seconds)
+                    window = Sample.model_validate(raw)
                 except _ManualRollback:
                     return await self._rollback(policy, baseline, step, "수동 롤백", manual=True)
                 except ActivityError as exc:
                     return await self._rollback(policy, baseline, step, f"관측 실패: {exc.cause}")
-                streak = streak + 1 if window.p99_ms > p99_limit(policy, baseline) else 0
-                total = Sample(
-                    requests=total.requests + window.requests,
-                    failed=total.failed + window.failed,
+                if idle_on and isinstance(raw.get("origin_requests"), int):
+                    origin_total = (origin_total or 0) + raw["origin_requests"]
+                real = Sample(
+                    requests=real.requests + window.requests,
+                    failed=real.failed + window.failed,
                     p99_ms=window.p99_ms,
                 )
+                total = real
+                # 원본·대상 모두 요청이 거의 없으면 사용자 트래픽이 없는 것이다. 롤백하지 않고 대상으로 합성
+                # 요청을 보내 같은 기준(실패·p99)으로 판정한다. 원본엔 요청이 있는데 대상만 0건이면 해당 없다.
+                probe = None
+                if idle_on and is_idle(origin_total, real.requests, policy.min_requests):
+                    probe = await self._probe(
+                        handover, policy, probe_count(real.requests, policy.min_requests)
+                    )
+                if probe is not None:
+                    total = Sample(
+                        requests=real.requests + probe.requests,
+                        failed=real.failed + probe.failed,
+                        p99_ms=max(real.p99_ms, probe.p99_ms),
+                    )
+                    self.next_notes.append(
+                        {
+                            "key": "idleProbe",
+                            "params": {
+                                "requests": probe.requests,
+                                "failed": probe.failed,
+                                "p99_ms": round(probe.p99_ms),
+                            },
+                        }
+                    )
+                streak = streak + 1 if total.p99_ms > p99_limit(policy, baseline) else 0
                 outcome = evaluate_step(policy, baseline, total, workflow.time() - began, streak)
                 await self._publish(policy, weights, step, baseline, total, 0, "gate")
                 if outcome.decision != "hold":
@@ -366,7 +429,9 @@ class TrafficShiftWorkflow:
                     return await self._rollback(policy, baseline, step, "취소 요청")
 
             if outcome.decision == "rollback":
-                return await self._rollback(policy, baseline, step, outcome.reason)
+                return await self._rollback(
+                    policy, baseline, step, outcome.reason, detail=outcome.detail
+                )
             current = weights
             decision = "done" if step == policy.steps[-1] else "advance"
             self.events.append({"step": step, "decision": decision})
