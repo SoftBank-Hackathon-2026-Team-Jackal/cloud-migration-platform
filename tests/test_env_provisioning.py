@@ -362,7 +362,8 @@ def test_agent_applies_fetched_env_secrets_before_helm():
     assert decoded(cluster, "demo-app-env") == {"API_TOKEN": "tok-SECRET-123"}
     assert decoded(cluster, "demo-db-conn")["host"] == "demo-db.demo.svc"
     # password Secret, then the two EnvPlan Secrets, then the two Helm Releases
-    assert cluster.mutations[:3] == [("apply", "Secret")] * 3
+    # (the data migration RoleBinding comes first: tests/test_onprem_agent.py covers it)
+    assert cluster.mutations[1:4] == [("apply", "Secret")] * 3
     assert [m for m in cluster.mutations if m[0] == "helm"] == [
         ("helm", "demo-db"),
         ("helm", "demo-app"),

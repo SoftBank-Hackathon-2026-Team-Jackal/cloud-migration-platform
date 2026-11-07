@@ -33,6 +33,17 @@ from cmp_providers.remote_agent import AgentControlClient, AgentTransportError, 
 
 MANAGED = "cmp.dev/managed"
 ENVIRONMENT = "cmp.dev/environment-id"
+# Data migration access (Provisioning 84): the data worker's ServiceAccount gets the database
+# permissions in every Namespace this Agent creates, through a RoleBinding to one ClusterRole that
+# `infra/onprem-agent/make-data-kubeconfig.py` owns. The binding is born and deleted with the
+# Namespace, so a teardown or a fresh cluster never leaves the worker without access. If the
+# ClusterRole or the ServiceAccount does not exist, the binding grants nothing.
+DATA_MIGRATION_ROLE = "cmp-data-migration-db"
+DATA_MIGRATION_SUBJECT = {
+    "kind": "ServiceAccount",
+    "name": "cmp-data-migration",
+    "namespace": "cmp-data-migration",
+}
 
 
 class RolloutAgentError(Exception):
@@ -329,6 +340,7 @@ class RolloutRunner:
                     },
                 }
             )
+        self._bind_data_migration(job.namespace)
         ref = job.database.password_secret
         if self.target.get("secret", ref.name, job.namespace) is None:
             # Generated in the user's cluster; the value never leaves it.
@@ -365,6 +377,29 @@ class RolloutRunner:
                     },
                 }
             )
+
+    def _bind_data_migration(self, namespace: str) -> None:
+        """Created when missing, never changed: `roleRef` is immutable, and a binding someone made
+        by hand (an older `make-data-kubeconfig.py bind`) already grants the same access."""
+        if self.target.get("rolebinding", DATA_MIGRATION_ROLE, namespace) is not None:
+            return
+        self.target.apply(
+            {
+                "apiVersion": "rbac.authorization.k8s.io/v1",
+                "kind": "RoleBinding",
+                "metadata": {
+                    "name": DATA_MIGRATION_ROLE,
+                    "namespace": namespace,
+                    "labels": {MANAGED: "true"},
+                },
+                "roleRef": {
+                    "apiGroup": "rbac.authorization.k8s.io",
+                    "kind": "ClusterRole",
+                    "name": DATA_MIGRATION_ROLE,
+                },
+                "subjects": [DATA_MIGRATION_SUBJECT],
+            }
+        )
 
     # --- NetworkPolicies (ticket 26) -------------------------------------------------------
     def _network_policies(self, job: ProductionRolloutJob, paths: dict[str, Path]) -> list[dict]:
