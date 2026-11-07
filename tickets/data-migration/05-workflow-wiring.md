@@ -8,6 +8,7 @@ DONE(로컬 검증, PR #138). 부모 연결은 `data-migration-v1` patch 아래�
 
 - `DataMigrationWorkflow`(`cmp_worker.workflows.data_migration`), 마이그레이션 Worker에 Workflow·Activity 10개 등록
 - 흐름: 사전 점검(막히면 `blocked`, 아무것도 만들지 않음) → 준비 → 스키마 → 구독 → streaming까지 Workflow 타이머로 감시 → PgBouncer 설치·앱 연결 → 감시하며 신호 대기
+  - 2026-11-07(`data-early-cutover-install-v1` patch): PgBouncer 설치(`dm_install_cutover`)는 사전 점검 통과 직후 시작해 준비·초기 복사와 함께 진행한다. 앱 연결(`dm_route_app`)은 그대로 streaming 뒤에 한다. 따라서 준비·복사 중에 취소되거나 실패하면 원본 앱 Namespace에 `cmp-cutover` Secret·Deployment·Service가 남을 수 있다. 앱은 아직 원본 DB에 직접 붙어 있으므로 데이터 경로에는 영향이 없고, 정리는 앱 연결 단계에서 실패했을 때와 같다(자동 제거 없음).
 - 신호: `switchover`(원본이 쓰기 주체일 때만), `rollback`(대상이 쓰기 주체일 때만), `finish`, `request_cancel`(전환 전이면 구독·발행 정리)
 - 전환은 한 번만 시도한다(재시도 없음). 거절되면 쓰기 주체를 그대로 두고 감시를 계속한다.
 - Query: `status`, `db_gate`(`writer`, `reverse_replication_ok`) — Traffic `require_db_gate`가 읽는 값(DM-007)

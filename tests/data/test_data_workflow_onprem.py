@@ -115,9 +115,12 @@ async def test_pass_runs_tunnel_then_preflight_then_replication_and_cleans_up_af
     fakes = OnPremFakes()
     result, _ = await run(fakes, signals=["finish"])
     assert result["status"] == "done" and result["tunnel_cleanup_code"] is None
-    assert ordered(fakes) == ["dm_tunnel", "run_network_preflight", "dm_precheck", "dm_prepare",
-                              "dm_copy_schema", "dm_subscribe", "dm_install_cutover",
-                              "dm_route_app", "dm_tunnel_cleanup"]  # fmt: skip
+    calls = ordered(fakes)
+    assert calls[:3] == ["dm_tunnel", "run_network_preflight", "dm_precheck"]
+    assert calls[-2:] == ["dm_route_app", "dm_tunnel_cleanup"]
+    # PgBouncer 설치는 준비·복사와 함께 돈다(순서 고정 없음)
+    assert sorted(calls[3:-2]) == sorted(["dm_prepare", "dm_copy_schema", "dm_subscribe",
+                                          "dm_install_cutover"])  # fmt: skip
 
 
 @pytest.mark.parametrize("verdict", ["FAIL", "UNKNOWN"])
@@ -187,9 +190,10 @@ async def test_without_tunnel_nothing_is_cleaned():
 
 
 async def test_history_from_before_the_patches_replays(monkeypatch):
-    """패치 전 코드로 만든 이력(사전 점검·터널 정리 없음)을 새 코드가 그대로 재생한다."""
+    """패치 전 코드로 만든 이력(사전 점검·터널 정리 없음, PgBouncer 설치는 streaming 뒤)을 새 코드가
+    그대로 재생한다."""
     real = workflow.patched
-    new = {dmw.PREFLIGHT_PATCH, dmw.TUNNEL_CLEANUP_PATCH}
+    new = {dmw.PREFLIGHT_PATCH, dmw.TUNNEL_CLEANUP_PATCH, dmw.EARLY_CUTOVER_PATCH}
     monkeypatch.setattr(workflow, "patched", lambda pid: False if pid in new else real(pid))
     fakes = OnPremFakes()
     async with await WorkflowEnvironment.start_time_skipping() as env:

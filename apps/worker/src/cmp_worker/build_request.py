@@ -10,6 +10,7 @@ import hashlib
 import re
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Literal, Protocol
 
 from cmp_contracts.provisioning import Platform, VersionRef
@@ -115,6 +116,55 @@ class InMemoryBuildStore:
                     (result.resource_id, result.source_ref.sha256, ",".join(result.platforms)),
                     result,
                 )
+
+
+class FileBuildStore(InMemoryBuildStore):
+    """`InMemoryBuildStore` whose reusable (successful) results also survive a worker restart.
+
+    Each one is a JSON file under `root`, named by a hash of its reuse key (resource, source
+    archive SHA-256, platforms). Only references and image identifiers are written, never a
+    credential. A file that cannot be read is treated as a miss, so the build simply runs again.
+    """
+
+    def __init__(self, root: Path | str) -> None:
+        super().__init__()
+        self._root = Path(root)
+
+    def _path(self, resource_id: str, source_sha256: str, platforms: list[str]) -> Path:
+        key = "\n".join([resource_id, source_sha256, ",".join(platforms)])
+        return self._root / f"{hashlib.sha256(key.encode()).hexdigest()}.json"
+
+    def find(
+        self, resource_id: str, source_sha256: str, platforms: list[str]
+    ) -> BuildResult | None:
+        hit = super().find(resource_id, source_sha256, platforms)
+        if hit is not None:
+            return hit
+        try:
+            text = self._path(resource_id, source_sha256, platforms).read_text()
+            saved = BuildResult.model_validate_json(text)
+        except (OSError, ValueError):
+            return None
+        same = (
+            saved.status == "SUCCEEDED"
+            and saved.resource_id == resource_id
+            and saved.source_ref.sha256 == source_sha256
+            and list(saved.platforms) == list(platforms)
+        )
+        return saved if same else None
+
+    def save(self, result: BuildResult) -> None:
+        super().save(result)
+        if result.status != "SUCCEEDED":
+            return
+        path = self._path(result.resource_id, result.source_ref.sha256, list(result.platforms))
+        try:
+            self._root.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(result.model_dump_json())
+            tmp.replace(path)
+        except OSError:
+            pass  # reuse is an optimisation; the in-memory index still has the result
 
 
 class _Builder(Protocol):

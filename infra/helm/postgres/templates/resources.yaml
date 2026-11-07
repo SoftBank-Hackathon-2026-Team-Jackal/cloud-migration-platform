@@ -104,7 +104,7 @@ spec:
           readinessProbe:
             exec:
               command: [sh, -ec, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
-            periodSeconds: 5
+            periodSeconds: 2
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
