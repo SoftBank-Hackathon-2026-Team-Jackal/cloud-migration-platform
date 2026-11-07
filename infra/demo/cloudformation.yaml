@@ -14,7 +14,7 @@ Parameters:
     Type: String
   InstanceType:
     Type: String
-    Default: t3.large
+    Default: m7i.2xlarge
 
 Resources:
   StateBucket:

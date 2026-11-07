@@ -1,6 +1,6 @@
 # 대회 데모 플랫폼 단일 EC2 배포 (#27)
 
-이 구성은 `cmp-aws-prod`의 계정 `714066696240`, 서울 리전에 단일 EC2(`t3.large`, 암호화된 80 GiB EBS)와 S3 버킷 두 개를 만든다. 기본 VPC의 공개 Subnet을 사용한다. 운영 접속은 SSM으로만 하며, Security Group 인바운드는 Agent용 HTTPS 443뿐이다(#100, 템플릿 반영 후). S3 버킷은 Terraform State·잠금용과 커밋한 배포 소스 전달용으로 분리한다. **대상 EKS와 앱/DB 마이그레이션 리소스는 만들지 않는다.** EC2, EBS, 공개 IPv4, S3에 비용이 발생한다.
+이 구성은 `cmp-aws-prod`의 계정 `714066696240`, 서울 리전에 단일 EC2(`m7i.2xlarge`, 암호화된 80 GiB EBS. 2026-11-07 본선 시연용으로 `t3.large`에서 올림, `CMP_DEMO_INSTANCE_TYPE`으로 바꾼다)와 S3 버킷 두 개를 만든다. 기본 VPC의 공개 Subnet을 사용한다. 운영 접속은 SSM으로만 하며, Security Group 인바운드는 Agent용 HTTPS 443뿐이다(#100, 템플릿 반영 후). S3 버킷은 Terraform State·잠금용과 커밋한 배포 소스 전달용으로 분리한다. **대상 EKS와 앱/DB 마이그레이션 리소스는 만들지 않는다.** EC2, EBS, 공개 IPv4, S3에 비용이 발생한다.
 
 ## 배포
 
@@ -404,7 +404,7 @@ aws ssm start-session --profile cmp-aws-prod --region ap-northeast-2 \
 ## 실제 배포 확인 (2026-11-04)
 
 - CloudFormation Stack: `cmp-demo-control-plane` (`CREATE_COMPLETE` 및 수정 후 `UPDATE_COMPLETE`).
-- EC2: `i-091464203346381b5`, `t3.large`, 암호화된 80 GiB EBS `vol-0bb19790f4b29ef8c`. 기본 VPC에 있고 인바운드 보안 그룹 규칙은 없다.
+- EC2: `i-091464203346381b5`, `m7i.2xlarge`(2026-11-07 `t3.large`에서 변경), 암호화된 80 GiB EBS `vol-0bb19790f4b29ef8c`. 기본 VPC에 있고 인바운드 보안 그룹 규칙은 없다.
 - State: `cmp-demo-714066696240-apne2-state`; 버전 관리 `Enabled`, 기본 암호화 `AES256`, 네 가지 S3 공개 접근 차단 모두 활성화. EC2 역할에서 임시 `.tflock` 객체의 쓰기·읽기·목록·삭제를 확인했다.
 - 배포 전달: `cmp-demo-714066696240-apne2-deploy`, 커밋별 `releases/` 아카이브.
 - 컨테이너: 업무/Temporal PostgreSQL `healthy`, Temporal·Temporal UI·API·Worker `running`. API `/health`는 `{"status":"ok"}`, Temporal UI는 HTTP 200. 실제 Temporal Server에서 부수효과 없는 승인 대기·재개 smoke 테스트가 `scaffold_complete`로 완료됐다.
