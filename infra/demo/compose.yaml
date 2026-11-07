@@ -244,6 +244,10 @@ services:
         NEXT_PUBLIC_API_MODE: sse
         NEXT_PUBLIC_SSE_START: source
         NEXT_PUBLIC_API_BASE: https://${CMP_PUBLIC_HOST:-localhost}
+        # Ticket 77: real-mode screens whose platform API exists (GET .../report, POST .../traffic/
+        # rollback|retry). sandbox.retry has no API yet. /opt/cmp/.env WEB_SSE_CAPABILITIES overrides
+        # (comma list, `none` = all off); a change needs a web rebuild.
+        NEXT_PUBLIC_SSE_CAPABILITIES: ${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry}
     restart: unless-stopped
     profiles: ["public"]
     depends_on:

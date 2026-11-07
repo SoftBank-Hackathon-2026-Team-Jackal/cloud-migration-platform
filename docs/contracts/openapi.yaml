@@ -3901,6 +3901,12 @@ components:
           additionalProperties: true
           type: object
           title: Results
+        cutover_outcome:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Cutover Outcome
       type: object
       required:
       - migration_id

@@ -1,5 +1,8 @@
 """`GET /migrations/{id}/report` (ticket 62): stage timings and a result summary from stored events.
 
+Ticket 77 adds `cutover_outcome`: the latest `cutover.outcome` data (DB switch result) for the web
+completion screen, whitelisted to the web `CutoverOutcomeData` keys.
+
 The report is computed from `migration_events` (ticket 24) only. Stages follow the web rail
 (`cloud-migration-web` `src/lib/stages.ts`): one backend phase per stage. A stage is filled once it
 has ended — a later stage has events, or the Migration reached done/failed/cancelled. Only codes,
@@ -53,6 +56,8 @@ class MigrationReport(BaseModel):
     total_seconds: int
     ai_fixes: int
     results: dict[str, Any]
+    # Ticket 77: the latest `cutover.outcome` data in the web `CutoverOutcomeData` shape, or null.
+    cutover_outcome: dict[str, Any] | None = None
 
 
 SessionsDep = Annotated[Callable, Depends(get_event_sessions)]
@@ -169,6 +174,28 @@ def _results(events: list[MigrationEvent]) -> dict[str, Any]:
     }
 
 
+# Ticket 77: keys copied from `cutover.outcome` (web `CutoverOutcomeData`). `message` is free text
+# (the executor's detail) and is never copied; `reason` is the code the web turns into a sentence.
+OUTCOME_KEYS = ("result", "reason", "active", "pause_ms", "held_requests", "failed_requests")
+OUTCOME_STEP_KEYS = ("id", "ms", "start_ms", "window")
+OUTCOME_REPLICATION_KEYS = ("direction", "lag_ms")
+
+
+def _pick(data: Any, keys: tuple[str, ...]) -> dict[str, Any]:
+    return {k: data[k] for k in keys if k in data} if isinstance(data, dict) else {}
+
+
+def _cutover_outcome(events: list[MigrationEvent]) -> dict[str, Any] | None:
+    event = _last(events, "cutover.outcome")
+    if event is None:
+        return None
+    outcome = _pick(event.data, OUTCOME_KEYS)
+    if isinstance(event.data.get("steps"), list):
+        outcome["steps"] = [_pick(step, OUTCOME_STEP_KEYS) for step in event.data["steps"]]
+    outcome["replication"] = _pick(event.data.get("replication"), OUTCOME_REPLICATION_KEYS)
+    return outcome
+
+
 def build_report(
     migration_id: str, events: list[MigrationEvent], state: dict | None
 ) -> MigrationReport:
@@ -182,6 +209,7 @@ def build_report(
         total_seconds=_seconds(stages[0].started_at, stages[-1].ended_at) if stages else 0,
         ai_fixes=_ai_fixes(events),
         results=_results(events),
+        cutover_outcome=_cutover_outcome(events),
     )
 
 

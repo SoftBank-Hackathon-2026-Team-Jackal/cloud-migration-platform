@@ -211,6 +211,8 @@ async def dm_tunnel(payload: dict) -> dict:
     """payload: {request: DataMigrationRequest, tunnel: WireGuardTunnel}"""
     req = DataMigrationRequest.model_validate(payload["request"])
     tunnel = wg.WireGuardTunnel.model_validate(payload["tunnel"])
+    # Provisioning 77: the web sees the (minutes-long) tunnel step, like dm_precheck's "preflight".
+    await dm._phase(req, "tunnel")
     try:
         return await asyncio.to_thread(establish, req, tunnel)
     except CommandError as exc:
