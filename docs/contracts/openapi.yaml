@@ -2302,6 +2302,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /migrations/{migration_id}/traffic/finalize:
+    post:
+      tags:
+      - traffic actions
+      summary: Finalize Traffic
+      description: 100% 전환 뒤 안정화 구간에서 이전을 최종 확정하라고 요청한다.
+      operationId: finalize_traffic_migrations__migration_id__traffic_finalize_post
+      parameters:
+      - name: migration_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Migration Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficActionAccepted'
+        '404':
+          description: MIGRATION_NOT_FOUND
+        '409':
+          description: TRAFFIC_NOT_RUNNING or TRAFFIC_ACTION_NOT_ALLOWED
+        '503':
+          description: TRAFFIC_UNAVAILABLE
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /migrations/{migration_id}/analysis/review:
     get:
       tags:
@@ -6145,6 +6178,7 @@ components:
           enum:
           - rollback
           - retry
+          - finalize
           title: Action
         signal:
           type: string

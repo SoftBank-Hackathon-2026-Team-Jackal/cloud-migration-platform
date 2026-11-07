@@ -24,6 +24,17 @@ class TrafficPolicy(BaseModel):
     min_requests: int = Field(default=30, ge=1)
     # 마지막(100%) 단계 전에 "DB 쓰기 주체가 대상이고 역방향 복제가 정상"이 확인돼야 하는지.
     require_db_gate: bool = False
+    # 100% 전환 뒤 최종 확정 전 안정화 구간(초). 0이면 예전처럼 100%에 닿자마자 끝난다.
+    # 이 구간에서는 자동으로 되돌리지 않는다: 이상을 알리고(`traffic.alert`) 사람의 롤백·확정을 기다린다.
+    # 아무 결정이 없으면 구간이 끝날 때 확정한다.
+    stabilize_seconds: float = Field(default=0, ge=0, le=86_400)
+    # 안정화 구간의 관찰 창 길이(초). 짧을수록 이상을 빨리 알린다.
+    stabilize_window_seconds: float = Field(default=10, gt=0, le=600)
+    # 안정화 구간에서 이 오류율(실패/요청)을 넘으면 알린다. p99는 전환 단계와 같은 기준(`p99_limit`)을 쓴다.
+    alert_error_rate: float = Field(default=0.05, ge=0, le=1)
+    # 안정화 구간에서 롤백하면 DB 쓰기 주체도 원본으로 되돌린다(데이터 이전 `rollback` 신호, 역방향 복제).
+    # 다시 전환할 때는 DB를 먼저 대상으로 전환(`switchover`)하고 DB 게이트가 열린 뒤 트래픽을 옮긴다.
+    rollback_db: bool = True
 
     @model_validator(mode="after")
     def _check_steps(self) -> TrafficPolicy:

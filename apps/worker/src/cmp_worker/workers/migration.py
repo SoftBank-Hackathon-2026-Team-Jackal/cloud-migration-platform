@@ -72,5 +72,5 @@ def create_workflow_worker(client: Client) -> Worker:
         # Ticket 49 F7: the MigrationWorkflow failure report runs where the Workflow runs, so it
         # never waits for another worker. DB writes only; no provider I/O on this queue.
         # #234: `traffic_readiness` only queries the data migration child (no provider I/O).
-        activities=[emit_migration_event, traffic.traffic_readiness],
+        activities=[emit_migration_event, traffic.traffic_readiness, traffic.traffic_db_gate],
     )

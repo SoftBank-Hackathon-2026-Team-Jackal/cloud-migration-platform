@@ -19,6 +19,8 @@ def build_snapshot(
     observe_left_seconds: float,
     decision: str | None = None,
     notes: list[dict[str, Any]] | None = None,
+    health: dict[str, Any] | None = None,
+    stabilize_left_seconds: float | None = None,
 ) -> dict[str, Any]:
     failed = observed.failed if observed else 0
     ratio = 0.0
@@ -42,6 +44,10 @@ def build_snapshot(
         snapshot["decision"] = decision
     if notes:
         snapshot["notes"] = notes
+    if health is not None:  # 안정화 구간(100% 뒤)의 대상 건강 상태
+        snapshot["health"] = health
+    if stabilize_left_seconds is not None:
+        snapshot["stabilize_left_seconds"] = stabilize_left_seconds
     return snapshot
 
 

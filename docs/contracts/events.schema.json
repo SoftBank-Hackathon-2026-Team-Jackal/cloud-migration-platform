@@ -75,6 +75,9 @@
       "$ref": "#/$defs/event:traffic.prepare"
     },
     {
+      "$ref": "#/$defs/event:traffic.alert"
+    },
+    {
       "$ref": "#/$defs/event:cutover.plan"
     },
     {
@@ -2909,7 +2912,9 @@
             "manual",
             "inject",
             "drained",
-            "restart"
+            "restart",
+            "finalized",
+            "dbRollback"
           ],
           "type": "string"
         },
@@ -3037,6 +3042,7 @@
             "applying",
             "observing",
             "gate",
+            "stabilizing",
             "complete",
             "rolledback"
           ],
@@ -3090,6 +3096,13 @@
         },
         "replication": {
           "$ref": "#/$defs/model:TrafficSnapshotReplication"
+        },
+        "health": {
+          "$ref": "#/$defs/model:TrafficSnapshotHealth"
+        },
+        "stabilize_left_seconds": {
+          "minimum": 0,
+          "type": "number"
         }
       },
       "required": [
@@ -4877,6 +4890,9 @@
           "$ref": "#/$defs/event:traffic.prepare"
         },
         {
+          "$ref": "#/$defs/event:traffic.alert"
+        },
+        {
           "$ref": "#/$defs/event:cutover.plan"
         },
         {
@@ -4979,6 +4995,230 @@
         },
         "data": {
           "$ref": "#/$defs/snapshotData"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "phase",
+        "type",
+        "status",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "model:TrafficHealthBreachItem": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "ERROR_RATE",
+            "P99"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "limit": {
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "value",
+        "limit"
+      ],
+      "title": "TrafficHealthBreachItem",
+      "type": "object"
+    },
+    "model:TrafficSnapshotHealth": {
+      "additionalProperties": false,
+      "description": "100% 전환 뒤 안정화 구간의 대상 건강 상태(관찰 창 하나)",
+      "properties": {
+        "requests": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p99_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseline_p99_ms": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "p99_limit_ms": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "alert_error_rate": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "judged": {
+          "type": "boolean"
+        },
+        "breach": {
+          "items": {
+            "$ref": "#/$defs/model:TrafficHealthBreachItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests",
+        "failed",
+        "error_rate",
+        "p99_ms",
+        "baseline_p99_ms",
+        "p99_limit_ms",
+        "alert_error_rate",
+        "judged",
+        "breach"
+      ],
+      "title": "TrafficSnapshotHealth",
+      "type": "object"
+    },
+    "data:traffic.alert": {
+      "additionalProperties": false,
+      "description": "안정화 구간에서 대상이 기준을 넘기 시작했거나(breach) 회복했다(recovered)",
+      "properties": {
+        "state": {
+          "enum": [
+            "breach",
+            "recovered"
+          ],
+          "type": "string"
+        },
+        "phase": {
+          "const": "stabilizing",
+          "type": "string"
+        },
+        "requests": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "p99_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseline_p99_ms": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "p99_limit_ms": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "alert_error_rate": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "judged": {
+          "type": "boolean"
+        },
+        "breach": {
+          "items": {
+            "$ref": "#/$defs/model:TrafficHealthBreachItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "phase",
+        "requests",
+        "failed",
+        "error_rate",
+        "p99_ms",
+        "baseline_p99_ms",
+        "p99_limit_ms",
+        "alert_error_rate",
+        "judged",
+        "breach"
+      ],
+      "title": "TrafficAlertData",
+      "type": "object"
+    },
+    "event:traffic.alert": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "type": {
+          "const": "traffic.alert"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "progress": {
+          "type": "number"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/data:traffic.alert"
         }
       },
       "required": [

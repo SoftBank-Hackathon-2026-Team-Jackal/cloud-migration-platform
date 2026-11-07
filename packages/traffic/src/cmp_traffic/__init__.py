@@ -17,6 +17,7 @@ from .shifter import (
     p99_limit,
     weights_for,
 )
+from .stability import stability_health
 
 __all__ = [
     "Handover",
@@ -33,5 +34,6 @@ __all__ = [
     "evaluate_step",
     "handover_from_result",
     "p99_limit",
+    "stability_health",
     "weights_for",
 ]
