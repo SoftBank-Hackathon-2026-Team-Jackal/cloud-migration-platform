@@ -98,8 +98,10 @@ def plan_data(
     sample: dict,
     readiness: dict,
     last_steps: list[dict] | None = None,
+    shadow: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """두 번째 승인 화면의 `cutover.plan`. 지난 전환이 있으면 그 단계 시간을 보인다."""
+    """두 번째 승인 화면의 `cutover.plan`. 지난 전환이 있으면 그 단계 시간을 보인다.
+    `shadow`(Provisioning 84 그림자 리허설 줄)는 표시만 한다: `plan_ready` 판정에 넣지 않는다."""
     steps = last_steps or [{"id": i, "ms": 0, "window": w} for i, w in PLAN_STEPS]
     return {
         "method": METHOD,
@@ -108,7 +110,7 @@ def plan_data(
             "max": settings.expected_pause_max_ms,
         },
         "rehearsal": REHEARSAL,
-        "preconditions": preconditions(sample, req.policy),
+        "preconditions": preconditions(sample, req.policy) + ([shadow] if shadow else []),
         "steps": steps,
         "rollback": {"standby_hours": settings.standby_hours},
         "topology": {

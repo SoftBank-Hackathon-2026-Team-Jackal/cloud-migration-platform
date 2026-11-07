@@ -298,6 +298,18 @@ async def test_announce_publishes_plan_and_cutover_approval(fakes, emitter) -> N
     assert emitter.events[-1].type == "cutover.plan"
 
 
+async def test_announce_shows_a_shadow_warning_without_blocking_readiness(fakes, emitter) -> None:
+    """Provisioning 84: 그림자 리허설 줄은 표시만 한다(warn이어도 준비됨)."""
+    line = {"id": "shadow", "state": "warn", "value": "1238/1240",
+            "evidence": "match >= 0.99 · target 5xx 0"}  # fmt: skip
+    payload = PAYLOAD | {"sample": {"phase": "streaming", "lag_bytes": 0}, "readiness": {},
+                         "approval": False, "shadow": line}  # fmt: skip
+    assert await run(dc.dm_announce_cutover, payload) == {"ready": True}
+    plan = emitter.events[-1]
+    assert plan.data["preconditions"][-1] == line
+    validate_data(plan.type, plan.data)
+
+
 async def test_unreachable_runner_is_reported_as_refused(fakes, emitter) -> None:
     cluster, _ = fakes
     await run(dc.dm_install_cutover, PAYLOAD)

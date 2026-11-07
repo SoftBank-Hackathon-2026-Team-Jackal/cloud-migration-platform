@@ -304,7 +304,7 @@ class MigrationWorkflow:
             status, "provisioning_failed"
         )
 
-    async def _data_migration(self, given: dict) -> str | None:
+    async def _data_migration(self, given: dict, relay_queue: str | None = None) -> str | None:
         """specs/data-migration ticket 05: 인계값으로 대상 DB를 정하고 DataMigrationWorkflow를 시작한 뒤,
         DB가 대상으로 전환될 때까지 기다린다. None이면 다음 단계로 간다.
 
@@ -357,6 +357,11 @@ class MigrationWorkflow:
             return "data_blocked"
         if preflight is not None:
             child_args["network_preflight"] = preflight
+        if parsed.shadow is not None and parsed.shadow.enabled:
+            # Provisioning 84: 그림자 리허설은 트래픽과 같은 중계 큐(83의 shadow_* Activity)를 쓴다.
+            # 꺼져 있으면 자식 입력이 지금과 같다.
+            child_args["shadow"] = parsed.shadow.model_dump(mode="json")
+            child_args["relay_queue"] = relay_queue
         child = await workflow.start_child_workflow(
             DataMigrationWorkflow.run,
             child_args,
@@ -728,7 +733,10 @@ class MigrationWorkflow:
                 if self.cancel_requested:
                     self.phase = "cancelled"
                     return "cancelled"
-                stopped = await self._data_migration(pipeline_input["data_migration"])
+                stopped = await self._data_migration(
+                    pipeline_input["data_migration"],
+                    (pipeline_input.get("traffic") or {}).get("relay_queue"),
+                )
                 if stopped:
                     self.phase = stopped
                     return stopped

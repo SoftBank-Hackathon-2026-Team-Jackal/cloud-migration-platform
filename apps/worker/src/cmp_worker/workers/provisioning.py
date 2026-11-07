@@ -14,6 +14,7 @@ from cmp_worker.activities.onprem_execution import execute_on_prem_plan_activity
 from cmp_worker.activities.plan_publish import build_plan_publish_activities
 from cmp_worker.activities.planning_register import build_planning_register_activities
 from cmp_worker.activities.provisioning import prepare_plan, provision_target
+from cmp_worker.activities.shadow_explain import shadow_explain
 from cmp_worker.config import settings
 from cmp_worker.events import emit_migration_event
 
@@ -60,6 +61,7 @@ def create_worker(client: Client) -> Worker:
             teardown.plan_cloud_destroy,
             teardown.apply_cloud_destroy,
             emit_migration_event,  # ticket 24: Workflow-side event emission
+            shadow_explain,  # Provisioning 84: 그림자 리허설 불일치 설명(제안만)
             verify_gcp_connection,  # ticket 48: GCP_TARGET connection check
         ],
     )
