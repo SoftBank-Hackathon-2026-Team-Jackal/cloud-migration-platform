@@ -56,6 +56,9 @@ class ClusterPort(Protocol):
     def pod_for(self, namespace: str, selector: str) -> str: ...
     def wait_old_pods_gone(self, namespace: str, deployment: str, timeout: int = 300) -> None: ...
     def run_runner(self, namespace: str, pod: str, config: dict) -> tuple[int, dict]: ...
+    def wait_service(
+        self, namespace: str, pod: str, host: str, port: int, timeout: int = 60
+    ) -> bool: ...
 
 
 class KubectlCluster:
@@ -138,6 +141,35 @@ class KubectlCluster:
         result = json.loads(lines[-2]) if len(lines) >= 2 else {}
         return rc, result
 
+    def wait_service(
+        self, namespace: str, pod: str, host: str, port: int, timeout: int = 60
+    ) -> bool:
+        """클러스터 안(cmp-cutover Pod의 runner)에서 host:port에 TCP 접속될 때까지 기다린다."""
+        try:
+            self._s._kubectl(
+                "exec", "-n", namespace, pod, "-c", "runner", "--",
+                "python3", "-c", _REACH_SCRIPT, host, str(port), str(timeout),
+                timeout=timeout + 30,
+            )  # fmt: skip
+        except CommandError:
+            return False
+        return True
+
+
+# argv: host port timeout_s. 접속되면 0, 시간 안에 안 되면 1로 끝난다.
+_REACH_SCRIPT = """
+import socket, sys, time
+host, port, limit = sys.argv[1], int(sys.argv[2]), time.monotonic() + float(sys.argv[3])
+while True:
+    try:
+        socket.create_connection((host, port), timeout=2).close()
+        sys.exit(0)
+    except OSError:
+        if time.monotonic() > limit:
+            sys.exit(1)
+        time.sleep(0.5)
+"""
+
 
 @contextmanager
 def open_cluster(endpoint: DbEndpoint) -> Iterator[ClusterPort]:
@@ -208,6 +240,13 @@ def route_app(app: co.SourceApp, source: DbEndpoint) -> dict:
             # 재시도: 앞선 시도가 재시작 뒤 옛 Pod를 기다리다 끊겼을 수 있다.
             cluster.wait_old_pods_gone(app.namespace, app.deployment)
             return {"routed": False}
+        # PgBouncer Pod가 Ready여도 Service 주소(DNS·kube-proxy 규칙)는 조금 늦게 열린다. 그 전에 앱을
+        # 재시작하면 새 Pod의 첫 접속이 실패하므로, 클러스터 안에서 Service로 접속되는지 먼저 확인한다.
+        pod = cluster.pod_for(app.namespace, f"app.kubernetes.io/name={co.NAME}")
+        if not cluster.wait_service(
+            app.namespace, pod, f"{co.SERVICE}.{app.namespace}.svc", co.PORT
+        ):
+            raise _fail("CUTOVER_SERVICE_UNREACHABLE", retryable=True)
         cluster.put_secret(
             app.namespace, app.url_secret, data | {app.url_key: routed}, replace=True
         )

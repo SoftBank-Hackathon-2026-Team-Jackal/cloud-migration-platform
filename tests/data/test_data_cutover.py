@@ -86,6 +86,7 @@ class FakeCluster:
         self.restarts: list[str] = []
         self.runner_result: tuple[int, dict] = (0, {})
         self.runner_configs: list[dict] = []
+        self.service_reachable = True
 
     def secret_data(self, namespace, name):
         return self.secrets.get((namespace, name))
@@ -108,6 +109,10 @@ class FakeCluster:
 
     def pod_for(self, namespace, selector):
         return "cmp-cutover-abc"
+
+    def wait_service(self, namespace, pod, host, port, timeout=60):
+        self.restarts.append(f"reach:{host}:{port}")
+        return self.service_reachable
 
     def run_runner(self, namespace, pod, config):
         self.runner_configs.append(config)
@@ -173,11 +178,30 @@ async def test_install_then_route_app_once_and_keep_the_original_url(fakes) -> N
 
     assert (await run(dc.dm_route_app, PAYLOAD))["routed"]
     assert not (await run(dc.dm_route_app, PAYLOAD))["routed"]
-    # 재시작 뒤 옛 Pod(원본 DB에 직접 붙은)가 사라질 때까지 기다린다. 재실행도 다시 확인한다.
-    assert cluster.restarts == ["chat-app", "wait:chat-app", "wait:chat-app"]
+    # 재시작 전에 Service 주소로 PgBouncer에 접속되는지 확인하고, 재시작 뒤 옛 Pod(원본 DB에 직접 붙은)가
+    # 사라질 때까지 기다린다. 재실행도 다시 확인한다.
+    assert cluster.restarts == [
+        "reach:cmp-pgbouncer.chat.svc:6432",
+        "chat-app",
+        "wait:chat-app",
+        "wait:chat-app",
+    ]
     assert (
         "cmp-pgbouncer.chat.svc:6432" in cluster.secrets[("chat", "chat-secrets")]["DATABASE_URL"]
     )
+
+
+async def test_route_app_waits_until_the_pgbouncer_service_answers(fakes) -> None:
+    """PgBouncer Pod가 Ready여도 Service 주소(DNS·kube-proxy 규칙)는 잠시 뒤에 열린다. 그 사이 앱을
+    재시작하면 새 Pod의 첫 접속이 실패한다(로컬 k3d e2e에서 2건). 열리지 않으면 앱을 건드리지 않는다."""
+    cluster, _ = fakes
+    await run(dc.dm_install_cutover, PAYLOAD)
+    cluster.service_reachable = False
+    with pytest.raises(ApplicationError) as err:
+        await run(dc.dm_route_app, PAYLOAD)
+    assert err.value.type == "CUTOVER_SERVICE_UNREACHABLE" and not err.value.non_retryable
+    assert cluster.restarts == ["reach:cmp-pgbouncer.chat.svc:6432"]
+    assert cluster.secrets[("chat", "chat-secrets")]["DATABASE_URL"] == APP_URL
 
 
 async def test_switchover_emits_web_cutover_events_and_moves_the_saved_route(
