@@ -11,7 +11,7 @@ from typing import Any, Literal
 from cmp_contracts.provisioning_v2 import RequirementsV2
 from cmp_contracts.verification import Verdict
 
-FailureClass = Literal["SPEC", "CODE", "BUILD", "RENDER", "INFRA"]
+FailureClass = Literal["SPEC", "CODE", "BUILD", "RENDER", "INFRA", "SECURITY"]
 
 # Sandbox environment failures that no change to the app or requirements can fix.
 INFRA_SANDBOX_CODES = {"CLUSTER_COMMAND_FAILED", "PROXY_FAILED", "TEARDOWN_INCOMPLETE"}
@@ -32,6 +32,9 @@ class AttemptSignals:
     build_failure_class: str | None = None  # from build_request.classify_failure
     verdict: Verdict | None = None
     stack_in_app_code: bool = False  # the failing stack trace points at application code
+    # Ticket 36: ids of this run's red-team Findings still OPEN or STILL_OPEN. Empty unless a
+    # red-team run happened, so every existing call site is unaffected by this field.
+    open_security_findings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,12 @@ def classify_failure(signals: AttemptSignals) -> Classification:
         return Classification("INFRA", ["BUILD:INFRA"])
     if signals.infra_timeout and not signals.app_cause_in_pod and not app_failed_to_start:
         return Classification("INFRA", ["TIMEOUT_WITHOUT_APP_CAUSE"])
+    # (0.5) A red-team Finding the app itself failed, not Sandbox plumbing around it, and not the
+    # verdict's own test suite: an open Finding is reported on its own, ahead of CODE/SPEC, so the
+    # Fixer gets the Finding's reproduction instead of guessing from unrelated verdict reasons.
+    if signals.open_security_findings:
+        reasons = [f"FINDING:{i}" for i in sorted(signals.open_security_findings)]
+        return Classification("SECURITY", reasons)
     # (1) The render differs from the requirements field by field.
     if signals.render_mismatches or code in RENDER_SANDBOX_CODES:
         reasons = [f"RENDER_MISMATCH:{m}" for m in sorted(signals.render_mismatches)]
