@@ -180,3 +180,40 @@ async def test_tunnel_heartbeats_reach_the_activity_from_the_worker_thread(clust
     assert beats, "no heartbeat reached the activity"
     assert {ident for ident, _ in beats} == {loop_thread}
     assert beats[0][1] == ("waiting for the target UDP load balancer",)
+
+
+# ---- 고정 게이트웨이 잠금(한 번에 한 실행) ----
+
+
+def _standing_owned_by(made, run, handshake_age_s, monkeypatch):
+    source = made["source"]
+    source.run = run
+    now = 1_800_000_000
+    monkeypatch.setattr(dt.time, "time", lambda: now)
+    source.latest_handshake = lambda namespace, selector: now - handshake_age_s
+    return source
+
+
+def test_a_standing_gateway_another_run_is_using_is_refused(clusters, monkeypatch) -> None:  # noqa: F811
+    made, _ = clusters
+    source = _standing_owned_by(made, "cmp-wg-other", 30, monkeypatch)
+    with pytest.raises(dt.ApplicationError) as exc:
+        dt.establish(request(), wg.WireGuardTunnel.model_validate(STANDING))
+    assert exc.value.type == "TUNNEL_IN_USE" and exc.value.non_retryable
+    assert (
+        source.peer_line is None and source.applied == []
+    )  # 다른 실행의 peer·NLB를 건드리지 않았다
+
+
+@pytest.mark.parametrize("run", [None, wg.STANDING_IDLE, "self"])
+def test_an_idle_or_own_standing_gateway_is_taken(clusters, monkeypatch, run) -> None:  # noqa: F811
+    made, _ = clusters
+    _standing_owned_by(made, wg.name(MID) if run == "self" else run, 30, monkeypatch)
+    assert dt.establish(request(), wg.WireGuardTunnel.model_validate(STANDING))["handshake"]
+
+
+def test_a_run_that_left_without_cleanup_does_not_hold_the_gateway(clusters, monkeypatch) -> None:  # noqa: F811
+    made, _ = clusters
+    source = _standing_owned_by(made, "cmp-wg-other", dt.STANDING_BUSY_HANDSHAKE_S + 1, monkeypatch)
+    dt.establish(request(), wg.WireGuardTunnel.model_validate(STANDING))
+    assert source.peer_line.split()[0] == wg.name(MID)

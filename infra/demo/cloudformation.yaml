@@ -181,6 +181,17 @@ Resources:
                   - ssm:GetCommandInvocation
                   - ssm:DescribeInstanceInformation
                 Resource: '*'
+              # 중계 서버 /opt/cmp/lib 맞추기(infra/relay/sync-lib.sh): Name 태그가 cmp-demo-relay인 인스턴스에만
+              # 명령을 보낸다. 문서(AWS-RunShellScript)는 위 문장이 허용한다.
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Name: cmp-demo-relay
+              - Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: '*'
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup

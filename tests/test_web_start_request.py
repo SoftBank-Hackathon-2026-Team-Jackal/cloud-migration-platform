@@ -819,6 +819,28 @@ def test_the_configured_cidr_alone_still_works_when_auto_is_off(
     assert given.tunnel.target_egress_cidrs == ["203.0.113.7/32"]
 
 
+# --- 데이터 이전 대상 Agent(target_agent_id): 화면에서 고른 Agent와 데이터 이전 kubeconfig가 같은 클러스터인지 ---
+
+
+def test_a_different_agent_from_the_data_target_refuses_the_start(api, env_ref, agent, monkeypatch):
+    pinned = {**ONPREM_DATA_MIGRATION, "target_agent_id": "soulee-mac-02"}
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(pinned))
+    client, temporal = api
+    response = client.post("/migrations", json=web_request(ONPREM, env_ref.id))
+    assert (response.status_code, code_of(response)) == (409, "DATA_TARGET_AGENT_MISMATCH")
+    assert temporal.started == []  # 앱과 DB가 다른 클러스터에 깔리기 전에 멈춘다
+
+
+@pytest.mark.parametrize("pinned_agent", ["office-seoul-01", None])
+def test_the_same_or_an_unpinned_agent_starts(api, env_ref, agent, monkeypatch, pinned_agent):
+    value = dict(ONPREM_DATA_MIGRATION)
+    if pinned_agent:
+        value["target_agent_id"] = pinned_agent
+    monkeypatch.setattr(settings, "web_start_data_migration", json.dumps(value))
+    client, _ = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+
+
 TRAFFIC = {"relay_queue": "relay-1", "policy": {"observe_seconds": 20, "min_requests": 10}}
 
 

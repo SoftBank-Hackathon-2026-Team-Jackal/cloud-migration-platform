@@ -30,6 +30,7 @@ from cmp_api.routes.env_files import get_env_file_store
 from cmp_api.start_request import (
     StartRefused,
     check_request,
+    check_target_agent,
     data_migration_settings,
     find_agent,
     find_connection,
@@ -134,6 +135,7 @@ def _real_start_input(
         sandbox = sandbox_settings(settings.web_start_sandbox_settings)
         data_migration = data_migration_settings(settings.web_start_data_migration, target.provider)
         # `auto_target_egress`: 그 대상 Agent가 서버에 접속한 출발지 IP를 터널 허용 목록에 더한다(꺼져 있으면 그대로).
+        check_target_agent(data_migration, target.agent_id)
         data_migration = resolve_target_egress(data_migration, target.agent_id)
         traffic = traffic_settings(settings.web_start_traffic)
     except StartRefused as exc:
