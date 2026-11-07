@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -35,6 +35,11 @@ class TrafficPolicy(BaseModel):
     # 안정화 구간에서 롤백하면 DB 쓰기 주체도 원본으로 되돌린다(데이터 이전 `rollback` 신호, 역방향 복제).
     # 다시 전환할 때는 DB를 먼저 대상으로 전환(`switchover`)하고 DB 게이트가 열린 뒤 트래픽을 옮긴다.
     rollback_db: bool = True
+    # 원본·대상 모두 최소 요청 수에 못 미치면(= 사용자 트래픽이 없으면) 롤백하지 않고, 중계 서버에서 대상으로
+    # 합성 요청을 보내 실패·p99를 확인한 뒤 진행한다. 끄면(False) 예전처럼 요청 부족은 보류 후 롤백이다.
+    idle_probe: bool = True
+    # 합성 요청 하나의 응답 제한(초). 넘으면 실패로 센다.
+    idle_probe_timeout_s: float = Field(default=3.0, gt=0, le=30)
 
     @model_validator(mode="after")
     def _check_steps(self) -> TrafficPolicy:
@@ -88,6 +93,8 @@ class StepOutcome(BaseModel):
     weights: dict[str, int]
     decision: Literal["advance", "hold", "rollback", "done"]
     reason: str = ""
+    # 판정 근거의 기계가 읽는 값(웹이 말을 고르고 숫자를 채운다): kind=failed|p99|requests, 관련 수치.
+    detail: dict[str, Any] = Field(default_factory=dict)
 
 
 class ShiftResult(BaseModel):
