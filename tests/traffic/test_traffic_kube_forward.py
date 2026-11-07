@@ -243,3 +243,16 @@ def test_cluster_type_matches_the_relay_module_without_importing_yaml() -> None:
     from cmp_traffic import kube_forward, relay
 
     assert kube_forward.CLUSTER_TYPE == relay.CLUSTER_TYPE
+
+
+def test_enable_script_runs_the_python_that_has_pydantic() -> None:
+    # Provisioning 78: on the relay host `python3` is 3.9 without pydantic; peer-sync and
+    # relay-worker run /usr/bin/python3.11. The script's import of cmp_traffic must use it too.
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[2] / "infra/relay/enable-kube-api-forward.sh"
+    ).read_text()
+    assert 'PYTHON="${PYTHON:-python3.11}"' in script
+    assert 'PYTHONPATH="$LIB" "$PYTHON" -' in script
+    assert 'PYTHONPATH="$LIB" python3 -' not in script

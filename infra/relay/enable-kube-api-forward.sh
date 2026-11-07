@@ -22,6 +22,8 @@ DIR=/etc/envoy-kube
 ENV_FILE=/etc/cmp/peer-sync.env
 LIB="${LIB:-/opt/cmp/lib}"
 ENVOY_IMAGE="${ENVOY_IMAGE:-envoyproxy/envoy:v1.32-latest}"
+# peer-sync·relay-worker와 같은 인터프리터(중계 서버의 python3는 3.9이고 pydantic이 없다, 78)
+PYTHON="${PYTHON:-python3.11}"
 [[ $EUID -eq 0 ]] || { echo "sudo로 실행하세요" >&2; exit 1; }
 [[ -f "$ENV_FILE" ]] || { echo "$ENV_FILE 이 없습니다(peer-sync 먼저)" >&2; exit 1; }
 
@@ -32,7 +34,7 @@ fi
 
 install -d -m 755 "$DIR"
 # 사설 IP 검사(0.0.0.0·공인·터널 대역 거부)와 첫 파일(빈 목록)을 같은 코드로 만든다.
-PYTHONPATH="$LIB" python3 - "$DIR" "$BIND_IP" <<'PY'
+PYTHONPATH="$LIB" "$PYTHON" - "$DIR" "$BIND_IP" <<'PY'
 import sys
 from pathlib import Path
 from cmp_traffic.kube_forward import KubeForwardFiles, render_kube_bootstrap

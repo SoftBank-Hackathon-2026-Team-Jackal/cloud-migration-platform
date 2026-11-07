@@ -220,7 +220,8 @@ worker(172.31.15.223) → 중계 서버 사설 IP:16400+터널 호스트 번호 
 ```
 
 - kubeconfig(티켓 75): `server: https://<중계 서버 사설 IP>:<16400 + 터널 IP 마지막 옥텟>`, `tls-server-name: kubernetes.default.svc`. 규칙은 [티켓 74](../../tickets/provisioning/74-relay-kube-api-forward.md).
-- 전제: 플랫폼 `TUNNEL_EXPOSE_KUBE_API=true`, Agent Chart `tunnel.exposeKubeApi=true`(티켓 73).
+- 전제: 플랫폼 `TUNNEL_EXPOSE_KUBE_API=true`(`/opt/cmp/.env`, compose가 api에 넘긴다. 포트는 `TUNNEL_KUBE_API_PORT`, 기본 6443 — 78에서 연결), Agent Chart `tunnel.exposeKubeApi=true`(티켓 73).
+- 중계 서버의 `python3`는 3.9라 pydantic이 없다. `enable-kube-api-forward.sh`는 peer-sync와 같은 `python3.11`을 쓴다(`PYTHON=`으로 바꿈, 78).
 
 ### 반영 (각 단계 사용자 승인 필요)
 
