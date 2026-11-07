@@ -18,6 +18,7 @@ from .shifter import (
     p99_limit,
     weights_for,
 )
+from .stability import stability_health
 
 __all__ = [
     "Handover",
@@ -36,6 +37,7 @@ __all__ = [
     "is_idle",
     "p99_limit",
     "probe_count",
+    "stability_health",
     "summarize_probe",
     "weights_for",
 ]

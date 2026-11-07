@@ -15,8 +15,9 @@ from cmp_contracts.events import validate_data
 from cmp_contracts.queues import WORKFLOW_QUEUE
 from cmp_traffic import Handover, TrafficPolicy
 from cmp_traffic.snapshot import build_prepare, build_ready, prepare_failure
+from cmp_worker.activities import traffic as traffic_activities
 from cmp_worker.workflows.traffic import TrafficShiftWorkflow
-from temporalio import activity
+from temporalio import activity, workflow
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -38,7 +39,10 @@ READINESS = {"lag_ms": 12.0, "longest_tx_ms": 85, "commits_per_sec": 118.0}
 class Relay:
     """가짜 중계 서버. `hold`가 켜져 있으면 관찰 창이 `release`될 때까지 끝나지 않는다."""
 
-    def __init__(self, windows=None, *, prepare_error: str | None = None, hold: bool = False):
+    def __init__(
+        self, windows=None, *, prepare_error: str | None = None, hold: bool = False, pace=0.0
+    ):
+        self.pace = pace  # 관찰 창 하나에 드는 실제 시간(안정화 구간이 너무 빨리 돌지 않게)
         self.windows = list(windows or [])
         self.prepare_error = prepare_error
         self.calls: list = []
@@ -71,6 +75,7 @@ class Relay:
         async def observe(payload: dict) -> dict:
             self.calls.append(("observe", None))
             await asyncio.wait_for(self.release.wait(), timeout=30)
+            await asyncio.sleep(self.pace)
             return self.windows.pop(0) if self.windows else GOOD
 
         @activity.defn(name="traffic_rollback")
@@ -294,14 +299,14 @@ async def test_manual_rollback_then_retry_runs_the_shift_again_to_the_end() -> N
             task_queue=WORKFLOW_QUEUE,
         )
         status = await until(handle, lambda s: s["actions"]["rollback"])
-        assert status["actions"] == {"rollback": True, "retry": False}
+        assert status["actions"] == {"rollback": True, "retry": False, "finalize": False}
         await handle.signal(TrafficShiftWorkflow.request_retry)  # wrong state: ignored
 
         await handle.signal(TrafficShiftWorkflow.request_rollback)
         status = await until(handle, lambda s: s["actions"]["retry"])
         assert status["snapshot"]["phase"] == "rolledback"
         assert status["snapshot"]["weights"] == {"origin": 100, "target": 0}
-        assert status["actions"] == {"rollback": False, "retry": True}
+        assert status["actions"] == {"rollback": False, "retry": True, "finalize": False}
         await handle.signal(TrafficShiftWorkflow.request_rollback)  # already rolled back: ignored
 
         relay.release.set()
@@ -358,3 +363,220 @@ def test_rollback_is_offered_only_while_shifting(phase) -> None:
     assert flow.can_rollback() is False
     flow.snapshot = {"phase": "observing"}
     assert flow.can_rollback() is True
+
+
+# ---- Workflow: 100% 뒤 안정화 구간(장애 → 알림 → 사람의 롤백 → DB까지 되돌림 → 재전환 → 확정) ----
+
+STABILIZE = {**POLICY, "stabilize_seconds": 600, "stabilize_window_seconds": 1}
+FAULTY = {"requests": 100, "failed": 40, "p99_ms": 900.0}
+
+
+@workflow.defn(name="DataMigrationWorkflow")
+class FakeData:
+    """데이터 이전 자식 흉내: 롤백·재전환 신호를 기록하고 DB 게이트를 돌려준다."""
+
+    def __init__(self) -> None:
+        self.signals: list[str] = []
+        self.writer = "target"
+        self.done = False
+
+    @workflow.signal
+    def rollback(self) -> None:
+        self.signals.append("rollback")
+        self.writer = "source"
+
+    @workflow.signal
+    def switchover(self) -> None:
+        self.signals.append("switchover")
+        self.writer = "target"
+
+    @workflow.signal
+    def finish(self) -> None:
+        self.done = True
+
+    @workflow.query
+    def seen(self) -> list[str]:
+        return self.signals
+
+    @workflow.query
+    def db_gate(self) -> dict:
+        return {"writer": self.writer, "reverse_replication_ok": self.writer == "target"}
+
+    @workflow.run
+    async def run(self) -> None:
+        await workflow.wait_condition(lambda: self.done)
+
+
+@workflow.defn(name="DataMigrationWorkflow")
+class FakeDataOnSource(FakeData):
+    """DB를 아직 전환하지 않은 데이터 이전: 쓰기 주체가 원본이다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writer = "source"
+
+    @workflow.run
+    async def run(self) -> None:
+        await workflow.wait_condition(lambda: self.done)
+
+
+def stabilize_workers(env, store: Store, relay: Relay, data=FakeData):
+    return (
+        Worker(
+            env.client,
+            task_queue=WORKFLOW_QUEUE,
+            workflows=[TrafficShiftWorkflow, data],
+            activities=[*store.activities(), traffic_activities.traffic_db_gate],
+        ),
+        relay.worker(env.client),
+    )
+
+
+async def test_stabilizing_after_100_percent_waits_for_a_person_to_finalize() -> None:
+    store, relay = Store(READINESS), Relay(pace=0.05)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        main, relay_worker = stabilize_workers(env, store, relay)
+        async with main, relay_worker:
+            handle = await env.client.start_workflow(
+                TrafficShiftWorkflow.run,
+                body(policy=STABILIZE),
+                id=f"traffic-{uuid.uuid4()}",
+                task_queue=WORKFLOW_QUEUE,
+            )
+            status = await until(handle, lambda s: s["actions"]["finalize"])
+            assert status["snapshot"]["phase"] == "stabilizing"
+            assert status["snapshot"]["weights"] == {"origin": 0, "target": 100}
+            assert status["actions"]["rollback"] is True
+            await handle.signal(TrafficShiftWorkflow.request_finalize)
+            result = await handle.result()
+            history = await handle.fetch_history()
+
+    assert result["status"] == "DONE"
+    assert result["events"][-1] == {"step": 100, "decision": "finalize", "reason": "manual"}
+    last = store.of("traffic.snapshot")[-1]
+    assert last["status"] == "done" and last["data"]["notes"] == [
+        {"key": "finalized", "params": {"by": "manual"}}
+    ]
+    assert store.of("traffic.alert") == []  # 정상이면 알리지 않는다
+    await Replayer(workflows=[TrafficShiftWorkflow]).replay_workflow(history)
+
+
+async def test_a_fault_while_stabilizing_alerts_then_rollback_returns_traffic_and_db() -> None:
+    windows = [GOOD] * 3 + [FAULTY] * 200  # 단계 3개는 정상, 100% 뒤부터 대상이 오류를 낸다
+    store, relay = Store(READINESS), Relay(windows, pace=0.05)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        main, relay_worker = stabilize_workers(env, store, relay)
+        async with main, relay_worker:
+            data = await env.client.start_workflow(
+                FakeData.run, id="data-migration-1", task_queue=WORKFLOW_QUEUE
+            )
+            handle = await env.client.start_workflow(
+                TrafficShiftWorkflow.run,
+                body(policy=STABILIZE, retry_wait_seconds=600),
+                id=f"traffic-{uuid.uuid4()}",
+                task_queue=WORKFLOW_QUEUE,
+            )
+            status = await until(
+                handle, lambda s: (s["snapshot"].get("health") or {}).get("breach")
+            )
+            assert status["snapshot"]["phase"] == "stabilizing"
+            assert relay.calls.count(("rollback", None)) == 0  # 자동으로 되돌리지 않는다
+
+            await handle.signal(TrafficShiftWorkflow.request_rollback)
+            status = await until(handle, lambda s: s["actions"]["retry"])
+            assert status["snapshot"]["weights"] == {"origin": 100, "target": 0}
+            assert await data.query(FakeData.seen) == ["rollback"]
+
+            relay.windows = []  # 장애를 껐다: 이제 정상
+            await handle.signal(TrafficShiftWorkflow.request_retry)
+            await until(handle, lambda s: s["actions"]["finalize"])
+            assert await data.query(FakeData.seen) == ["rollback", "switchover"]
+            await handle.signal(TrafficShiftWorkflow.request_finalize)
+            result = await handle.result()
+            history = await handle.fetch_history()
+            await data.signal(FakeData.finish)
+
+    assert result["status"] == "DONE"
+    assert [v for kind, v in relay.calls if kind == "set"] == [10, 50, 100, 10, 50, 100]
+    assert relay.calls.count(("rollback", None)) == 1
+    (alert,) = [a for a in store.of("traffic.alert") if a["data"]["state"] == "breach"]
+    assert alert["data"]["error_rate"] == 0.4
+    assert {b["code"] for b in alert["data"]["breach"]} == {"ERROR_RATE", "P99"}
+    rolled = next(e for e in store.of("traffic.snapshot") if e["data"]["phase"] == "rolledback")
+    assert rolled["status"] == "running"  # 재시도할 수 있으니 이전 실패가 아니다
+    db_back = [
+        e
+        for e in store.of("traffic.snapshot")
+        if {"key": "dbRollback"} in (e["data"].get("notes") or [])
+    ]
+    assert [e["data"]["phase"] for e in db_back] == ["rolledback"]
+    await Replayer(workflows=[TrafficShiftWorkflow]).replay_workflow(history)
+
+
+async def test_without_stabilize_seconds_the_shift_ends_at_100_percent_as_before() -> None:
+    store = Store(READINESS)
+    result = await run_to_end(Relay([GOOD] * 3), store, body())
+    assert result["status"] == "DONE"
+    assert all(e["data"]["phase"] != "stabilizing" for e in store.of("traffic.snapshot"))
+
+
+SHORT = {**STABILIZE, "stabilize_seconds": 3, "stabilize_hold_seconds": 3}
+IDLE = {"requests": 5, "failed": 0, "p99_ms": 50.0}
+
+
+async def run_stabilizing(windows, policy, data=None) -> tuple[dict, Store, list[str]]:
+    store, relay = Store(READINESS), Relay([GOOD] * 3 + windows, pace=0.01)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        main, relay_worker = stabilize_workers(env, store, relay, data or FakeData)
+        async with main, relay_worker:
+            child = None
+            if data is not None:
+                child = await env.client.start_workflow(
+                    data.run, id="data-migration-1", task_queue=WORKFLOW_QUEUE
+                )
+            handle = await env.client.start_workflow(
+                TrafficShiftWorkflow.run,
+                body(policy=policy, retry_wait_seconds=1),
+                id=f"traffic-{uuid.uuid4()}",
+                task_queue=WORKFLOW_QUEUE,
+            )
+            if data is not None:
+                await until(handle, lambda s: (s["snapshot"].get("health") or {}).get("breach"))
+                await handle.signal(TrafficShiftWorkflow.request_rollback)
+            result = await handle.result()
+            history = await handle.fetch_history()
+            seen = await child.query(FakeData.seen) if child else []
+            if child:
+                await child.signal(FakeData.finish)
+    await Replayer(workflows=[TrafficShiftWorkflow]).replay_workflow(history)
+    return result, store, seen
+
+
+async def test_window_end_while_alerting_does_not_finalize_and_falls_back_to_origin() -> None:
+    result, store, _ = await run_stabilizing([FAULTY] * 2000, SHORT)
+    assert result["status"] == "ROLLED_BACK"
+    assert "결정 없음" in result["events"][-1]["reason"]
+    assert not any(e.get("decision") == "finalize" for e in result["events"])
+    assert all(e["data"]["phase"] != "complete" for e in store.of("traffic.snapshot")[-5:])
+
+
+async def test_window_end_without_any_judged_window_waits_then_finalizes_as_no_traffic() -> None:
+    result, store, _ = await run_stabilizing([IDLE] * 2000, SHORT)
+    assert result["status"] == "DONE"
+    assert result["events"][-1] == {"step": 100, "decision": "finalize", "reason": "no_traffic"}
+    stabilizing = [e for e in store.of("traffic.snapshot") if e["data"]["phase"] == "stabilizing"]
+    assert any(
+        e["data"]["stabilize_left_seconds"] == 0 for e in stabilizing
+    )  # 구간 뒤에도 기다렸다
+    assert store.of("traffic.alert") == []
+
+
+async def test_stabilizing_rollback_leaves_the_db_alone_when_it_was_never_switched() -> None:
+    policy = {**STABILIZE, "stabilize_seconds": 60}
+    result, store, seen = await run_stabilizing([FAULTY] * 2000, policy, FakeDataOnSource)
+    assert result["status"] == "ROLLED_BACK"
+    assert seen == []  # 쓰기 주체가 원본이면 롤백 신호를 보내지 않는다
+    assert not any(
+        {"key": "dbRollback"} in (e["data"].get("notes") or [])
+        for e in store.of("traffic.snapshot")
+    )

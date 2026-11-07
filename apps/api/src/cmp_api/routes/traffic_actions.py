@@ -1,4 +1,6 @@
-"""#234: 사람이 누르는 트래픽 롤백·재시도(웹 실제 모드 `POST /migrations/{id}/traffic/{action}`).
+"""#234: 사람이 누르는 트래픽 롤백·재시도·최종 확정(웹 실제 모드 `POST /migrations/{id}/traffic/{action}`).
+
+최종 확정(`finalize`)은 100% 전환 뒤 안정화 구간(`stabilize_seconds`)에서만 받는다.
 
 API는 실행 중인 TrafficShiftWorkflow(`traffic-<migration_id>`, 부모 MigrationWorkflow의 자식)에 Signal만
 보낸다. 되돌림은 Workflow가 기존 `traffic_rollback` Activity로 한다. 자동 재시도·자동 복귀는 없다.
@@ -25,8 +27,12 @@ from cmp_api.temporal_client import get_temporal_client
 
 router = APIRouter(prefix="/migrations", tags=["traffic actions"])
 
-Action = Literal["rollback", "retry"]
-SIGNALS: dict[str, str] = {"rollback": "request_rollback", "retry": "request_retry"}
+Action = Literal["rollback", "retry", "finalize"]
+SIGNALS: dict[str, str] = {
+    "rollback": "request_rollback",
+    "retry": "request_retry",
+    "finalize": "request_finalize",
+}
 
 
 class TrafficActionAccepted(BaseModel):
@@ -150,3 +156,14 @@ async def rollback_traffic(migration_id: str, control: ControlDep) -> dict:
 async def retry_traffic(migration_id: str, control: ControlDep) -> dict:
     """되돌린 뒤 기다리는 동안 첫 단계부터 다시 전환하라고 요청한다."""
     return await _request(migration_id, "retry", control)
+
+
+@router.post(
+    "/{migration_id}/traffic/finalize",
+    status_code=202,
+    response_model=TrafficActionAccepted,
+    responses=ERRORS,
+)
+async def finalize_traffic(migration_id: str, control: ControlDep) -> dict:
+    """100% 전환 뒤 안정화 구간에서 이전을 최종 확정하라고 요청한다."""
+    return await _request(migration_id, "finalize", control)

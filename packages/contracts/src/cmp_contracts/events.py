@@ -493,6 +493,8 @@ class TrafficSnapshotNotesItem(WebModel):
         "inject",
         "drained",
         "restart",
+        "finalized",
+        "dbRollback",
         "idleProbe",
     ]
     params: dict[str, str | float] | None = Field(default=None)
@@ -532,8 +534,44 @@ class TrafficSnapshotReplication(WebModel):
     lag_ms: float | None = Field(ge=0)
 
 
+class TrafficHealthBreachItem(WebModel):
+    code: Literal["ERROR_RATE", "P99"]
+    value: float = Field(ge=0)
+    limit: float = Field(ge=0)
+
+
+class TrafficSnapshotHealth(WebModel):
+    """100% 전환 뒤 안정화 구간의 대상 건강 상태(관찰 창 하나)"""
+
+    requests: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    error_rate: float | None = Field(ge=0, le=1)
+    p99_ms: float | None = Field(ge=0)
+    baseline_p99_ms: float = Field(ge=0)
+    p99_limit_ms: float = Field(ge=0)
+    alert_error_rate: float = Field(ge=0, le=1)
+    judged: bool
+    breach: list[TrafficHealthBreachItem]
+
+
+class TrafficAlertData(WebModel):
+    """안정화 구간에서 대상이 기준을 넘기 시작했거나(breach) 회복했다(recovered)"""
+
+    state: Literal["breach", "recovered"]
+    phase: Literal["stabilizing"]
+    requests: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    error_rate: float | None = Field(ge=0, le=1)
+    p99_ms: float | None = Field(ge=0)
+    baseline_p99_ms: float = Field(ge=0)
+    p99_limit_ms: float = Field(ge=0)
+    alert_error_rate: float = Field(ge=0, le=1)
+    judged: bool
+    breach: list[TrafficHealthBreachItem]
+
+
 class TrafficSnapshotData(WebModel):
-    phase: Literal["applying", "observing", "gate", "complete", "rolledback"]
+    phase: Literal["applying", "observing", "gate", "stabilizing", "complete", "rolledback"]
     weights: TrafficSnapshotWeights
     step: float = Field(ge=0, le=100)
     gate: TrafficSnapshotGate
@@ -544,6 +582,8 @@ class TrafficSnapshotData(WebModel):
     backends: TrafficSnapshotBackends | None = Field(default=None)
     results: list[TrafficSnapshotResultsItem] | None = Field(default=None)
     replication: TrafficSnapshotReplication | None = Field(default=None)
+    health: TrafficSnapshotHealth | None = Field(default=None)
+    stabilize_left_seconds: float | None = Field(default=None, ge=0)
 
 
 class TrafficPrepareChecksItem(WebModel):
@@ -837,6 +877,7 @@ DATA_MODELS: dict[str, type[WebModel]] = {
     "traffic.ready": TrafficReadyData,
     "traffic.snapshot": TrafficSnapshotData,
     "traffic.prepare": TrafficPrepareData,
+    "traffic.alert": TrafficAlertData,
     "cutover.plan": CutoverPlanData,
     "cutover.ready": CutoverReadyData,
     "cutover.step": CutoverStepData,

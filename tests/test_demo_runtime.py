@@ -167,6 +167,13 @@ def test_edge_sends_agent_relay_and_migration_routes_to_the_api():
         "handle @pulse_report {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
         "}",
+        "@traffic_health_report {",
+        "method POST",
+        "path /system/traffic-health/report",
+        "}",
+        "handle @traffic_health_report {",
+        "reverse_proxy {$CMP_API_UPSTREAM}",
+        "}",
         "@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*",
         "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM}",
@@ -227,7 +234,7 @@ def test_web_is_built_in_real_sse_mode_against_the_public_origin():
         "NEXT_PUBLIC_API_BASE": "https://${CMP_PUBLIC_HOST:-localhost}",
         # Ticket 77: the web's real-mode screens backed by platform APIs that exist (report #240,
         # traffic rollback/retry #245). sandbox.retry has no platform API and stays off.
-        "NEXT_PUBLIC_SSE_CAPABILITIES": "${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry}",
+        "NEXT_PUBLIC_SSE_CAPABILITIES": "${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry,traffic.finalize}",
     }
     for name in web["build"]["args"]:
         assert name not in web["environment"], name

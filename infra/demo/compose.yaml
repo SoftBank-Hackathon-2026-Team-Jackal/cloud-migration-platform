@@ -128,6 +128,7 @@ services:
       # kill switch (`touch /opt/cmp/data/llm/disabled`), so one budget covers every model call.
       AGENT_CHAT_ENABLED: ${AGENT_CHAT_ENABLED:-false}
       PULSE_REPORT_TOKEN: ${PULSE_REPORT_TOKEN:-}
+      DEMO_TOOLS_ENABLED: ${DEMO_TOOLS_ENABLED:-false}
       AGENT_MODEL: ${AGENT_CHAT_MODEL:-claude-haiku-5-5}
       AGENT_CAPTION_MODEL: ${AGENT_CHAT_CAPTION_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -263,7 +264,7 @@ services:
         # Ticket 77: real-mode screens whose platform API exists (GET .../report, POST .../traffic/
         # rollback|retry). sandbox.retry has no API yet. /opt/cmp/.env WEB_SSE_CAPABILITIES overrides
         # (comma list, `none` = all off); a change needs a web rebuild.
-        NEXT_PUBLIC_SSE_CAPABILITIES: ${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry}
+        NEXT_PUBLIC_SSE_CAPABILITIES: ${WEB_SSE_CAPABILITIES:-report,traffic.rollback,traffic.retry,traffic.finalize}
     restart: unless-stopped
     profiles: ["public"]
     depends_on:

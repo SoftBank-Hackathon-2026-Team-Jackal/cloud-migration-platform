@@ -312,3 +312,18 @@ async def traffic_readiness(payload: dict) -> dict:
         "longest_tx_ms": readiness.get("longest_xact_ms"),
         "commits_per_sec": readiness.get("commits_per_sec"),
     }
+
+
+@activity.defn
+async def traffic_db_gate(payload: dict) -> dict:
+    """같은 실행의 데이터 이전 DB 게이트(쓰기 주체, 역방향 복제). 데이터 이전이 없거나 읽지 못하면 `{}`.
+
+    안정화 구간에서 되돌린 뒤 다시 전환할 때, DB가 대상으로 다시 전환됐는지 확인하려고 Workflow 큐에서 읽는다.
+    """
+    migration_id = payload.get("migration_id")
+    if not isinstance(migration_id, str) or not migration_id:
+        return {}
+    try:
+        return await activity.client().get_workflow_handle(f"data-{migration_id}").query("db_gate")
+    except Exception:  # noqa: BLE001 - no data migration in this run, or not reachable
+        return {}

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     agent_caption_model: str | None = None
     # 원본·이전 서버가 CPU·메모리를 보내는 `POST /system/pulse/report`의 공유 토큰. 비면 수신을 끈다(503).
     pulse_report_token: str = ""
+    # 시연용 Tools 화면의 장애 스위치(`/system/fault`). 켜야만 열린다(꺼지면 404). 웹 서버만 부른다.
+    demo_tools_enabled: bool = False
     llm_ledger_path: str | None = None
     llm_kill_switch_path: str | None = None
     approval_admin_key: str | None = None
