@@ -17,6 +17,20 @@ AWS EKS에서 돌고 있는 앱과 PostgreSQL을 온프레미스 K3s나 다른 �
 
 </div>
 
+## 저장소 목록
+
+이 README는 `cloud-migration-platform`을 설명합니다. 팀의 저장소는 다음과 같습니다.
+
+| 저장소 | 역할 |
+| --- | --- |
+| [cloud-migration-platform](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform) | 백엔드: FastAPI API, Temporal Worker, 이전 로직(이 저장소) |
+| [cloud-migration-web](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-web) | 웹 화면(TypeScript). 기본은 목업 데이터로 움직이고, SSE 모드에서는 플랫폼 이벤트로 움직입니다 |
+| [demo-app](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app) | 시연에 쓰는 이전 대상 앱: 메시지마다 어느 환경과 DB가 처리했는지 남기는 Go 채팅 앱 |
+| [demo-app-vuln](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app-vuln) | `demo-app`에 SQL 인젝션 취약점 3개를 넣은 버전. Sandbox 레드팀 확인용 |
+| [demo-application](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-application) | 이전에 쓰던 시연 대상 앱(Python). 지금은 `demo-app`으로 바뀌었습니다 |
+| [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | 결선 기록, PoC, 클라우드 설정(Terraform) |
+| [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | 조직 프로필 |
+
 <!-- TODO: 웹 E2E 녹화 (GIF 또는 mp4) -->
 
 ## 소개
@@ -261,6 +275,12 @@ AI는 Claude를 씁니다. 사용하는 곳은 세 군데입니다.
 - 원본·대상 환경 연결 방식(AWS 역할 위임, GCP 고정 프로젝트): [ADR-005](docs/decisions/ADR-005.md)
 - 트래픽 전환을 Envoy 중계로 하는 이유: [ADR-006](docs/decisions/ADR-006.md)
 - 온프레미스 데이터 이전 경로를 원본 쪽 게이트웨이로 정한 이유: [ADR-007](docs/decisions/ADR-007.md)
+- 플랫폼을 FastAPI API와 Temporal Worker로 구성한 이유: [ADR-009](docs/decisions/ADR-009.md)
+- 데이터를 PostgreSQL 논리 복제로 옮기고 원본 쪽 PgBouncer로 전환하는 이유: [ADR-010](docs/decisions/ADR-010.md)
+- Worker가 `kubectl exec`로 SQL을 실행하고 EKS 토큰을 Activity 사이에서 재사용하는 이유: [ADR-011](docs/decisions/ADR-011.md)
+- 전환할 때 원본 앱의 NetworkPolicy에 허용 규칙만 더하는 이유: [ADR-012](docs/decisions/ADR-012.md)
+- DB 전환 승인 전에 그림자 리허설로 대상 응답을 관찰하는 이유: [ADR-013](docs/decisions/ADR-013.md)
+- 시연 플랫폼을 단일 EC2에서 운영하고 main 커밋만 배포하는 방식: [ADR-014](docs/decisions/ADR-014.md)
 
 비밀값은 저장소와 이벤트, 로그에 남기지 않습니다. `.env`는 암호화해서 저장하고 이후에는 참조만 넘기며, Agent와 승인자 토큰은 DB에 해시만 저장합니다.
 

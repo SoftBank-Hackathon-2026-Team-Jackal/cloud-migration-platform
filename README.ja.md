@@ -17,6 +17,20 @@ AWS EKS で動いているアプリと PostgreSQL を、オンプレミスの K3
 
 </div>
 
+## リポジトリ一覧
+
+この README は `cloud-migration-platform` の説明です。チームのリポジトリは次のとおりです。
+
+| リポジトリ | 役割 |
+| --- | --- |
+| [cloud-migration-platform](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform) | バックエンド：FastAPI API、Temporal Worker、移行ロジック（このリポジトリ） |
+| [cloud-migration-web](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-web) | Web 画面（TypeScript）。既定ではモックデータで動き、SSE モードではプラットフォームのイベントで動きます |
+| [demo-app](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app) | デモで使う移行対象アプリ：メッセージごとにどの環境と DB が処理したかを残す Go のチャットアプリ |
+| [demo-app-vuln](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app-vuln) | `demo-app` に SQL インジェクションの脆弱性を 3 つ入れた版。Sandbox レッドチームの確認用 |
+| [demo-application](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-application) | 以前のデモ対象アプリ（Python）。現在は `demo-app` に置き換えました |
+| [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | 決勝の記録、PoC、クラウド設定（Terraform） |
+| [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | Organization のプロフィール |
+
 <!-- TODO: Web E2E の録画（GIF または mp4） -->
 
 ## 概要
@@ -261,6 +275,12 @@ AI には Claude を使っています。使っているのは次の 3 か所で
 - 移行元・移行先環境の接続方式（AWS のロール委任、GCP の固定プロジェクト）：[ADR-005](docs/decisions/ADR-005.md)
 - トラフィック切替を Envoy の中継で行う理由：[ADR-006](docs/decisions/ADR-006.md)
 - オンプレミスのデータ移行経路を移行元側のゲートウェイにした理由：[ADR-007](docs/decisions/ADR-007.md)
+- プラットフォームを FastAPI API と Temporal Worker で構成した理由：[ADR-009](docs/decisions/ADR-009.md)
+- データを PostgreSQL の論理レプリケーションで移し、移行元側の PgBouncer で切り替える理由：[ADR-010](docs/decisions/ADR-010.md)
+- Worker が `kubectl exec` で SQL を実行し、EKS トークンを Activity 間で再利用する理由：[ADR-011](docs/decisions/ADR-011.md)
+- 切替時に移行元アプリの NetworkPolicy へ許可ルールだけを追加する理由：[ADR-012](docs/decisions/ADR-012.md)
+- DB 切替の承認前にシャドーリハーサルで移行先の応答を観察する理由：[ADR-013](docs/decisions/ADR-013.md)
+- デモ用プラットフォームを単一の EC2 で運用し、main のコミットだけをデプロイする方式：[ADR-014](docs/decisions/ADR-014.md)
 
 秘密情報はリポジトリ、イベント、ログに残しません。`.env` は暗号化して保存し以降は参照だけを渡します。Agent と承認者のトークンは DB にハッシュだけを保存します。
 

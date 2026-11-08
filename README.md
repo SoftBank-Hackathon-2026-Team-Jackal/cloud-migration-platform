@@ -17,6 +17,20 @@ A platform for moving an app and its PostgreSQL database running on AWS EKS to o
 
 </div>
 
+## Repositories
+
+This README covers `cloud-migration-platform`. All repositories of the team:
+
+| Repository | Role |
+| --- | --- |
+| [cloud-migration-platform](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform) | Backend: FastAPI API, Temporal workers, migration logic (this repository) |
+| [cloud-migration-web](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-web) | Web UI (TypeScript). Runs on mock data by default, or on platform events over SSE |
+| [demo-app](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app) | Migration target used in the demo: a Go chat app whose messages record which environment and DB served them |
+| [demo-app-vuln](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app-vuln) | Variant of `demo-app` with three SQL injection flaws, used to check the sandbox red team |
+| [demo-application](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-application) | Earlier demo target (Python), replaced by `demo-app` |
+| [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | Finals notes, PoCs and cloud setup (Terraform) |
+| [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | Organization profile |
+
 <!-- TODO: web E2E recording (GIF or mp4) -->
 
 ## Overview
@@ -261,6 +275,12 @@ What runs on the demo server today:
 - How source and target environments are connected (AWS role delegation, a fixed GCP project): [ADR-005](docs/decisions/ADR-005.md)
 - Why traffic is shifted through an Envoy relay: [ADR-006](docs/decisions/ADR-006.md)
 - Why the on-premises data path enters through a gateway on the source side: [ADR-007](docs/decisions/ADR-007.md)
+- Why the platform is a FastAPI API plus Temporal workers: [ADR-009](docs/decisions/ADR-009.md)
+- Why data moves by PostgreSQL logical replication and switches over through PgBouncer on the source side: [ADR-010](docs/decisions/ADR-010.md)
+- Why the worker runs SQL through `kubectl exec` and reuses the EKS token between Activities: [ADR-011](docs/decisions/ADR-011.md)
+- Why switchover only adds NetworkPolicy allow rules to the source app: [ADR-012](docs/decisions/ADR-012.md)
+- Why a shadow rehearsal observes the target before the DB switchover is approved: [ADR-013](docs/decisions/ADR-013.md)
+- How the demo platform runs on one EC2 host and deploys only main commits: [ADR-014](docs/decisions/ADR-014.md)
 
 Secrets are kept out of the repository, events, and logs. `.env` is stored encrypted and only referenced afterwards, and Agent and approver tokens are stored as hashes.
 
