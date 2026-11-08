@@ -114,6 +114,9 @@ def build_sandbox_loop(config: "Settings | None" = None) -> SandboxLoopActivitie
             else None
         ),
         skills_root=resources / "skills",  # ticket 27-B: the Tester's `test-authoring` skill
+        # The same bucket as the red-team cache: a repeat of the same source replays the Fixer's and
+        # Tester's earlier answers instead of asking the model again (`llm_replay`).
+        replay_cache=redteam_cache,
     )
 
 
