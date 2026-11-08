@@ -267,6 +267,19 @@ def sandbox_settings(value: str | None) -> dict | None:
     return parsed or None
 
 
+def with_redteam_cache(sandbox: dict | None, enabled: bool | None) -> dict | None:
+    """The web's per-run "reuse the red-team attack result" choice on top of the server's settings.
+
+    Only sets `redteam_cache_enabled`; every other field stays as the server configured it. With
+    no server settings (`sandbox` is None) there is nothing to set, and a dict made up here would
+    switch the whole rehearsal shape on, so the choice is dropped and the rehearsal stays as it
+    was. No choice (`enabled` is None) changes nothing.
+    """
+    if sandbox is None or enabled is None:
+        return sandbox
+    return {**sandbox, "redteam_cache_enabled": enabled}
+
+
 def data_migration_settings(value: str | None, provider: str | None = None) -> dict | None:
     """Data-migration ticket 08: the server's `DataMigrationInput` JSON or None when unset.
 

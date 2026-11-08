@@ -42,6 +42,7 @@ from cmp_api.start_request import (
     scope_analysis_fields,
     start_input,
     traffic_settings,
+    with_redteam_cache,
 )
 from cmp_api.temporal_client import get_temporal_client
 
@@ -133,6 +134,7 @@ def _real_start_input(
                 scope, source_connection = load_scope(session, request.scope_id)
                 scope_fields = scope_analysis_fields(scope, credential_ref(source_connection))
         sandbox = sandbox_settings(settings.web_start_sandbox_settings)
+        sandbox = with_redteam_cache(sandbox, request.redteam_cache_enabled)  # the web toggle
         data_migration = data_migration_settings(settings.web_start_data_migration, target.provider)
         # `auto_target_egress`: 그 대상 Agent가 서버에 접속한 출발지 IP를 터널 허용 목록에 더한다(꺼져 있으면 그대로).
         check_target_agent(data_migration, target.agent_id)
@@ -166,6 +168,8 @@ async def start_migration(
     store = env_ref = None
     if request.scope_id is not None and request.target is None:
         raise _refused("SCOPE_NOT_APPLICABLE")  # 06B: a scope belongs to a real start
+    if request.redteam_cache_enabled is not None and request.target is None:
+        raise _refused("REDTEAM_CACHE_NOT_APPLICABLE")  # the red-team belongs to a real start
     if request.target is not None:
         data, store, env_ref = _real_start_input(request, env_store, sessions)
     elif request.env_file_ref is not None:

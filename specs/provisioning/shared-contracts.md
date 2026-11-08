@@ -255,6 +255,7 @@ Workflow 전달(patch `env-file-ref-v1`): 시작 입력 dict의 `env_file_ref`�
 | `target` | `{provider, profile, region?, agent_id?, credential_ref?}` | 없으면 scaffold 시작(입력 바이트 동일). 있으면 실제 시작 |
 | `source` | `{kind: GITHUB_PUBLIC, repository_id, full_name, commit_sha}` | 실제 시작에 필수(`SOURCE_REQUIRED`) |
 | `env_file_ref` | `ContentRef` 또는 `envf-<32 hex>` | 실제 시작에 필수(`ENV_FILE_REF_REQUIRED`) |
+| `redteam_cache_enabled` | `bool`(엄격: 문자열·숫자는 422) | 웹 시작 화면의 "보안 점검 결과 재사용" 토글. 서버 `WEB_START_SANDBOX_SETTINGS`가 있을 때만 그 위에 `SandboxSettings.redteam_cache_enabled`로 덮어쓴다(없으면 리허설을 켜지 않으므로 효과 없음). 생략하면 서버 값(기본 켜짐). `target` 없이 보내면 `REDTEAM_CACHE_NOT_APPLICABLE`. 워커에 `REDTEAM_CACHE_BUCKET`이 없으면 어느 값이든 효과 없음 |
 
 실제 시작 입력은 CLI `build_start_input`과 같은 `{project_id, analysis: AnalysisInput{repository: https://github.com/<full_name>.git, requested_commit}, sandbox: null, planning: PlanningSettings(env_file_ref null), env_file_ref}`이고 `MigrationWorkflow`는 바뀌지 않았다. 57(#228)부터 API 설정 `WEB_START_SANDBOX_SETTINGS`(SandboxSettings JSON 객체)가 있으면 `sandbox`가 그 객체(CLI `--sandbox`와 같은 값)이고, 비어 있으면 `null` 그대로다. JSON 객체가 아니면 503 `SANDBOX_SETTINGS_INVALID`. 필드 검증은 worker(`assemble_sandbox_input`)가 한다. data-migration 08부터 API 설정 `WEB_START_DATA_MIGRATION`(DataMigrationInput JSON 객체, CLI `--data-migration`과 같다)이 있으면 `data_migration`이 그 값이고, 없으면 키가 없다(데이터 단계 scaffold). 검증에 실패하면 503 `DATA_MIGRATION_SETTINGS_INVALID`. `PlanningSettings`는 `cmp_api.start_request.planning_settings`가 만든다.
 

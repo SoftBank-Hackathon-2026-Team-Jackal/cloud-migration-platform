@@ -460,6 +460,67 @@ def test_server_sandbox_settings_leave_the_scaffold_start_alone(api, monkeypatch
     assert temporal.started[0]["data"] == "demo"
 
 
+# --- red-team attack-result cache: the web toggle (`redteam_cache_enabled`) -------------------
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_the_cache_toggle_reaches_the_sandbox_settings(api, env_ref, agent, monkeypatch, enabled):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", json.dumps(GO_SHAPE))
+    client, temporal = api
+    body = web_request(ONPREM, env_ref.id, redteam_cache_enabled=enabled)
+    assert client.post("/migrations", json=body).status_code == 202
+    sandbox = temporal.started[0]["data"]["sandbox"]
+    assert sandbox == {**GO_SHAPE, "redteam_cache_enabled": enabled}
+    # What the worker validates is a real SandboxSettings carrying the same choice.
+    assert SandboxSettings.model_validate(sandbox).redteam_cache_enabled is enabled
+
+
+def test_without_the_toggle_the_server_sandbox_settings_stay_as_they_are(
+    api, env_ref, agent, monkeypatch
+):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", json.dumps(GO_SHAPE))
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    assert temporal.started[0]["data"]["sandbox"] == GO_SHAPE  # no key added: the default is on
+
+
+def test_the_toggle_never_switches_the_rehearsal_on_by_itself(api, env_ref, agent):
+    # No server sandbox settings: the rehearsal stays health-only, the toggle has nothing to set.
+    client, temporal = api
+    body = web_request(ONPREM, env_ref.id, redteam_cache_enabled=False)
+    assert client.post("/migrations", json=body).status_code == 202
+    assert temporal.started[0]["data"]["sandbox"] is None
+
+
+def test_the_toggle_keeps_the_rest_of_the_start_input(api, env_ref, agent, monkeypatch):
+    monkeypatch.setattr(settings, "web_start_sandbox_settings", json.dumps(GO_SHAPE))
+    client, temporal = api
+    assert client.post("/migrations", json=web_request(ONPREM, env_ref.id)).status_code == 202
+    plain = temporal.started[0]["data"]
+    body = web_request(ONPREM, env_ref.id, redteam_cache_enabled=False)
+    assert client.post("/migrations", json=body).status_code == 202
+    toggled = temporal.started[1]["data"]
+    assert {k: v for k, v in toggled.items() if k != "sandbox"} == {
+        k: v for k, v in plain.items() if k != "sandbox"
+    }
+
+
+def test_the_toggle_without_a_target_is_refused(api):
+    client, temporal = api
+    body = {"project_id": "demo", "redteam_cache_enabled": False}
+    response = client.post("/migrations", json=body)
+    assert (response.status_code, code_of(response)) == (422, "REDTEAM_CACHE_NOT_APPLICABLE")
+    assert temporal.started == []
+
+
+@pytest.mark.parametrize("value", ["no", 0, "false"])
+def test_the_toggle_must_be_a_real_boolean(api, env_ref, agent, value):
+    client, temporal = api
+    body = web_request(ONPREM, env_ref.id, redteam_cache_enabled=value)
+    assert client.post("/migrations", json=body).status_code == 422
+    assert temporal.started == []
+
+
 def registration_for(planning: dict, env_ref: ContentRef):
     """What `sbx_plan_assemble` does with the start input (parent copies `env_file_ref` in)."""
     data = json.loads((ANALYSIS / "analysis-report-eks-k3s.json").read_text(encoding="utf-8"))
