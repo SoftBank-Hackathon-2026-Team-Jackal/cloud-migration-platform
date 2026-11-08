@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # by the SDK from ANTHROPIC_API_KEY. Spend limits are enforced by a shared ledger file.
     llm_enabled: bool = False
     llm_model: str = "claude-sonnet-5-5"
-    llm_max_output_tokens: int = 16000
+    llm_max_output_tokens: int = 100000
     llm_ledger_path: str | None = None
     llm_kill_switch_path: str | None = None
     llm_limit_run_usd: float = 5.0
