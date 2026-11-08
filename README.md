@@ -24,7 +24,7 @@ This README covers `cloud-migration-platform`. All repositories of the team:
 | Repository | Role |
 | --- | --- |
 | [cloud-migration-platform](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform) | Backend: FastAPI API, Temporal workers, migration logic (this repository) |
-| [cloud-migration-web](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-web) | Web UI (TypeScript). Runs on mock data by default, or on platform events over SSE |
+| [cloud-migration-web](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-web) | Web UI (TypeScript), with a voice guide ("Jackal") that reports each step. Runs on mock data by default, or on platform events over SSE |
 | [demo-app](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app) | Migration target used in the demo: a Go chat app whose messages record which environment and DB served them |
 | [demo-app-vuln](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app-vuln) | Variant of `demo-app` with three SQL injection flaws, used to check the sandbox red team |
 | [demo-application](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-application) | Earlier demo target (Python), replaced by `demo-app` |
@@ -37,10 +37,10 @@ This README covers `cloud-migration-platform`. All repositories of the team:
 
 In the web UI, the user connects a GitHub repository, a `.env` file, and an AWS account, and picks what to migrate. The platform does the rest:
 
-1. It reads the source code, the EKS manifests, and the AWS resources to work out what the app depends on.
-2. It builds an image and runs it in an isolated sandbox. If a test fails, AI (Claude) fixes the cause and runs the tests again.
+1. It reads the source code, the EKS manifests, and the AWS resources to work out what the app depends on, and a person reviews the result.
+2. It builds an image and runs it in an isolated sandbox. If a test fails, AI (Claude) fixes the cause and runs the tests again. An AI red team then attacks the sandbox copy, and the weaknesses it finds are fixed and checked again.
 3. It creates a deployment plan for the target environment and deploys it once a person approves it. For on-premises targets, an Agent installed in the user's cluster does the deployment.
-4. It copies the database with logical replication, then pauses writes briefly to switch over. Traffic is moved in steps.
+4. It copies the database with logical replication, compares real requests against the target in a shadow rehearsal, then pauses writes briefly to switch over. Traffic is moved in steps.
 
 We paid particular attention to keeping the source's security settings during the move. The platform extracts which components talk to each other from the source security groups and manifests, and recreates that in the target as NetworkPolicy that denies by default and opens only the needed paths.
 
@@ -87,7 +87,25 @@ flowchart TB
 </details>
 
 <details>
-<summary><b>2. Build the image</b></summary>
+<summary><b>2. Review before the sandbox</b></summary>
+
+```mermaid
+flowchart LR
+  R[analysis result] --> G[review gate]
+  G --> M[mapping per item<br/>moves as is · API differs · lost features]
+  G --> S[security checks on the source<br/>external HTTPS · DB access scope<br/>DB transport encryption · admin API exposure]
+  M & S --> U[user picks what to migrate<br/>and accepts the losses]
+  U --> NEXT[sandbox]
+```
+
+- Before anything is built, a person reviews the analysis. Each item shows whether it moves as is or its API differs on the target, and which features are lost (for example, ALB-only features such as WAF integration).
+- The platform checks the source infrastructure for external HTTPS, DB access scope, DB transport encryption, and admin API exposure, and shows whether each stays the same or gets stronger after the move.
+- The user chooses which items to migrate and approves the losses. Only the reviewed mapping goes on to the sandbox.
+
+</details>
+
+<details>
+<summary><b>3. Build the image</b></summary>
 
 ```mermaid
 flowchart LR
@@ -103,26 +121,38 @@ flowchart LR
 </details>
 
 <details>
-<summary><b>3. Sandbox verification</b></summary>
+<summary><b>4. Sandbox verification and red team</b></summary>
 
 ```mermaid
 flowchart LR
   REQ[intermediate spec + digest] --> RD[shared renderer]
-  RD --> K3D[k3d sandbox<br/>temporary namespace · no outbound traffic · cleaned after 2h]
+  RD --> K3D[k3d sandbox<br/>temporary namespace · allow-list egress proxy · cleaned after 2h]
   K3D --> T[tests<br/>health · DB write→read · survives restart<br/>+ AI-generated tests]
-  T -->|pass| OK[PASSED]
   T -->|fail| FX[AI Fixer] -->|up to 3 times| RD
+  T -->|pass| RT[AI red team<br/>isolated executor Pod]
+  RT -->|finding| FX
+  RT -->|no open finding| OK[PASSED]
 ```
 
-- Each run gets a temporary namespace in a k3d cluster on the platform VM, with outbound traffic blocked. It is cleaned up after two hours.
+- Each run gets a temporary namespace in a k3d cluster on the platform VM. It is cleaned up after two hours.
+- Outbound traffic goes only through an allow-list egress proxy: the external hosts the analysis found and the services kept at the source (for example S3). Everything else is blocked and recorded.
 - The standard tests are a health check, a database write then read, and data surviving a restart. AI-generated tests are added on top.
-- On failure, the Fixer changes the setup, then it is rendered and tested again, up to three attempts.
+- On failure, the failure is classified (spec, code, build, renderer, environment) and the Fixer changes the setup or the code, then it is rendered and tested again, up to three attempts.
 - The sandbox and the real deployment use the same renderer (`shared_deployment_v2`).
+
+**AI red team** ([ADR-008](docs/decisions/ADR-008.md))
+
+- Once the tests pass, an AI agent attacks the sandbox copy of the app. The executor Pod can reach only the app's port: no DNS, database, other namespaces, internet, or cluster API.
+- The model only chooses which request to send next, as a tool name and a path. There is no host or URL field in its output, so it cannot pick another destination.
+- Consent is given once when the migration starts. The default intensity is observe-only (no data changes), with a 5-minute budget, and outside calls are cut during the attack.
+- A finding's endpoint, evidence, and reproduction come only from requests actually sent and responses actually received, with secrets masked.
+- Findings go to the Fixer, which fixes the code. The rebuilt image is checked again with the same requests, up to three security rounds, tracked per image digest. Findings that stay open are shown and recorded and do not block the migration.
+- Results are cached in S3 by source hash, so a rerun of the same source does not pay for the same attack again.
 
 </details>
 
 <details>
-<summary><b>4. Deployment plan and approval</b></summary>
+<summary><b>5. Deployment plan and approval</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -142,7 +172,7 @@ sequenceDiagram
 </details>
 
 <details>
-<summary><b>5. On-premises deployment</b></summary>
+<summary><b>6. On-premises deployment</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -161,29 +191,36 @@ sequenceDiagram
 - The user installs the Agent Helm chart once. The Agent enrolls with a one-time token and only makes outbound connections to the platform.
 - The Agent also opens the WireGuard tunnel to the relay server, so no port has to be opened on the user's network.
 - The Agent polls for approved jobs, deploys the namespace, NetworkPolicy, database, and app in that order, and reports back. On failure it rolls back to the previous Revision.
+- The Agent ships as a GitHub Release with an OCI Helm chart whose image is pinned by digest (currently 0.6.0).
 
 </details>
 
 <details>
-<summary><b>6. Data replication and DB cutover</b></summary>
+<summary><b>7. Data replication, shadow rehearsal, and DB cutover</b></summary>
 
 ```mermaid
 flowchart LR
-  SRC[(source DB)] -->|logical replication · WireGuard data tunnel| TGT[(target DB)]
+  SRC[(source DB)] -->|logical replication| GW[standing gateway · NLB<br/>on the source side]
+  GW -->|WireGuard data tunnel| TGT[(target DB)]
   TGT --> ST[catch up on changes]
-  ST --> AP{DB cutover approval}
+  ST --> SH[shadow rehearsal<br/>mirror real GETs · compare]
+  SH --> AP{DB cutover approval}
   AP --> PB[hold writes briefly in PgBouncer<br/>sync sequences · verify row counts and checksums]
   PB --> SW[target becomes the writer]
+  SW --> RV[reverse replication<br/>target → source, for rollback]
 ```
 
-- The schema and initial data are copied first, then logical replication catches up on changes.
+- A network preflight runs first. The data tunnel enters through a standing gateway and NLB on the source side, and each run attaches its own peer ([ADR-007](docs/decisions/ADR-007.md)). If another run is using the gateway, the new one stops with `TUNNEL_IN_USE` instead of taking it over.
+- The schema and initial data are copied first, then logical replication catches up on changes. Tables the target app already created are kept, and only the missing ones are restored.
+- Shadow rehearsal ([ADR-013](docs/decisions/ADR-013.md)): once replication has caught up, Envoy mirrors real GET requests on allow-listed paths to the target as well. Responses are compared three ways (the source twice, the target once) to learn which fields are noise. The result is advisory and never blocks the cutover; AI explains mismatches.
 - Cutover happens after a second approval. Writes are paused in PgBouncer, sequences are synced, row counts and checksums are compared, and the target becomes the writer.
+- After cutover, replication runs in reverse (target to source) so the move can be rolled back.
 - In our EKS to GKE test, writes were paused for 83 ms and row counts and checksums matched.
 
 </details>
 
 <details>
-<summary><b>7. Traffic shift</b></summary>
+<summary><b>8. Traffic shift</b></summary>
 
 ```mermaid
 flowchart LR
@@ -197,8 +234,16 @@ flowchart LR
 
 - The Envoy weights on the relay server move to 10%, 50%, then 100%. At each step the platform checks request count, failures, and latency, and rolls back to the source if a threshold is crossed.
 - Rollback and retry can also be triggered from the web UI.
+- A manual step mode waits at each step until someone presses "next step" (or calls `POST /migrations/{id}/traffic/advance`).
+- For demos and checks, faults can be injected on the path to the target (block, reject, packet loss) to show automatic rollback.
 
 </details>
+
+## App observability
+
+- The migrated app sends OpenTelemetry (OTLP/HTTP) from both the source and the target cluster to the platform.
+- Caddy accepts only POSTs that carry the ingest token. Metrics go to Prometheus and traces to Jaeger.
+- The web UI shows them as a panel on the traffic and DB cutover screens, so the app's own latency and errors can be compared across environments.
 
 ## Architecture
 
@@ -254,7 +299,7 @@ flowchart TB
 We use Claude in three places:
 
 - Analysis: mapping the source setup to the platform's standard resources. Each decision keeps its evidence (file and line), and a person reviews it in the plan preview.
-- Sandbox: writing tests and fixing failed ones. This only runs inside the sandbox, where outbound traffic is blocked.
+- Sandbox: writing tests, fixing failed ones, red-team attacks on the sandbox copy, and explaining shadow-rehearsal mismatches. Tests, fixes, and attacks only run inside the sandbox, where outbound traffic is limited to an allow list.
 - Cost and data: spending caps of $5 per migration, $20 per day, and $100 per month are enforced in code. The model only receives masked snippets of evidence, never `.env` values or the full codebase. See [ADR-004](docs/decisions/ADR-004.md).
 
 ## Current status
@@ -263,18 +308,22 @@ What runs on the demo server today:
 
 | Step | Status |
 | --- | --- |
-| Connection and scope selection, analysis, image build, sandbox verification | Working |
-| Deployment plan and approval, on-premises deployment (Agent and tunnel) | Working. Confirmed up to deploying the app and database to the user's K3s |
-| Traffic shift | Being verified. Confirmed in a real run up to the start of the stepped shift |
-| Data replication and DB cutover | Verified for EKS to GKE. The on-premises path is in progress ([ADR-007](docs/decisions/ADR-007.md)) |
+| Connection and scope selection, analysis, review, image build, sandbox verification | Working |
+| Sandbox red team (attack, fix, re-check) | Working |
+| Deployment plan and approval, on-premises deployment (Agent and tunnel) | Working |
+| Data replication, shadow rehearsal, and DB cutover | Working for EKS to on-premises K3s and EKS to GKE |
+| Traffic shift | Working. Confirmed end to end in a real run to on-premises K3s |
 
 ## Design decisions
 
 - Why Temporal, and how we change code while workflows are running: [ADR-001](docs/decisions/ADR-001.md)
+- Scope of the first provisioning work and how it was split for parallel work: [ADR-002](docs/decisions/ADR-002.md)
 - Reusing the sandbox-verified image digest for the production deployment: [ADR-003](docs/decisions/ADR-003.md)
+- AI cost caps and what data the model may see: [ADR-004](docs/decisions/ADR-004.md)
 - How source and target environments are connected (AWS role delegation, a fixed GCP project): [ADR-005](docs/decisions/ADR-005.md)
 - Why traffic is shifted through an Envoy relay: [ADR-006](docs/decisions/ADR-006.md)
 - Why the on-premises data path enters through a gateway on the source side: [ADR-007](docs/decisions/ADR-007.md)
+- How the sandbox red team attacks safely (isolation, consent, fix and re-check): [ADR-008](docs/decisions/ADR-008.md)
 - Why the platform is a FastAPI API plus Temporal workers: [ADR-009](docs/decisions/ADR-009.md)
 - Why data moves by PostgreSQL logical replication and switches over through PgBouncer on the source side: [ADR-010](docs/decisions/ADR-010.md)
 - Why the worker runs SQL through `kubectl exec` and reuses the EKS token between Activities: [ADR-011](docs/decisions/ADR-011.md)
@@ -286,8 +335,8 @@ Secrets are kept out of the repository, events, and logs. `.env` is stored encry
 
 ## How we worked
 
-- Decisions are recorded in 7 ADRs under `docs/decisions/` and in per-area specs (`specs/`). Work was split into 136 tickets under `tickets/`, each noting the alternatives considered, the reason for the choice, and how it was checked.
-- Every change went through a PR and was squash-merged after CI (ruff and about 3,000 pytest tests). About 160 PRs have been merged so far.
+- Decisions are recorded in 14 ADRs under `docs/decisions/` and in per-area specs (`specs/`). Work was split into 154 tickets under `tickets/`, each noting the alternatives considered, the reason for the choice, and how it was checked.
+- Every change went through a PR and was squash-merged after CI (ruff and about 3,900 pytest tests). About 225 PRs have been merged so far.
 - Ownership was split into analysis and verification, provisioning, data migration, traffic, and web. Interfaces between areas are defined in `packages/contracts` and the event schema.
 
 ## Repository layout

@@ -24,7 +24,7 @@ AWS EKS에서 돌고 있는 앱과 PostgreSQL을 온프레미스 K3s나 다른 �
 | 저장소 | 역할 |
 | --- | --- |
 | [cloud-migration-platform](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-platform) | 백엔드: FastAPI API, Temporal Worker, 이전 로직(이 저장소) |
-| [cloud-migration-web](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-web) | 웹 화면(TypeScript). 기본은 목업 데이터로 움직이고, SSE 모드에서는 플랫폼 이벤트로 움직입니다 |
+| [cloud-migration-web](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/cloud-migration-web) | 웹 화면(TypeScript). 단계마다 음성으로 안내하는 자칼(Jackal)이 있습니다. 기본은 목업 데이터로 움직이고, SSE 모드에서는 플랫폼 이벤트로 움직입니다 |
 | [demo-app](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app) | 시연에 쓰는 이전 대상 앱: 메시지마다 어느 환경과 DB가 처리했는지 남기는 Go 채팅 앱 |
 | [demo-app-vuln](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-app-vuln) | `demo-app`에 SQL 인젝션 취약점 3개를 넣은 버전. Sandbox 레드팀 확인용 |
 | [demo-application](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/demo-application) | 이전에 쓰던 시연 대상 앱(Python). 지금은 `demo-app`으로 바뀌었습니다 |
@@ -37,10 +37,10 @@ AWS EKS에서 돌고 있는 앱과 PostgreSQL을 온프레미스 K3s나 다른 �
 
 사용자는 웹에서 GitHub 저장소, `.env` 파일, AWS 계정을 연결하고 옮길 범위를 고릅니다. 그다음은 플랫폼이 진행합니다.
 
-1. 원본 코드와 EKS 매니페스트, AWS 리소스를 읽어 앱이 무엇을 쓰는지 정리합니다.
-2. 이미지를 빌드하고 격리된 샌드박스에 띄워 테스트합니다. 테스트가 실패하면 AI(Claude)가 원인을 고치고 다시 돌립니다.
+1. 원본 코드와 EKS 매니페스트, AWS 리소스를 읽어 앱이 무엇을 쓰는지 정리하고, 사람이 결과를 검토합니다.
+2. 이미지를 빌드하고 격리된 샌드박스에 띄워 테스트합니다. 테스트가 실패하면 AI(Claude)가 원인을 고치고 다시 돌립니다. 이어서 AI 레드팀이 샌드박스 사본을 공격하고, 찾은 약점을 고친 뒤 다시 확인합니다.
 3. 대상 환경에 맞는 배포 계획을 만들고, 사람이 승인하면 배포합니다. 온프레미스는 사용자 클러스터에 설치한 Agent가 배포합니다.
-4. DB를 논리 복제로 옮긴 뒤 짧게 쓰기를 멈추고 전환합니다. 트래픽은 단계적으로 넘깁니다.
+4. DB를 논리 복제로 옮기고, 그림자 리허설로 실제 요청을 대상에도 보내 비교한 뒤, 짧게 쓰기를 멈추고 전환합니다. 트래픽은 단계적으로 넘깁니다.
 
 옮기는 과정에서 원본의 보안 설정이 빠지지 않게 하는 데 신경을 썼습니다. 원본 보안그룹과 매니페스트에서 앱 사이 접속 관계를 뽑아, 대상 환경에서는 기본 차단 후 필요한 경로만 여는 NetworkPolicy로 다시 만듭니다.
 
@@ -87,7 +87,25 @@ flowchart TB
 </details>
 
 <details>
-<summary><b>2. 이미지 빌드</b></summary>
+<summary><b>2. 샌드박스 전 검토</b></summary>
+
+```mermaid
+flowchart LR
+  R[분석 결과] --> G[검토 게이트]
+  G --> M[항목별 매핑<br/>그대로 이전 · API 차이 · 잃는 기능]
+  G --> S[원본 보안 점검<br/>외부 HTTPS · DB 접근 범위<br/>DB 전송 암호화 · 관리자 API 노출]
+  M & S --> U[사용자가 이관 대상을 고르고<br/>잃는 기능을 승인]
+  U --> NEXT[샌드박스]
+```
+
+- 빌드하기 전에 사람이 분석 결과를 검토합니다. 항목마다 그대로 옮겨지는지, 대상에서 API가 달라지는지, 잃는 기능(예: WAF 연동 같은 ALB 전용 기능)이 무엇인지 보여 줍니다.
+- 원본 인프라의 외부 HTTPS, DB 접근 범위, DB 전송 암호화, 관리자 API 노출을 점검하고, 이전 뒤에 보안 수준이 원본과 같은지 높아지는지를 항목별로 보여 줍니다.
+- 사용자는 이관 대상별 이관 여부를 고르고, 잃는 기능을 확인해 승인합니다. 검토를 거친 매핑만 샌드박스로 넘어갑니다.
+
+</details>
+
+<details>
+<summary><b>3. 이미지 빌드</b></summary>
 
 ```mermaid
 flowchart LR
@@ -103,26 +121,38 @@ flowchart LR
 </details>
 
 <details>
-<summary><b>3. 샌드박스 검증</b></summary>
+<summary><b>4. 샌드박스 검증과 레드팀</b></summary>
 
 ```mermaid
 flowchart LR
   REQ[중간 명세 + digest] --> RD[공통 렌더러]
-  RD --> K3D[k3d 샌드박스<br/>임시 Namespace · 외부 통신 차단 · 2시간 뒤 정리]
+  RD --> K3D[k3d 샌드박스<br/>임시 Namespace · 허용 목록 출구 프록시 · 2시간 뒤 정리]
   K3D --> T[테스트<br/>헬스 · DB 쓰기→읽기 · 재시작 후 유지<br/>+ AI 생성 테스트]
-  T -->|통과| OK[PASSED]
   T -->|실패| FX[AI Fixer 수정] -->|최대 3회| RD
+  T -->|통과| RT[AI 레드팀<br/>격리된 공격 Pod]
+  RT -->|약점 발견| FX
+  RT -->|남은 약점 없음| OK[PASSED]
 ```
 
-- 플랫폼 VM의 k3d 클러스터에 실행마다 임시 Namespace를 만들고, 외부로 나가는 통신은 막습니다. 2시간이 지나면 정리합니다.
+- 플랫폼 VM의 k3d 클러스터에 실행마다 임시 Namespace를 만듭니다. 2시간이 지나면 정리합니다.
+- 밖으로 나가는 통신은 허용 목록 방식의 출구 프록시로만 나갑니다. 분석이 찾은 외부 호출과 원본에 남겨 두는 서비스(예: S3)만 열고, 나머지는 막고 기록합니다.
 - 기본 테스트는 헬스 체크, DB 쓰기 후 읽기, 재시작 후 데이터 유지입니다. 여기에 AI가 만든 테스트가 더해집니다.
-- 실패하면 Fixer가 고친 뒤 다시 렌더링하고 테스트합니다. 최대 3번까지 시도합니다.
+- 실패하면 원인을 분류(명세, 코드, 빌드, 렌더러, 환경)하고, Fixer가 설정이나 코드를 고친 뒤 다시 렌더링하고 테스트합니다. 최대 3번까지 시도합니다.
 - 샌드박스와 실제 배포는 같은 렌더러(`shared_deployment_v2`)를 씁니다.
+
+**AI 레드팀** ([ADR-008](docs/decisions/ADR-008.md))
+
+- 테스트를 통과하면 AI 에이전트가 샌드박스 사본을 공격합니다. 공격 Pod는 앱 포트에만 접근할 수 있고, DNS, DB, 다른 Namespace, 인터넷, 클러스터 API에는 닿지 못합니다.
+- 모델은 다음에 보낼 요청을 도구 이름과 경로로만 고릅니다. 출력에 호스트나 URL 필드가 없어서 다른 목적지를 고를 수 없습니다.
+- 동의는 이전을 시작할 때 한 번 받습니다. 기본 강도는 관찰만(데이터를 바꾸지 않음)이고 시간 한도는 5분이며, 점검하는 동안 외부 호출을 끊습니다.
+- 약점의 엔드포인트, 증거, 재현 방법은 실제로 보낸 요청과 실제 응답에서만 가져오고, 비밀값은 가립니다.
+- 약점은 Fixer가 코드를 고치고, 다시 빌드한 이미지에 같은 요청을 보내 재검증합니다. 보안 수정은 최대 3회이고 이미지 digest 기준으로 추적합니다. 남은 약점은 표시하고 기록하며, 이전을 막지 않습니다.
+- 결과는 소스 해시 기준으로 S3에 캐시해서, 같은 소스를 다시 이전할 때 같은 공격을 다시 하지 않습니다.
 
 </details>
 
 <details>
-<summary><b>4. 배포 계획과 승인</b></summary>
+<summary><b>5. 배포 계획과 승인</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -142,7 +172,7 @@ sequenceDiagram
 </details>
 
 <details>
-<summary><b>5. 온프레미스 배포</b></summary>
+<summary><b>6. 온프레미스 배포</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -161,29 +191,36 @@ sequenceDiagram
 - 사용자는 Agent Helm 차트를 한 번 설치하면 됩니다. Agent는 일회용 토큰으로 등록하고, 플랫폼 쪽으로만 접속합니다.
 - WireGuard 터널도 Agent가 중계 서버로 먼저 연결하기 때문에 사용자 네트워크에서 포트를 열 필요가 없습니다.
 - Agent는 승인된 작업을 폴링으로 받아 Namespace, NetworkPolicy, DB, 앱 순서로 배포하고 결과를 보고합니다. 실패하면 직전 Revision으로 되돌립니다.
+- Agent는 GitHub Release와 OCI Helm 차트로 배포하고, 이미지는 digest로 고정합니다(현재 0.6.0).
 
 </details>
 
 <details>
-<summary><b>6. 데이터 복제와 DB 전환</b></summary>
+<summary><b>7. 데이터 복제, 그림자 리허설, DB 전환</b></summary>
 
 ```mermaid
 flowchart LR
-  SRC[(원본 DB)] -->|논리 복제 · WireGuard 데이터 터널| TGT[(대상 DB)]
+  SRC[(원본 DB)] -->|논리 복제| GW[원본 쪽 고정 게이트웨이 · NLB]
+  GW -->|WireGuard 데이터 터널| TGT[(대상 DB)]
   TGT --> ST[변경분 따라잡기]
-  ST --> AP{DB 전환 승인}
+  ST --> SH[그림자 리허설<br/>실제 GET 복사 · 비교]
+  SH --> AP{DB 전환 승인}
   AP --> PB[PgBouncer로 쓰기 잠시 대기<br/>시퀀스 맞춤 · 행 수·체크섬 검증]
   PB --> SW[쓰기 주체를 대상으로]
+  SW --> RV[역방향 복제<br/>대상 → 원본, 되돌리기용]
 ```
 
-- 스키마와 초기 데이터를 복사한 뒤 논리 복제로 변경분을 따라잡습니다.
+- 먼저 네트워크 사전 점검을 합니다. 데이터 터널은 원본 쪽 고정 게이트웨이와 NLB로 들어오고, 실행마다 자기 peer를 붙입니다([ADR-007](docs/decisions/ADR-007.md)). 다른 실행이 게이트웨이를 쓰고 있으면 가로채지 않고 `TUNNEL_IN_USE`로 멈춥니다.
+- 스키마와 초기 데이터를 복사한 뒤 논리 복제로 변경분을 따라잡습니다. 대상 앱이 이미 만든 테이블은 그대로 두고, 없는 테이블만 복원합니다.
+- 그림자 리허설([ADR-013](docs/decisions/ADR-013.md)): 복제가 따라잡으면 Envoy가 허용한 경로의 실제 GET 요청을 대상에도 복사합니다. 원본 두 번과 대상 한 번의 응답을 비교해 잡음 필드를 걸러 냅니다. 결과는 참고용이라 전환을 막지 않고, 불일치는 AI가 설명합니다.
 - DB 전환은 두 번째 승인을 받은 뒤 진행합니다. PgBouncer에서 쓰기를 잠시 멈추고 시퀀스를 맞춘 뒤, 행 수와 체크섬을 비교하고 대상 DB로 넘깁니다.
+- 전환 뒤에는 대상에서 원본으로 역방향 복제를 유지해 되돌릴 수 있게 합니다.
 - EKS에서 GKE로 옮기는 검증에서는 쓰기 중단이 83ms였고, 행 수와 체크섬이 일치했습니다.
 
 </details>
 
 <details>
-<summary><b>7. 트래픽 전환</b></summary>
+<summary><b>8. 트래픽 전환</b></summary>
 
 ```mermaid
 flowchart LR
@@ -197,8 +234,16 @@ flowchart LR
 
 - 중계 서버의 Envoy 가중치를 10%, 50%, 100% 순서로 바꿉니다. 단계마다 요청 수, 실패, 지연을 보고 기준을 넘으면 원본으로 되돌립니다.
 - 웹에서 롤백과 재시도를 직접 할 수도 있습니다.
+- 수동 단계 모드에서는 단계마다 "다음 단계"를 누르거나 `POST /migrations/{id}/traffic/advance`를 호출해야 넘어갑니다.
+- 시연과 점검을 위해 대상으로 가는 길에 장애(차단, 거절, 패킷 손실)를 넣어 자동 롤백을 보여 줄 수 있습니다.
 
 </details>
+
+## 앱 관측
+
+- 이전한 앱은 원본과 대상 클러스터 양쪽에서 OpenTelemetry(OTLP/HTTP)를 플랫폼으로 보냅니다.
+- Caddy는 수집 토큰이 있는 POST만 받습니다. 메트릭은 Prometheus로, 트레이스는 Jaeger로 보냅니다.
+- 웹의 트래픽 전환·DB 전환 화면에 패널로 보여 줘서, 환경별로 앱 자체의 지연과 오류를 비교할 수 있습니다.
 
 ## 아키텍처
 
@@ -254,7 +299,7 @@ flowchart TB
 AI는 Claude를 씁니다. 사용하는 곳은 세 군데입니다.
 
 - 분석: 원본 구성을 플랫폼 표준 리소스에 대응시킵니다. 판단마다 근거(파일과 줄 번호)를 남기고, 사람이 계획 미리보기에서 확인합니다.
-- 샌드박스: 테스트를 만들고, 실패한 테스트의 원인을 고칩니다. 외부 통신이 막힌 샌드박스 안에서만 동작합니다.
+- 샌드박스: 테스트를 만들고, 실패한 테스트의 원인을 고치고, 샌드박스 사본을 레드팀으로 공격하고, 그림자 리허설의 불일치를 설명합니다. 테스트, 수정, 공격은 외부 통신이 허용 목록으로 제한된 샌드박스 안에서만 동작합니다.
 - 비용과 데이터: 이전 1건 $5, 하루 $20, 한 달 $100 상한을 코드로 적용합니다. 모델에는 마스킹한 근거 일부만 보내고 `.env` 값과 전체 코드는 보내지 않습니다. 자세한 내용은 [ADR-004](docs/decisions/ADR-004.md)에 있습니다.
 
 ## 구현 현황
@@ -263,18 +308,22 @@ AI는 Claude를 씁니다. 사용하는 곳은 세 군데입니다.
 
 | 단계 | 상태 |
 | --- | --- |
-| 연결·범위 선택, 분석, 이미지 빌드, 샌드박스 검증 | 동작 |
-| 배포 계획·승인, 온프레미스 배포(Agent·터널) | 동작. 사용자 K3s에 앱과 DB 배포까지 확인 |
-| 트래픽 전환 | 검증 중. 실제 실행에서 단계별 전환 시작까지 확인 |
-| 데이터 복제·DB 전환 | EKS→GKE는 검증 완료. 온프레미스 경로는 구현 중([ADR-007](docs/decisions/ADR-007.md)) |
+| 연결·범위 선택, 분석, 검토, 이미지 빌드, 샌드박스 검증 | 동작 |
+| 샌드박스 레드팀(공격, 수정, 재검증) | 동작 |
+| 배포 계획·승인, 온프레미스 배포(Agent·터널) | 동작 |
+| 데이터 복제, 그림자 리허설, DB 전환 | EKS→온프레미스 K3s, EKS→GKE 모두 동작 |
+| 트래픽 전환 | 동작. 온프레미스 K3s로 끝까지 진행한 실제 실행에서 확인 |
 
 ## 주요 설계 결정
 
 - Temporal을 쓴 이유와 실행 중인 워크플로우를 유지하면서 코드를 바꾸는 방법: [ADR-001](docs/decisions/ADR-001.md)
+- 첫 Provisioning 작업 범위와 병렬 작업을 나눈 기준: [ADR-002](docs/decisions/ADR-002.md)
 - 샌드박스에서 검증한 이미지 digest를 운영 배포에 그대로 쓰는 방식: [ADR-003](docs/decisions/ADR-003.md)
+- AI 비용 상한과 모델에 보내도 되는 데이터: [ADR-004](docs/decisions/ADR-004.md)
 - 원본·대상 환경 연결 방식(AWS 역할 위임, GCP 고정 프로젝트): [ADR-005](docs/decisions/ADR-005.md)
 - 트래픽 전환을 Envoy 중계로 하는 이유: [ADR-006](docs/decisions/ADR-006.md)
 - 온프레미스 데이터 이전 경로를 원본 쪽 게이트웨이로 정한 이유: [ADR-007](docs/decisions/ADR-007.md)
+- 샌드박스 레드팀을 안전하게 돌리는 방식(격리, 동의, 수정 후 재검증): [ADR-008](docs/decisions/ADR-008.md)
 - 플랫폼을 FastAPI API와 Temporal Worker로 구성한 이유: [ADR-009](docs/decisions/ADR-009.md)
 - 데이터를 PostgreSQL 논리 복제로 옮기고 원본 쪽 PgBouncer로 전환하는 이유: [ADR-010](docs/decisions/ADR-010.md)
 - Worker가 `kubectl exec`로 SQL을 실행하고 EKS 토큰을 Activity 사이에서 재사용하는 이유: [ADR-011](docs/decisions/ADR-011.md)
@@ -286,8 +335,8 @@ AI는 Claude를 씁니다. 사용하는 곳은 세 군데입니다.
 
 ## 개발 방식
 
-- 결정은 `docs/decisions/`의 ADR 7건과 영역별 명세(`specs/`)로 남겼습니다. 작업은 `tickets/`에 티켓 136건으로 나눠, 검토한 대안과 선택 이유, 확인 결과를 같이 적었습니다.
-- 변경은 모두 PR로 올렸고, CI(ruff, pytest 약 3,000개)를 통과한 뒤 squash 병합했습니다. 지금까지 병합한 PR은 약 160건입니다.
+- 결정은 `docs/decisions/`의 ADR 14건과 영역별 명세(`specs/`)로 남겼습니다. 작업은 `tickets/`에 티켓 154건으로 나눠, 검토한 대안과 선택 이유, 확인 결과를 같이 적었습니다.
+- 변경은 모두 PR로 올렸고, CI(ruff, pytest 약 3,900개)를 통과한 뒤 squash 병합했습니다. 지금까지 병합한 PR은 약 225건입니다.
 - 분석·검증, Provisioning, 데이터 이전, 트래픽, 웹으로 담당을 나누고, 영역 사이 인터페이스는 `packages/contracts`와 이벤트 스키마로 맞췄습니다.
 
 ## 저장소 구조
