@@ -620,7 +620,8 @@ class SandboxVerificationWorkflow:
                                         if k not in ("repro", "evidence_ref")
                                     }
                                     for f in red_open
-                                ]
+                                ],
+                                "redteam_cache": data["redteam"].get("cache_enabled", True),
                             }
                             if security_round
                             else {}

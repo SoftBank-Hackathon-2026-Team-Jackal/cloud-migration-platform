@@ -303,3 +303,88 @@ async def test_a_skill_for_another_target_or_an_unknown_one_is_not_offered(tmp_p
     sent = llm.calls[0].messages[0].content
     assert "storage-s3" in sent and "storage-gcs" not in sent
     assert "STORAGE-GCS-BODY" not in llm.calls[1].messages[-1].content
+
+
+class DictCache:
+    """In-memory stand-in for the red-team cache: a plain get/put on a dict."""
+
+    def __init__(self):
+        self.items = {}
+
+    def get(self, key):
+        return self.items.get(key)
+
+    def put(self, key, value):
+        self.items[key] = value
+
+
+SECURITY_FINDING = {
+    "finding_id": "f-1", "category": "INFO_EXPOSURE", "severity": "LOW", "endpoint": "GET /stats",
+    "summary": "s", "repro_summary": "r",
+}  # fmt: skip
+
+
+def security_fix_payload(payload, store, **extra):
+    classification = {"failure_class": "SECURITY", "reasons": ["FINDING:f-1"]}
+    return fix_payload(
+        payload, store, classification=classification, findings=[SECURITY_FINDING], **extra
+    )
+
+
+def code_fix_llm():
+    files = [{"path": "main.go", "content": "package main\nvar port = 8080\n// guarded\n"}]
+    return FakeLLMClient(
+        [LLMResponse(tool_calls=[call("submit_code_fix", reason="guard stats", files=files)])]
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_security_fix_is_stored_and_reused_for_the_same_source_and_findings(tmp_path):
+    from types import SimpleNamespace
+
+    cache = DictCache()
+    llm = code_fix_llm()
+    activities, store, payload, _, _ = world(tmp_path, llm=llm)
+    activities.redteam = SimpleNamespace(cache=cache)
+    first = await activities.sbx_fix(security_fix_payload(payload, store))
+    assert first["status"] == "PROPOSED" and first["kind"] == "CODE" and len(llm.calls) == 1
+    assert len(cache.items) == 1 and next(iter(cache.items)).startswith("redteam/fix/")
+
+    again = FakeLLMClient([])  # a second call to the Fixer would fail
+    activities.llm_factory = lambda *_: again
+    second = await activities.sbx_fix(security_fix_payload(payload, store))
+    assert again.calls == []
+    assert second["status"] == "PROPOSED" and second["source"] == first["source"]
+
+
+@pytest.mark.asyncio
+async def test_the_fix_cache_is_not_read_when_the_run_turned_the_cache_off(tmp_path):
+    from types import SimpleNamespace
+
+    cache = DictCache()
+    activities, store, payload, _, _ = world(tmp_path, llm=code_fix_llm())
+    activities.redteam = SimpleNamespace(cache=cache)
+    await activities.sbx_fix(security_fix_payload(payload, store))
+    llm = code_fix_llm()
+    activities.llm_factory = lambda *_: llm
+    result = await activities.sbx_fix(security_fix_payload(payload, store, redteam_cache=False))
+    assert result["status"] == "PROPOSED" and len(llm.calls) == 1  # the Fixer ran again
+
+
+@pytest.mark.asyncio
+async def test_other_failures_and_other_findings_do_not_use_the_fix_cache(tmp_path):
+    from types import SimpleNamespace
+
+    cache = DictCache()
+    activities, store, payload, _, _ = world(tmp_path, llm=code_fix_llm())
+    activities.redteam = SimpleNamespace(cache=cache)
+    await activities.sbx_fix(security_fix_payload(payload, store))
+    other = {**SECURITY_FINDING, "finding_id": "f-2"}
+    llm = code_fix_llm()
+    activities.llm_factory = lambda *_: llm
+    classification = {"failure_class": "SECURITY", "reasons": ["FINDING:f-2"]}
+    result = await activities.sbx_fix(
+        fix_payload(payload, store, classification=classification, findings=[other])
+    )
+    assert result["status"] == "PROPOSED" and len(llm.calls) == 1  # different Findings: a miss
+    assert len(cache.items) == 2

@@ -16,7 +16,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, propose_fix
+from cmp_agents.fixer import (
+    CodeFix,
+    FixInput,
+    FixOutcome,
+    apply_code_fix,
+    apply_requirements_fix,
+    propose_fix,
+)
 from cmp_agents.fixer_skills import select_skills
 from cmp_agents.llm import LLMClient
 from cmp_agents.tester import SuiteRequest, generate_tests
@@ -67,6 +74,7 @@ from cmp_worker.planning_handoff import (
     check_with_planning,
 )
 from cmp_worker.prebuilt_builder import BuildUnavailable
+from cmp_worker.redteam_cache import RedTeamCacheError, fix_cache_key
 from cmp_worker.redteam_stage import RedTeamInput, RedTeamKit, request_for, run_stage
 from cmp_worker.sandbox_deploy import (
     SandboxCapabilities,
@@ -513,25 +521,43 @@ class SandboxLoopActivities:
         logs = self.store.get(ArtifactRef.model_validate(payload["logs_ref"])).decode()
         suite = load_bundle(self.store.get(ArtifactRef.model_validate(payload["suite_ref"])))
         workspace = payload["source"].get("workspace")
-        outcome = propose_fix(
-            FixInput(
-                failure_class=klass,
-                reasons=payload["classification"]["reasons"],
-                requirements_json=canonical_requirements(requirements)[0].decode(),
-                logs=logs,
-                tests={c.id: c.model_dump(mode="json") for c in suite.cases},
-                findings=payload.get("findings") or [],
-            ),
-            llm=self.llm_factory(payload["migration_id"], "fixer"),
-            workspace=workspace,
-            # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
-            skills_root=self.skills_root,
-            skills=select_skills(
-                self.skills_root,
-                klass,
-                payload["classification"]["reasons"],
-                target_provider=self._target_provider(payload.get("analysis_report_ref")),
-            ),
+        # A security fix for the same source and the same Findings is reused from the red-team cache,
+        # so a repeat run does not wait for the Fixer and builds the very same fixed source.
+        cache = getattr(self.redteam, "cache", None)
+        fix_key: str | None = None
+        reused: CodeFix | None = None
+        if klass == "SECURITY" and cache is not None and workspace and Path(workspace).is_dir():
+            ids = [f["finding_id"] for f in payload.get("findings") or [] if "finding_id" in f]
+            fix_key = fix_cache_key(tree_sha256(workspace), ids) if ids else None
+            if fix_key and payload.get("redteam_cache", True):
+                try:
+                    stored = cache.get(fix_key)
+                    reused = CodeFix.model_validate(stored) if stored else None
+                except (RedTeamCacheError, ValueError):
+                    reused = None  # an unreachable or unreadable entry is a miss
+        outcome = (
+            FixOutcome(status="PROPOSED", code_fix=reused)
+            if reused is not None
+            else propose_fix(
+                FixInput(
+                    failure_class=klass,
+                    reasons=payload["classification"]["reasons"],
+                    requirements_json=canonical_requirements(requirements)[0].decode(),
+                    logs=logs,
+                    tests={c.id: c.model_dump(mode="json") for c in suite.cases},
+                    findings=payload.get("findings") or [],
+                ),
+                llm=self.llm_factory(payload["migration_id"], "fixer"),
+                workspace=workspace,
+                # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
+                skills_root=self.skills_root,
+                skills=select_skills(
+                    self.skills_root,
+                    klass,
+                    payload["classification"]["reasons"],
+                    target_provider=self._target_provider(payload.get("analysis_report_ref")),
+                ),
+            )
         )
         if outcome.status != "PROPOSED":
             return {"status": outcome.status, "reason": outcome.reason}
@@ -579,6 +605,11 @@ class SandboxLoopActivities:
         )
         if lowered:
             return {"status": "FAILED", "reason": lowered[0]}
+        if fix_key and reused is None:
+            try:
+                cache.put(fix_key, fix.model_dump(mode="json"))
+            except RedTeamCacheError:
+                pass  # best-effort: a cache write failing must not fail a fix that already passed
         digest = self.store.put(
             "\n".join(f"{c.path}\0{c.content}" for c in fix.files).encode(),
             ref_id="code-fix", kind="code-fix",

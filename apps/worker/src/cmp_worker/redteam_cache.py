@@ -14,6 +14,7 @@ Nothing here is wired to anything yet: `SandboxSettings.redteam_cache_enabled` (
 default -- no bucket configured) makes every lookup a clean, silent miss.
 """
 
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -44,6 +45,14 @@ def cache_key(source_sha256: str) -> str:
     deliberately not part of it: the model finds different things on each run, so keying on them
     made identical source miss. The object under this key is the latest result for that source."""
     return f"redteam/attack/{source_sha256}.json"
+
+
+def fix_cache_key(source_sha256: str, finding_ids: list[str]) -> str:
+    """One key per exact source and set of Findings: the same attack result on the same source
+    gets the same fix back, so a repeat run skips the Fixer and lands on the same fixed source
+    (and therefore on the same cached re-check)."""
+    material = "\n".join([source_sha256, *sorted(finding_ids)]).encode()
+    return f"redteam/fix/{hashlib.sha256(material).hexdigest()}.json"
 
 
 class S3RedTeamCache:
