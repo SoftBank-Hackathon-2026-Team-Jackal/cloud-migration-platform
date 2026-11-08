@@ -421,6 +421,17 @@ sudo bash /opt/cmp/releases/$(cat /opt/cmp/current-revision)/infra/demo/runtime-
 | `target_profiles_file=`·`sandbox_kubeconfig_file=`·`gcp_key_file=` | 배치 여부(`present`/`absent`) |
 | `data_migration_kubeconfig_files=` | `/opt/cmp/secrets/data-migration`의 `*.yaml` 개수(이름은 출력하지 않는다) |
 
+## 앱 관측 수신 (OpenTelemetry)
+
+이전 대상 데모 앱(원본 EKS, 대상 k3d)은 OTLP/HTTP로 트레이스와 메트릭을 이 서버의 edge `/otlp/*`에 보냅니다.
+
+- **인증:** 헤더 `X-Otlp-Token`이 `/opt/cmp/.env`의 `OTLP_INGEST_TOKEN`과 같아야 합니다. 이 값은 `ensure-secrets.sh`가 만듭니다. 토큰이 없거나 틀리면 401을 돌려줍니다.
+- **저장:** 메트릭은 Prometheus(OTLP 수신, 3일 보관)에, 트레이스는 Jaeger(메모리)에 저장합니다. 두 서비스 모두 `127.0.0.1`에만 열려 있으며 SSM 포트 포워딩으로 볼 수 있습니다(9090, 16686).
+- **화면:** 웹은 서버 쪽에서 `PROMETHEUS_URL`로 PromQL을 실행합니다. 브라우저는 Prometheus에 직접 닿지 않습니다.
+- **대상 NetworkPolicy:** `/opt/cmp/.env`에 `CMP_TELEMETRY_EGRESS_CIDR=<이 서버 EIP>/32`를 두면, 운영 Plan의 NetworkPolicy가 앱 → 그 주소 TCP 443을 허용합니다. Plan 미리보기의 플랫폼 기본값에도 이 줄이 나옵니다. 비워 두면 정책은 바뀌지 않습니다.
+- **데모 앱 설정:** `OTEL_EXPORTER_OTLP_ENDPOINT=https://<CMP_PUBLIC_HOST>/otlp`, `OTEL_EXPORTER_OTLP_HEADERS=X-Otlp-Token=<OTLP_INGEST_TOKEN>`입니다. 원본은 매니페스트(configmap, `chat-secrets`)에 두고, 대상은 업로드하는 `.env`에 같은 두 줄을 둡니다.
+- **이전 경로와의 관계:** 트래픽 전환 판정은 중계 서버 Envoy 카운터로 합니다. 그래서 Prometheus나 Jaeger가 멈춰도 이전은 계속되고, 화면의 앱 관측 패널만 비게 됩니다.
+
 ## 접속과 확인
 
 SSM Session Manager의 포트 포워딩으로 로컬 `8000`을 EC2 `8000`에 연결하면 `/health`와 `/docs`를 볼 수 있다. Temporal UI는 같은 방식으로 `8080`에 접속한다. API/Temporal UI는 EC2의 loopback에만 바인딩된다. 공개 URL은 Agent·중계·이전·Plan 승인 경로(`/agents/*`, `/relays/*`, `/migrations[/*]`, `/provisioning/*`)만 API로 전달하는 에지뿐이다.

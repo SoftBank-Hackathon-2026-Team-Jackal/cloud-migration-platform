@@ -8,6 +8,8 @@ install -d -m 700 /opt/cmp/data/plans /opt/cmp/data/artifact-store /opt/cmp/data
 install -d -m 700 /opt/cmp/data/env-files /opt/cmp/data/analysis-workspaces /opt/cmp/data/llm
 # The web container runs as uid 1000 (node) and keeps the voice model and its cache here.
 install -d -m 700 -o 1000 -g 1000 /opt/cmp/data/web-models /opt/cmp/data/web-cache
+# App telemetry store: the Prometheus image runs as nobody (65534).
+install -d -m 700 -o 65534 -g 65534 /opt/cmp/data/prometheus
 
 for attempt in {1..60}; do
   if docker compose version >/dev/null 2>&1; then
@@ -38,7 +40,7 @@ if grep -q '^CMP_DEPLOY_MODE=image[[:space:]]*$' /opt/cmp/.env; then
 fi
 
 compose=(docker compose --env-file /opt/cmp/.env -f infra/demo/compose.yaml)
-"${compose[@]}" up -d platform-db temporal-db temporal temporal-ui
+"${compose[@]}" up -d platform-db temporal-db temporal temporal-ui prometheus jaeger
 # Build first: the migration must run with the new release's code, not the previously built image.
 "${compose[@]}" build api worker
 "${compose[@]}" run --rm api alembic upgrade head

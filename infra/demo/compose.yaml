@@ -54,6 +54,34 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
 
+  # App telemetry (OpenTelemetry): the migrated demo app on the source and target clusters pushes OTLP/HTTP
+  # through the edge (/otlp/*, X-Otlp-Token = OTLP_INGEST_TOKEN). Metrics land in Prometheus (native OTLP
+  # receiver) and the web reads them for the stage panels; traces land in Jaeger (memory only). Neither is
+  # on the migration path: traffic gates read the relay Envoy, so these going down only empties the panels.
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=3d
+      - --web.enable-otlp-receiver
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /opt/cmp/data/prometheus:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    mem_limit: 1g
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.66.0
+    restart: unless-stopped
+    environment:
+      MEMORY_MAX_TRACES: "20000"
+    ports:
+      - "127.0.0.1:16686:16686"
+    mem_limit: 512m
+
   api:
     # Image mode (CMP_DEPLOY_MODE=image, start-image.sh) sets CMP_API_IMAGE to the prebuilt registry tag.
     # Unset, this is the name compose already gives the locally built image, so build mode is unchanged.
@@ -189,6 +217,9 @@ services:
       # Ticket 47 (D-10): the demo host EIP as /32 in /opt/cmp/.env; AWS Plans then refuse
       # api_access_cidrs that leave it out. Empty = not checked (Preview warning).
       PROVISIONING_PLATFORM_EGRESS_CIDRS: ${PROVISIONING_PLATFORM_EGRESS_CIDRS:-}
+      # App telemetry: ON_PREM/cloud production NetworkPolicies let the app reach this CIDR on TCP 443
+      # (the edge's /otlp/*). /opt/cmp/.env sets the demo host EIP as /32; empty = no telemetry egress.
+      CMP_TELEMETRY_EGRESS_CIDR: ${CMP_TELEMETRY_EGRESS_CIDR:-}
       # GCP: operator-provided service-account key, activated by the entrypoint into tmpfs. The same
       # ADC serves GCP Plan/Apply and the API's GCP_TARGET connection check (ticket 48 Activity).
       CMP_GCP_KEY_FILE: /run/cmp/gcp/key.json
@@ -291,6 +322,8 @@ services:
       - temporal-ui
     environment:
       TEMPORAL_UI_URL: http://temporal-ui:8080
+      # App telemetry panels (server-side PromQL; the browser never reaches Prometheus).
+      PROMETHEUS_URL: http://prometheus:9090
       PLATFORM_API_BASE: http://api:8000
       PLATFORM_PUBLIC_URL: https://${CMP_PUBLIC_HOST:-localhost}
       AUTH_SECRET: ${WEB_AUTH_SECRET:-}
@@ -330,6 +363,10 @@ services:
       CMP_TEMPORAL_UPSTREAM: temporal:7233
       # Relay host address allowed to reach Temporal through the edge (default: nobody).
       CMP_TEMPORAL_ALLOWED_IP: ${CMP_TEMPORAL_ALLOWED_IP:-192.0.2.1/32}
+      # App telemetry ingest token (ensure-secrets.sh generates it; the demo app sends X-Otlp-Token).
+      CMP_OTLP_TOKEN: ${OTLP_INGEST_TOKEN:?set OTLP_INGEST_TOKEN}
+      CMP_PROMETHEUS_UPSTREAM: prometheus:9090
+      CMP_JAEGER_UPSTREAM: jaeger:4318
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./agent-routes.caddy:/etc/caddy/agent-routes.caddy:ro

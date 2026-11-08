@@ -20,6 +20,7 @@ from cmp_providers.network_policy import (
     PRODUCTION_LABELS,
     aws_vpc_cni_enforces,
     base_policies,
+    describe,
     gke_dataplane_v2,
     production_policies,
     with_connections,
@@ -173,6 +174,45 @@ def test_external_egress_exists_only_for_external_intents():
     policies = rules("AWS")
     assert not allowed(policies, APP, INTERNET, 443)
     assert not [p for p in policies if "ipBlock" in json.dumps(p)]
+
+
+PLATFORM_EDGE = {"ip": "13.209.240.49"}
+
+
+@pytest.mark.parametrize("provider", ["AWS", "GCP", "ON_PREM"])
+def test_telemetry_egress_opens_only_the_platform_ingest_on_443(provider):
+    policies = production_policies(
+        namespace=NS,
+        provider=provider,
+        releases=RELEASES,
+        applications={"api-main": 8080},
+        databases=["postgres-main"],
+        intents=with_connections([], [("api-main", "postgres-main")]),
+        telemetry_cidr="13.209.240.49/32",
+    )
+    assert allowed(policies, APP, PLATFORM_EDGE, 443)
+    assert not allowed(policies, APP, PLATFORM_EDGE, 80)
+    assert not allowed(policies, APP, INTERNET, 443)  # only that one address
+    assert not allowed(policies, DB, PLATFORM_EDGE, 443)  # applications only
+    # Without the setting the policies are exactly what they were.
+    before = rules(provider)
+    assert len([p for p in policies if p not in before]) == 1
+    assert all(p in policies for p in before)
+
+
+def test_preview_lists_the_telemetry_egress_as_a_platform_default():
+    shape = {
+        "releases": RELEASES,
+        "applications": {"api-main": 8080},
+        "databases": ["postgres-main"],
+        "intents": [],
+        "provider": "ON_PREM",
+    }
+    _, without = describe(**shape)
+    _, with_telemetry = describe(**shape, telemetry_cidr="13.209.240.49/32")
+    assert [line for line in with_telemetry if line not in without] == [
+        "api-main → 플랫폼 관측 수신(OpenTelemetry) 13.209.240.49/32 TCP 443 허용"
+    ]
 
 
 def test_app_to_db_is_allowed_even_when_analysis_saw_no_edge():

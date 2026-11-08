@@ -182,6 +182,27 @@ def test_edge_sends_agent_relay_and_migration_routes_to_the_api():
         "lb_try_interval 250ms",
         "}",
         "}",
+        "@otlp_metrics {",
+        "method POST",
+        "path /otlp/v1/metrics",
+        "header X-Otlp-Token {$CMP_OTLP_TOKEN}",
+        "}",
+        "handle @otlp_metrics {",
+        "rewrite * /api/v1/otlp/v1/metrics",
+        "reverse_proxy {$CMP_PROMETHEUS_UPSTREAM}",
+        "}",
+        "@otlp_traces {",
+        "method POST",
+        "path /otlp/v1/traces",
+        "header X-Otlp-Token {$CMP_OTLP_TOKEN}",
+        "}",
+        "handle @otlp_traces {",
+        "rewrite * /v1/traces",
+        "reverse_proxy {$CMP_JAEGER_UPSTREAM}",
+        "}",
+        "handle /otlp/* {",
+        "respond 401",
+        "}",
         "@backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*",
         "handle @backend {",
         "reverse_proxy {$CMP_API_UPSTREAM} {",
@@ -256,6 +277,30 @@ def test_web_is_built_in_real_sse_mode_against_the_public_origin():
     # An sse build would otherwise switch the web's connection screens to the real API, which
     # needs the operator key the public web does not hold; keep today's mock default.
     assert web["environment"]["PLATFORM_CONNECTIONS"] == "${WEB_PLATFORM_CONNECTIONS:-mock}"
+
+
+def test_app_telemetry_ingest_needs_the_generated_token_and_stays_off_the_migration_path():
+    services = _compose()["services"]
+    edge = _env("edge")
+    # The edge refuses to start without a token (ensure-secrets.sh generates it), so /otlp/* is never
+    # open to anyone without the header.
+    assert edge["CMP_OTLP_TOKEN"] == "${OTLP_INGEST_TOKEN:?set OTLP_INGEST_TOKEN}"
+    assert "ensure_key OTLP_INGEST_TOKEN 32" in (DEMO / "ensure-secrets.sh").read_text()
+    assert edge["CMP_PROMETHEUS_UPSTREAM"] == "prometheus:9090"
+    assert edge["CMP_JAEGER_UPSTREAM"] == "jaeger:4318"
+    prometheus = services["prometheus"]
+    assert "--web.enable-otlp-receiver" in prometheus["command"]
+    assert prometheus["ports"] == ["127.0.0.1:9090:9090"]
+    assert services["jaeger"]["ports"] == ["127.0.0.1:16686:16686"]
+    config = yaml.safe_load((DEMO / "prometheus.yml").read_text())
+    assert "app.env" in config["otlp"]["promote_resource_attributes"]
+    # Nothing on the migration path depends on them.
+    for name in ("api", "worker", "temporal", "edge"):
+        assert not {"prometheus", "jaeger"} & set(services[name].get("depends_on") or [])
+    assert _env("web")["PROMETHEUS_URL"] == "http://prometheus:9090"
+    assert _env("worker")["CMP_TELEMETRY_EGRESS_CIDR"] == "${CMP_TELEMETRY_EGRESS_CIDR:-}"
+    for script in ("start.sh", "start-image.sh"):
+        assert "temporal-ui prometheus jaeger" in (DEMO / script).read_text()
 
 
 def test_temporal_ui_proxied_by_the_public_web_is_read_only():

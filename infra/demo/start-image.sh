@@ -42,7 +42,7 @@ compose=(docker compose --env-file "$env_file" -f infra/demo/compose.yaml)
 # 1. Pull first. A missing tag or an unauthorised private package fails here and nothing is changed.
 "${compose[@]}" pull --quiet api worker
 
-"${compose[@]}" up -d platform-db temporal-db temporal temporal-ui
+"${compose[@]}" up -d platform-db temporal-db temporal temporal-ui prometheus jaeger
 
 # 2. Migrate with the NEW image while the old api still serves (schema changes must stay backward compatible).
 "${compose[@]}" run --rm api alembic upgrade head
