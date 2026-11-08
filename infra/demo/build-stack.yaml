@@ -32,6 +32,12 @@ Parameters:
     Type: String
     Default: builds
     AllowedPattern: '^[A-Za-z0-9_-]+$'
+  # Red-team attack-result cache (worker `redteam_cache`): `redteam/attack/<sha>/<ids>.json` when the
+  # worker's REDTEAM_CACHE_PREFIX is empty (BUCKET = the deploy bucket). Keep both in step.
+  RedteamCachePrefix:
+    Type: String
+    Default: redteam
+    AllowedPattern: '^[A-Za-z0-9_-]+$'
   UntaggedImageDays:
     Type: Number
     Default: 7
@@ -54,6 +60,8 @@ Rules:
       - Assert: !Not [!Equals [!Ref SuitePrefix, releases]]
         AssertDescription: releases/ belongs to the deploy pipeline.
       - Assert: !Not [!Equals [!Ref LogPrefix, releases]]
+        AssertDescription: releases/ belongs to the deploy pipeline.
+      - Assert: !Not [!Equals [!Ref RedteamCachePrefix, releases]]
         AssertDescription: releases/ belongs to the deploy pipeline.
 
 Resources:
@@ -148,6 +156,14 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${SourcePrefix}/*'
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${SuitePrefix}/*'
               - !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${LogPrefix}/*'
+          # Red-team attack-result cache: read (a miss is a clean 404 thanks to SandboxList) and write
+          # that one prefix, nothing else, never releases/.
+          - Sid: RedteamCacheObjects
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Resource: !Sub 'arn:${AWS::Partition}:s3:::${DeployBucketName}/${RedteamCachePrefix}/*'
           # Ticket 47 (B-09): pull tokens for user clusters come from the pull-only role.
           - Sid: AssumeEcrPullRole
             Effect: Allow

@@ -260,7 +260,8 @@ services:
       # Red-team attack-result cache in S3 (optional; names only, values in /opt/cmp/.env). Empty bucket =
       # no cache at all, so the web start screen's toggle has no effect. Objects land under
       # `[<PREFIX>/]redteam/attack/<source_sha256>/<ids|initial>.json`; the worker's AWS identity (the
-      # instance role) needs s3:GetObject and s3:PutObject on that key range.
+      # instance role) needs s3:GetObject and s3:PutObject on that key range (build-stack.yaml,
+      # RedteamCacheObjects: the deploy bucket's `redteam/*`, i.e. an empty PREFIX).
       REDTEAM_CACHE_BUCKET: ${REDTEAM_CACHE_BUCKET:-}
       REDTEAM_CACHE_PREFIX: ${REDTEAM_CACHE_PREFIX:-}
       # Provisioning 72 (ADR-007 단계 6): cluster access of the data-migration Activities. The AWS

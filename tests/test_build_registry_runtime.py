@@ -138,7 +138,28 @@ def test_s3_access_is_get_put_on_the_code_prefixes_and_never_releases():
     assert "s3:DeleteObject" not in text and "s3:*" not in text
     assert "releases/" not in str(statements)
     rules = template["Rules"]["ReleasesStayReadOnly"]["Assertions"]
-    assert len(rules) == 3
+    assert len(rules) == 4  # the three code prefixes and the red-team cache prefix
+
+
+def test_red_team_cache_prefix_is_get_put_only_and_never_releases():
+    """The worker's attack-result cache (`redteam_cache`) writes `redteam/attack/...` when
+    `REDTEAM_CACHE_PREFIX` is empty, in the deploy bucket. Read and write that prefix only; the
+    bucket listing the stack already grants is what turns a missing key into a clean 404."""
+    from cmp_worker.redteam_cache import cache_key
+
+    template = _template("build-stack.yaml")
+    assert template["Parameters"]["RedteamCachePrefix"]["Default"] == "redteam"
+    assert cache_key("a" * 64, []).startswith("redteam/")  # the key the default prefix covers
+    statement = _statements()["RedteamCacheObjects"]
+    assert statement["Effect"] == "Allow"
+    assert _actions(statement) == {"s3:GetObject", "s3:PutObject"}
+    assert statement["Resource"] == {
+        "Sub": "arn:${AWS::Partition}:s3:::${DeployBucketName}/${RedteamCachePrefix}/*"
+    }
+    rules = template["Rules"]["ReleasesStayReadOnly"]["Assertions"]
+    assert any("RedteamCachePrefix" in str(rule["Assert"]) for rule in rules)
+    # The existing code prefixes keep exactly their own three resources.
+    assert len(_statements()["SandboxObjects"]["Resource"]) == 3
 
 
 def test_control_plane_stack_is_unchanged_by_this_ticket():
