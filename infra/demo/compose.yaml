@@ -257,6 +257,13 @@ services:
       # without the file stops the worker at start-up (SANDBOX_KUBECONFIG_NOT_FOUND).
       SANDBOX_KUBECONFIG: ${SANDBOX_KUBECONFIG:-}
       SANDBOX_PREBUILT_IMAGES: ${SANDBOX_PREBUILT_IMAGES:-}
+      # Red-team attack-result cache in S3 (optional; names only, values in /opt/cmp/.env). Empty bucket =
+      # no cache at all, so the web start screen's toggle has no effect. Objects land under
+      # `[<PREFIX>/]redteam/attack/<source_sha256>/<ids|initial>.json`; the worker's AWS identity (the
+      # instance role) needs s3:GetObject and s3:PutObject on that key range (build-stack.yaml,
+      # RedteamCacheObjects: the deploy bucket's `redteam/*`, i.e. an empty PREFIX).
+      REDTEAM_CACHE_BUCKET: ${REDTEAM_CACHE_BUCKET:-}
+      REDTEAM_CACHE_PREFIX: ${REDTEAM_CACHE_PREFIX:-}
       # Provisioning 72 (ADR-007 단계 6): cluster access of the data-migration Activities. The AWS
       # profile is `cmp-demo-data-migration` (ensure-secrets.sh writes it from DATA_MIGRATION_ROLE_ARN);
       # KUBECONFIG access reads <dir>/<kubeconfig_ref>.yaml from the read-only mount

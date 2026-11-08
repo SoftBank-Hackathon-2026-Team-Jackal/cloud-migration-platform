@@ -1038,3 +1038,28 @@ def test_start_script_gates_on_the_public_entry_when_it_is_enabled():
     start = (DEMO / "start.sh").read_text()
     assert '--resolve "$host:443:127.0.0.1"' in start
     assert start.index('echo "CMP demo API healthy"') < start.index("CMP demo public entry healthy")
+
+
+def test_worker_forwards_the_red_team_cache_bucket_and_prefix_and_both_default_to_off(
+    monkeypatch,
+):
+    from cmp_worker.config import Settings
+    from cmp_worker.redteam_cache import optional_s3_cache
+
+    worker = _env("worker")
+    assert worker["REDTEAM_CACHE_BUCKET"] == "${REDTEAM_CACHE_BUCKET:-}"
+    assert worker["REDTEAM_CACHE_PREFIX"] == "${REDTEAM_CACHE_PREFIX:-}"
+    # Only the worker runs the attack, so only the worker gets the cache settings.
+    assert not {"REDTEAM_CACHE_BUCKET", "REDTEAM_CACHE_PREFIX"} & set(_env("api"))
+    example = _runtime_example()
+    assert example["REDTEAM_CACHE_BUCKET"] == "" and example["REDTEAM_CACHE_PREFIX"] == ""
+    # The names compose passes are the names the worker reads.
+    monkeypatch.setenv("REDTEAM_CACHE_BUCKET", "demo-bucket")
+    monkeypatch.setenv("REDTEAM_CACHE_PREFIX", "cmp")
+    settings = Settings(_env_file=None)
+    assert (settings.redteam_cache_bucket, settings.redteam_cache_prefix) == ("demo-bucket", "cmp")
+    # Compose passes empty strings when /opt/cmp/.env has nothing: that is "no cache", not an error.
+    monkeypatch.setenv("REDTEAM_CACHE_BUCKET", "")
+    monkeypatch.setenv("REDTEAM_CACHE_PREFIX", "")
+    empty = Settings(_env_file=None)
+    assert optional_s3_cache(empty.redteam_cache_bucket, prefix=empty.redteam_cache_prefix) is None
