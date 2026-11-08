@@ -43,6 +43,57 @@ APP_URL = "postgresql://chat:s3cr%40t@db.chat.svc:5432/chat?sslmode=disable"
 # ---- 순수 ----
 
 
+def policy(selector: dict, *, types: list[str] | None = None, egress: bool = True) -> dict:
+    spec: dict = {"podSelector": selector}
+    if types is not None:
+        spec["policyTypes"] = types
+    if egress:
+        spec["egress"] = [{"ports": [{"port": 5432}]}]
+    return {"metadata": {"name": "p", "namespace": "chat"}, "spec": spec}
+
+
+@pytest.mark.parametrize(
+    ("selector", "isolated"),
+    [
+        ({"matchLabels": {"app": "chat-app"}}, True),
+        ({}, True),  # Namespace의 모든 Pod
+        ({"matchLabels": {"app": "other"}}, False),
+        ({"matchExpressions": [{"key": "tier", "operator": "In", "values": ["web"]}]}, True),
+        ({"matchExpressions": [{"key": "tier", "operator": "NotIn", "values": ["web"]}]}, False),
+        ({"matchExpressions": [{"key": "tier", "operator": "Exists"}]}, True),
+        ({"matchExpressions": [{"key": "tier", "operator": "DoesNotExist"}]}, False),
+    ],
+)
+def test_app_is_egress_isolated_only_when_an_egress_policy_selects_its_pods(
+    selector, isolated
+) -> None:
+    labels = {"app": "chat-app", "tier": "web"}
+    assert co.egress_isolated([policy(selector, types=["Egress"])], labels) is isolated
+
+
+def test_ingress_only_policies_do_not_isolate_egress() -> None:
+    labels = {"app": "chat-app"}
+    sel = {"matchLabels": {"app": "chat-app"}}
+    assert not co.egress_isolated([policy(sel, types=["Ingress"], egress=False)], labels)
+    # policyTypes를 생략하면 egress 규칙이 있을 때만 Egress로 본다(Kubernetes 기본값).
+    assert not co.egress_isolated([policy(sel, egress=False)], labels)
+    assert co.egress_isolated([policy(sel)], labels)
+
+
+def test_app_egress_policy_only_opens_the_pgbouncer_port() -> None:
+    item = co.app_egress_policy("chat", {"app": "chat-app"})
+    assert item["kind"] == "NetworkPolicy" and item["metadata"]["labels"] == co.LABELS
+    spec = item["spec"]
+    assert spec["podSelector"] == {"matchLabels": {"app": "chat-app"}}
+    assert spec["policyTypes"] == ["Egress"]
+    assert spec["egress"] == [
+        {
+            "to": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": co.NAME}}}],
+            "ports": [{"port": co.PORT, "protocol": "TCP"}],
+        }
+    ]
+
+
 def test_pgbouncer_url_keeps_credentials_and_options_but_moves_host() -> None:
     assert co.pgbouncer_url(APP_URL, "chat") == (
         "postgresql://chat:s3cr%40t@cmp-pgbouncer.chat.svc:6432/chat?sslmode=disable"
@@ -87,6 +138,14 @@ class FakeCluster:
         self.runner_result: tuple[int, dict] = (0, {})
         self.runner_configs: list[dict] = []
         self.service_reachable = True
+        self.app_labels = ({"app": "chat-app"}, {"app": "chat-app", "tier": "web"})
+        self.policies: list[dict] = []
+
+    def app_pod_labels(self, namespace, deployment):
+        return self.app_labels
+
+    def network_policies(self, namespace):
+        return [p for p in self.policies if p["metadata"]["namespace"] == namespace]
 
     def secret_data(self, namespace, name):
         return self.secrets.get((namespace, name))
@@ -202,6 +261,32 @@ async def test_route_app_waits_until_the_pgbouncer_service_answers(fakes) -> Non
     assert err.value.type == "CUTOVER_SERVICE_UNREACHABLE" and not err.value.non_retryable
     assert cluster.restarts == ["reach:cmp-pgbouncer.chat.svc:6432"]
     assert cluster.secrets[("chat", "chat-secrets")]["DATABASE_URL"] == APP_URL
+
+
+async def test_route_app_opens_egress_to_pgbouncer_when_the_app_is_egress_isolated(fakes) -> None:
+    """원본 앱에 egress NetworkPolicy가 있으면 PgBouncer(6432)로 나가는 연결이 막혀 앱이 멈춘다
+    (2026-11-08 원본 EKS chat-source: chat-db:5432만 허용). 재시작 전에 허용 정책을 더한다."""
+    cluster, _ = fakes
+    cluster.policies = [policy({"matchLabels": {"app": "chat-app"}}, types=["Egress"])]
+    await run(dc.dm_install_cutover, PAYLOAD)
+    cluster.applied.clear()
+    assert (await run(dc.dm_route_app, PAYLOAD))["routed"]
+    assert [m["metadata"]["name"] for m in cluster.applied] == [co.EGRESS_POLICY]
+    assert cluster.applied[0]["spec"]["podSelector"] == {"matchLabels": {"app": "chat-app"}}
+    # 이미 PgBouncer로 바꾼 뒤의 재시도도 정책을 다시 맞춘다(앞선 시도가 정책 전에 끊겼을 수 있다).
+    cluster.applied.clear()
+    assert not (await run(dc.dm_route_app, PAYLOAD))["routed"]
+    assert [m["metadata"]["name"] for m in cluster.applied] == [co.EGRESS_POLICY]
+
+
+async def test_route_app_adds_no_policy_when_the_app_egress_is_open(fakes) -> None:
+    """egress 정책이 없는 앱에 정책을 새로 만들면 그 Pod의 다른 외부 연결(DNS 포함)이 모두 막힌다."""
+    cluster, _ = fakes
+    cluster.policies = [policy({"matchLabels": {"app": "other"}}, types=["Egress"])]
+    await run(dc.dm_install_cutover, PAYLOAD)
+    cluster.applied.clear()
+    assert (await run(dc.dm_route_app, PAYLOAD))["routed"]
+    assert cluster.applied == []
 
 
 async def test_switchover_emits_web_cutover_events_and_moves_the_saved_route(

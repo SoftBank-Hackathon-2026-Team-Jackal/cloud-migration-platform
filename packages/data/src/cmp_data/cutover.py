@@ -21,6 +21,7 @@ SECRET = "cmp-cutover"
 PORT = 6432
 ADMIN_USER = "cmp_admin"
 ROUTE_FILE = "/etc/pgbouncer/runtime/databases.ini"
+EGRESS_POLICY = "cmp-pgbouncer-egress"
 LABELS = {"app.kubernetes.io/name": NAME, "app.kubernetes.io/managed-by": "cmp-data-migration"}
 
 
@@ -152,6 +153,54 @@ def manifests(namespace: str, image: str) -> list[dict[str, Any]]:
         },
     }
     return [deployment, service]
+
+
+def _selector_matches(selector: dict[str, Any], labels: dict[str, str]) -> bool:
+    """Kubernetes LabelSelector 판정. 빈 selector는 모든 Pod를 고른다."""
+    if any(labels.get(k) != v for k, v in (selector.get("matchLabels") or {}).items()):
+        return False
+    for expr in selector.get("matchExpressions") or []:
+        key, op, values = expr.get("key"), expr.get("operator"), expr.get("values") or []
+        ok = {
+            "In": key in labels and labels[key] in values,
+            "NotIn": key not in labels or labels[key] not in values,
+            "Exists": key in labels,
+            "DoesNotExist": key not in labels,
+        }.get(op, False)
+        if not ok:
+            return False
+    return True
+
+
+def egress_isolated(policies: list[dict[str, Any]], pod_labels: dict[str, str]) -> bool:
+    """이 Pod를 고르는 Egress NetworkPolicy가 하나라도 있으면, 허용 규칙에 없는 곳으로는 나가지 못한다.
+    policyTypes를 생략한 정책은 egress 규칙이 있을 때만 Egress로 본다(Kubernetes 기본값)."""
+    for item in policies:
+        spec = item.get("spec") or {}
+        types = spec.get("policyTypes") or (["Ingress", "Egress"] if spec.get("egress") else [])
+        if "Egress" in types and _selector_matches(spec.get("podSelector") or {}, pod_labels):
+            return True
+    return False
+
+
+def app_egress_policy(namespace: str, app_selector: dict[str, str]) -> dict[str, Any]:
+    """egress가 막힌 원본 앱 Pod에서 PgBouncer(6432)로 나가는 연결만 더 허용한다.
+    NetworkPolicy 허용 규칙은 합쳐지므로 앱의 기존 정책은 고치지 않는다."""
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {"name": EGRESS_POLICY, "namespace": namespace, "labels": LABELS},
+        "spec": {
+            "podSelector": {"matchLabels": dict(app_selector)},
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": NAME}}}],
+                    "ports": [{"port": PORT, "protocol": "TCP"}],
+                }
+            ],
+        },
+    }
 
 
 def admin_url(endpoint_host: str, port: int, dbname: str, login: DbLogin) -> str:
