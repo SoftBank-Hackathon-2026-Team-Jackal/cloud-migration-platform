@@ -149,7 +149,7 @@ def test_red_team_cache_prefix_is_get_put_only_and_never_releases():
 
     template = _template("build-stack.yaml")
     assert template["Parameters"]["RedteamCachePrefix"]["Default"] == "redteam"
-    assert cache_key("a" * 64, []).startswith("redteam/")  # the key the default prefix covers
+    assert cache_key("a" * 64).startswith("redteam/")  # the key the default prefix covers
     statement = _statements()["RedteamCacheObjects"]
     assert statement["Effect"] == "Allow"
     assert _actions(statement) == {"s3:GetObject", "s3:PutObject"}

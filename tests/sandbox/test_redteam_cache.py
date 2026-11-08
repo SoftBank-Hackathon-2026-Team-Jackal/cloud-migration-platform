@@ -21,10 +21,9 @@ def fake_aws(tmp_path, script):
 
 
 def test_the_key_is_the_source_hash_never_the_built_images_own_digest():
-    # Two findings in any order give the same key; no findings is the first attack on that source.
-    assert cache_key("src-abc", []) == "redteam/attack/src-abc/initial.json"
-    assert cache_key("src-abc", ["f2", "f1"]) == cache_key("src-abc", ["f1", "f2"])
-    assert cache_key("src-abc", ["f1"]) != cache_key("src-def", ["f1"])
+    # Only the source decides the key; the Findings a run carried never do.
+    assert cache_key("src-abc") == "redteam/attack/src-abc.json"
+    assert cache_key("src-abc") != cache_key("src-def")
 
 
 def test_a_miss_returns_none_without_raising(tmp_path):

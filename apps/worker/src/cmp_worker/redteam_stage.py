@@ -166,8 +166,8 @@ def run_stage(
     `source_sha256` (ticket 39 draft) is the build step's own hash of the source -- never
     `digest`, which is not stable across rebuilds of identical source (the Go toolchain embeds a
     build ID). When given, `red.cache_enabled` and `kit.cache` are set, a result already recorded
-    for this exact source and this exact set of Findings is replayed with no attack dispatched and
-    no approval spent; a fresh result is cached the same way afterward.
+    for this exact source is replayed whatever `previous` holds, with no attack dispatched and no
+    approval spent; a fresh result is written under the same key afterward, overwriting.
     """
     if kit is None:
         return _skipped(NOT_CONFIGURED, previous)
@@ -180,7 +180,7 @@ def run_stage(
     # result and a later run with the cache on reads that latest one.
     cache_entry_key = None
     if source_sha256 and kit.cache is not None:
-        cache_entry_key = cache_key(source_sha256, (f["finding_id"] for f in previous))
+        cache_entry_key = cache_key(source_sha256)
         if red.cache_enabled:
             try:
                 cached = kit.cache.get(cache_entry_key)

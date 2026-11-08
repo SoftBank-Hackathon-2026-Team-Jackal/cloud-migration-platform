@@ -17,7 +17,6 @@ default -- no bucket configured) makes every lookup a clean, silent miss.
 import json
 import subprocess
 import tempfile
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol
 
@@ -40,11 +39,11 @@ class RedTeamCacheStore(Protocol):
     def put(self, key: str, value: dict) -> None: ...
 
 
-def cache_key(source_sha256: str, finding_ids: Iterable[str]) -> str:
-    """One key per (exact source, exact set of Findings being re-checked). An empty
-    `finding_ids` is the very first attack on that source."""
-    ids = ",".join(sorted(finding_ids))
-    return f"redteam/attack/{source_sha256}/{ids or 'initial'}.json"
+def cache_key(source_sha256: str) -> str:
+    """One key per exact source, nothing else. The Findings an earlier run happened to carry are
+    deliberately not part of it: the model finds different things on each run, so keying on them
+    made identical source miss. The object under this key is the latest result for that source."""
+    return f"redteam/attack/{source_sha256}.json"
 
 
 class S3RedTeamCache:

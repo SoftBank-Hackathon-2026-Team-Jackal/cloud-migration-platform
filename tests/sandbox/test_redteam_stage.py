@@ -354,8 +354,8 @@ def test_a_cache_miss_runs_for_real_and_then_stores_the_result(tmp_path):
     result = env.stage(env.kit(cache=cache), source_sha256="src-1")
     assert env.decided == 2  # the model really ran (one dispatch turn, one finish turn)
     assert result["open"][0]["finding_id"]
-    assert cache.puts == ["redteam/attack/src-1/initial.json"]
-    assert cache.store["redteam/attack/src-1/initial.json"] == result
+    assert cache.puts == ["redteam/attack/src-1.json"]
+    assert cache.store["redteam/attack/src-1.json"] == result
 
 
 def test_a_cache_hit_never_touches_the_runner_the_model_or_the_approval_ledger(tmp_path):
@@ -375,14 +375,25 @@ def test_a_cache_hit_never_touches_the_runner_the_model_or_the_approval_ledger(t
     assert ledger.consume("appr-unused") is True
 
 
-def test_a_different_source_or_a_different_open_finding_set_is_its_own_key(tmp_path):
+def test_a_different_source_is_its_own_key(tmp_path):
     env = Env(tmp_path)
     cache = FakeCache()
     env.stage(env.kit(cache=cache), source_sha256="src-1")
     env.stage(env.kit(cache=cache), source_sha256="src-2")
     assert len(cache.store) == 2
-    assert "redteam/attack/src-1/initial.json" in cache.store
-    assert "redteam/attack/src-2/initial.json" in cache.store
+    assert "redteam/attack/src-1.json" in cache.store
+    assert "redteam/attack/src-2.json" in cache.store
+
+
+def test_the_same_source_hits_whatever_findings_the_caller_carries(tmp_path):
+    env = Env(tmp_path)
+    cache = FakeCache()
+    first = env.stage(env.kit(cache=cache), source_sha256="src-1")
+    env.decided = 0
+    carried = [{**first["open"][0], "finding_id": "some-other-finding"}]
+    again = env.stage(env.kit(cache=cache), source_sha256="src-1", previous=carried)
+    assert again == first and env.decided == 0  # replayed; nothing was attacked or re-checked
+    assert cache.puts == ["redteam/attack/src-1.json"]  # and nothing new was written
 
 
 def test_redteam_cache_false_never_reads_but_still_writes_and_overwrites(tmp_path):
@@ -392,7 +403,7 @@ def test_redteam_cache_false_never_reads_but_still_writes_and_overwrites(tmp_pat
     env.stage(env.kit(cache=cache), source_sha256="src-1", red=off)
     env.stage(env.kit(cache=cache), source_sha256="src-1", red=off)
     assert cache.gets == []  # never read while off
-    assert cache.puts == ["redteam/attack/src-1/initial.json"] * 2  # same key, overwritten
+    assert cache.puts == ["redteam/attack/src-1.json"] * 2  # same key, overwritten
     assert env.decided == 3  # both were real runs (Env's shared FakeBrain counter
     # makes the second run's own single turn start from where the first left off)
 
