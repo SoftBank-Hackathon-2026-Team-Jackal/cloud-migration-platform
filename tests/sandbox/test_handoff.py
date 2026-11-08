@@ -87,6 +87,19 @@ def test_the_assembly_passes_the_planning_validation_and_digests_match():
     assert registration.target.provider == "ON_PREM"
 
 
+def test_a_red_team_security_attempt_before_the_pass_still_hands_over():
+    attempts = [
+        {"attempt": 1, "passed": False, "failure_class": "SECURITY",
+         "reasons": ["FINDING:sql-injection:/login"]},
+        {"attempt": 2, "passed": True},
+    ]  # fmt: skip
+    args, content = evidence(attempts=attempts)
+    registration = assemble_registration(**args)
+    check_with_planning(registration, content)
+    recorded = registration.planning_request.sandbox.attempts
+    assert [a.failure_class for a in recorded] == ["SECURITY", None]
+
+
 def test_no_build_evidence_means_no_hand_off():
     args, _ = evidence(builds=[])
     with pytest.raises(HandoffError) as exc:
