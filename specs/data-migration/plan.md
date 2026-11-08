@@ -21,7 +21,7 @@ MigrationWorkflow
        2. run_network_preflight  `network_preflight` 입력이 있으면(웹 ON_PREM 기본) 터널 뒤 MNP 검사 →
                            may_start_data_migration(같은 입력 PASS만). 아니면 BLOCKED(NETWORK_PREFLIGHT_*)
        3. dm_precheck      원본 precheck SQL → evaluate_precheck → data.phase(preflight|blocked)
-       4. dm_copy_schema   pg_dump --schema-only 원본 → 대상, 전환 확인용 marker 테이블
+       4. dm_copy_schema   pg_dump --schema-only 원본 → 대상(대상 앱이 먼저 만든 같은 컬럼의 표·소유 시퀀스는 빼고 복원, 컬럼이 다르면 TARGET_SCHEMA_PARTIAL), 전환 확인용 marker 테이블
        5. dm_subscribe     원본 publication, 대상 subscription(copy_data=true). 이름은 replication_names
        6. dm_sample (반복)  대상 pg_subscription_rel + 원본 슬롯 지연 → sync_events → data.*
                            streaming이 될 때까지 Workflow 타이머로 간격을 둔다(무기한 Activity 없음)

@@ -90,6 +90,42 @@ def parse_user_tables(raw: str) -> set[str]:
     return set(json.loads(raw)) - INTERNAL_TABLES
 
 
+def table_shapes_sql(tables: set[str]) -> str:
+    """`schema.table`별 컬럼 (이름, 타입)과 그 표가 소유한 시퀀스(serial·identity, pg_depend 'a'·'i').
+
+    대상에 이미 있는 표를 스키마 복원에서 뺄 때 쓴다. 이름은 `USER_TABLES_SQL`이 돌려준 값이다."""
+    names = ", ".join(literal(t) for t in sorted(tables)) or "null"
+    return f"""
+select coalesce(json_object_agg(t.name, json_build_object(
+  'columns', coalesce((
+    select json_agg(json_build_array(a.attname, format_type(a.atttypid, a.atttypmod))
+                    order by a.attnum)
+    from pg_attribute a where a.attrelid = t.oid and a.attnum > 0 and not a.attisdropped), '[]'),
+  'sequences', coalesce((
+    select json_agg(format('%I.%I', sn.nspname, s.relname) order by sn.nspname, s.relname)
+    from pg_depend d
+    join pg_class s on s.oid = d.objid and s.relkind = 'S'
+    join pg_namespace sn on sn.oid = s.relnamespace
+    where d.classid = 'pg_class'::regclass and d.refclassid = 'pg_class'::regclass
+      and d.refobjid = t.oid and d.deptype in ('a', 'i')), '[]'))), '{{}}')
+from (select c.oid, format('%I.%I', n.nspname, c.relname) as name
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where c.relkind in ('r', 'p')) t
+where t.name in ({names})
+"""
+
+
+def parse_table_shapes(raw: str) -> dict[str, dict[str, Any]]:
+    """`table_shapes_sql` 결과. 컬럼은 순서 없이 비교하도록 정렬한 튜플로 바꾼다."""
+    return {
+        name: {
+            "columns": tuple(sorted((c[0], c[1]) for c in shape["columns"])),
+            "sequences": frozenset(shape["sequences"]),
+        }
+        for name, shape in json.loads(raw).items()
+    }
+
+
 def ensure_repl_role_sql(password: str) -> str:
     """전용 복제 역할을 만들거나 비밀번호를 맞춘다. 재실행해도 결과가 같다."""
     pw = literal(password)

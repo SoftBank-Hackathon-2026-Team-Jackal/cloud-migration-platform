@@ -42,6 +42,7 @@ REQUEST = {
 class FakeDb:
     def __init__(self, *, tables=(), wal="logical", facts=None):
         self.tables = set(tables)
+        self.columns: dict[str, list[list[str]]] = {}  # 표별 (이름, 타입). 없으면 id bigint
         self.wal = wal
         self.facts = facts or {}
         self.publications: set[str] = set()
@@ -71,6 +72,12 @@ class FakeDb:
             return self.wal
         if sql == q.USER_TABLES_SQL:
             return json.dumps(sorted(self.tables))
+        if "pg_attribute" in sql:  # q.table_shapes_sql: 물어본 표의 컬럼과 소유 시퀀스
+            return json.dumps({
+                t: {"columns": self.columns.get(t, [["id", "bigint"]]),
+                    "sequences": [f"{t}_id_seq"]}
+                for t in self.tables if q.literal(t) in sql
+            })  # fmt: skip
         if "from pg_publication" in sql:
             return str(sum(1 for p in self.publications if p in sql))
         if "from pg_subscription where" in sql:
@@ -159,13 +166,42 @@ async def test_prepare_turns_on_logical_wal_on_the_subscriber_and_restarts_once(
     assert "alter table public.audit_log replica identity full" in dbs["src"].executed[0]
 
 
-async def test_copy_schema_copies_once_and_stops_on_a_partial_target(dbs, emitter) -> None:
-    assert (await run(dm.dm_copy_schema, REQUEST))["copied"] is True
+async def test_copy_schema_copies_once_then_skips(dbs, emitter) -> None:
+    first = await run(dm.dm_copy_schema, REQUEST)
+    assert first == {"copied": True, "tables": 2, "skipped": []}
+    # 하나도 없으면 내부 객체만 빼고 전부 복원한다
+    assert dbs["src"].dumped_excluding == set(q.INTERNAL_DUMP_EXCLUDES)
     assert (await run(dm.dm_copy_schema, REQUEST))["copied"] is False
+
+
+async def test_copy_schema_keeps_tables_the_app_already_made_and_restores_the_rest(dbs) -> None:
+    """대상 앱이 시작하며 자기 표를 먼저 만든다(2026-11-08 TARGET_SCHEMA_PARTIAL). 컬럼이 원본과 같으면
+    그 표와 그 표가 소유한 시퀀스를 덤프에서 빼고 나머지만 복원한다. 시퀀스가 남으면 "already exists"."""
     dbs["dst"].tables = {"public.messages"}
+    result = await run(dm.dm_copy_schema, REQUEST)
+    assert result == {"copied": True, "tables": 2, "skipped": ["public.messages"]}
+    assert dbs["src"].dumped_excluding == set(q.INTERNAL_DUMP_EXCLUDES) | {
+        "public.messages",
+        "public.messages_id_seq",
+    }
+    assert dbs["dst"].tables == {"public.messages", "public.rooms"}
+
+
+async def test_copy_schema_stops_when_an_existing_table_differs_from_the_source(dbs) -> None:
+    dbs["dst"].tables = {"public.messages"}
+    dbs["dst"].columns["public.messages"] = [["id", "integer"]]
     with pytest.raises(ApplicationError) as err:
         await run(dm.dm_copy_schema, REQUEST)
-    assert err.value.type == "TARGET_SCHEMA_PARTIAL"
+    assert err.value.type == "TARGET_SCHEMA_PARTIAL" and err.value.non_retryable
+    assert not hasattr(dbs["src"], "dumped_excluding")
+
+
+async def test_copy_schema_compares_columns_regardless_of_order(dbs) -> None:
+    """앱이 `ADD COLUMN IF NOT EXISTS`로 더한 컬럼은 원본과 순서가 다를 수 있다. 복제는 이름으로 맞춘다."""
+    dbs["src"].columns["public.messages"] = [["id", "bigint"], ["body", "text"]]
+    dbs["dst"].tables = {"public.messages"}
+    dbs["dst"].columns["public.messages"] = [["body", "text"], ["id", "bigint"]]
+    assert (await run(dm.dm_copy_schema, REQUEST))["skipped"] == ["public.messages"]
 
 
 async def test_copy_schema_ignores_the_marker_table_and_ensures_it_on_the_target(dbs) -> None:
@@ -174,14 +210,15 @@ async def test_copy_schema_ignores_the_marker_table_and_ensures_it_on_the_target
     dbs["src"].tables.add(q.MARKER_TABLE)
     dbs["dst"].tables = {"public.messages", "public.rooms"}
     result = await run(dm.dm_copy_schema, REQUEST)
-    assert result == {"copied": False, "tables": 2}
+    assert result == {"copied": False, "tables": 2, "skipped": []}
+    assert not hasattr(dbs["src"], "dumped_excluding")
     assert q.ENSURE_MARKER_SQL in dbs["dst"].executed
 
 
 async def test_copy_schema_restores_user_tables_without_the_marker_then_ensures_it(dbs) -> None:
     dbs["src"].tables.add(q.MARKER_TABLE)
     result = await run(dm.dm_copy_schema, REQUEST)
-    assert result == {"copied": True, "tables": 2}
+    assert result == {"copied": True, "tables": 2, "skipped": []}
     # dump는 내부 표를 빼고(대상에 이미 있어도 restore가 깨지지 않게), 뒤에 marker를 보장한다
     assert q.MARKER_TABLE in q.INTERNAL_TABLES
     assert dbs["src"].dumped_excluding == set(q.INTERNAL_DUMP_EXCLUDES)

@@ -350,21 +350,36 @@ def prepare(req: DataMigrationRequest, actions: list[list[str]]) -> dict:
 
 def copy_schema(req: DataMigrationRequest) -> dict:
     """스키마만 복사한다(논리 복제는 DDL을 옮기지 않는다). 구독자에 이미 같은 테이블이 다 있으면
-    건너뛰고, 일부만 있으면 사람이 봐야 하므로 멈춘다.
+    건너뛴다. 일부만 있으면(대상 앱이 시작하며 자기 표를 먼저 만든 경우) 그 표의 컬럼(이름·타입)이
+    원본과 같을 때만 그 표와 소유 시퀀스를 덤프에서 빼고 나머지를 복원한다. 다르면 사람이 봐야 하므로
+    멈춘다. 새 표가 이미 있는 표를 참조하는 외래키는 한 트랜잭션 복원 안에서 그대로 걸린다.
 
     비교·복사는 사용자 표만 본다. prepare가 발행자에 만든 marker 표는 빼고, 구독자에는 따로 만든다
     (`for all tables` 발행이 marker 행도 보내므로 구독자에 표가 있어야 한다, Provisioning 72)."""
     publisher, subscriber = _sides(req)
+    skipped: list[str] = []
     with OPEN_DB(publisher) as src, OPEN_DB(subscriber) as dst:
         wanted = q.parse_user_tables(src.query(q.USER_TABLES_SQL))
         present = q.parse_user_tables(dst.query(q.USER_TABLES_SQL))
         copied = not wanted <= present
         if copied:
-            if present & wanted:
-                raise _fail("TARGET_SCHEMA_PARTIAL", retryable=False)
-            dst.restore(src.dump_schema(q.INTERNAL_DUMP_EXCLUDES))
+            exclude = set(q.INTERNAL_DUMP_EXCLUDES)
+            existing = present & wanted
+            if existing:
+                ours = q.parse_table_shapes(src.query(q.table_shapes_sql(existing)))
+                theirs = q.parse_table_shapes(dst.query(q.table_shapes_sql(existing)))
+                if any(
+                    t not in ours or t not in theirs or ours[t]["columns"] != theirs[t]["columns"]
+                    for t in existing
+                ):
+                    raise _fail("TARGET_SCHEMA_PARTIAL", retryable=False)
+                # 덤프에 나오는 이름은 원본 것이다. 대상 이름도 함께 빼 두면 해가 없다.
+                for t in existing:
+                    exclude |= {t} | ours[t]["sequences"] | theirs[t]["sequences"]
+                skipped = sorted(existing)
+            dst.restore(src.dump_schema(frozenset(exclude)))
         dst.execute(q.ENSURE_MARKER_SQL)
-    return {"copied": copied, "tables": len(wanted)}
+    return {"copied": copied, "tables": len(wanted), "skipped": skipped}
 
 
 def subscribe(req: DataMigrationRequest, copy_data: bool = True) -> dict:
