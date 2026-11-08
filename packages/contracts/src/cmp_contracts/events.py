@@ -843,7 +843,8 @@ class SandboxAttemptData(WebModel):
     attempt: int = Field(ge=1, le=3)
     max_attempts: int = Field(ge=1)
     verdict: SandboxAttemptVerdict
-    failure_class: Literal["SPEC", "CODE", "BUILD", "RENDER", "INFRA"] | None
+    # SECURITY: a red-team round's own attempt (`failure_classifier` gives it ahead of CODE/SPEC).
+    failure_class: Literal["SPEC", "CODE", "BUILD", "RENDER", "INFRA", "SECURITY"] | None
     checks: SandboxAttemptChecks
     fix_ids: list[str]
 
