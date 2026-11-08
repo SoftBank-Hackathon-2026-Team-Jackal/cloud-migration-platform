@@ -385,15 +385,26 @@ def test_a_different_source_or_a_different_open_finding_set_is_its_own_key(tmp_p
     assert "redteam/attack/src-2/initial.json" in cache.store
 
 
-def test_redteam_cache_false_always_runs_for_real_even_with_a_cache_configured(tmp_path):
+def test_redteam_cache_false_never_reads_but_still_writes_and_overwrites(tmp_path):
     env = Env(tmp_path)
     cache = FakeCache()
     off = RedTeamInput(**{**RED.model_dump(), "cache_enabled": False})
     env.stage(env.kit(cache=cache), source_sha256="src-1", red=off)
     env.stage(env.kit(cache=cache), source_sha256="src-1", red=off)
-    assert cache.gets == [] and cache.puts == []
-    assert env.decided == 3  # both were real, uncached runs (Env's shared FakeBrain counter
+    assert cache.gets == []  # never read while off
+    assert cache.puts == ["redteam/attack/src-1/initial.json"] * 2  # same key, overwritten
+    assert env.decided == 3  # both were real runs (Env's shared FakeBrain counter
     # makes the second run's own single turn start from where the first left off)
+
+
+def test_turning_the_cache_on_reads_the_latest_result_an_uncached_run_wrote(tmp_path):
+    env = Env(tmp_path)
+    cache = FakeCache()
+    off = RedTeamInput(**{**RED.model_dump(), "cache_enabled": False})
+    latest = env.stage(env.kit(cache=cache), source_sha256="src-1", red=off)
+    env.decided = 0
+    again = env.stage(env.kit(cache=cache), source_sha256="src-1")
+    assert again == latest and env.decided == 0
 
 
 def test_no_source_hash_means_no_caching_even_with_a_cache_configured(tmp_path):

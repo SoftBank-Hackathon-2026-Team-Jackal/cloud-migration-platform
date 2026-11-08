@@ -175,15 +175,19 @@ def run_stage(
         approved = Approval.model_validate(approval) if approval else None
     except ValidationError:
         return _skipped(NOT_APPROVED, previous)
+    # `cache_enabled` only decides whether the stored result is *read* back. A real run is always
+    # written (overwriting whatever the same key held), so the object under a key is the latest
+    # result and a later run with the cache on reads that latest one.
     cache_entry_key = None
-    if source_sha256 and red.cache_enabled and kit.cache is not None:
+    if source_sha256 and kit.cache is not None:
         cache_entry_key = cache_key(source_sha256, (f["finding_id"] for f in previous))
-        try:
-            cached = kit.cache.get(cache_entry_key)
-        except RedTeamCacheError:
-            cached = None  # an unreachable cache is a miss, never a reason to fail the run
-        if cached is not None:
-            return cached
+        if red.cache_enabled:
+            try:
+                cached = kit.cache.get(cache_entry_key)
+            except RedTeamCacheError:
+                cached = None  # an unreachable cache is a miss, never a reason to fail the run
+            if cached is not None:
+                return cached
     config = RunConfig(intensity=red.intensity, time_budget_seconds=red.time_budget_seconds)
     secrets = kit.known_secrets(plan)
     brain = kit.brain(migration_id)
