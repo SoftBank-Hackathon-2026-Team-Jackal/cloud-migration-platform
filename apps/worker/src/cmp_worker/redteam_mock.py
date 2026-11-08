@@ -6,14 +6,15 @@ resolves them all, and the security fix applies the code change the real AI Fixe
 Workflow is not touched, so the screen sees the same steps, branches and events as a real run.
 
 Nothing here is invented: `redteam_mock/round1.json` is the first `sbx_redteam` result of the real
-run `migration-26c7a25b-51f0-4c80-be7f-6cffb854c016` and `redteam_mock/fix.json` the code change
-its `sbx_fix` produced (both read from that run's Temporal history and fix workspace, secrets
-removed). Values that belong to one run (image digest, suite hash, time, evidence references) are
-replaced with the current run's own.
+run `migration-26c7a25b-51f0-4c80-be7f-6cffb854c016` (from its Temporal history) and
+`redteam_mock/fix.json` the code change its `sbx_fix` made, as a unified diff against that run's
+source (demo-app 627d1b7); both were read from the demo server, read-only, and hold no secrets.
+Values that belong to one run (image digest, suite hash, time, evidence references) are replaced
+with the current run's own.
 """
 
-import hashlib
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -95,23 +96,79 @@ def recheck_report(previous: list[dict]) -> dict[str, Any]:
     }  # fmt: skip
 
 
-def code_fix(workspace: str | None, fixture: dict[str, Any] | None) -> tuple[CodeFix | None, str]:
-    """The recorded fix as a `CodeFix`, or why it does not fit this source.
+_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@")
 
-    Each file must still be exactly what the real Fixer started from (`before_sha256`; `null` for a
-    file it created); otherwise the source has changed and the recorded change is not applied."""
+
+def parse_patch(text: str) -> dict[str, list[tuple[int, list[str], list[str]]]]:
+    """A unified diff as {path: [(old_start, old_lines, new_lines), ...]} (`a/`/`b/` prefixes)."""
+    files: dict[str, list[tuple[int, list[str], list[str]]]] = {}
+    hunks: list[tuple[int, list[str], list[str]]] | None = None
+    for line in text.splitlines():
+        if line.startswith("--- "):
+            continue
+        if line.startswith("+++ "):
+            path = line[4:].split("\t")[0]
+            hunks = files.setdefault(path.removeprefix("b/"), [])
+            continue
+        match = _HUNK.match(line)
+        if match and hunks is not None:
+            hunks.append((int(match.group(1)), [], []))
+            continue
+        if not hunks or line.startswith("\\"):
+            continue
+        _, old, new = hunks[-1]
+        tag, body = line[:1], line[1:]
+        if tag in (" ", ""):
+            old.append(body)
+            new.append(body)
+        elif tag == "-":
+            old.append(body)
+        elif tag == "+":
+            new.append(body)
+    return files
+
+
+def _apply_hunks(text: str, hunks: list[tuple[int, list[str], list[str]]]) -> str | None:
+    """Apply hunks exactly (no fuzz; a shifted position is fine). None when one does not fit."""
+    lines = text.split("\n")
+    out: list[str] = []
+    pos = 0
+    for start, old, new in hunks:
+        want = max(start - 1, 0)
+        at = next(
+            (
+                i
+                for i in sorted(range(pos, len(lines) - len(old) + 1), key=lambda i: abs(i - want))
+                if lines[i : i + len(old)] == old
+            ),
+            None,
+        )
+        if at is None:
+            return None
+        out += lines[pos:at] + new
+        pos = at + len(old)
+    return "\n".join(out + lines[pos:])
+
+
+def code_fix(workspace: str | None, fixture: dict[str, Any] | None) -> tuple[CodeFix | None, str]:
+    """The recorded fix as a `CodeFix` on this source, or why it does not fit.
+
+    The recorded patch is applied exactly to the current files; if any hunk no longer matches,
+    the source has changed since the recording and the change is not applied."""
     if fixture is None:
         return None, FIX_FIXTURE_MISSING
     if not workspace or not Path(workspace).is_dir():
         return None, FIX_NO_WORKSPACE
     root = Path(workspace)
-    for change in fixture["files"]:
-        path = root / change["path"]
-        before = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
-        if before != change["before_sha256"]:
+    changes = []
+    for path, hunks in parse_patch(fixture["patch"]).items():
+        target = root / path
+        if not target.is_file():
             return None, FIX_SOURCE_CHANGED
-    fix = CodeFix(
-        reason=fixture["reason"],
-        files=[FileChange(path=c["path"], content=c["content"]) for c in fixture["files"]],
-    )
-    return fix, ""
+        fixed = _apply_hunks(target.read_text(encoding="utf-8"), hunks)
+        if fixed is None:
+            return None, FIX_SOURCE_CHANGED
+        changes.append(FileChange(path=path, content=fixed))
+    if not changes:
+        return None, FIX_FIXTURE_MISSING
+    return CodeFix(reason=fixture["reason"], files=changes), ""

@@ -6,7 +6,6 @@ recording (`cmp_worker/redteam_mock/`) is checked on its own at the end.
 """
 
 import asyncio
-import hashlib
 import json
 import os
 
@@ -34,6 +33,7 @@ DIGEST = "sha256:" + "f" * 64
 OLD_DIGEST = "sha256:" + "0" * 64
 SUITE_SHA = "c" * 64
 BEFORE = 'rows, _ := db.Query("SELECT * FROM items WHERE id = " + id)\n'
+SOURCE = "package main\n\nfunc items() {\n%s}\n"
 AFTER = 'rows, _ := db.Query("SELECT * FROM items WHERE id = $1", id)\n'
 
 
@@ -49,7 +49,7 @@ def recorded_finding(fid, category="sql injection"):
     }  # fmt: skip
 
 
-def write_recording(root, *, before=BEFORE):
+def write_recording(root):
     root.mkdir(parents=True, exist_ok=True)
     findings = [recorded_finding("sql-1"), recorded_finding("info-1", "information disclosure")]
     (root / "round1.json").write_text(
@@ -60,19 +60,12 @@ def write_recording(root, *, before=BEFORE):
             }
         )
     )
+    patch = (
+        "--- a/main.go\n+++ b/main.go\n@@ -2,2 +2,2 @@\n func items() {\n"
+        f"-{BEFORE.rstrip()}\n+{AFTER.rstrip()}\n"
+    )
     (root / "fix.json").write_text(
-        json.dumps(
-            {
-                "reason": "use a bound parameter for id",
-                "files": [
-                    {
-                        "path": "main.go",
-                        "before_sha256": hashlib.sha256(before.encode()).hexdigest(),
-                        "content": AFTER,
-                    }
-                ],
-            }
-        )
+        json.dumps({"reason": "use a bound parameter for id", "patch": patch})
     )
 
 
@@ -109,7 +102,7 @@ def red_payload(previous=(), mock=True):
     }  # fmt: skip
 
 
-def workspace(tmp_path, text=BEFORE):
+def workspace(tmp_path, text=SOURCE % BEFORE):
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
     (ws / "main.go").write_text(text)
@@ -202,8 +195,8 @@ async def test_a_mocked_security_fix_applies_the_recorded_change_and_shows_its_d
     assert out["reason"] == "use a bound parameter for id" and out["changed"] == ["main.go"]
     assert out["fix_ids"] == ["fix-1-1"]
     fixed = tmp_path / "work" / out["source"]["workspace"].rsplit("/", 1)[-1]
-    assert (fixed / "main.go").read_text() == AFTER
-    assert (ws / "main.go").read_text() == BEFORE  # the original source is left as it was
+    assert (fixed / "main.go").read_text() == SOURCE % AFTER
+    assert (ws / "main.go").read_text() == SOURCE % BEFORE  # the original source is left as it was
     [event] = emitter.events
     assert event.type == "build.fix"
     DATA_MODELS[event.type].model_validate(event.data)
@@ -289,15 +282,20 @@ async def test_with_the_mock_on_the_loop_finds_fixes_rechecks_and_passes(tmp_pat
 # ------------------------------------------------------------------ the shipped recording
 
 
-def test_the_shipped_recording_is_a_valid_first_attack_and_fix():
+def test_the_shipped_recording_is_the_real_first_attack_and_fix_of_run_26c7a25b():
     rec = redteam_mock.load("round1.json")
     fix = redteam_mock.load("fix.json")
     assert rec is not None and fix is not None, "recording of run 26c7a25b is missing"
-    assert rec["source"].startswith("migration-26c7a25b")
-    store_free = [f for f in rec["result"]["open"]]
-    assert len(store_free) == 5
-    categories = sorted(f["category"] for f in store_free)
-    assert categories.count("sql injection") == 4 and "information disclosure" in categories
-    for f in store_free:
+    assert rec["source"].startswith("migration-26c7a25b") and fix["source"].startswith(
+        "migration-26c7a25b"
+    )
+    found = rec["result"]["open"]
+    categories = [f["category"].lower() for f in found]
+    assert len(found) == 5 and categories.count("information disclosure") == 1
+    assert sum(c.startswith("sql injection") for c in categories) == 4
+    for f in found:
+        Finding.model_validate({k: v for k, v in f.items() if k != "repro"})
+        assert "evidence_ref" not in f  # it named the demo server's store; re-stored when run
         assert f["repro"]["tool"] and f["repro_summary"]
-    assert fix["files"] and fix["reason"]
+    assert set(redteam_mock.parse_patch(fix["patch"])) == {"main.go", "store.go"}
+    assert fix["reason"]
