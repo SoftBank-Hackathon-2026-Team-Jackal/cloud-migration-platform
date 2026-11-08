@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from cmp_contracts.provisioning import ContentRef
 
@@ -52,6 +52,10 @@ class MigrationRequest(BaseModel):
     # Ticket 06B: the API reads the confirmed scope and its source connection; the web sends
     # only this ID. Optional: without it the analysis has no cluster to scan (as before).
     scope_id: ScopeId | None = None
+    # The web start screen's "reuse the red-team attack result" toggle. Sets the per-run
+    # `SandboxSettings.redteam_cache_enabled` on top of the server's rehearsal settings. Absent
+    # keeps the server value (default on). Strict: a string like "no" is not a boolean.
+    redteam_cache_enabled: StrictBool | None = None
 
 
 class MigrationCreated(BaseModel):
