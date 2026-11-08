@@ -280,6 +280,7 @@ NetworkPolicy(Sandbox 워커 생성):
 - `network_intent`의 리소스 간 항목(`destination_resource_id`) 허용(리소스 라벨 기준), DNS(kube-dns) 허용.
 - 외부 진입(`AnalysisReport`의 진입 정보)은 테스트 실행기·Ingress Controller에서 앱 포트로의 접근만 허용.
 - 외부 egress는 출구 프록시로만 허용. 프록시 허용 목록 = intent의 `external_host` 항목 + 매핑에서 `KEEP`인 서비스 주소.
+  - 예외 하나: 워커 환경 `CMP_TELEMETRY_EGRESS_CIDR`(운영 NetworkPolicy가 쓰는 같은 값, 플랫폼의 OTLP 수신 주소)가 있으면 프록시 설정(`allow.json`)에 `cidrs`로 실려, **CONNECT의 이름이 그 범위(TCP 443)로 풀릴 때** 허용한다. 프록시는 매칭된 주소로 직접 연결한다(재조회로 다른 곳에 닿지 않게). 앱이 `OTEL_EXPORTER_OTLP_ENDPOINT`를 쓰면 요청이 생긴 뒤 이 주소를 부르는데, 규칙이 없으면 `EGRESS_BLOCKED`로 검증이 떨어진다(샌드박스 보안 수정 뒤 재검증에서 확인). 값이 비었거나 해석되지 않거나 너무 넓으면(IPv4 /16, IPv6 /48 미만) 규칙을 만들지 않는다. 설정이 없으면 `allow.json`은 이전과 바이트가 같다.
 - `MIGRATE` 서비스의 원본 주소(원본 DB, 원본 ALB 등)와 목록 밖 호스트는 차단·기록 → 판정 실패 → `SPEC`(의도 누락)으로 분류.
 
 테스트:
