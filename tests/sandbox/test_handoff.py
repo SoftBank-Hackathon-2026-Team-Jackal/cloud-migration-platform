@@ -94,10 +94,11 @@ def test_a_red_team_security_attempt_before_the_pass_still_hands_over():
         {"attempt": 2, "passed": True},
     ]  # fmt: skip
     args, content = evidence(attempts=attempts)
+    # Before the contract knew `SECURITY`, this raised HandoffError("PROJECTION_REJECTED").
     registration = assemble_registration(**args)
     check_with_planning(registration, content)
-    recorded = registration.planning_request.sandbox.attempts
-    assert [a.failure_class for a in recorded] == ["SECURITY", None]
+    # The projection keeps the evidence's outcome, not the attempt list (SandboxEvidenceV2).
+    assert registration.planning_request.sandbox.status == "PASSED"
 
 
 def test_no_build_evidence_means_no_hand_off():

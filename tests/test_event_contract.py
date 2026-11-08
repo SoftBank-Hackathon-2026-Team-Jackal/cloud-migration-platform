@@ -179,3 +179,28 @@ def test_plan_ready_scope_is_optional_and_limited_to_approval_scopes():
     assert validate_data("plan.ready", old | {"scope": "WORKLOADS"})["scope"] == "WORKLOADS"
     with pytest.raises(ValueError):
         validate_data("plan.ready", old | {"scope": "workloads"})
+
+
+def test_every_failure_class_the_classifier_returns_can_be_stored_as_a_sandbox_attempt_event():
+    """The Workflow emits `sandbox.attempt` with the classifier's class after every fix, security
+    rounds included. The API refuses an event whose data does not validate and `sbx_emit` only logs
+    that, so a class the event model does not know is lost without any error."""
+    from typing import get_args
+
+    from cmp_contracts.events import validate_data
+    from cmp_worker.failure_classifier import FailureClass
+
+    base = {
+        "run": 1, "attempt": 1, "max_attempts": 3,
+        "verdict": {"passed": False, "reasons": ["FINDING:sql-injection:/login"]},
+        "checks": {
+            "required_passed": 0, "required_total": 0, "calls_total": 0, "calls_in_mapping": 0,
+            "unsupported_calls": 0, "blocked_egress": 0,
+        },
+        "fix_ids": ["fix-1-1"],
+    }  # fmt: skip
+    classes = get_args(FailureClass)
+    assert "SECURITY" in classes
+    for klass in classes:
+        shaped = validate_data("sandbox.attempt", {**base, "failure_class": klass})
+        assert shaped["failure_class"] == klass, klass

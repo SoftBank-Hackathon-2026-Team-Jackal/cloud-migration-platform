@@ -4648,7 +4648,8 @@
                 "CODE",
                 "BUILD",
                 "RENDER",
-                "INFRA"
+                "INFRA",
+                "SECURITY"
               ],
               "type": "string"
             },
