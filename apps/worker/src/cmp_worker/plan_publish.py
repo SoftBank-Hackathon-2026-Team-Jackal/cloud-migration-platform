@@ -8,6 +8,7 @@ settings, with artifacts where 09/11 read them.
 Results hold codes and identifiers only; never Secret values, Terraform output or input text.
 """
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -804,6 +805,8 @@ def network_policies(spec: ProvisioningSpecV2, deployment: dict) -> NetworkRende
         "applications": {app["release_name"]: app["port"]},
         "databases": [database["release_name"]],
         "intents": intents,
+        # App telemetry (OTLP to the platform edge); empty = no extra egress.
+        "telemetry_cidr": os.environ.get("CMP_TELEMETRY_EGRESS_CIDR", "").strip() or None,
     }
     policies = production_policies(namespace=deployment["namespace"], **shape)
     lines, defaults = describe(**shape)

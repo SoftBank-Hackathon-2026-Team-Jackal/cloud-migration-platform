@@ -53,6 +53,30 @@ handle @traffic_health_report {
 		lb_try_interval 250ms
 	}
 }
+# App telemetry ingest (OpenTelemetry OTLP/HTTP from the migrated demo app on the source and target
+# clusters). Only POST with the ingest token passes; metrics go to Prometheus' OTLP receiver and traces to
+# Jaeger. Any other /otlp/* request is refused here and never reaches the web.
+@otlp_metrics {
+	method POST
+	path /otlp/v1/metrics
+	header X-Otlp-Token {$CMP_OTLP_TOKEN}
+}
+handle @otlp_metrics {
+	rewrite * /api/v1/otlp/v1/metrics
+	reverse_proxy {$CMP_PROMETHEUS_UPSTREAM}
+}
+@otlp_traces {
+	method POST
+	path /otlp/v1/traces
+	header X-Otlp-Token {$CMP_OTLP_TOKEN}
+}
+handle @otlp_traces {
+	rewrite * /v1/traces
+	reverse_proxy {$CMP_JAEGER_UPSTREAM}
+}
+handle /otlp/* {
+	respond 401
+}
 @backend path /agents/* /relays/* /migrations /migrations/* /provisioning/*
 handle @backend {
 	reverse_proxy {$CMP_API_UPSTREAM} {

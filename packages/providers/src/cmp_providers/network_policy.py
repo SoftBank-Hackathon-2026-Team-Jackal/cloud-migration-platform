@@ -14,6 +14,8 @@ paths in `production_policies`:
   Only created when such intents exist; the hostname itself is not enforced.
 - platform paths the executing side needs: DB self-probe, DB replication egress (TCP 5432,
   Data Migration), and on ON_PREM the Agent tunnel → DB and the Network Preflight probe Pod.
+- app telemetry (optional, `telemetry_cidr`): the applications may reach the platform's OTLP ingest
+  (TCP 443 on that one CIDR, the demo host edge `/otlp/*`). Without it nothing changes.
 
 Pure functions: no cluster access, deterministic output (sorted, hashed names).
 """
@@ -154,6 +156,17 @@ def _external_egress(namespace, labels, releases, intents) -> list[dict]:
     return found
 
 
+def _telemetry_egress(namespace, labels, applications, cidr: str) -> list[dict]:
+    found = []
+    for app in sorted(applications):
+        found.append(policy(namespace, policy_name("telemetry", app), labels, {
+            "podSelector": selector(app), "policyTypes": ["Egress"],
+            "egress": [{"to": [{"ipBlock": {"cidr": cidr}}],
+                        "ports": [{"protocol": "TCP", "port": 443}]}],
+        }))  # fmt: skip
+    return found
+
+
 def _database_paths(namespace, labels, database: str, provider: str) -> list[dict]:
     port = [{"protocol": "TCP", "port": DB_PORT}]
     sources: list[dict[str, Any]] = [{"podSelector": selector(database)}]
@@ -208,13 +221,17 @@ def production_policies(
     applications: Mapping[str, int],
     databases: Sequence[str],
     intents: Sequence[Mapping[str, Any]],
+    telemetry_cidr: str | None = None,
 ) -> list[dict]:
     """`releases`: resource id → release; `applications`: app release → port;
-    `databases`: DB releases; `intents`: validated intents (see `with_connections`)."""
+    `databases`: DB releases; `intents`: validated intents (see `with_connections`);
+    `telemetry_cidr`: the platform OTLP ingest address, or None."""
     labels = PRODUCTION_LABELS
     found = base_policies(namespace, labels, releases, intents)
     found += [entry(namespace, labels, app, port) for app, port in sorted(applications.items())]
     found += _external_egress(namespace, labels, releases, intents)
+    if telemetry_cidr:
+        found += _telemetry_egress(namespace, labels, applications, telemetry_cidr)
     for database in sorted(databases):
         found += _database_paths(namespace, labels, database, provider)
     if provider == "ON_PREM":
@@ -233,6 +250,7 @@ def describe(
     databases: Sequence[str],
     intents: Sequence[Mapping[str, Any]],
     provider: str,
+    telemetry_cidr: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """(intent-derived lines, platform-default lines) for the Preview; names and ports only."""
     lines = ["Namespace 기본 차단(cmp-default-deny: 모든 Pod 수신·송신)"]
@@ -250,6 +268,11 @@ def describe(
     for app, port in sorted(applications.items()):
         lines.append(f"외부 진입(LB/Ingress) → {app} TCP {port} 허용, 다른 포트 차단")
     defaults = ["모든 Pod → kube-system kube-dns·node-local-dns UDP/TCP 53 허용"]
+    if telemetry_cidr:
+        for app in sorted(applications):
+            defaults.append(
+                f"{app} → 플랫폼 관측 수신(OpenTelemetry) {telemetry_cidr} TCP 443 허용"
+            )
     for database in sorted(databases):
         defaults.append(f"{database} 자기 점검·복제 연결 TCP {DB_PORT} 허용(수신은 자신만)")
         if provider == "ON_PREM":

@@ -32,6 +32,8 @@ ensure_key TEMPORAL_DB_PASSWORD 24
 ensure_key AGENT_ENROLLMENT_ADMIN_KEY 32
 ensure_key APPROVAL_ADMIN_KEY 32
 ensure_key WEB_AUTH_SECRET 32
+# App telemetry ingest (edge /otlp/*, header X-Otlp-Token); the demo app holds the same value.
+ensure_key OTLP_INGEST_TOKEN 32
 if ! grep -q "^ENV_FILE_ENCRYPTION_KEY=" "$env_file"; then
   printf 'ENV_FILE_ENCRYPTION_KEY=%s\n' \
     "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')" >>"$env_file"

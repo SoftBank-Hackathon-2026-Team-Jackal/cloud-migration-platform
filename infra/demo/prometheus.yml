@@ -1,0 +1,15 @@
+# App telemetry store (compose service `prometheus`). Nothing is scraped: the demo app pushes OTLP
+# metrics through the edge (/otlp/v1/metrics → /api/v1/otlp/v1/metrics, --web.enable-otlp-receiver).
+global:
+  evaluation_interval: 15s
+otlp:
+  # Resource attributes kept as labels so the web can split source and target: app_env (ENV_NAME of the
+  # app, e.g. aws-eks / onprem) and the deployment environment name.
+  promote_resource_attributes:
+    - app.env
+    - deployment.environment.name
+    - service.name
+storage:
+  tsdb:
+    # Pushes from two clusters arrive with their own clocks.
+    out_of_order_time_window: 10m
