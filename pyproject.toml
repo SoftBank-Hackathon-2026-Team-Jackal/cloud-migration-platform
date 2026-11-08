@@ -45,6 +45,7 @@ cmp_data = "packages/data/src/cmp_data"
 
 [tool.setuptools.package-data]
 cmp_agents = ["prompts/*.md"]
+cmp_worker = ["redteam_mock/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

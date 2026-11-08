@@ -286,6 +286,22 @@ def test_a_switched_on_red_team_reaches_the_input_aimed_at_the_application(repo)
     assert SandboxInput.model_validate(result).redteam is not None  # and the loop accepts it
 
 
+@pytest.mark.parametrize("mock", [False, True])
+def test_the_demo_mock_switch_reaches_the_red_team_block_only_when_on(repo, mock):
+    from cmp_worker.activities.sandbox_loop import SandboxInput
+
+    pipeline = make(repo)
+    settings = SandboxSettings(
+        redteam=True,
+        redteam_consent_ref="consent-1",
+        redteam_endpoints=[{"method": "GET", "path": "/items", "params": []}],
+        redteam_mock=mock,
+    )
+    result = assemble_sandbox_input(analysed(pipeline, repo), settings, pipeline.store)
+    assert ("mock" in result["redteam"]) is mock  # off: the block is exactly as before
+    assert SandboxInput.model_validate(result).redteam.mock is mock
+
+
 def test_a_go_apps_own_scanned_routes_fill_redteam_endpoints_when_none_are_given(tmp_path):
 
     store = LocalArtifactStore(tmp_path / "store")

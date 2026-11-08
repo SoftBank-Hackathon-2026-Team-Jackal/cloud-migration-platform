@@ -5,6 +5,7 @@ Payloads and results are small JSON: references, names, codes. Secrets, source t
 never enter Workflow history; logs are masked and stored by reference.
 """
 
+import asyncio
 import json
 import re
 import shutil
@@ -16,7 +17,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, propose_fix
+from cmp_agents.fixer import (
+    FixInput,
+    FixOutcome,
+    apply_code_fix,
+    apply_requirements_fix,
+    propose_fix,
+)
 from cmp_agents.fixer_skills import select_skills
 from cmp_agents.llm import LLMClient
 from cmp_agents.tester import SuiteRequest, generate_tests
@@ -34,10 +41,11 @@ from cmp_testsuite.model import HttpStep, ProbeStep
 from cmp_testsuite.record import RECORDED_PREFIX, Fetch, record_probe
 from cmp_testsuite.runner import run_case
 from cmp_testsuite.validate import CaseRunner, pin_suite, validate_tests
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from cmp_worker import redteam_mock
 from cmp_worker.artifact_store import ArtifactRef, LocalArtifactStore
 from cmp_worker.build_wiring import BuildFailed, to_build_attempt
 from cmp_worker.failure_classifier import (
@@ -67,7 +75,14 @@ from cmp_worker.planning_handoff import (
     check_with_planning,
 )
 from cmp_worker.prebuilt_builder import BuildUnavailable
-from cmp_worker.redteam_stage import RedTeamInput, RedTeamKit, request_for, run_stage
+from cmp_worker.redteam_safeguards import Approval, summarize
+from cmp_worker.redteam_stage import (
+    NOT_APPROVED,
+    RedTeamInput,
+    RedTeamKit,
+    request_for,
+    run_stage,
+)
 from cmp_worker.sandbox_deploy import (
     SandboxCapabilities,
     SandboxError,
@@ -96,6 +111,17 @@ Builder = Callable[[str, dict[str, Any]], Image]
 _TRACE = re.compile(r"panic:|Traceback \(most recent call last\)|goroutine \d+ \[|Exception in")
 _FILE_REF = re.compile(r"([\w./@-]+\.(?:go|py|js|ts|java|rb))(?::\d+|\", line \d+)")
 _APP_CAUSE_EVENTS = {"Unhealthy", "BackOff", "CrashLoopBackOff", "Failed", "FailedScheduling"}
+
+
+async def _wait_with_heartbeat(seconds: float) -> None:
+    """Sleep, telling Temporal every second that the Activity is alive (when inside one)."""
+    left = seconds
+    while left > 0:
+        if activity.in_activity():
+            activity.heartbeat()
+        step = min(1.0, left)
+        await asyncio.sleep(step)
+        left -= step
 
 
 class SandboxInput(BaseModel):
@@ -228,7 +254,16 @@ class SandboxLoopActivities:
         reset_data: Callable[[SandboxPlan], Any] | None = None,
         skills_root: Path | str | None = None,
         redteam: RedTeamKit | None = None,
+        redteam_mock_dir: Path | str | None = None,
+        redteam_mock_waits: tuple[float, float] = (
+            redteam_mock.FIRST_WAIT_SECONDS,
+            redteam_mock.RECHECK_WAIT_SECONDS,
+        ),
     ) -> None:
+        # Demo mock (`SandboxSettings.redteam_mock`): where the recorded run is, and how long the
+        # first attack and the re-check appear to take.
+        self.redteam_mock_dir = Path(redteam_mock_dir) if redteam_mock_dir else None
+        self.redteam_mock_waits = redteam_mock_waits
         self.redteam = redteam  # ticket 37: None attacks nothing and says REDTEAM_NOT_CONFIGURED
         self.target_fetcher = target_fetcher or make_proxy_fetcher(service)  # ticket 27-B
         self.reset_data = reset_data  # default: the service's own, looked up when needed
@@ -506,36 +541,15 @@ class SandboxLoopActivities:
 
     @activity.defn(name="sbx_fix")
     async def sbx_fix(self, payload: dict) -> dict:
-        if self.llm_factory is None:
-            return {"status": "FAILED", "reason": "LLM_NOT_CONFIGURED"}
         klass = payload["classification"]["failure_class"]
-        requirements = self._requirements(payload["requirements_ref"])
-        logs = self.store.get(ArtifactRef.model_validate(payload["logs_ref"])).decode()
-        suite = load_bundle(self.store.get(ArtifactRef.model_validate(payload["suite_ref"])))
         workspace = payload["source"].get("workspace")
-        outcome = propose_fix(
-            FixInput(
-                failure_class=klass,
-                reasons=payload["classification"]["reasons"],
-                requirements_json=canonical_requirements(requirements)[0].decode(),
-                logs=logs,
-                tests={c.id: c.model_dump(mode="json") for c in suite.cases},
-                findings=payload.get("findings") or [],
-            ),
-            llm=self.llm_factory(payload["migration_id"], "fixer"),
-            workspace=workspace,
-            # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
-            skills_root=self.skills_root,
-            skills=select_skills(
-                self.skills_root,
-                klass,
-                payload["classification"]["reasons"],
-                target_provider=self._target_provider(payload.get("analysis_report_ref")),
-            ),
-        )
+        outcome = self._mock_security_fix(payload, klass, workspace)
+        if outcome is None:
+            outcome = self._propose_fix(payload, klass, workspace)
         if outcome.status != "PROPOSED":
             return {"status": outcome.status, "reason": outcome.reason}
         if outcome.requirements_fix is not None:
+            requirements = self._requirements(payload["requirements_ref"])
             changes = {c.row_id: c.disposition for c in outcome.requirements_fix.row_changes}
             if changes:
                 try:
@@ -594,6 +608,51 @@ class SandboxLoopActivities:
             "source": {"workspace": str(target)}, **fix_ids,
         }  # fmt: skip
 
+    def _propose_fix(self, payload: dict, klass: str, workspace: str | None) -> FixOutcome:
+        if self.llm_factory is None:
+            return FixOutcome(status="FAILED", reason="LLM_NOT_CONFIGURED")
+        requirements = self._requirements(payload["requirements_ref"])
+        logs = self.store.get(ArtifactRef.model_validate(payload["logs_ref"])).decode()
+        suite = load_bundle(self.store.get(ArtifactRef.model_validate(payload["suite_ref"])))
+        return propose_fix(
+            FixInput(
+                failure_class=klass,
+                reasons=payload["classification"]["reasons"],
+                requirements_json=canonical_requirements(requirements)[0].decode(),
+                logs=logs,
+                tests={c.id: c.model_dump(mode="json") for c in suite.cases},
+                findings=payload.get("findings") or [],
+            ),
+            llm=self.llm_factory(payload["migration_id"], "fixer"),
+            workspace=workspace,
+            # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
+            skills_root=self.skills_root,
+            skills=select_skills(
+                self.skills_root,
+                klass,
+                payload["classification"]["reasons"],
+                target_provider=self._target_provider(payload.get("analysis_report_ref")),
+            ),
+        )
+
+    def _mock_marker(self, migration_id: str) -> Path:
+        return self.workspace_root / "redteam-mock" / migration_id
+
+    def _mock_security_fix(
+        self, payload: dict, klass: str, workspace: str | None
+    ) -> FixOutcome | None:
+        """Demo mock: the recorded real fix, when this run's red team is mocked and the source is
+        still the one that fix was made for. None means: ask the real Fixer."""
+        if klass != "SECURITY" or not self._mock_marker(payload["migration_id"]).is_file():
+            return None
+        fix, why = redteam_mock.code_fix(
+            workspace, redteam_mock.load("fix.json", self.redteam_mock_dir)
+        )
+        if fix is None:
+            activity.logger.warning("redteam mock fix not used: %s", why)
+            return None
+        return FixOutcome(status="PROPOSED", code_fix=fix)
+
     @staticmethod
     async def _emit_fixes(payload: dict, shown: list[tuple[str | None, list[dict]]]) -> dict:
         """One `build.fix` per fixed file (or one for a requirements fix); their IDs go back to
@@ -630,8 +689,10 @@ class SandboxLoopActivities:
         Findings come back with their own reproduction so the Workflow can hand them back for the
         re-check; the Fixer is given the summary only (see the Workflow)."""
         inp = SandboxInput.model_validate(payload["input"])
-        plan = SandboxPlan.model_validate(payload["plan"])
         assert inp.redteam is not None
+        if inp.redteam.mock:
+            return await self._mock_redteam(payload, inp)
+        plan = SandboxPlan.model_validate(payload["plan"])
         requirements = self._requirements(payload["requirements_ref"])
         return run_stage(
             self.redteam,
@@ -644,6 +705,40 @@ class SandboxLoopActivities:
             previous=payload.get("previous_findings") or [],
             migration_id=inp.migration_id,
             source_sha256=payload.get("source_sha256"),
+        )
+
+    async def _mock_redteam(self, payload: dict, inp: SandboxInput) -> dict:
+        """Demo mock: the recorded real attack, then a re-check that finds it fixed. Attacks
+        nothing and calls no model; a yes is still needed, as for a real run."""
+        previous = payload.get("previous_findings") or []
+        try:
+            Approval.model_validate(payload.get("approval"))
+        except ValidationError:
+            return {
+                "status": "SKIPPED", "code": NOT_APPROVED, "open": previous, "resolved": [],
+                "withheld": [], "summary": summarize([]).model_dump(mode="json"),
+                "stopped_reason": None,
+            }  # fmt: skip
+        fixture = None if previous else redteam_mock.load("round1.json", self.redteam_mock_dir)
+        if not previous and fixture is None:
+            return {
+                "status": "SKIPPED", "code": "REDTEAM_MOCK_FIXTURE_MISSING", "open": [],
+                "resolved": [], "withheld": [], "summary": summarize([]).model_dump(mode="json"),
+                "stopped_reason": None,
+            }  # fmt: skip
+        await _wait_with_heartbeat(self.redteam_mock_waits[1 if previous else 0])
+        # `sbx_fix` gets no Workflow input: this marks the run so its security fix is mocked too.
+        marker = self._mock_marker(inp.migration_id)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("1")
+        if previous:
+            return redteam_mock.recheck_report(previous)
+        return redteam_mock.first_report(
+            self.store,
+            digest=payload["digest"],
+            suite_sha256=ArtifactRef.model_validate(payload["suite_ref"]).sha256,
+            now=datetime.now(UTC),
+            fixture=fixture,
         )
 
     @activity.defn(name="sbx_ai_tests")

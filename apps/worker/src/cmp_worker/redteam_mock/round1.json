@@ -1,0 +1,109 @@
+{
+  "source": "migration-26c7a25b-51f0-4c80-be7f-6cffb854c016 sbx_redteam round 1 (Temporal history)",
+  "result": {
+    "code": null,
+    "model_error": null,
+    "open": [
+      {
+        "category": "SQL Injection",
+        "endpoint": "/api/search",
+        "executed_at": "2026-11-08T02:29:15.550562Z",
+        "finding_id": "sql injection-4b166973d9",
+        "image_digest": "sha256:8d9f65a4de0d5b99837244274921214700ad82e00ba711abb268a44fbe69eb9c",
+        "intensity": "PASSIVE",
+        "repro": {
+          "path": "/api/search?author=a&q=test&sort=asc&limit=10",
+          "tool": "probe_get"
+        },
+        "repro_summary": "GET /api/search?author=a&q=test&sort=asc&limit=10 returns a raw Postgres syntax error revealing SQL injection in the sort parameter.",
+        "severity": "HIGH",
+        "suite_sha256": "108e9b4b10f1dec3611b4887a05247f63694b0455e8c23dfed4666d2630ad4d4",
+        "summary": "The 'sort' parameter of /api/search is concatenated directly into a SQL query without sanitization, causing a database syntax error when injected with 'asc' variants."
+      },
+      {
+        "category": "SQL Injection",
+        "endpoint": "/api/search",
+        "executed_at": "2026-11-08T02:29:15.553291Z",
+        "finding_id": "sql injection-460caba089",
+        "image_digest": "sha256:8d9f65a4de0d5b99837244274921214700ad82e00ba711abb268a44fbe69eb9c",
+        "intensity": "PASSIVE",
+        "repro": {
+          "path": "/api/search?q=a&sort=asc)%3B--",
+          "tool": "probe_get"
+        },
+        "repro_summary": "GET /api/search?q=a&sort=asc)%3B-- returns SQLSTATE 42601 syntax error, indicating injected SQL fragment reached the database parser.",
+        "severity": "HIGH",
+        "suite_sha256": "108e9b4b10f1dec3611b4887a05247f63694b0455e8c23dfed4666d2630ad4d4",
+        "summary": "Injecting payload 'asc);--' into the sort parameter triggers a raw SQL syntax error, confirming unsanitized use of user input in a query and potential for stacked/comment-based injection."
+      },
+      {
+        "category": "SQL Injection",
+        "endpoint": "/api/search",
+        "executed_at": "2026-11-08T02:29:15.555811Z",
+        "finding_id": "sql injection-552d1a3079",
+        "image_digest": "sha256:8d9f65a4de0d5b99837244274921214700ad82e00ba711abb268a44fbe69eb9c",
+        "intensity": "PASSIVE",
+        "repro": {
+          "path": "/api/search?sort=id)--%20",
+          "tool": "probe_get"
+        },
+        "repro_summary": "GET /api/search?sort=id)--%20 returns a Postgres syntax error for unexpected ')' character.",
+        "severity": "HIGH",
+        "suite_sha256": "108e9b4b10f1dec3611b4887a05247f63694b0455e8c23dfed4666d2630ad4d4",
+        "summary": "The sort parameter accepts raw SQL syntax including closing parentheses and comment sequences, causing a database-level syntax error and confirming injectable query construction."
+      },
+      {
+        "category": "Information Disclosure",
+        "endpoint": "/api/search",
+        "executed_at": "2026-11-08T02:29:15.558234Z",
+        "finding_id": "information disclosure-87f4bde21f",
+        "image_digest": "sha256:8d9f65a4de0d5b99837244274921214700ad82e00ba711abb268a44fbe69eb9c",
+        "intensity": "PASSIVE",
+        "repro": {
+          "path": "/api/search?author=a&q=test&sort=asc&limit=10",
+          "tool": "probe_get"
+        },
+        "repro_summary": "Any malformed 'sort' value returns verbose Postgres error text in the JSON response body.",
+        "severity": "MEDIUM",
+        "suite_sha256": "108e9b4b10f1dec3611b4887a05247f63694b0455e8c23dfed4666d2630ad4d4",
+        "summary": "Raw database error messages (including SQLSTATE codes and query syntax details) are returned directly to the client, leaking backend implementation details."
+      },
+      {
+        "category": "SQL Injection - Comment Bypass",
+        "endpoint": "/api/search",
+        "executed_at": "2026-11-08T02:29:15.560994Z",
+        "finding_id": "sql injection - comment -fa4ee12fce",
+        "image_digest": "sha256:8d9f65a4de0d5b99837244274921214700ad82e00ba711abb268a44fbe69eb9c",
+        "intensity": "PASSIVE",
+        "repro": {
+          "path": "/api/search?author=cmp-rehearsal&q=&sort=id--&limit=5",
+          "tool": "probe_get"
+        },
+        "repro_summary": "GET /api/search?author=cmp-rehearsal&q=&sort=id--&limit=5 returns results in reversed order compared to the same query without the injected comment, proving the injected SQL comment altered query execution.",
+        "severity": "HIGH",
+        "suite_sha256": "108e9b4b10f1dec3611b4887a05247f63694b0455e8c23dfed4666d2630ad4d4",
+        "summary": "Appending SQL comment syntax '--' after a valid sort column value ('id--') is accepted by the server and changes the ORDER BY direction/behavior, confirming the sort parameter is used unsanitized and comment-truncation injection works."
+      }
+    ],
+    "resolved": [],
+    "status": "DONE",
+    "stopped_reason": "TURN_LIMIT",
+    "summary": {
+      "by_severity": {
+        "HIGH": 4,
+        "MEDIUM": 1
+      },
+      "count": 5,
+      "finding_ids": [
+        "sql injection-4b166973d9",
+        "sql injection-460caba089",
+        "sql injection-552d1a3079",
+        "information disclosure-87f4bde21f",
+        "sql injection - comment -fa4ee12fce"
+      ],
+      "max_severity": "HIGH"
+    },
+    "withheld": []
+  },
+  "evidence": {}
+}

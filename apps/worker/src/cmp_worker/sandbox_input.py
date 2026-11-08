@@ -61,6 +61,10 @@ class SandboxSettings(BaseModel):
     # when the Worker also has a cache configured (`REDTEAM_CACHE_BUCKET`); otherwise it is a
     # silent no-op either way.
     redteam_cache_enabled: bool = True
+    # Demo mock: the red-team attack and the security fix replay a recorded real run
+    # (`cmp_worker.redteam_mock`) instead of calling a model. Off by default; the screen's steps
+    # and events stay the same either way.
+    redteam_mock: bool = False
     write_path: str | None = None
     read_path: str | None = None
     # The app's write API shape (ticket 27); see `AppApi`. Left out, the original shape is used.
@@ -200,6 +204,7 @@ def assemble_sandbox_input(
                     "endpoints": [e.model_dump() for e in red_endpoints],
                     "max_turns": settings.redteam_max_turns,
                     "cache_enabled": settings.redteam_cache_enabled,
+                    **({"mock": True} if settings.redteam_mock else {}),
                 }
             }
             if settings.redteam
