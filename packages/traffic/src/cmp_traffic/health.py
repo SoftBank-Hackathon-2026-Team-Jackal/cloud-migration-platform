@@ -10,6 +10,9 @@
 장애 스위치 동기화(시연용 Tools 화면): `FAULT_TOKEN`이 있으면 보고 응답에 실린 "원하는 장애 상태"를 대상 앱
 `/__cmp/fault`에 적용하고, 대상 앱에서 읽은 실제 상태를 다음 보고에 싣는다. 중계 서버에 들어오는 포트를
 열지 않고 플랫폼이 시킨 일만 한다. 같은 명령(id)은 한 번만 적용한다.
+지표 보고(5초)를 기다리면 화면 반영이 최대 10초 걸리므로, 별도 스레드가 `/system/traffic-health/fault`를
+1초마다 묻고(FAULT_SYNC_INTERVAL), 새 명령을 적용하면 곧바로 실제 상태를 다시 알린다. 이 경로가 실패해도
+지표 보고에 실린 명령으로 지금처럼 동기화된다.
 
 환경변수:
   TRAFFIC_HEALTH_URL       보고 주소. 예: https://<플랫폼 호스트>/system/traffic-health/report
@@ -18,6 +21,7 @@
   TRAFFIC_HEALTH_INTERVAL  구간 길이(초, 기본 5)
   FAULT_TOKEN              대상 앱의 FAULT_TOKEN. 없으면 장애 스위치 동기화를 하지 않는다
   FAULT_TARGET_URL         대상 앱 주소를 직접 줄 때. 없으면 Envoy `cluster_target`에서 읽는다
+  FAULT_SYNC_INTERVAL      빠른 장애 동기화 간격(초, 기본 1). 0이면 빠른 동기화를 끈다
 
 실행: python3 -m cmp_traffic.health            # 계속 보낸다
       python3 -m cmp_traffic.health --dry-run  # 한 구간을 재서 보낼 내용만 출력한다
@@ -28,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -137,17 +142,23 @@ class FaultSync:
         self.token, self.env, self.send, self.fetch = token, env, send, fetch
         self.applied_id: str | None = None
         self.error: str | None = None
+        # 지표 보고 루프와 빠른 동기화 스레드가 같은 명령을 두 번 적용하지 않게 한다.
+        self._lock = threading.Lock()
 
     def _base(self) -> str:
         return fault.target_url(self.env, self.fetch)
 
-    def apply(self, desired: dict[str, Any] | None) -> None:
-        """새 명령(id가 다름)이면 한 번 적용한다. 실패하면 다음 보고 때 다시 시도한다."""
+    def apply(self, desired: dict[str, Any] | None) -> bool:
+        """새 명령(id가 다름)이면 한 번 적용한다. 실패하면 다음 보고 때 다시 시도한다. 적용했으면 True."""
+        with self._lock:
+            return self._apply(desired)
+
+    def _apply(self, desired: dict[str, Any] | None) -> bool:
         if not desired or desired.get("id") == self.applied_id:
-            return
+            return False
         action = desired.get("action")
         if action not in ("on", "off"):
-            return
+            return False
         settings: dict[str, Any] = {}
         if action == "on":
             settings = {
@@ -159,11 +170,20 @@ class FaultSync:
             status, _ = fault.call(self._base(), self.token, action, self.send, **settings)
         except (OSError, ValueError, RuntimeError) as exc:
             self.error = f"unreachable: {type(exc).__name__}"
-            return
+            return False
         if status == 200:
             self.applied_id, self.error = desired["id"], None
-        else:
-            self.error = f"status {status}"
+            return True
+        self.error = f"status {status}"
+        return False
+
+    def sync_once(self, post_fn: Callable[[dict], tuple[int, dict[str, Any]]]) -> int:
+        """빠른 동기화 한 번: 실제 상태를 보내고 받은 명령을 적용한다. 새로 적용했으면 바뀐 상태를 곧바로 다시
+        보낸다(화면이 다음 주기를 기다리지 않게). 플랫폼 응답 코드를 돌려준다."""
+        status, answer = post_fn({"fault": self.state()})
+        if status == 200 and self.apply(answer.get("fault")):
+            status, _ = post_fn({"fault": self.state()})
+        return status
 
     def state(self, clock: Callable[[], float] = time.time) -> dict[str, Any]:
         """대상 앱에서 읽은 지금 상태(보고 본문의 `fault`). 읽지 못하면 active는 None(모름)."""
@@ -224,6 +244,27 @@ def post(url: str, token: str, body: dict) -> tuple[int, dict[str, Any]]:
         return 0, {}
 
 
+def fault_sync_url(report_url: str) -> str:
+    """지표 보고 주소(…/traffic-health/report) 옆의 빠른 장애 동기화 주소(…/traffic-health/fault)."""
+    base, sep, last = report_url.rstrip("/").rpartition("/")
+    return f"{base}/fault" if sep and last == "report" else ""
+
+
+def run_fault_sync(sync: FaultSync, url: str, token: str, interval: float) -> None:
+    """빠른 장애 동기화 스레드. 닿지 못하면 같은 간격으로 계속 묻는다(상태가 바뀔 때만 한 줄 남긴다)."""
+    last: int | None = None
+    while True:
+        try:
+            status = sync.sync_once(lambda body: post(url, token, body))
+        except Exception as exc:  # noqa: BLE001 - 이 스레드가 죽으면 5초 경로만 남으므로 계속 돈다
+            status = -1
+            print(f"fault sync failed: {type(exc).__name__}", file=sys.stderr, flush=True)
+        if status != last:
+            print(f"fault sync status {status}", flush=True)
+            last = status
+        time.sleep(interval)
+
+
 def main(argv: list[str]) -> int:
     dry = "--dry-run" in argv
     url = os.environ.get("TRAFFIC_HEALTH_URL", "")
@@ -235,6 +276,15 @@ def main(argv: list[str]) -> int:
     reader = EnvoyReader(os.environ.get("ENVOY_ADMIN_URL", "http://127.0.0.1:9901"))
     fault_token = os.environ.get("FAULT_TOKEN", "")
     sync = FaultSync(fault_token, dict(os.environ)) if fault_token else None
+    sync_interval = float(os.environ.get("FAULT_SYNC_INTERVAL", "1"))
+    sync_url = fault_sync_url(url)
+    if sync is not None and not dry and sync_interval > 0 and sync_url:
+        threading.Thread(
+            target=run_fault_sync,
+            args=(sync, sync_url, token, max(0.5, sync_interval)),
+            name="fault-sync",
+            daemon=True,
+        ).start()
     previous: Reading | None = None
     last_status: int | str | None = None
     while True:

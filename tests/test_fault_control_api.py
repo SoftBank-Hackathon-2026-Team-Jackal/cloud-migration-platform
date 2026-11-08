@@ -136,3 +136,26 @@ def test_the_report_still_needs_the_token(setup) -> None:
     http, _, _ = setup
     response = http.post("/system/traffic-health/report", json=window())
     assert response.status_code == 403
+
+
+def fast_sync(http: TestClient, fault: dict | None = None, token: str = "secret-token"):
+    body = {} if fault is None else {"fault": fault}
+    return http.post("/system/traffic-health/fault", json=body, headers={"X-Pulse-Token": token})
+
+
+def test_fast_sync_hands_out_the_command_and_records_the_observed_state(setup) -> None:
+    http, _, state = setup
+    command = http.post(
+        "/system/fault", json={"error_rate": 0.5, "delay_ms": 800, "duration_s": 60}
+    ).json()["desired"]
+    answer = fast_sync(http, {"active": False})
+    assert answer.status_code == 200 and answer.json()["fault"]["id"] == command["id"]
+    fast_sync(
+        http, {"active": True, "error_rate": 0.5, "delay_ms": 800, "applied_id": command["id"]}
+    )
+    view = http.get("/system/fault").json()
+    assert view["applied"] is True and view["observed"]["active"] is True
+    # 토큰이 틀리면 거절하고, Tools가 꺼져 있으면 명령을 내주지 않는다
+    assert fast_sync(http, token="wrong").status_code == 403
+    state["tools"] = False
+    assert fast_sync(http, {"active": False}).json() == {"fault": None}

@@ -2625,6 +2625,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /system/traffic-health/fault:
+    post:
+      tags:
+      - system
+      summary: Relay syncs the demo fault switch (desired command out, observed state
+        in)
+      operationId: post_fault_sync_system_traffic_health_fault_post
+      parameters:
+      - name: x-pulse-token
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Pulse-Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaultSync'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportAnswer'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /system/fault:
     get:
       tags:
@@ -3983,6 +4018,16 @@ components:
       additionalProperties: false
       type: object
       title: FaultRequest
+    FaultSync:
+      properties:
+        fault:
+          anyOf:
+          - $ref: '#/components/schemas/FaultObserved'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      title: FaultSync
+      description: '리포터의 빠른 장애 동기화(1초 간격): 지표 없이 대상 앱의 실제 장애 상태만 싣는다.'
     FaultView:
       properties:
         at:

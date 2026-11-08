@@ -153,7 +153,10 @@ def test_the_public_edge_routes_only_the_token_protected_report() -> None:
     assert "path /system/pulse/report" in caddy and "method POST" in caddy
     # 맥박·건강 지표 조회(GET)와 그 밖의 /system 경로는 공개하지 않는다
     paths = [line.strip() for line in caddy.splitlines() if "path" in line and "/system" in line]
-    assert paths == ["path /system/pulse/report", "path /system/traffic-health/report"]
+    assert paths == [
+        "path /system/pulse/report",
+        "path /system/traffic-health/report /system/traffic-health/fault",
+    ]
 
 
 # ---- 원본·이전 서버 보고 ----

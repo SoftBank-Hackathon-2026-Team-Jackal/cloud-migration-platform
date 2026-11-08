@@ -41,10 +41,11 @@ handle @pulse_report {
 	}
 }
 # Relay traffic health report (the relay Envoy's origin/target 5xx and p99 per window; same
-# X-Pulse-Token). Only this POST is public: GET /system/traffic-health stays internal.
+# X-Pulse-Token) and the relay's 1 s demo fault sync. Only these POSTs are public: GET
+# /system/traffic-health stays internal.
 @traffic_health_report {
 	method POST
-	path /system/traffic-health/report
+	path /system/traffic-health/report /system/traffic-health/fault
 }
 handle @traffic_health_report {
 	reverse_proxy {$CMP_API_UPSTREAM} {
