@@ -16,7 +16,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cmp_agents.fixer import FixInput, apply_code_fix, apply_requirements_fix, propose_fix
+from cmp_agents.fixer import (
+    FixInput,
+    FixOutcome,
+    apply_code_fix,
+    apply_requirements_fix,
+    propose_fix,
+)
 from cmp_agents.fixer_skills import select_skills
 from cmp_agents.llm import LLMClient
 from cmp_agents.tester import SuiteRequest, generate_tests
@@ -60,6 +66,7 @@ from cmp_worker.fix_patch import (
     build_patch_artifact,
     tree_sha256,
 )
+from cmp_worker.llm_replay import dump_fix, dump_tests, load_fix, load_tests, replay_key, replayed
 from cmp_worker.planning_handoff import (
     HandoffError,
     PlanningSettings,
@@ -67,6 +74,7 @@ from cmp_worker.planning_handoff import (
     check_with_planning,
 )
 from cmp_worker.prebuilt_builder import BuildUnavailable
+from cmp_worker.redteam_cache import RedTeamCacheStore
 from cmp_worker.redteam_stage import RedTeamInput, RedTeamKit, request_for, run_stage
 from cmp_worker.sandbox_deploy import (
     SandboxCapabilities,
@@ -228,7 +236,9 @@ class SandboxLoopActivities:
         reset_data: Callable[[SandboxPlan], Any] | None = None,
         skills_root: Path | str | None = None,
         redteam: RedTeamKit | None = None,
+        replay_cache: RedTeamCacheStore | None = None,
     ) -> None:
+        self.replay_cache = replay_cache  # None: the Fixer and Tester are always asked
         self.redteam = redteam  # ticket 37: None attacks nothing and says REDTEAM_NOT_CONFIGURED
         self.target_fetcher = target_fetcher or make_proxy_fetcher(service)  # ticket 27-B
         self.reset_data = reset_data  # default: the service's own, looked up when needed
@@ -251,6 +261,13 @@ class SandboxLoopActivities:
         self.llm_factory = llm_factory
 
     # ---------------------------------------------------------------- helpers
+
+    @staticmethod
+    def _replay_key(role: str, workspace: str | None, *parts: str) -> str | None:
+        """None (no replay) when there is no source tree to hash."""
+        if not workspace or not Path(workspace).is_dir():
+            return None
+        return replay_key(role, tree_sha256(workspace), *parts)
 
     def _requirements(self, ref: dict) -> RequirementsV2:
         return RequirementsV2.model_validate_json(self.store.get(ArtifactRef.model_validate(ref)))
@@ -513,25 +530,38 @@ class SandboxLoopActivities:
         logs = self.store.get(ArtifactRef.model_validate(payload["logs_ref"])).decode()
         suite = load_bundle(self.store.get(ArtifactRef.model_validate(payload["suite_ref"])))
         workspace = payload["source"].get("workspace")
-        outcome = propose_fix(
-            FixInput(
-                failure_class=klass,
-                reasons=payload["classification"]["reasons"],
-                requirements_json=canonical_requirements(requirements)[0].decode(),
-                logs=logs,
-                tests={c.id: c.model_dump(mode="json") for c in suite.cases},
-                findings=payload.get("findings") or [],
-            ),
-            llm=self.llm_factory(payload["migration_id"], "fixer"),
-            workspace=workspace,
-            # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
-            skills_root=self.skills_root,
-            skills=select_skills(
-                self.skills_root,
-                klass,
-                payload["classification"]["reasons"],
-                target_provider=self._target_provider(payload.get("analysis_report_ref")),
-            ),
+        requirements_json = canonical_requirements(requirements)[0].decode()
+
+        def ask() -> FixOutcome:
+            return propose_fix(
+                FixInput(
+                    failure_class=klass,
+                    reasons=payload["classification"]["reasons"],
+                    requirements_json=requirements_json,
+                    logs=logs,
+                    tests={c.id: c.model_dump(mode="json") for c in suite.cases},
+                    findings=payload.get("findings") or [],
+                ),
+                llm=self.llm_factory(payload["migration_id"], "fixer"),
+                workspace=workspace,
+                # Ticket 31: a skill only when the failure calls for one (`fixer-triggers.yaml`).
+                skills_root=self.skills_root,
+                skills=select_skills(
+                    self.skills_root,
+                    klass,
+                    payload["classification"]["reasons"],
+                    target_provider=self._target_provider(payload.get("analysis_report_ref")),
+                ),
+            )
+
+        # The same source, requirements and failure class are the same question: skip the model.
+        # Everything below (security checks, applying, events) still runs on the replayed answer.
+        outcome = replayed(
+            self.replay_cache,
+            self._replay_key("fixer", workspace, requirements_json, klass),
+            ask,
+            dump=dump_fix,
+            load=load_fix,
         )
         if outcome.status != "PROPOSED":
             return {"status": outcome.status, "reason": outcome.reason}
@@ -670,17 +700,32 @@ class SandboxLoopActivities:
         source = Path(workspace) if workspace and Path(workspace).is_dir() else None
         report = self._report(payload.get("analysis_report_ref"))
         usages = report.usage_profile.usages if report else []
-        generated = generate_tests(
-            SuiteRequest(
-                usage_summary="\n".join(usages) or "(none)",
-                api_routes=routes,
-                existing_ids=[c.id for c in suite.cases],
-                http_routes=scan_go_routes(source) if source else [],
-                workspace=source,
-                skills_root=self.skills_root,
-                origin_available=self.origin_case_runner is not None,
+        request = SuiteRequest(
+            usage_summary="\n".join(usages) or "(none)",
+            api_routes=routes,
+            existing_ids=[c.id for c in suite.cases],
+            http_routes=scan_go_routes(source) if source else [],
+            workspace=source,
+            skills_root=self.skills_root,
+            origin_available=self.origin_case_runner is not None,
+        )
+        # Only the proposal is replayed. Recording the probes and validating every case against
+        # the live Sandbox below still runs each time.
+        generated = replayed(
+            self.replay_cache,
+            self._replay_key(
+                "tester",
+                workspace,
+                suite_ref.sha256,
+                json.dumps(sorted(routes)),
+                request.usage_summary,
+                str(request.origin_available),
             ),
-            llm=self.llm_factory(payload["migration_id"], "tester"),
+            lambda: generate_tests(
+                request, llm=self.llm_factory(payload["migration_id"], "tester")
+            ),
+            dump=dump_tests,
+            load=load_tests,
         )
         if generated.status != "GENERATED":
             return {**same, "status": "FAILED", "reason": generated.failure_reason}
