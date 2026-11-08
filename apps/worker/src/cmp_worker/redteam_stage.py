@@ -73,7 +73,7 @@ class RedTeamInput(BaseModel):
     target_resource_id: str = Field(min_length=1)
     consent_ref: str = Field(min_length=1)  # the same consent `SandboxSettings.redteam` needs
     endpoints: list[Endpoint]  # grey-box input (R7): method, path, parameter names
-    max_turns: int = Field(default=20, ge=1, le=100)
+    max_turns: int = Field(default=30, ge=1, le=100)
     # Ticket 39 draft: redeploying the exact same source replays the last real attack's result
     # instead of spending another one. On by default; a toggle the settings screen can turn off
     # per run (e.g. a rehearsal that wants a fresh, uncached pass).

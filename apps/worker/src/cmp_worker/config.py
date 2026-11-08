@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 16000
     llm_ledger_path: str | None = None
     llm_kill_switch_path: str | None = None
-    llm_limit_run_usd: float = 3.0
+    llm_limit_run_usd: float = 5.0
     llm_limit_day_usd: float = 20.0
     llm_limit_month_usd: float = 100.0
     # Ticket 22: the Sandbox worker. Real loop Activities are registered only when the kubeconfig

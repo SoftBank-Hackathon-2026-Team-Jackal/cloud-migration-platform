@@ -241,7 +241,7 @@ We use Claude in three places:
 
 - Analysis: mapping the source setup to the platform's standard resources. Each decision keeps its evidence (file and line), and a person reviews it in the plan preview.
 - Sandbox: writing tests and fixing failed ones. This only runs inside the sandbox, where outbound traffic is blocked.
-- Cost and data: spending caps of $3 per migration, $20 per day, and $100 per month are enforced in code. The model only receives masked snippets of evidence, never `.env` values or the full codebase. See [ADR-004](docs/decisions/ADR-004.md).
+- Cost and data: spending caps of $5 per migration, $20 per day, and $100 per month are enforced in code. The model only receives masked snippets of evidence, never `.env` values or the full codebase. See [ADR-004](docs/decisions/ADR-004.md).
 
 ## Current status
 

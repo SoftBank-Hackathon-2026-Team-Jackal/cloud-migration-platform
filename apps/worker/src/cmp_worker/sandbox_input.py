@@ -56,7 +56,7 @@ class SandboxSettings(BaseModel):
     redteam_endpoints: list[Endpoint] = Field(default_factory=list)
     redteam_intensity: Intensity = Intensity.PASSIVE
     redteam_time_budget_seconds: int = Field(default=300, ge=30, le=3600)
-    redteam_max_turns: int = Field(default=20, ge=1, le=100)
+    redteam_max_turns: int = Field(default=30, ge=1, le=100)
     # Ticket 39 draft: a per-run toggle for the settings screen (default on). Only takes effect
     # when the Worker also has a cache configured (`REDTEAM_CACHE_BUCKET`); otherwise it is a
     # silent no-op either way.

@@ -77,7 +77,7 @@ def test_the_model_needs_a_key_a_ledger_and_no_stop_switch_and_the_key_is_never_
     assert check(on)["llm"].status == FAIL
     ready = settings(tmp_path, llm_enabled=True, llm_ledger_path=str(tmp_path / "led" / "l.json"))
     result = check(ready, environ={"ANTHROPIC_API_KEY": "sk-ant-secret-value"})
-    assert result["llm"].status == OK and "$3/run" in result["llm"].detail
+    assert result["llm"].status == OK and "$5/run" in result["llm"].detail
     assert "sk-ant-secret-value" not in summary(list(result.values()))
     stop = tmp_path / "STOP"
     stop.write_text("")
