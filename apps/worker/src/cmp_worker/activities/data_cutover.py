@@ -59,6 +59,10 @@ class ClusterPort(Protocol):
     def wait_service(
         self, namespace: str, pod: str, host: str, port: int, timeout: int = 60
     ) -> bool: ...
+    def app_pod_labels(
+        self, namespace: str, deployment: str
+    ) -> tuple[dict[str, str], dict[str, str]]: ...
+    def network_policies(self, namespace: str) -> list[dict]: ...
 
 
 class KubectlCluster:
@@ -100,6 +104,19 @@ class KubectlCluster:
             "rollout", "status", "-n", namespace, f"deployment/{deployment}",
             f"--timeout={timeout}s", timeout=timeout + 30,
         )  # fmt: skip
+
+    def app_pod_labels(
+        self, namespace: str, deployment: str
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """(Deployment selector, Pod template 라벨)."""
+        spec = (self._s._get("deployment", deployment, namespace) or {}).get("spec", {})
+        selector = spec.get("selector", {}).get("matchLabels") or {}
+        template = spec.get("template", {}).get("metadata", {}).get("labels") or {}
+        return selector, template
+
+    def network_policies(self, namespace: str) -> list[dict]:
+        out = self._s._kubectl("get", "networkpolicy", "-n", namespace, "-o", "json")
+        return json.loads(out).get("items", [])
 
     def wait_old_pods_gone(self, namespace: str, deployment: str, timeout: int = 300) -> None:
         """rollout 완료 뒤에도 옛 Pod는 종료 중에 계속 DB에 쓸 수 있다(SIGTERM을 무시하면 최대 유예 시간).
@@ -236,6 +253,7 @@ def route_app(app: co.SourceApp, source: DbEndpoint) -> dict:
             raise _fail("CUTOVER_NOT_INSTALLED")
         data = cluster.secret_data(app.namespace, app.url_secret) or {}
         routed = co.pgbouncer_url(state["original_url"], app.namespace)
+        _open_app_egress(cluster, app)
         if data.get(app.url_key) == routed:
             # 재시도: 앞선 시도가 재시작 뒤 옛 Pod를 기다리다 끊겼을 수 있다.
             cluster.wait_old_pods_gone(app.namespace, app.deployment)
@@ -254,6 +272,15 @@ def route_app(app: co.SourceApp, source: DbEndpoint) -> dict:
         cluster.rollout_wait(app.namespace, app.deployment)
         cluster.wait_old_pods_gone(app.namespace, app.deployment)
     return {"routed": True}
+
+
+def _open_app_egress(cluster: ClusterPort, app: co.SourceApp) -> None:
+    """원본 앱의 egress가 NetworkPolicy로 막혀 있으면 PgBouncer로 나가는 연결을 허용한다. 그대로 두면
+    재시작한 앱이 PgBouncer에 붙지 못해 모든 조회가 시간 초과로 끝난다. egress가 열린 앱에는 정책을
+    만들지 않는다(새 정책이 그 Pod를 고르는 순간 다른 외부 연결이 모두 막힌다)."""
+    selector, template = cluster.app_pod_labels(app.namespace, app.deployment)
+    if selector and co.egress_isolated(cluster.network_policies(app.namespace), template):
+        cluster.apply([co.app_egress_policy(app.namespace, selector)])
 
 
 def _ensure_repl_secret(db: dm.DbPod, name: str) -> str:
