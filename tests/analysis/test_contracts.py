@@ -233,3 +233,16 @@ def test_sandbox_attempt_accepts_infra_failure_class():
         SandboxAttempt.model_validate(
             {"attempt": 1, "verdict": {"passed": False, "reasons": []}, "failure_class": "infra"}
         )
+
+
+def test_sandbox_attempt_accepts_security_failure_class():
+    from cmp_contracts.verification import SandboxAttempt
+
+    attempt = SandboxAttempt.model_validate(
+        {
+            "attempt": 1,
+            "verdict": {"passed": False, "reasons": ["FINDING:sql-injection:/login"]},
+            "failure_class": "SECURITY",
+        }
+    )
+    assert attempt.failure_class == "SECURITY"
