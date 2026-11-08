@@ -201,6 +201,35 @@ async def post_traffic_health(
     return {"fault": control.desired()}
 
 
+class FaultSync(BaseModel):
+    """리포터의 빠른 장애 동기화(1초 간격): 지표 없이 대상 앱의 실제 장애 상태만 싣는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fault: FaultObserved | None = None
+
+
+@router.post(
+    "/traffic-health/fault",
+    response_model=ReportAnswer,
+    summary="Relay syncs the demo fault switch (desired command out, observed state in)",
+)
+async def post_fault_sync(
+    body: FaultSync,
+    control: Annotated[fault_control.FaultControl, Depends(get_fault_control)],
+    tools: Annotated[bool, Depends(get_tools_enabled)],
+    token: Annotated[str, Depends(get_report_token)],
+    x_pulse_token: Annotated[str | None, Header()] = None,
+) -> dict:
+    # 5초 지표 보고(/traffic-health/report)를 기다리지 않고 명령을 1초 안에 넘기고 적용 결과를 받는다.
+    _check_token(token, x_pulse_token)
+    if not tools:
+        return {"fault": None}
+    if body.fault is not None:
+        control.observe(body.fault.model_dump())
+    return {"fault": control.desired()}
+
+
 class FaultRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

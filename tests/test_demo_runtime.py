@@ -174,7 +174,7 @@ def test_edge_sends_agent_relay_and_migration_routes_to_the_api():
         "}",
         "@traffic_health_report {",
         "method POST",
-        "path /system/traffic-health/report",
+        "path /system/traffic-health/report /system/traffic-health/fault",
         "}",
         "handle @traffic_health_report {",
         "reverse_proxy {$CMP_API_UPSTREAM} {",

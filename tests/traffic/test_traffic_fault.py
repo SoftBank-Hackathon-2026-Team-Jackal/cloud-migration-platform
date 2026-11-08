@@ -166,3 +166,35 @@ def test_sync_reports_what_the_target_actually_has() -> None:
 def test_sync_says_unknown_when_the_target_cannot_be_read() -> None:
     sync = make_sync(Target(status=403))
     assert sync.state()["active"] is None
+
+
+def test_fast_sync_applies_and_reports_the_new_state_at_once() -> None:
+    # 5초 지표 보고를 기다리지 않는다: 명령을 받아 적용하면 바뀐 실제 상태를 같은 차례에 다시 보낸다.
+    target = Target()
+    sync = make_sync(target)
+    command = {"id": "c3", "action": "on", "error_rate": 0.5, "delay_ms": 800, "duration_s": 300}
+    sent: list[dict] = []
+
+    def post_fn(body: dict) -> tuple[int, dict]:
+        sent.append(body)
+        return 200, {"fault": command}
+
+    assert sync.sync_once(post_fn) == 200
+    assert [b["fault"]["active"] for b in sent] == [False, True]
+    assert sent[1]["fault"]["applied_id"] == "c3"
+    # 같은 명령이면 다시 적용하지 않고 한 번만 보낸다
+    sent.clear()
+    sync.sync_once(post_fn)
+    assert len(sent) == 1
+    assert [c[0] for c in target.calls].count("POST") == 1
+
+
+def test_fast_sync_url_sits_next_to_the_report_url() -> None:
+    from cmp_traffic.health import fault_sync_url
+
+    assert (
+        fault_sync_url("https://h.example/system/traffic-health/report")
+        == "https://h.example/system/traffic-health/fault"
+    )
+    assert fault_sync_url("https://h.example/other") == ""
+    assert fault_sync_url("") == ""
