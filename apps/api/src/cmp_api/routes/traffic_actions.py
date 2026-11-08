@@ -166,7 +166,7 @@ async def retry_traffic(migration_id: str, control: ControlDep) -> dict:
     responses=ERRORS,
 )
 async def advance_traffic(migration_id: str, control: ControlDep) -> dict:
-    """수동 단계 모드(`manual_steps`)에서 판정을 통과하고 기다리는 중일 때 다음 전환 단계로 가라고 요청한다."""
+    """수동 단계 모드(`manual_steps`)에서 판정을 통과하고 기다리는 중이면 다음 전환 단계로 가라고, 단계의 관찰 창이 진행 중이면 남은 관찰 시간을 건너뛰라고 요청한다."""
     return await _request(migration_id, "advance", control)
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from cmp_contracts.queues import WORKFLOW_QUEUE
@@ -86,4 +87,27 @@ async def test_wait_timeout_continues_and_off_by_default() -> None:
         relay2.worker(env.client),
     ):
         handle = await _start(env, relay2, store2, {**POLICY, "stabilize_seconds": 0})
+        assert (await handle.result())["status"] == "DONE"
+
+
+async def test_advance_during_the_observation_window_skips_the_rest_of_it() -> None:
+    """기다리기 싫은 사람의 버튼: 관찰 창이 끝나기 전에 누르면 남은 시간을 건너뛰고 다음 관찰·판정으로 간다."""
+    relay, store = Relay(hold=True), Store()
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        _worker(env, store),
+        relay.worker(env.client),
+    ):
+        policy = {**POLICY, "stabilize_seconds": 0, "idle_probe": False}
+        handle = await _start(env, relay, store, policy)
+        await until(handle, lambda s: s["actions"].get("advance"))  # 관찰 중에도 버튼이 열린다
+        assert relay.calls.count(("observe", None)) == 1
+        await handle.signal(TrafficShiftWorkflow.request_advance)
+        # 첫 창은 아직 끝나지 않았는데(release 전) 워크플로는 창을 끝내고 다음 창을 시작했다.
+        for _ in range(100):
+            if relay.calls.count(("observe", None)) >= 2:
+                break
+            await asyncio.sleep(0.05)
+        assert relay.calls.count(("observe", None)) >= 2
+        relay.release.set()
         assert (await handle.result())["status"] == "DONE"

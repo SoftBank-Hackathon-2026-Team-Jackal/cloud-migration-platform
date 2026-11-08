@@ -47,6 +47,8 @@ ACTIONS_PATCH = "traffic-actions-v1"
 # 사용자 트래픽이 없으면 롤백하지 않고 합성 요청으로 확인한 뒤 진행한다(진행 중인 이전은 예전 동작 그대로).
 IDLE_PROBE_PATCH = "traffic-idle-probe-v1"
 MANUAL_STEPS_PATCH = "traffic-manual-steps-v1"
+# 관찰 창 도중에 "다음 단계"를 누르면 남은 관찰 시간을 건너뛴다(기다리기 싫은 사람을 위한 버튼).
+SKIP_OBSERVE_PATCH = "traffic-skip-observe-v1"
 EVENT_STATUS = {"complete": "done", "rolledback": "failed"}  # everything else is `running`
 ZERO = {"requests": 0, "failed": 0, "p99_ms": 0.0}
 QUEUE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -95,6 +97,8 @@ class TrafficShiftWorkflow:
             False  # 수동 단계 모드: 판정을 통과하고 사람의 "다음 단계"를 기다리는 중
         )
         self.advance_requested = False
+        self.observing = False  # 단계의 관찰 창이 진행 중(건너뛰기를 받을 수 있다)
+        self.skip_observe_requested = False
 
     @workflow.signal
     def request_cancel(self) -> None:
@@ -114,9 +118,12 @@ class TrafficShiftWorkflow:
 
     @workflow.signal
     def request_advance(self) -> None:
-        """수동 단계 모드에서 사람이 누른 "다음 단계". 기다리는 동안만 받는다. 아니면 무시한다(멱등)."""
+        """사람이 누른 "다음 단계". 수동 단계 대기 중이면 다음 단계로 보내고, 단계의 관찰 창이 진행 중이면
+        남은 관찰 시간을 건너뛴다. 그 밖에는 무시한다(멱등)."""
         if self.awaiting_advance:
             self.advance_requested = True
+        elif self.observing and not self.rollback_requested:
+            self.skip_observe_requested = True
 
     @workflow.signal
     def request_finalize(self) -> None:
@@ -142,7 +149,12 @@ class TrafficShiftWorkflow:
             "actions": {
                 "rollback": self.can_rollback(),
                 "retry": self.waiting_retry and not self.retry_requested,
-                "advance": self.awaiting_advance and not self.advance_requested,
+                "advance": (self.awaiting_advance and not self.advance_requested)
+                or (
+                    self.observing
+                    and not self.skip_observe_requested
+                    and not self.rollback_requested
+                ),
                 "finalize": self.snapshot.get("phase") == STABILIZING
                 and not self.finalize_requested
                 and not self.rollback_requested,
@@ -305,14 +317,24 @@ class TrafficShiftWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=2),
             cancellation_type=workflow.ActivityCancellationType.ABANDON,
         )
+        skip_on = workflow.patched(SKIP_OBSERVE_PATCH)
         await workflow.wait_condition(
-            lambda: handle.done() or self.rollback_requested or self.finalize_requested
+            lambda: (
+                handle.done()
+                or self.rollback_requested
+                or self.finalize_requested
+                or (skip_on and self.skip_observe_requested)
+            )
         )
         if not handle.done():
             handle.cancel()
             if self.rollback_requested:
                 raise _ManualRollback()
-            raise _Finalized()
+            if self.finalize_requested:
+                raise _Finalized()
+            # 건너뛰기: 이 창에서 잰 값은 없다. 비어 있는 창으로 돌려주면 요청이 모자란 단계로 보고 합성 요청으로
+            # 같은 기준(실패·p99)을 확인한 뒤 판정한다(사용자 트래픽이 없는 데모와 같은 길).
+            return {"requests": 0, "failed": 0, "p99_ms": 0.0, "origin_requests": 0}
         return await handle
 
     @workflow.run
@@ -438,6 +460,8 @@ class TrafficShiftWorkflow:
                 await self._publish(
                     policy, weights, step, baseline, total, policy.observe_seconds, "observing"
                 )
+                self.skip_observe_requested = False
+                self.observing = workflow.patched(SKIP_OBSERVE_PATCH)
                 try:
                     raw = await self._observe(policy.observe_seconds)
                     window = Sample.model_validate(raw)
@@ -445,6 +469,8 @@ class TrafficShiftWorkflow:
                     return await self._rollback(policy, baseline, step, "수동 롤백", manual=True)
                 except ActivityError as exc:
                     return await self._rollback(policy, baseline, step, f"관측 실패: {exc.cause}")
+                finally:
+                    self.observing = False
                 if idle_on and isinstance(raw.get("origin_requests"), int):
                     origin_total = (origin_total or 0) + raw["origin_requests"]
                 real = Sample(
