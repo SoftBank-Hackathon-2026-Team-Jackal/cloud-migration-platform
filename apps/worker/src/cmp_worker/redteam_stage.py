@@ -78,6 +78,8 @@ class RedTeamInput(BaseModel):
     # instead of spending another one. On by default; a toggle the settings screen can turn off
     # per run (e.g. a rehearsal that wants a fresh, uncached pass).
     cache_enabled: bool = True
+    # Demo mock (`SandboxSettings.redteam_mock`): replay a recorded real run, attack nothing.
+    mock: bool = False
 
 
 class Brain(Protocol):
