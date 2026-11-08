@@ -55,6 +55,7 @@ from cmp_worker.sandbox_network import (
     parse_records,
     proxy_env,
     proxy_script_text,
+    telemetry_cidr_from_env,
 )
 
 SANDBOX_CONTEXT = "k3d-cmp-sandbox"
@@ -877,6 +878,7 @@ class SandboxService:
             intents=plan.network_intent,
             allow=allow,
             proxy_script=proxy_script_text(),
+            telemetry_cidr=telemetry_cidr_from_env(),
         )
         self.cluster.kubectl(
             "apply", "--server-side", f"--field-manager={FIELD_MANAGER}", "--force-conflicts",

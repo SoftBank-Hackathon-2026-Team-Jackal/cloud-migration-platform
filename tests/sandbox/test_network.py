@@ -162,3 +162,50 @@ def test_the_external_cut_always_restores_the_proxy(tmp_path):
         raise RuntimeError("boom")
     scale = [a for a, _ in runner.calls if "scale" in a]
     assert "--replicas=0" in scale[0] and "--replicas=1" in scale[1]
+
+
+# --- the platform's own OTLP ingest (CMP_TELEMETRY_EGRESS_CIDR) ------------------------------
+
+
+def test_telemetry_cidr_becomes_a_port_443_rule_and_a_wide_range_is_refused():
+    from cmp_worker.sandbox_network import telemetry_cidrs
+
+    assert telemetry_cidrs("13.209.240.49/32") == [{"cidr": "13.209.240.49/32", "port": 443}]
+    assert telemetry_cidrs(" 13.209.240.49 ") == [{"cidr": "13.209.240.49/32", "port": 443}]
+    for unusable in (None, "", "   ", "not-an-ip", "0.0.0.0/0", "10.0.0.0/8", "::/0"):
+        assert telemetry_cidrs(unusable) == []  # an operator slip never opens the sandbox
+
+
+def test_the_proxy_config_carries_the_range_only_when_one_is_configured(tmp_path):
+    from cmp_worker.sandbox_network import build_manifests
+
+    def config(**extra):
+        items = build_manifests(
+            namespace="ns", labels={"a": "b"},
+            resources=[{"kind": "APPLICATION", "release_name": "app", "port": 8080}],
+            releases={"app": "app"}, intents=[], allow=[{"host": "x.example.com", "port": 443}],
+            proxy_script="script", **extra,
+        )  # fmt: skip
+        return next(i for i in items if i["kind"] == "ConfigMap")["data"]["allow.json"]
+
+    without = json.loads(config())
+    assert without == {"allow": [{"host": "x.example.com", "port": 443}]}  # no new key at all
+    assert config() == config(telemetry_cidr=None) == config(telemetry_cidr="0.0.0.0/0")
+    with_range = json.loads(config(telemetry_cidr="13.209.240.49/32"))
+    assert with_range["allow"] == without["allow"]
+    assert with_range["cidrs"] == [{"cidr": "13.209.240.49/32", "port": 443}]
+
+
+def test_apply_network_reads_the_telemetry_range_from_the_worker_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("CMP_TELEMETRY_EGRESS_CIDR", "13.209.240.49/32")
+    runner = FakeRunner()
+    service, plan = with_intents(tmp_path, runner)
+    _, items = applied(service, runner, plan)
+    config = next(i for i in items if i["kind"] == "ConfigMap")
+    assert json.loads(config["data"]["allow.json"])["cidrs"] == [
+        {"cidr": "13.209.240.49/32", "port": 443}
+    ]
+    monkeypatch.delenv("CMP_TELEMETRY_EGRESS_CIDR")
+    _, items = applied(service, runner, plan)
+    config = next(i for i in items if i["kind"] == "ConfigMap")
+    assert "cidrs" not in json.loads(config["data"]["allow.json"])

@@ -9,7 +9,9 @@ back with `egress_records`.
 """
 
 import hashlib
+import ipaddress
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -48,6 +50,31 @@ def proxy_env(release_names: list[str]) -> dict[str, str]:
     return {**values, **{k.lower(): v for k, v in values.items()}}
 
 
+TELEMETRY_PORT = 443
+# An operator slip must not open the sandbox: a range wider than this is ignored.
+_MIN_PREFIX = {4: 16, 6: 48}
+
+
+def telemetry_cidrs(value: str | None) -> list[dict[str, Any]]:
+    """The platform's own OTLP ingest (`CMP_TELEMETRY_EGRESS_CIDR`, the value production allows).
+
+    An app that exports telemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`) calls this address on TCP 443 once
+    it has traffic; without a rule the proxy records a BLOCK and the verdict fails with
+    `EGRESS_BLOCKED`. Unset, empty, unparsable or too wide values give no rule.
+    """
+    try:
+        net = ipaddress.ip_network((value or "").strip(), strict=False)
+    except ValueError:
+        return []
+    if net.prefixlen < _MIN_PREFIX[net.version]:
+        return []
+    return [{"cidr": str(net), "port": TELEMETRY_PORT}]
+
+
+def telemetry_cidr_from_env() -> str | None:
+    return os.environ.get("CMP_TELEMETRY_EGRESS_CIDR", "").strip() or None
+
+
 def allowlist(
     intents: list[dict[str, Any]], keep_hosts: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -67,6 +94,7 @@ def build_manifests(
     allow: list[dict[str, Any]],
     proxy_script: str,
     redteam: bool = False,
+    telemetry_cidr: str | None = None,
 ) -> list[dict[str, Any]]:
     apps = [r for r in resources if r["kind"] == "APPLICATION"]
     # Shared with Production (ticket 26): default-deny, DNS and resource → resource edges. With
@@ -106,7 +134,10 @@ def build_manifests(
         }),
     ]  # fmt: skip
 
-    allow_json = json.dumps({"allow": allow}, sort_keys=True)
+    config: dict[str, Any] = {"allow": allow}
+    if cidrs := telemetry_cidrs(telemetry_cidr):  # no key at all otherwise: the file is unchanged
+        config["cidrs"] = cidrs
+    allow_json = json.dumps(config, sort_keys=True)
     allow_hash = hashlib.sha256(allow_json.encode()).hexdigest()
     manifests += [
         {
