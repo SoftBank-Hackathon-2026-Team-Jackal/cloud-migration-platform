@@ -31,7 +31,10 @@ AWS EKS에서 돌고 있는 앱과 PostgreSQL을 온프레미스 K3s나 다른 �
 | [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | 결선 기록, PoC, 클라우드 설정(Terraform) |
 | [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | 조직 프로필 |
 
-<!-- TODO: 웹 E2E 녹화 (GIF 또는 mp4) -->
+<p align="center">
+  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="웹 화면의 트래픽 전환"><br>
+  <sub>웹 화면 (목업 데이터로 캡처, 대상: 온프레미스 K3s)</sub>
+</p>
 
 ## 소개
 
@@ -83,6 +86,11 @@ flowchart TB
 - AWS 계정은 CloudFormation으로 만든 읽기 전용 역할로 연결합니다. 옮길 범위는 EKS Namespace와 워크로드 단위로 고릅니다.
 - `.env`는 암호화해서 저장하고, 분석 단계에서는 키 이름만 봅니다.
 - 분석 결과(중간 명세)에는 앱이 쓰는 DB, 설정, 외부 노출, 접속 관계와 각각을 플랫폼 표준 리소스로 어떻게 바꿀지가 들어갑니다.
+
+<p align="center">
+  <img src="docs/readme/screens/03-scope.png" width="49%" alt="이전 범위 선택">
+  <img src="docs/readme/screens/04-analysis.png" width="49%" alt="인프라와 소스코드 분석">
+</p>
 
 </details>
 
@@ -149,6 +157,11 @@ flowchart LR
 - 약점은 Fixer가 코드를 고치고, 다시 빌드한 이미지에 같은 요청을 보내 재검증합니다. 보안 수정은 최대 3회이고 이미지 digest 기준으로 추적합니다. 남은 약점은 표시하고 기록하며, 이전을 막지 않습니다.
 - 결과는 소스 해시 기준으로 S3에 캐시해서, 같은 소스를 다시 이전할 때 같은 공격을 다시 하지 않습니다.
 
+<p align="center">
+  <img src="docs/readme/screens/06a-redteam-fixing.png" width="49%" alt="레드팀 약점 수정 중">
+  <img src="docs/readme/screens/06b-redteam-done.png" width="49%" alt="레드팀 완료">
+</p>
+
 </details>
 
 <details>
@@ -168,6 +181,11 @@ sequenceDiagram
 
 - 대상 프로필(온프레미스, AWS, GCP)에 맞춰 Namespace, NetworkPolicy, DB, 앱 구성을 만들고 Revision으로 저장합니다.
 - 승인은 Revision 단위로 받습니다. 배포할 때 이미지 digest가 승인 당시와 다르면 `ARTIFACT_DIGEST_MISMATCH`로 중단합니다.
+
+<p align="center">
+  <img src="docs/readme/screens/07-plan.png" width="49%" alt="배포 계획">
+  <img src="docs/readme/screens/08-approval.png" width="49%" alt="승인">
+</p>
 
 </details>
 
@@ -193,6 +211,10 @@ sequenceDiagram
 - Agent는 승인된 작업을 폴링으로 받아 Namespace, NetworkPolicy, DB, 앱 순서로 배포하고 결과를 보고합니다. 실패하면 직전 Revision으로 되돌립니다.
 - Agent는 GitHub Release와 OCI Helm 차트로 배포하고, 이미지는 digest로 고정합니다(현재 0.6.0).
 
+<p align="center">
+  <img src="docs/readme/screens/10-provisioning-done.png" width="100%" alt="온프레미스 배포 완료">
+</p>
+
 </details>
 
 <details>
@@ -217,6 +239,11 @@ flowchart LR
 - 전환 뒤에는 대상에서 원본으로 역방향 복제를 유지해 되돌릴 수 있게 합니다.
 - EKS에서 GKE로 옮기는 검증에서는 쓰기 중단이 83ms였고, 행 수와 체크섬이 일치했습니다.
 
+<p align="center">
+  <img src="docs/readme/clips/01-data-migration.gif" width="49%" alt="데이터 복제">
+  <img src="docs/readme/clips/02-db-cutover.gif" width="49%" alt="DB 전환">
+</p>
+
 </details>
 
 <details>
@@ -236,6 +263,10 @@ flowchart LR
 - 웹에서 롤백과 재시도를 직접 할 수도 있습니다.
 - 수동 단계 모드에서는 단계마다 "다음 단계"를 누르거나 `POST /migrations/{id}/traffic/advance`를 호출해야 넘어갑니다.
 - 시연과 점검을 위해 대상으로 가는 길에 장애(차단, 거절, 패킷 손실)를 넣어 자동 롤백을 보여 줄 수 있습니다.
+
+<p align="center">
+  <img src="docs/readme/screens/18-report.png" width="100%" alt="전환 후 이전 리포트">
+</p>
 
 </details>
 
