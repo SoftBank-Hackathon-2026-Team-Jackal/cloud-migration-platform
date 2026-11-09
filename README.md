@@ -31,7 +31,10 @@ This README covers `cloud-migration-platform`. All repositories of the team:
 | [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | Finals notes, PoCs and cloud setup (Terraform) |
 | [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | Organization profile |
 
-<!-- TODO: web E2E recording (GIF or mp4) -->
+<p align="center">
+  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="Traffic shift in the web UI"><br>
+  <sub>Web UI, captured with mock data (target: on-premises K3s)</sub>
+</p>
 
 ## Overview
 
@@ -83,6 +86,11 @@ flowchart TB
 - The AWS account is connected through a read-only role created with CloudFormation. The scope is chosen per EKS namespace and workload.
 - `.env` is stored encrypted; analysis only looks at the key names.
 - The analysis result (the intermediate spec) lists the database, configuration, exposure, and connections the app uses, and how each maps to the platform's standard resources.
+
+<p align="center">
+  <img src="docs/readme/screens/03-scope.png" width="49%" alt="Scope selection">
+  <img src="docs/readme/screens/04-analysis.png" width="49%" alt="Infrastructure and source analysis">
+</p>
 
 </details>
 
@@ -149,6 +157,11 @@ flowchart LR
 - Findings go to the Fixer, which fixes the code. The rebuilt image is checked again with the same requests, up to three security rounds, tracked per image digest. Findings that stay open are shown and recorded and do not block the migration.
 - Results are cached in S3 by source hash, so a rerun of the same source does not pay for the same attack again.
 
+<p align="center">
+  <img src="docs/readme/screens/06a-redteam-fixing.png" width="49%" alt="Red team fixing a finding">
+  <img src="docs/readme/screens/06b-redteam-done.png" width="49%" alt="Red team done">
+</p>
+
 </details>
 
 <details>
@@ -168,6 +181,11 @@ sequenceDiagram
 
 - Based on the target profile (on-premises, AWS, or GCP), the platform builds the namespace, NetworkPolicy, database, and app configuration and stores it as a Revision.
 - Approval is given per Revision. If the image digest at deploy time differs from the approved one, deployment stops with `ARTIFACT_DIGEST_MISMATCH`.
+
+<p align="center">
+  <img src="docs/readme/screens/07-plan.png" width="49%" alt="Deployment plan">
+  <img src="docs/readme/screens/08-approval.png" width="49%" alt="Approval">
+</p>
 
 </details>
 
@@ -193,6 +211,10 @@ sequenceDiagram
 - The Agent polls for approved jobs, deploys the namespace, NetworkPolicy, database, and app in that order, and reports back. On failure it rolls back to the previous Revision.
 - The Agent ships as a GitHub Release with an OCI Helm chart whose image is pinned by digest (currently 0.6.0).
 
+<p align="center">
+  <img src="docs/readme/screens/10-provisioning-done.png" width="100%" alt="On-premises deployment done">
+</p>
+
 </details>
 
 <details>
@@ -217,6 +239,11 @@ flowchart LR
 - After cutover, replication runs in reverse (target to source) so the move can be rolled back.
 - In our EKS to GKE test, writes were paused for 83 ms and row counts and checksums matched.
 
+<p align="center">
+  <img src="docs/readme/clips/01-data-migration.gif" width="49%" alt="Data replication">
+  <img src="docs/readme/clips/02-db-cutover.gif" width="49%" alt="DB cutover">
+</p>
+
 </details>
 
 <details>
@@ -236,6 +263,10 @@ flowchart LR
 - Rollback and retry can also be triggered from the web UI.
 - A manual step mode waits at each step until someone presses "next step" (or calls `POST /migrations/{id}/traffic/advance`).
 - For demos and checks, faults can be injected on the path to the target (block, reject, packet loss) to show automatic rollback.
+
+<p align="center">
+  <img src="docs/readme/screens/18-report.png" width="100%" alt="Migration report after the shift">
+</p>
 
 </details>
 

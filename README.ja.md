@@ -31,7 +31,10 @@ AWS EKS で動いているアプリと PostgreSQL を、オンプレミスの K3
 | [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | 決勝の記録、PoC、クラウド設定（Terraform） |
 | [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | Organization のプロフィール |
 
-<!-- TODO: Web E2E の録画（GIF または mp4） -->
+<p align="center">
+  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="Web 画面でのトラフィック切替"><br>
+  <sub>Web 画面（モックデータで撮影、移行先：オンプレミス K3s）</sub>
+</p>
 
 ## 概要
 
@@ -83,6 +86,11 @@ flowchart TB
 - AWS アカウントは CloudFormation で作成した読み取り専用ロールで接続します。移行範囲は EKS の Namespace とワークロード単位で選びます。
 - `.env` は暗号化して保存し、分析ではキー名だけを見ます。
 - 分析結果（中間仕様）には、アプリが使う DB、設定、外部公開、接続関係と、それぞれをプラットフォームの標準リソースにどう置き換えるかが入ります。
+
+<p align="center">
+  <img src="docs/readme/screens/03-scope.png" width="49%" alt="移行範囲の選択">
+  <img src="docs/readme/screens/04-analysis.png" width="49%" alt="インフラとソースコードの分析">
+</p>
 
 </details>
 
@@ -149,6 +157,11 @@ flowchart LR
 - 弱点は Fixer がコードを直し、再ビルドしたイメージに同じリクエストを送って再検証します。セキュリティ修正は最大 3 回で、イメージ digest ごとに追跡します。残った弱点は表示と記録だけで、移行は止めません。
 - 結果はソースのハッシュをキーに S3 にキャッシュし、同じソースを再び移すときに同じ攻撃をやり直しません。
 
+<p align="center">
+  <img src="docs/readme/screens/06a-redteam-fixing.png" width="49%" alt="レッドチームの弱点を修正中">
+  <img src="docs/readme/screens/06b-redteam-done.png" width="49%" alt="レッドチーム完了">
+</p>
+
 </details>
 
 <details>
@@ -168,6 +181,11 @@ sequenceDiagram
 
 - 移行先のプロファイル（オンプレミス、AWS、GCP）に合わせて Namespace、NetworkPolicy、DB、アプリの構成を作り、Revision として保存します。
 - 承認は Revision 単位です。デプロイ時のイメージ digest が承認時と異なる場合は `ARTIFACT_DIGEST_MISMATCH` で中止します。
+
+<p align="center">
+  <img src="docs/readme/screens/07-plan.png" width="49%" alt="デプロイ計画">
+  <img src="docs/readme/screens/08-approval.png" width="49%" alt="承認">
+</p>
 
 </details>
 
@@ -193,6 +211,10 @@ sequenceDiagram
 - Agent は承認済みのジョブをポーリングで受け取り、Namespace、NetworkPolicy、DB、アプリの順にデプロイして結果を報告します。失敗した場合は直前の Revision に戻します。
 - Agent は GitHub Release と OCI の Helm チャートで配布し、イメージは digest で固定しています（現在 0.6.0）。
 
+<p align="center">
+  <img src="docs/readme/screens/10-provisioning-done.png" width="100%" alt="オンプレミスへのデプロイ完了">
+</p>
+
 </details>
 
 <details>
@@ -217,6 +239,11 @@ flowchart LR
 - 切替後は移行先から移行元への逆方向レプリケーションを保ち、切り戻せるようにします。
 - EKS から GKE への検証では、書き込みの停止は 83ms で、行数とチェックサムは一致しました。
 
+<p align="center">
+  <img src="docs/readme/clips/01-data-migration.gif" width="49%" alt="データ複製">
+  <img src="docs/readme/clips/02-db-cutover.gif" width="49%" alt="DB 切替">
+</p>
+
 </details>
 
 <details>
@@ -236,6 +263,10 @@ flowchart LR
 - Web からロールバックや再試行を実行することもできます。
 - 手動の段階モードでは、段階ごとに「次の段階」を押すか `POST /migrations/{id}/traffic/advance` を呼ぶまで進みません。
 - デモや確認のために、移行先への経路に障害（遮断、拒否、パケット損失）を入れて自動ロールバックを見せられます。
+
+<p align="center">
+  <img src="docs/readme/screens/18-report.png" width="100%" alt="切替後の移行レポート">
+</p>
 
 </details>
 
