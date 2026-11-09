@@ -31,11 +31,6 @@ AWS EKS에서 돌고 있는 앱과 PostgreSQL을 온프레미스 K3s나 다른 �
 | [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | 결선 기록, PoC, 클라우드 설정(Terraform) |
 | [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | 조직 프로필 |
 
-<p align="center">
-  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="웹 화면의 트래픽 전환"><br>
-  <sub>웹 화면 (목업 데이터로 캡처, 대상: 온프레미스 K3s)</sub>
-</p>
-
 ## 소개
 
 사용자는 웹에서 GitHub 저장소, `.env` 파일, AWS 계정을 연결하고 옮길 범위를 고릅니다. 그다음은 플랫폼이 진행합니다.
@@ -263,6 +258,10 @@ flowchart LR
 - 웹에서 롤백과 재시도를 직접 할 수도 있습니다.
 - 수동 단계 모드에서는 단계마다 "다음 단계"를 누르거나 `POST /migrations/{id}/traffic/advance`를 호출해야 넘어갑니다.
 - 시연과 점검을 위해 대상으로 가는 길에 장애(차단, 거절, 패킷 손실)를 넣어 자동 롤백을 보여 줄 수 있습니다.
+
+<p align="center">
+  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="트래픽 전환">
+</p>
 
 <p align="center">
   <img src="docs/readme/screens/18-report.png" width="100%" alt="전환 후 이전 리포트">

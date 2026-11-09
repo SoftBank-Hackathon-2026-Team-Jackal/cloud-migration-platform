@@ -31,11 +31,6 @@ AWS EKS で動いているアプリと PostgreSQL を、オンプレミスの K3
 | [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | 決勝の記録、PoC、クラウド設定（Terraform） |
 | [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | Organization のプロフィール |
 
-<p align="center">
-  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="Web 画面でのトラフィック切替"><br>
-  <sub>Web 画面（モックデータで撮影、移行先：オンプレミス K3s）</sub>
-</p>
-
 ## 概要
 
 ユーザーは Web 画面で GitHub リポジトリ、`.env` ファイル、AWS アカウントを接続し、移行する範囲を選びます。その後はプラットフォームが進めます。
@@ -263,6 +258,10 @@ flowchart LR
 - Web からロールバックや再試行を実行することもできます。
 - 手動の段階モードでは、段階ごとに「次の段階」を押すか `POST /migrations/{id}/traffic/advance` を呼ぶまで進みません。
 - デモや確認のために、移行先への経路に障害（遮断、拒否、パケット損失）を入れて自動ロールバックを見せられます。
+
+<p align="center">
+  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="トラフィック切替">
+</p>
 
 <p align="center">
   <img src="docs/readme/screens/18-report.png" width="100%" alt="切替後の移行レポート">

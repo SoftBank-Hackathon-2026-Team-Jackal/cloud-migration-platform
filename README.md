@@ -31,11 +31,6 @@ This README covers `cloud-migration-platform`. All repositories of the team:
 | [Softbank-Hackathon-2026-Finals](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/Softbank-Hackathon-2026-Finals) | Finals notes, PoCs and cloud setup (Terraform) |
 | [.github](https://github.com/SoftBank-Hackathon-2026-Team-Jackal/.github) | Organization profile |
 
-<p align="center">
-  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="Traffic shift in the web UI"><br>
-  <sub>Web UI, captured with mock data (target: on-premises K3s)</sub>
-</p>
-
 ## Overview
 
 In the web UI, the user connects a GitHub repository, a `.env` file, and an AWS account, and picks what to migrate. The platform does the rest:
@@ -263,6 +258,10 @@ flowchart LR
 - Rollback and retry can also be triggered from the web UI.
 - A manual step mode waits at each step until someone presses "next step" (or calls `POST /migrations/{id}/traffic/advance`).
 - For demos and checks, faults can be injected on the path to the target (block, reject, packet loss) to show automatic rollback.
+
+<p align="center">
+  <img src="docs/readme/clips/03-traffic-shift.gif" width="100%" alt="Traffic shift">
+</p>
 
 <p align="center">
   <img src="docs/readme/screens/18-report.png" width="100%" alt="Migration report after the shift">
