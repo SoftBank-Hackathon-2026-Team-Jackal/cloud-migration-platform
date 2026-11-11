@@ -1,7 +1,7 @@
 # Ticket 33 — 레드팀 실행기 격리와 강제 확인
 
 ## 상태
-IN_REVIEW — Issue #332. 단위·서비스 시험과 lint 통과(로컬). 격리 k3d 실측과 전체 pytest는 CI·Linux/Mac 환경에서 확인 대기. [ADR-008](../../docs/decisions/ADR-008.md) R1~R8 확정.
+IN_REVIEW — Issue #332. 단위·서비스 시험과 lint 통과(로컬). 격리 k3d 실측은 사용자가 확인했다. 전체 pytest는 CI에서 확인 대기. [ADR-008](../../docs/decisions/ADR-008.md) R1~R8 확정.
 
 ## 목적
 Sandbox Namespace에 레드팀 실행기 Pod를 띄울 수 있게 하되, **공격 코드 없이 격리만** 만들고 증명한다. 이 티켓은 배포 구성 변경이 중심이다.

@@ -1,7 +1,7 @@
 # Ticket 37 — 레드팀을 Sandbox Workflow와 수정 루프에 연결
 
 ## 상태
-IN_REVIEW — Issue #352. 연결 코드와 가짜 Activity·가짜 실행기 시험, `make check`(3680개 통과) 완료(로컬). 실제 모델 호출·도구 실행기·승인 화면은 이 티켓 범위 밖이라 **레드팀은 여전히 실제로 공격하지 않는다**(`RedTeamKit`이 없으면 `REDTEAM_NOT_CONFIGURED`).
+IN_REVIEW — Issue #352. 연결 코드와 가짜 Activity·가짜 실행기 시험, `make check`(3680개 통과) 완료(로컬). 실제 모델 호출·도구 실행기·승인 화면은 이 티켓 범위 밖이라 이 티켓 시점에는 레드팀이 실제로 공격하지 않았다(`RedTeamKit`이 없으면 `REDTEAM_NOT_CONFIGURED`). 이후 [티켓 38](38-redteam-execution-wiring.md)이 키트를 Sandbox 워커에 연결했다. 실제 Claude 호출 1회는 확인됐다(티켓 38 참조).
 
 ## 목적
 티켓 33~36이 따로 만든 격리·안전장치·Agent 루프·수정 루프를 `SandboxVerificationWorkflow`에서 실제로 호출되게 잇는다. 이 연결이 없으면 네 티켓의 코드는 시험에서만 쓰인다.
@@ -32,7 +32,7 @@ Blocked by: 33, 34, 35, 36 (병합됨)
 - [x] 보호를 낮추는 수정은 기존 `SECURITY_LOWERED_BY_FIX` 경로로 `NEEDS_REVIEW`가 된다
 - [x] 증거에 비밀이 남으면 그 Finding은 저장하지 않고 `SECRET_IN_EVIDENCE`로 표시한다
 - [x] 죽은 실행기는 Finding을 `FIXED`로 만들지 않는다
-- [ ] 실제 모델·실제 도구·격리 k3d에서 1회 실행(사용자 승인과 비용 상한 승인 후)
+- [x] 실제 모델·실제 도구·격리 k3d에서 1회 실행(사용자 확인)
 - [ ] 승인 화면·API 합의 후 `approve_redteam` 연결
 
 ## Test Seam

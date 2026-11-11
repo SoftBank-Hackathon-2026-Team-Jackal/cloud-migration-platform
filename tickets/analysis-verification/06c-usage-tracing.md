@@ -1,7 +1,7 @@
 # Ticket 06C — 앱의 AWS 리소스 사용 추적(선택·비선택 후보 대조, CloudTrail 근거)
 
 ## 상태
-DONE — PR #248 병합, Issue #247 (2026-11-06). 미확인: 실제 계정·클러스터 후보로 IAM·CloudTrail 근거 확인 1회(승인 필요).
+DONE — PR #248 병합, Issue #247 (2026-11-06). 실제 계정·클러스터 후보로 IAM·CloudTrail 근거 확인 1회는 사용자가 확인했다.
 
 ## 목적
 코드 스캔만으로는 놓치는 AWS 리소스 사용을 IAM·CloudTrail과 범위 선택의 후보로 보강한다. 지금은 스캐너가 읽은 IAM 정책 결과(`role_policies`)와 CloudTrail 요약(`cloudtrail`)이 `aws-scan` 산출물에 저장만 되고 분석·매핑·승인 어디에도 쓰이지 않는다(`Evidence.kind`의 `IAM_POLICY`·`CLOUDTRAIL`을 만드는 코드도 없다). 또 06B는 선택한 후보만 전체를 넘기고 선택하지 않은 후보는 ID만 넘긴다. 사용자가 본 후보(범위 선택)와 분석이 독립적으로 읽은 값(코드·CloudTrail)을 **대조**해서 어긋나는 지점을 드러낸다.

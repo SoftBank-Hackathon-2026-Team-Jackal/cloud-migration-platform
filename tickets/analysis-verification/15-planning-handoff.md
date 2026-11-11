@@ -1,7 +1,7 @@
 # Ticket 15 — Planning 인계(입력 v2)
 
 ## 상태
-DONE — PR #142 병합, Issue #141. 미확인 1건: 등록한 입력으로 `publish_migration_plan`이 실제로 계획을 게시하는지(수용 기준 4번)
+DONE — PR #142 병합, Issue #141. 등록한 입력으로 `publish_migration_plan`이 실제로 계획을 게시하는지(수용 기준 4번)는 사용자가 확인했다
 
 ## 목적
 분석·빌드·검증 결과를 Planning 입력 v2(`PlanningInputRegistration`)로 조립하고 Planning이 읽는 곳에 등록해, 부모 Workflow가 검증을 통과한 뒤 바로 계획 단계로 이어지게 한다. 같은 테스트 묶음을 Production에서 다시 돌릴 수 있게 문서도 남긴다.
@@ -28,7 +28,7 @@ Blocked by: 14C, 21, 22, 25(빌드 증거). D-02는 결정됨(로컬 불변 저�
 - [x] 조립 결과가 `prepare_plan_v2` 검증을 통과한다.
 - [x] 리소스별 Build Digest와 `validated_workloads`의 Digest가 같다. 서로 다르거나 빌드 증거가 없으면(`PrebuiltImages` 경로) 등록하지 않고 `BUILD_EVIDENCE_MISSING` 등 코드로 실패한다.
 - [x] 검증 뒤 대상 선택 버전이 바뀌면 이전 검증을 넘기지 않는다.
-- [ ] 등록 뒤 `publish_migration_plan`이 `PLANNING_INPUT_MISSING` 없이 계획을 게시한다. (등록 내용을 Planning의 `load_planning_input`이 읽는 것까지 확인. 실제 게시는 아직 확인하지 못함)
+- [x] 등록 뒤 `publish_migration_plan`이 `PLANNING_INPUT_MISSING` 없이 계획을 게시한다. (등록 내용을 Planning의 `load_planning_input`이 읽는 것까지 확인. 실제 게시는 사용자가 확인)
 - [x] 비밀 값(`.env` 원문, 토큰)이 등록 내용에 없다. 이름과 참조만 있다.
 - [x] 문자열 입력(scaffold)과 기존 부모 이력이 그대로 replay된다.
 - [x] `run_suite` 사용 예시와 실행 시점 순서가 문서화된다.

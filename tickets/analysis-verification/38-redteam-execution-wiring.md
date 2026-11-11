@@ -1,7 +1,7 @@
 # Ticket 38 — 레드팀 실행 배선: 실행기 도구·모델 호출·Finding 판단을 Worker에 연결
 
 ## 상태
-IN_REVIEW — Issue #355. 선행 [티켓 37](37-redteam-workflow-connection.md)(#352, PR #354 병합). 단위·서비스 시험과 `make check`(3714개 통과), 실제 k3d 시험 3개, `make smoke-temporal` 통과(로컬). **실제 Claude 호출은 아직 하지 않았다**(사용자 비용 승인 대기).
+IN_REVIEW — Issue #355. 선행 [티켓 37](37-redteam-workflow-connection.md)(#352, PR #354 병합). 단위·서비스 시험과 `make check`(3714개 통과), 실제 k3d 시험 3개, `make smoke-temporal` 통과(로컬). 실제 Claude 호출 1회는 사용자가 확인했다.
 
 ## 목적
 #352에서 Workflow에 이은 레드팀이 운영 Worker에서 실제로 돌도록, 실행기 Pod 안의 도구 실행·모델 호출·Finding 판단·설정 연결을 채운다.
@@ -23,7 +23,7 @@ AV-024, [ADR-008](../../docs/decisions/ADR-008.md) 결정 2·5·8·14, R7, [ADR-
 - [x] 실행기에서 고정 도구가 실제 앱(podinfo)을 읽는다(실제 클러스터)
 - [x] 가짜 모델로 `decide`·`detect`·`reproduces`가 닫힌다. 모델이 말한 증거가 아니라 루프가 실제로 보낸 요청과 응답만 Finding에 쓰인다
 - [x] 설정을 켜지 않으면 입력에 `redteam`이 없고, 모델이 꺼진 Worker는 키트가 없어 `REDTEAM_NOT_CONFIGURED`
-- [ ] 실제 모델 1회: 사용자 비용 승인 후, 가짜 데이터의 취약 데모 앱 (정답지는 Agent 입력에 쓰지 않음)
+- [x] 실제 모델 1회(사용자 확인): 가짜 데이터의 취약 데모 앱 (정답지는 Agent 입력에 쓰지 않음)
 
 ## Test Seam
 - 순수·서비스: 가짜 클러스터(`test_redteam_tools.py`, `test_redteam_isolation.py`), 가짜 모델(`test_redteam_brain.py`), 배선(`test_redteam_wiring.py`, `tests/analysis/test_sandbox_input.py`)
@@ -55,4 +55,4 @@ spec AV-024, runbook, tasks.md, 티켓 33·37을 같은 PR에서 갱신했다. �
 - `make check`: 3714 passed, 35 skipped
 - k3d(`cmp-sandbox`) 3개: 격리, 느슨한 정책 거절, 도구 실행. 시험이 만든 Namespace는 남지 않음을 확인
 - `make smoke-temporal` 통과
-- 미검증: 실제 Claude 호출, 취약 데모 앱 발견율, `ACTIVE`
+- 미검증: 취약 데모 앱 발견율, `ACTIVE` (실제 Claude 호출은 확인됨)

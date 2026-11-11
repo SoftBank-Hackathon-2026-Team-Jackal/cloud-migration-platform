@@ -26,7 +26,7 @@ Blocked by: 11, 21, 24 (병합됨).
 - [x] 기다리는 정리(수동·만료 정리)는 그대로다.
 - [x] 만료 정리 Schedule이 한 번만 등록되고 겹침을 건너뛰며, 등록 실패가 워커 시작을 막지 않는다. `sbx_cleanup_expired`가 Sandbox 루프 Activity에 등록된다.
 - [x] `prewarm`이 두 이미지를 노드에 받는다.
-- [ ] 실제 k3d에서 통과 후 대기 시간이 줄었는지 한 번 잰다(미확인).
+- [x] 실제 k3d에서 통과 후 대기 시간이 줄었는지 한 번 잰다(사용자 확인).
 
 ## 테스트 전략
 Test Seam: `SandboxService`(기록하는 `FakeRunner`), Sandbox 루프 Workflow(가짜 Activity), Schedule 등록(가짜 클라이언트), `prewarm_images`(가짜 러너). 잡는 것: 삭제 방식, 호출 인자, Schedule 정책, 등록 실패 처리. 못 잡는 것: 실제 삭제 시간과 클러스터의 삭제 완료 여부.

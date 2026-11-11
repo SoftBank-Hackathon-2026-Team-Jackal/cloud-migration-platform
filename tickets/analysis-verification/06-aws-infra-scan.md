@@ -1,7 +1,7 @@
 # Ticket 06 — AWS 인프라·네트워크 스캔과 통신 의도
 
 ## 상태
-IN_PROGRESS — PR #90 병합, Issue #89. 실제 AWS 계정 1회 실행(승인 필요) 기록 후 DONE
+DONE — PR #90 병합, Issue #89. 실제 AWS 계정 실행은 사용자가 확인했다. 스캔 소요 시간·권한 목록 기록은 남음
 
 ## 목적
 원본 AWS의 EKS·네트워크·IAM·CloudTrail을 읽기 전용으로 조회하고 Security Group·Ingress를 `RequirementsV2`의 `network_intent` 목록과 외부 진입 정보로 바꾼다.
